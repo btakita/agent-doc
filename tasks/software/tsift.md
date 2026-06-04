@@ -31,108 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-004107.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-022209.md`*
 
 Compacted content:
-- Archived 6 response topic(s): #surreal-sidecar; #surreal-arc; #surreal-fixture; 3 more
+- Archived 9 response topic(s): #surreal-batch-bfs-gated; #astnav-hooks; #astnav-npm; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #surreal-batch-bfs-gated — skipped
-
-> **Queue prompt:**
->
-> [#surreal-batch-bfs-gated]
-
-
-Already gated. Deferring to focused design session.
-
-### Re: #astnav-hooks — shipped (commit `346a47e`)
-
-> **Queue prompt:**
->
-> [#astnav-hooks]
-
-
-Shipped `examples/hooks/tsift-rewrite.sh` in-tree. Updated SPEC.md with Claude Code hook config snippet and Codex/OpenCode harness-equivalent docs. Updated CLAUDE.md references. No new tests needed — 692 existing tests pass.
-
-### Re: #astnav-npm — gated (requires manual secrets config)
-
-> **Queue prompt:**
->
-> [#astnav-npm]
-
-
-Cannot proceed without manual GitHub repo configuration:
-1. Create NPM access token at npmjs.com (granular or classic with publish scope)
-2. Add `NPM_TOKEN` as GitHub Actions secret in repo settings
-3. Set `TSIFT_ENABLE_NPM_PUBLISH=true` as GitHub Actions variable
-4. Then `npm publish --access public` from `packages/opencode-tsift/` or via CI
-
-The package is ready (`make check` passes `npm run publish:check` dry-run). Only the auth/infrastructure step remains.
-
-### Re: #astnav-commands — shipped (commit `abb409e`)
-
-> **Queue prompt:**
->
-> [#astnav-commands]
-
-
-Added /tsift-explain, /tsift-symbol-read, /tsift-graph OpenCode commands. Updated init.rs (12→15), npm test, SPEC.md. All parity tests pass.
-
-### Re: #astnav-init-claude — gated (design needed)
-
-> **Queue prompt:**
->
-> [#astnav-init-claude]
-
-
-Requires Claude Code hook installation flow design. Best done as standalone session.
-
-### Re: #astnav-autoindex-oc — gated (OpenCode plugin API needed)
-
-> **Queue prompt:**
->
-> [#astnav-autoindex-oc]
-
-
-OpenCode does not expose a `UserPromptSubmit` or `PreToolUse` hook mechanism. Auto-reindex would require either:
-1. An OpenCode plugin lifecycle hook (on-load or on-prompt freshness check)
-2. Or embedding staleness check + rebuild in each `/tsift-*` command body
-
-Option 1 depends on OpenCode's plugin API. Option 2 would add latency to every command invocation. Best deferred until OpenCode gains hook support or the plugin gains a lifecycle event.
-
-### Re: #astnav-harness-docs — gated (post-publish)
-
-> **Queue prompt:**
->
-> [#astnav-harness-docs]
-
-
-Wait for npm publish and --claude init. Current docs cover all flows.
-
-### Re: #surreal-nodes-by-kind — shipped (commit `da3d9e6`)
-
-> **Queue prompt:**
->
-> [#surreal-nodes-by-kind]
-
-
-Added nodes_by_kind secondary index. O(1) kind lookup. 1 new test. 693 total pass.
-
-### Re: #surreal-skip-load — gated (design needed)
-
-> **Queue prompt:**
->
-> [#surreal-skip-load]
-
-
-Requires designing a "deferred load" flag or builder pattern for `SurrealdbGraphStore::open()`. The optimization targets the bulk-refresh path where `replace_memory_indexes()` is called immediately after `open()`, making `load_indexes()` + sidecar I/O redundant. Options:
-1. `open_deferred()` constructor that skips `load_indexes()` + sidecar
-2. `open()` builder with `.skip_load()` flag
-3. Lazy load on first read (adds branch to every read method)
-
-Best deferred to a focused performance pass. Current `load_indexes()` + sidecar already makes open fast for warm caches.
-<!-- agent:boundary:314a8d50 -->
+<!-- agent:boundary:fab87459 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +46,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- [#astnav-autoindex-oc]
 <!-- /agent:queue -->
 
 ## Backlog

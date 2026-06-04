@@ -139,7 +139,29 @@ Extended `scripts/update-benchmark-results.py` with 7 async benchmark groups and
 **Known issue:** `async_concurrent_contention/async_context` panics at 4+ workers with "get_async: notifier dropped unexpectedly" (`async_context.rs:753`). Only worker=1 result captured. This is a pre-existing bug, not introduced by this change. Added to backlog for follow-up.
 
 Commit: `ea1512f` in `src/lazily-rs`. `make check` passes clean.
-<!-- agent:boundary:7e0f8eb8 -->
+
+### Re: #fk8p ThreadSafeContext-inside-Tokio benchmarks — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#fk8p]
+
+
+Created `benches/tokio_sync.rs` with 6 Criterion benchmark groups running ThreadSafeContext inside a Tokio multi-thread runtime:
+
+| Group | Cases | Notable result |
+|---|---|---|
+| tokio_sync_cached_read | single_task, spawn_read | 662 ns single, 3.98 us spawn |
+| tokio_sync_cold_first_get | single_task, spawn_compute | 602 ns single, 4.89 us spawn |
+| tokio_sync_invalidation | single_task | 30.87 us (64 iters) |
+| tokio_sync_concurrent_contention | same_slot_write_read, independent_slots (1/4/16 workers) | 4.48 ms same-slot/16, 1.39 ms independent/16 |
+| tokio_sync_batch | spawn_batch | 28.54 us |
+| tokio_sync_effect | single_task | 10.07 ms (16 invalidations with 10ms sleeps) |
+
+Also extended `update-benchmark-results.py` with tokio_sync groups (indices 18-23), case ordering for concurrent_contention, and `--features instrumentation,async,tokio` in the bench run command.
+
+Commit: `f68e1c5`. `make check` passes clean.
+<!-- agent:boundary:6ca77dcf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,8 +171,8 @@ Commit: `ea1512f` in `src/lazily-rs`. `make check` passes clean.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?~
-- do [#61zg]
-- do [#fk8p]
+- ~do [#61zg]~
+- ~do [#fk8p]~
 - do [#v6r8]
 - do [#zspz]
 - do [#8e2q]
@@ -160,7 +182,6 @@ Commit: `ea1512f` in `src/lazily-rs`. `make check` passes clean.
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#fk8p] #lazilyperf37 Add ThreadSafeContext-inside-Tokio Criterion benchmarks (benches/tokio_sync.rs)
 - [ ] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
 - [ ] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [ ] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation

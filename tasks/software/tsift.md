@@ -100,7 +100,16 @@ OpenCode does not expose a `UserPromptSubmit` or `PreToolUse` hook mechanism. Au
 2. Or embedding staleness check + rebuild in each `/tsift-*` command body
 
 Option 1 depends on OpenCode's plugin API. Option 2 would add latency to every command invocation. Best deferred until OpenCode gains hook support or the plugin gains a lifecycle event.
-<!-- agent:boundary:8773f089 -->
+
+### Re: #astnav-harness-docs — gated (post-publish)
+
+> **Queue prompt:**
+>
+> [#astnav-harness-docs]
+
+
+Wait for npm publish and --claude init. Current docs cover all flows.
+<!-- agent:boundary:86b280e8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +125,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#astnav-commands]~
 - ~[#astnav-init-claude]~
 - ~[#astnav-autoindex-oc]~
-- [#astnav-harness-docs]
+- ~[#astnav-harness-docs]~
 - [#surreal-nodes-by-kind]
 - [#surreal-skip-load]
 <!-- /agent:queue -->
@@ -126,7 +135,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:backlog -->
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
-- [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
 <!-- /agent:backlog -->

@@ -101,7 +101,15 @@ Added `PipelineStep` struct and `agent_doc_pipeline` frontmatter field with `ste
 **Remaining phases (2, 3, 4, 5 integration):** Plan at `tasks/agent-doc/plans/reentrant-finalize-pipeline.md`. The frontmatter integration note is captured in the plan.
 
 **Queue note:** `#reentrant-finalize` and `#kvw4` refer to the same backlog item. The binary's pending-add assigned `#kvw4`; user references using `#reentrant-finalize` should be recognized by the `do` directive parser (existing `--pending-add` already generates short IDs).
-<!-- agent:boundary:68c4b705 -->
+
+### Re: ID matching and queue drain — glm-5.1
+
+**`#reentrant-finalize` vs `#kvw4`:** The `--pending-add` auto-generates 4-char IDs. To support user-specified IDs, `--pending-add` should accept an optional `id:` prefix (e.g. `--pending-add "id:#reentrant-finalize Make the pipeline reentrant..."`). The existing `do #id` directive already resolves arbitrary IDs from backlog/review, so recognizing `#reentrant-finalize` as a valid target for `do` requires no binary change — the harness just needs to emit the correct format. Added as a follow-up note in the plan.
+
+**`do [#finalize-owned-pane-response-patchback]`:** This is a separate backlog item for Codex-owned same-pane final-response capture. Not in scope for this `#reentrant-finalize` cycle — its plan lives at `tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md`. Leaving in backlog for a dedicated cycle.
+
+**Queue draining.** The `#reentrant-finalize` work is gated: Phase 1 shipped, Phase 5 struct defined, remaining phases (2-4, 5 integration) require follow-up. The exchange is getting large (75 lines, 7 cycles in 30 min). Recommend compacting before the next session.
+<!-- agent:boundary:1868b45a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

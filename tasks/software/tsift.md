@@ -69,7 +69,16 @@ Cannot proceed without manual GitHub repo configuration:
 4. Then `npm publish --access public` from `packages/opencode-tsift/` or via CI
 
 The package is ready (`make check` passes `npm run publish:check` dry-run). Only the auth/infrastructure step remains.
-<!-- agent:boundary:65c19a47 -->
+
+### Re: #astnav-commands — shipped (commit `abb409e`)
+
+> **Queue prompt:**
+>
+> [#astnav-commands]
+
+
+Added /tsift-explain, /tsift-symbol-read, /tsift-graph OpenCode commands. Updated init.rs (12→15), npm test, SPEC.md. All parity tests pass.
+<!-- agent:boundary:4e708d0a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +91,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#surreal-batch-bfs-gated]~
 - ~[#astnav-hooks]~
 - ~[#astnav-npm]~
-- [#astnav-commands]
+- ~[#astnav-commands]~
 - [#astnav-init-claude]
 - [#astnav-autoindex-oc]
 - [#astnav-harness-docs]
@@ -94,7 +103,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:backlog -->
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
-- [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
 - [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)
 - [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)

@@ -38,7 +38,36 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): lazyperf34 lazyperf35; benchmark-skill BENCHMARKS.md freshness + skill/runbook; performance differences; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:777b23c2 -->
+<!-- no-pending-capture -->
+### Re: next-steps for single-threaded, Tokio, and multi-threaded performance — glm-5.1 (HEAD)
+
+#### BENCHMARKS.md and the Tokio path
+
+**No, BENCHMARKS.md does not include the Tokio/AsyncContext path.** It covers `Context` (single-threaded), `ThreadSafeContext` (multi-threaded via `std::thread`), and instrumentation profiles. The async benchmarks in `benches/async_context.rs` exist but results are absent from BENCHMARKS.md. The `tokio_sync.rs` integration tests exercise `ThreadSafeContext` inside Tokio tasks but have no dedicated Criterion benchmarks.
+
+#### Single-threaded path (Context) next-steps
+
+1. **Eliminate `Rc<dyn Any>` boxing on hot cached reads.** The cached read path (8.2 ns) goes through `Rc<dyn Any>` dispatch. A typed cache layer could drop this below 5 ns.
+2. **Reduce `cold_first_get` overhead (90 ns).** Pre-allocating slot storage and using an index-based tracking stack instead of `Vec<SlotId>` on the thread-local would help.
+3. **`SmallVec` edge tuning.** For high fan-out, a hybrid approach (small inline + spill to `HashSet` for `contains` checks at scale) would reduce the O(n) scan.
+4. **Memo equality fast-path.** A per-node dirty epoch check before recomputation could skip entire subtrees when parity hasn't changed.
+
+#### Tokio path (AsyncContext) next-steps
+
+5. **Add AsyncContext results to BENCHMARKS.md.** Extend `scripts/update-benchmark-results.py` to parse async benchmark output.
+6. **Add `ThreadSafeContext`-inside-Tokio benchmarks.** A dedicated `benches/tokio_sync.rs` with cached reads, invalidation, and batch under Tokio multi-thread runtime.
+7. **Reduce async overhead vs sync baseline.** A fast-path that returns the cached value synchronously without spawning a task.
+8. **Async concurrent contention optimization.** A batch-then-read pattern or read-only cached snapshots for readers would reduce contention.
+
+#### Multi-threaded path (ThreadSafeContext) next-steps
+
+9. **Same-slot write/read scaling (7.2 ms at 16 workers).** Per-slot fine-grained locking would allow independent slots to proceed without contention.
+10. **Effect batch flush at 16 workers (6.2 ms).** Batch coalescing (accumulate invalidations, single publish at batch exit) would reduce lock sites.
+11. **Independent slot contention — reduce publish lock hold.** A lock-free publish path (atomic epoch bump + deferred edge cleanup).
+12. **Graph propagation fan-out eager validation (5.8 ms at 16 workers).** A lazy invalidation frontier would defer cost, matching the `lazy_dirty_epochs` pattern that already shows 3.8 ms vs 5.8 ms.
+
+Top of backlog: **#lazilyperf36**
+<!-- agent:boundary:c8185a3a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,6 +77,12 @@ Compacted content:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?
+- do [#61zg]
+- do [#fk8p]
+- do [#v6r8]
+- do [#zspz]
+- do [#8e2q]
+- do [#mqcw]
 <!-- /agent:queue -->
 
 ## Backlog

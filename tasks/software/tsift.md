@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -133,7 +133,43 @@ Top of backlog: **`#sqlite-chunk`**
 | `#sqlite-chunk` through `#sqlite-frontier-temp` | tsift | Modify tsift-sqlite store, staging, and query code |
 
 **Cross-posted** `#lazyperf32`, `#lazyperf35`, and `#lazyperf34` to the lazily-rs session backlog so they can be prioritized alongside the AsyncContext work.
-<!-- agent:boundary:1c8c3d15 -->
+
+### Re: tsift token-saving next-steps — opus-4-6
+
+> **Queue prompt:**
+>
+> What are #next-steps for tsift to save tokens?
+
+
+tsift already has a deep token-saving stack: envelope bounding, budget presets (`small`/`normal`/`deep`/`auto`), graph output token caps (6k default), digest compression, terse/ultra-terse/schema modes, cycle packet cache, rewrite protocol, and ranked neighborhood traversal (30-60% savings). The gaps are in **measurement**, **unguarded surfaces**, and **eviction hygiene**.
+
+#### Already implemented (current savings)
+
+| Mechanism | Savings |
+|---|---|
+| Envelope budget system | 3-10 items, 120-240 byte previews |
+| Ranked neighborhood | 30-60% vs unranked |
+| Terse/ultra-terse/schema | 30-50% / 55-70% / 40-60% key overhead reduction |
+| Diff/test/log digest | Collapsed groups, bounded caps |
+| Rewrite protocol | Intercepts cat/grep/git diff/cargo test with bounded replacements |
+| Cycle packet cache | Zero-cost cache hits for repeated evidence/context-pack |
+
+#### Recommended next steps (priority order)
+
+1. **`#tokegate-seed` Populate token gate history** — The cross-surface regression gate has **zero samples**. Without baseline data, no token regression can be detected on any of the 6 metrics across the 5 agent-facing surfaces. This is a measurement gap that makes all other optimizations unverifiable. Ship baseline samples first.
+
+2. **`#source-body-cap` Source-read body token cap** — `source-read` and `symbol-read` envelopes bound AST metadata but not the source body preview. A long function body can dominate the envelope with no truncation or expansion handle. Adding a body token cap (e.g., 400 tokens) with a `source_body` expansion command would prevent runaway output.
+
+3. **`#diff-parse-cap` Default diff-digest parse cap** — `max_parsed_files` defaults to `None` (parse all). For standalone `diff-digest` on large working trees, this triggers full tree-sitter parsing of every changed file. Default to 20-30 with explicit opt-out.
+
+4. **`#evidence-page` Evidence pagination** — The graph evidence surface uses a single 6k-token cap. For large neighborhoods, this either floods or cuts aggressively. Cursor-based paging (like `graph-db kind` already has) lets agents expand incrementally.
+
+5. **`#packet-cache-evict` Cycle packet cache cleanup** — `.tsift/cycle-packet-cache/` has no eviction policy. Add cleanup to `tsift status --fix` or `graph-db compact`.
+
+6. **`#terse-edge-codes` Ultra-terse edge short codes** — Map `calls`→`c`, `defines`→`d`, etc. Strip provenance/freshness objects. Marginal but low-risk compression.
+
+Top of backlog: **`#tokegate-seed`**
+<!-- agent:boundary:2d3fc893 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,16 +178,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" auto -->
-- ~What are #next-steps for lazily-rs help with performance?~
-- ~What are #next-steps to improve the sqlite graph performance + effectiveness?~
-- ~Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?~
-- What are #next-steps for tsift to save tokens?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog queue -->
+- [ ] [#tokegate-seed] Populate token-gate-history.json with baseline samples (3+ per surface) — currently empty, so no regression detection exists for any of the 6 token metrics across 5 surfaces (high)
+- [ ] [#source-body-cap] Add body preview token cap to source-read/symbol-read envelopes — long function bodies dominate envelopes with no truncation or expansion command (high)
+- [ ] [#diff-parse-cap] Default max_parsed_files to 20-30 in standalone diff-digest — unlimited tree-sitter parsing on large working-tree diffs is wasteful; opt out with --max-parsed-files 0 (medium)
+- [ ] [#evidence-page] Cursor-based evidence pagination — single 6k-token cap either floods or cuts aggressively; incremental paging lets agents expand on demand (medium)
+- [ ] [#packet-cache-evict] Add cycle packet cache eviction to tsift status --fix — no TTL/size/cleanup policy exists for .tsift/cycle-packet-cache/ (low)
+- [ ] [#terse-edge-codes] Map common edge kinds to short codes in ultra-terse — calls->c, defines->d, etc; strip provenance/freshness for further compression (low)
 - [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)
 - [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)
 - [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
@@ -185,6 +223,10 @@ Could FalkorDB help with performance?
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tsift.done.md -->
+- [x] [#lazyperf32-tsift] Cross-posted #lazyperf32 to lazily-rs backlog (lazily-rs project to implement)
+- [x] [#lazyperf35-tsift] Cross-posted #lazyperf35 to lazily-rs backlog (lazily-rs project to implement)
+- [x] [#lazyperf34-tsift] Cross-posted #lazyperf34 to lazily-rs backlog (lazily-rs project to implement)
+- [x] [#lazily-tsift-bench] Cross-posted tsift-pattern benchmarks recommendation to lazily-rs backlog
 - [x] [#surreal-rt-pool-warm] Accept external tokio Runtime in open_or_refresh so backend-eval can reuse one Runtime across candidate stores
 <!-- completed work archived in tasks/software/tsift.done.md -->
 <!-- /agent:done -->

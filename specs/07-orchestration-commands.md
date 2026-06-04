@@ -224,6 +224,33 @@ The `agent:queue` component batches prompts inside the document.
 - Queue entries are parsed as `Prompt`, `Completed`, `Preset`, `StartFence`, or `StopFence`.
 - Activation resolution considers `auto`, inline start fences, exchange-triggered `do queue` / `run queue`, and persisted `queue_active`.
 
+### Canonical queue control (`queue:` frontmatter, `#queue-state-unify`)
+
+The `queue:` frontmatter key is the canonical, harness-agnostic queue activation
+control. It subsumes the deprecated `queue_active:` boolean and the deprecated
+`auto` attribute on the `agent:queue` marker:
+
+| `queue:` value | meaning | subsumes |
+|----------------|---------|----------|
+| `start` (alias `go`) | activate — drive the queue | `queue_active: true` + marker `auto` |
+| `stop` | deactivate — halt | `queue_active: false` |
+| (absent) | unmanaged / inactive | absence of both |
+
+- The value is parsed leniently (case- and whitespace-insensitive). An
+  unrecognized value (typo) is ignored and never flips activation.
+- `frontmatter::normalize_queue_control` folds a recognized `queue:` value onto
+  `queue_active` at parse time, so every existing reader (preflight activation,
+  Claude `/loop` continuation, Codex Stop-hook, OpenCode auto-loop) honors it
+  without a separate read path. The canonical key wins over a stale
+  `queue_active:` line in the same frontmatter.
+- `queue_active:` and the `auto` marker attribute remain accepted as deprecated
+  input for backward compatibility; new documents should use `queue: start` /
+  `queue: stop`.
+- **Remaining (`#queue-state-unify` follow-ups):** queue-maintenance write paths
+  still emit/clear `queue_active:`; migrating the writer to emit `queue: stop`
+  on drain, normalizing existing `auto` markers to `queue: start`, and the
+  harness-parity doc rewrites are tracked as later phases.
+
 ### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`)
 
 An `agent:backlog` or `agent:icebox` component may carry a `queue` attribute so

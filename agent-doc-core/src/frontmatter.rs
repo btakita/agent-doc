@@ -118,6 +118,38 @@ pub enum CodexNetworkAccess {
     Disabled,
 }
 
+/// Canonical queue activation control (`#queue-state-unify`).
+///
+/// The `queue:` frontmatter key subsumes the deprecated `queue_active:` boolean
+/// and the `auto` attribute on the `agent:queue` marker. `start` (alias `go`)
+/// activates the queue; `stop` deactivates it. Parsed leniently (case- and
+/// whitespace-insensitive); unknown values resolve to `None` and are ignored so
+/// a typo never silently flips activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueControl {
+    /// `start` / `go` — activate the queue.
+    Start,
+    /// `stop` — deactivate the queue.
+    Stop,
+}
+
+impl QueueControl {
+    /// Parse a raw `queue:` value. `start`/`go` → [`Start`], `stop` → [`Stop`].
+    /// Returns `None` for empty/unknown values.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "start" | "go" => Some(Self::Start),
+            "stop" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+
+    /// Whether this control activates the queue.
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Start)
+    }
+}
+
 /// Document format: controls document structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum AgentDocFormat {
@@ -508,9 +540,19 @@ pub struct Frontmatter {
         rename = "agent_doc_cwd"
     )]
     pub cwd: Option<String>,
-    /// Whether the queue is currently active (consuming prompts).
-    /// Set to `true` when the queue is activated via `auto`, start fence, or
-    /// `do queue`/`run queue`. Cleared when the queue drains to empty.
+    /// Canonical queue activation control (`#queue-state-unify`).
+    /// `start` (alias `go`) activates the queue; `stop` deactivates it. This is
+    /// the preferred surface and subsumes the deprecated `queue_active:` boolean
+    /// and the `auto` marker attribute. [`normalize_queue_control`] folds an
+    /// explicit value onto `queue_active` at parse time so every existing reader
+    /// honors it; the canonical key wins over a stale `queue_active:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue: Option<String>,
+    /// **Deprecated** in favor of the canonical `queue:` control. Whether the
+    /// queue is currently active (consuming prompts). Set to `true` when the
+    /// queue is activated via `queue: start`/`go`, `auto`, a start fence, or
+    /// `do queue`/`run queue`. Cleared when the queue drains to empty. Still read
+    /// and written for backward compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,
     /// Opt-in length threshold for the `#queue-prompt-echo-in-response` echo.
@@ -667,13 +709,26 @@ impl Frontmatter {
     }
 }
 
+/// Fold the canonical `queue:` control onto the deprecated `queue_active`
+/// boolean (`#queue-state-unify`). An explicit, recognized `queue:` value wins
+/// over any stale `queue_active:` already present, so the canonical key is the
+/// single source of truth. Unrecognized/empty `queue:` values leave
+/// `queue_active` untouched. Callers run this immediately after deserializing
+/// frontmatter so every downstream reader of `queue_active` honors `queue:`.
+pub fn normalize_queue_control(fm: &mut Frontmatter) {
+    if let Some(control) = fm.queue.as_deref().and_then(QueueControl::parse) {
+        fm.queue_active = Some(control.is_active());
+    }
+}
+
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
 /// If no frontmatter block is present, returns defaults and the full content as body.
 pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     let Some((yaml, body)) = split_frontmatter(content)? else {
         return Ok((Frontmatter::default(), content));
     };
-    let fm: Frontmatter = serde_yaml::from_str(yaml)?;
+    let mut fm: Frontmatter = serde_yaml::from_str(yaml)?;
+    normalize_queue_control(&mut fm);
     Ok((fm, body))
 }
 
@@ -717,6 +772,7 @@ pub fn parse_with_ssh_resolver<'a>(
     };
     match serde_yaml::from_str(yaml) {
         Ok(mut fm) => {
+            normalize_queue_control(&mut fm);
             apply_required_ssh_defaults(&mut fm, ctx)?;
             Ok((fm, body))
         }
@@ -1098,6 +1154,66 @@ mod tests {
     }
 
     #[test]
+    fn queue_control_parse_aliases() {
+        assert_eq!(QueueControl::parse("start"), Some(QueueControl::Start));
+        assert_eq!(QueueControl::parse("go"), Some(QueueControl::Start));
+        assert_eq!(QueueControl::parse("STOP"), Some(QueueControl::Stop));
+        assert_eq!(QueueControl::parse("  Start  "), Some(QueueControl::Start));
+        assert_eq!(QueueControl::parse("auto"), None);
+        assert_eq!(QueueControl::parse(""), None);
+        assert!(QueueControl::Start.is_active());
+        assert!(!QueueControl::Stop.is_active());
+    }
+
+    #[test]
+    fn parse_queue_start_activates() {
+        // `queue: start` (canonical) folds onto the deprecated queue_active bool
+        // so every existing reader honors it (#queue-state-unify).
+        let (fm, _) = parse("---\nagent_doc_format: template\nqueue: start\n---\n\n").unwrap();
+        assert_eq!(fm.queue.as_deref(), Some("start"));
+        assert_eq!(fm.queue_active, Some(true));
+    }
+
+    #[test]
+    fn parse_queue_go_alias_activates() {
+        let (fm, _) = parse("---\nqueue: go\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(true));
+    }
+
+    #[test]
+    fn parse_queue_stop_deactivates() {
+        let (fm, _) = parse("---\nqueue: stop\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(false));
+    }
+
+    #[test]
+    fn parse_queue_canonical_wins_over_stale_queue_active() {
+        // An explicit `queue:` control overrides a stale `queue_active:` line.
+        let (fm, _) = parse("---\nqueue: stop\nqueue_active: true\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(false));
+
+        let (fm, _) = parse("---\nqueue: start\nqueue_active: false\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(true));
+    }
+
+    #[test]
+    fn parse_queue_unknown_value_leaves_queue_active_untouched() {
+        // A typo must never silently flip activation.
+        let (fm, _) = parse("---\nqueue: bogus\nqueue_active: true\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(true));
+        let (fm, _) = parse("---\nqueue: bogus\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, None);
+    }
+
+    #[test]
+    fn parse_legacy_queue_active_still_honored() {
+        // Back-compat: docs without the canonical key keep working.
+        let (fm, _) = parse("---\nqueue_active: true\n---\n\n").unwrap();
+        assert_eq!(fm.queue.as_deref(), None);
+        assert_eq!(fm.queue_active, Some(true));
+    }
+
+    #[test]
     fn parse_partial_fields() {
         let content = "---\nsession: xyz\n---\n# Doc\n";
         let (fm, body) = parse(content).unwrap();
@@ -1285,6 +1401,7 @@ mod tests {
             dispatch: None,
             agent_doc_env_inherit: None,
             cwd: None,
+            queue: None,
             queue_active: None,
             queue_prompt_echo_max_chars: None,
             collaboration: None,

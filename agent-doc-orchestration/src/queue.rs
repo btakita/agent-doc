@@ -1409,6 +1409,37 @@ mod tests {
     }
 
     #[test]
+    fn activation_canonical_queue_start_drives_persisted_active() {
+        // End-to-end (#queue-state-unify): `queue: start` in frontmatter folds
+        // onto `queue_active`, which feeds `resolve_activation` as
+        // `persisted_active`, activating the queue with the Persisted trigger
+        // (auto-loop-continuation eligible).
+        let (fm, _) = agent_doc_core::frontmatter::parse(
+            "---\nagent_doc_format: template\nqueue: start\n---\n\n",
+        )
+        .unwrap();
+        let persisted_active = fm.queue_active.unwrap_or(false);
+        assert!(persisted_active, "queue: start must set queue_active");
+
+        let entries = vec![make_prompt("do #fix1")];
+        let act = resolve_activation(&entries, false, false, persisted_active);
+        assert!(act.active);
+        assert_eq!(act.trigger, Some(QueueTrigger::Persisted));
+    }
+
+    #[test]
+    fn activation_canonical_queue_stop_deactivates() {
+        let (fm, _) =
+            agent_doc_core::frontmatter::parse("---\nqueue: stop\nqueue_active: true\n---\n\n")
+                .unwrap();
+        // Canonical `queue: stop` wins over a stale `queue_active: true`.
+        assert_eq!(fm.queue_active, Some(false));
+        let entries = vec![make_prompt("do #fix1")];
+        let act = resolve_activation(&entries, false, false, fm.queue_active.unwrap_or(false));
+        assert!(!act.active);
+    }
+
+    #[test]
     fn activation_auto_takes_precedence_over_exchange() {
         let entries = vec![make_prompt("task")];
         let act = resolve_activation(&entries, true, true, false);

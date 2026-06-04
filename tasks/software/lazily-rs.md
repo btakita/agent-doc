@@ -57,7 +57,33 @@ Composes with the existing `TypeId`-at-creation typed cache, zero overhead on th
 `serde = ["dep:serde"]` (+ `dep:erased-serde`, both optional); a sealed `MaybeSerialize<T>` helper resolves the vtable so existing constructor signatures are unchanged; `Context::snapshot()` / `ThreadSafeContext::snapshot()` emit `ContextSnapshot { nodes: Vec<NodeSnapshot { slot_id, type_tag, payload | Opaque }> }`. That snapshot type is the direct input to **#ipc2** (snapshot + incremental update protocol) and the value substrate for **#ipc3** (CRDT vs Raft).
 
 Design-only change — `cargo test --test spec_compliance` stays green (101 passed). The uncommitted `Cargo.toml`/`Cargo.lock` `serde`/`serde_json` groundwork in the working tree predates this cycle and was left untouched (a design task shouldn't bundle dep wiring). Next queue item: `[#4rxf] #ipc2`.
-<!-- agent:boundary:11a1b23d -->
+
+### Re: [#4rxf] #ipc2 — Design lazily-ipc snapshot + incremental update protocol — opus-4-8
+
+> **Queue prompt:**
+>
+> [#4rxf]
+
+
+Designed and committed (`lazily-rs` `11dc3c3`, pushed to `main`). New **IPC snapshot + incremental update protocol (`lazily-ipc`)** section in `SPEC.md`, built directly on the #ipc1 `ContextSnapshot`.
+
+##### Core idea — reuse the batch boundary, don't invent one
+Two message kinds: `Snapshot` (full state, on connect/resync) and `Delta` (incremental). A `Delta` is emitted **once per outermost batch flush** — the single atomic graph-mutation boundary the thread-safe path already guarantees. Coalescing is free: one delta per flush, never one per `set_cell`.
+
+##### Versioning
+A context-level `ipc_epoch: u64` advances once per flush (independent of the per-slot `cache_revision` read-path atomics). `Snapshot` carries `epoch`; each `Delta` carries `{ base_epoch, epoch = base_epoch+1 }`, strictly sequential — so a receiver detects any gap/reorder/restart via `base_epoch == last_epoch` and requests a fresh `Snapshot`.
+
+##### DeltaOp set
+`CellSet` / `SlotValue` / `Invalidate` / `NodeAdd` / `NodeRemove` / `EdgeAdd` / `EdgeRemove`. The protocol **inherits** existing invariants rather than re-deriving them: PartialEq cell guard → equal writes emit nothing; memo equality suppression → equal recompute emits no `SlotValue`/downstream `Invalidate`; coalesced frontier → a multi-path dependent appears once per delta.
+
+##### Lazy reconciliation
+**Value-mirror (default):** sender resolves invalidated allowlisted slots via `ctx.get()` at flush so deltas carry concrete values; receiver is a pure data mirror. **Mirror-lazy** (receiver holds closures, recomputes on read) requires closure replication → deferred to `lazily-distributed` (#ipc3).
+
+##### Boundaries
+Allowlisted nodes only (#39c5) — non-allowlisted are *omitted entirely*, not `Opaque`, applied at construction. New `ipc = ["serde"]` feature, transport-agnostic (`IpcSink`/`IpcSource`), length-prefixed tagged messages. The `Delta`/`ipc_epoch` model is a single-writer linear log — whether multi-writer needs CRDT vs Raft on top is exactly **#ipc3**, next in queue (`[#jwwc]`).
+
+Design-only — `cargo test --test spec_compliance` green (101 passed).
+<!-- agent:boundary:2d138fcb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +92,7 @@ Design-only change — `cargo test --test spec_compliance` stays green (101 pass
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#4rxf]
+- ~[#4rxf]~
 - [#jwwc]
 - [#q5r1]
 - [#4cn0]
@@ -76,7 +102,6 @@ Design-only change — `cargo test --test spec_compliance` stays green (101 pass
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#4rxf] #ipc2 Design lazily-ipc snapshot + incremental update protocol
 - [ ] [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist
 - [ ] [#4cn0] #yxjw Build Cloudflare Worker signaling server

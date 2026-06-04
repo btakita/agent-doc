@@ -59,7 +59,28 @@ Relabeled. Re-ran `corky transcribe --diarize --speakers "Brian Takita,Judith Kr
 - Frontmatter `participants` now lists all four; also re-transcribed 3 low-confidence blocks (avg +0.39).
 
 **Accuracy caveat:** attribution in the noisy opening minute is approximate — e.g. the `[00:00:25]` "Judith will be late, let me give her a call" turn is tagged Judith but is almost certainly someone else announcing her. The bulk of the call attributes cleanly. If you spot specific mis-tags, point me at the timestamps and I'll correct them.
-<!-- agent:boundary:0a4f76a4 -->
+❯ Please create a markdown document with a list of tasks that were identified in the call transcript.
+
+### Re: task list from call transcript — opus-4-8
+
+Done. Read the full 95:38 transcript and pulled the action items into a markdown doc co-located with the recording:
+
+- **Output:** [file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md](file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md)
+
+It's an EFS demo/discovery walkthrough (Brian, Judith, Robert, April). I organized by topic rather than by speaker, since the diarization attribution is too noisy to trust for who-said-what:
+
+- **Homepage / public site** — logo touch-up, revise loan-parameters box (drop "Points", "Primarily California"), rename product categories (drop "extraction"/"tract development"), fix the "proof" label, make recent-transactions admin-editable, "Licensed loan **originator**", contact-block reorder, lien wording.
+- **Rate estimate tool** — show loan amount, hard-stop at 100% LTV, dynamic recalc, "Above guidelines → contact for custom quote" in the 65–80% band, currency formatting.
+- **Apply flow** — finish multi-step borrower app, **fix the lead-disappears-on-advance bug**, true quick-app for borrowers.
+- **Admin pipeline** — stage/Kanban view aligned to TMO stages, TMO sync, funded-deals photo upload, editable About page, cache hookups.
+- **Investor portal** — available-deals-first, new-deal email, "I'm interested" button, drop Returns/Distributions/Statements, simplified portfolio (no servicing data), special-instructions/vestings, documents + lender-doc dropdown, requirements/questionnaire, multi-lender funding status, workflow-priority dashboard, **secure wiring-instructions link**.
+- **Broker portal** — referring-broker app lives here, code-based onboarding, tag every loan to a broker source.
+- **Messaging/CRM** — plan of record is Robert's GoHighLevel, integrated with the site.
+- **Security/OCR (later phase)** — vault + OCR redaction, document request forms.
+- **EFS to provide** — TMO workflow screenshots, the two TMO app links, lender-doc list + investor questionnaire, Dropbox naming conventions, a broker test sign-up.
+
+Several of these map to existing backlog/review items (TMO sync/webhooks, messaging round-trip, OCR, broker backend, investor docs). I queued a `[recommended]` backlog item (#exb1) to triage the list into the EFS roadmap — say the word and I'll do that pass.
+<!-- agent:boundary:c8a78e5a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +93,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#exb1] [recommended] Triage the 2026-06-03 EFS demo-call task list (/home/brian/Videos/2026-06-03 16-58-49-tasks.md) into the EFS backlog/roadmap; map items onto existing ids (#dzmm/#k2xg TMO sync, #xcvg messaging, #37ah broker backend, #qakx investor docs, OCR #7fx4/#d1h2/#f5kq) and add net-new ones (rate-tool LTV fixes, lead-disappears bug, secure wiring link, GoHighLevel integration).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

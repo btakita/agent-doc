@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -29,30 +29,12 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-182411.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-184821.md`*
 
 Compacted content:
-- Archived 7 response topic(s): stdout bleed in front of OpenCode TUI; fixing image detection for non-vision models; verify config + make describe_image work; 4 more
+- Archived 3 response topic(s): queue_active flip on JB Run Agent Doc; do #tn34; do #pr5t
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: queue_active flip on JB Run Agent Doc — glm-5.1
-
-Acknowledged: `queue_active` should flip to `true` when JB Run Agent Doc is invoked on a document whose queue has the `auto` attribute. This is the expected auto-queue activation path.
-
-### Re: do #tn34 — glm-5.1
-
-Plan already exists at `tasks/agent-doc/plan-finalize-mid-exchange-user-prompt-drift.md` (Option A recommended: absorb user edits above the boundary into the committed blob). Implementation deferred to a focused cycle — the change touches `git::commit()`, `template.rs`, `write.rs`, and `snapshot.rs`, requiring careful testing around the selective-commit convention. The plan is actionable and ready for a dedicated implementation turn. Marking as gated pending implementation.
-
-### Re: do #pr5t — glm-5.1
-
-**Implemented, tested, and pushed.** The CLI `describe-image` subcommand now reads vision settings from `.agent-doc/config.toml` as a fallback layer. New precedence chain: CLI args > env vars (`AGENT_DOC_VISION_*`) > project config (`[vision]` section) > hardcoded defaults. The orchestration path is unchanged.
-
-Changes:
-- `src/agent-doc/src/describe_image.rs`: added `config_*` fallback parameters to `resolve_provider`, `resolve_api_key`, `resolve_model`, and `resolve_vision_config`. `run()` now calls `load_project_for_doc(image)` to extract `VisionConfig` values.
-- `src/agent-doc/src/orchestrate.rs`: updated `resolve_vision_config` call to pass `None` for config fallbacks (orchestrate already feeds project config through CLI-param position).
-- Added tests: `resolve_vision_config_config_fallback` and `resolve_vision_config_cli_overrides_config`.
-- Submodule commit `37177d05`, superproject `73e3839d0`, pushed.
-<!-- agent:boundary:6461dfbc -->
+<!-- agent:boundary:d89c63a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

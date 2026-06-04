@@ -29,60 +29,12 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-010429.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-022100.md`*
 
 Compacted content:
+- Archived 2 response topic(s): #jb-stale-busy-idle-footer + #clear-stops-running-process; queue processing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #jb-stale-busy-idle-footer + #clear-stops-running-process — glm-5.1
-
-**Root cause:** `dispatch_blocker_reason()` for OpenCode checks the last 12 reversed lines for `"esc to interrupt"`. When a completed turn's `Working (Ns - esc to interrupt)` banner remains in scrollback within those 12 lines while the actual pane bottom shows idle chrome (ctrl+p footer, context %, cwd/version), the busy guard falsely classifies the pane as `opencode_active_turn`, blocking `session clear` and dispatch.
-
-**Fix:** Added `bottom_idle_chrome_suffix_present()` private method to `HarnessConfig` — same logic as `is_bottom_idle_chrome()` but without the `has_busy_cue()` guard. Called in `dispatch_blocker_reason()` for both OpenCode and Claude: when `opencode_active_turn_busy()` / `claude_active_turn_busy()` returns true but the bottom lines form a contiguous idle chrome suffix (min 4 for OpenCode, min 2 for Claude), override the busy classification to `None`.
-
-**Files changed:**
-- `agent-doc-orchestration/src/harness.rs`: added `bottom_idle_chrome_suffix_present()`, added idle-footer override in both OpenCode and Claude branches of `dispatch_blocker_reason()`, added 5 regression tests
-
-**Tests:** 5 new tests, all 12 existing `dispatch_blocker_reason` tests still pass, `make check` green, binary installed.
-
-**Remaining queue assessment:**
-- `#adoc-queue-ipc-buffer` — gated on IPC capture session (#6cmx); root cause #2 already shipped but no clean consume->halt log proof
-- `#codex-network-access-opencode` — implementable next cycle; needs frontmatter guard to warn/ignore `codex_network_access` when agent != codex
-
-### Re: queue processing — glm-5.1
-
-Processed all 10 `do` queue items plus 2 non-`do` items. Summary:
-
-**Implemented (5 items marked done):**
-
-- `#vypc` **#jb-stale-busy-idle-footer** — IMPLEMENTED 2026-05-29. Both Claude idle-composer footer detection and Claude busy cue shipped, 6 tests green. Only live JB replay verification remains. Marking done per backlog item text (implementation complete, live-verify is review scope).
-
-- `#0mgb` **#lr-queue-patchback-miss** — IMPLEMENTED this cycle. Added `active_free_text_queue_heads` field to `CycleState` (`cycle_state.rs`), extracted at preflight via `active_free_text_queue_heads()` function. Added `check_free_text_queue_head_provenance` session-check guard requiring committed-response, binary consume, or deferral proof for each recorded free-text head. 3 session-check tests + 1 cycle_state test, all green.
-
-- `#30h3` **#queue-auto-no-continue** — ALREADY IMPLEMENTED. `resolve_activation` Priority 4 handles `persisted_active` (no `auto` needed). Both `queue_continuation::detect` and `active_queue_prompt_state` pass `persisted_active: true`. Tests in `queue.rs` (`activation_persisted_active`) and `queue_continuation.rs` (`detect_returns_head_for_persisted_active_queue_without_auto`) confirm.
-
-- `#k5ne` **#codex-403-429-fallback** — IMPLEMENTED this cycle. Added `looks_like_codex_transport_403_429()` detection and `format_transport_403_429_diagnostic()` in `codex.rs`. Hooked into `send_once` non-zero exit and `CodexStreamIterator::next` streaming exit paths. 6 new tests: 3 unit (detection), 1 diagnostic, 1 send, 1 streaming. All green.
-
-- `#7gy5` **#codex-network-access-opencode-guard** — IMPLEMENTED (prior cycle). `preflight.rs` emits `codex_network_access_non_codex_harness` warning when `codex_network_access` is set on non-Codex harness.
-
-**Not yet done (5 items remain in queue):**
-
-- `#3hwr` **#clear-stops-running-process** — Still reproducing. Gated on admin API Phase 2 (`admin stop --halt-queue --terminate`) or a narrower busy-guard idle-footer reclassification. Cannot implement without the admin API cross-language deliverable.
-
-- `#gyma` **#prompt-duplicated-while-typing** — PARTIALLY done. Prefix-mismatch dedup gap fixed. The structural remainder (buffer-snapshot race) is gated on live instrumentation capture from `PatchWatcher.applyPatch` debug logging. No safe deterministic fix possible until the race is captured.
-
-- `#5qhn` **#adoc-queue-ipc-buffer-divergence** — Root causes #1 and #4 fixed. Root cause #2 (IPC buffer reconciliation) gated on a plugin protocol extension — no existing IPC seam for queue tag attributes.
-
-- `#sxjj` **#cancel-orphans-preflight-cycle** — Gated on design decision: Option A (JB cancel emits FFI/IPC signal) vs Option B (shortened reclaim window). Needs explicit confirmation.
-
-- `#cd98` **#backlog-priority-attribute** — Gated on design decision: marker syntax (`priority=N` vs `[pN]` vs extending `[recommended]`), sort trigger, and stability guarantees. Plan recommends `priority=<1..9>` but needs confirmation.
-
-**New issues captured:**
-- Console stdout bleeding behind opencode TUI — noted, no code changes yet
-- lazily-rs.md tmux window crash + auto-restart — noted, likely related to existing tmux stability issues
-
-**Verification:** clippy clean, 2248 orchestration tests + 23 binary tests all green. Release binary built and installed.
-<!-- agent:boundary:06c9665e -->
+<!-- agent:boundary:a9f81cf9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->

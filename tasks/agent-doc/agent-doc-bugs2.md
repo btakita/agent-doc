@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -104,7 +104,7 @@ model = "gpt-4o"
 Queue drained — no remaining items.
 Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
 
-### Re: JB Run Agent Doc stall fix — opencode (HEAD)
+### Re: JB Run Agent Doc stall fix — opencode
 
 **Root cause:** Stale controller lease projecting `busy` while the opencode console was idle. The queue also had a contaminated item (assistant-like prose duplicated into the queue, triggering the `#jb-run-agent-doc-response-queue-contamination` guard).
 
@@ -112,7 +112,7 @@ Is there a current gpt-5 vision model that is available? If yes, please configur
 1. `agent-doc session clear` — reset controller lease from `busy` to `operator_ready`
 2. Removed contaminated queue item from `agent:queue`
 
-### Re: GPT-5 vision model availability — opencode (HEAD)
+### Re: GPT-5 vision model availability — opencode
 
 Yes. The latest OpenAI models with vision support:
 - **GPT-5.5** — flagship, $5/$30 per MTok, 1M context, vision enabled
@@ -134,7 +134,7 @@ model = "gpt-5.5"
 
 Or use `AGENT_DOC_VISION_MODEL=gpt-5.5` env var.
 
-### Re: #preflight-image-extract — opencode (HEAD)
+### Re: #preflight-image-extract — opencode
 
 Already implemented in the previous two cycles:
 - `extract_image_references()` in `describe_image.rs` with naked path/URL detection
@@ -143,7 +143,7 @@ Already implemented in the previous two cycles:
 
 Remaining wiring work (Phase 2-3 from plan): integrate extraction into preflight pipeline, add `Passthrough` and `Google` providers.
 
-### Re: JB stall + do #preflight-image-extract — opencode (HEAD)
+### Re: JB stall + do #preflight-image-extract — opencode
 
 > - JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
 > - do [#preflight-image-extract]
@@ -173,10 +173,12 @@ Remaining wiring work (Phase 2-3 from plan): integrate extraction into preflight
 **Committed:** agent-doc `4c24e9fa`. All 488 tests pass. Binary installed.
 
 **Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` — all phases complete. URL image downloading remains as a future enhancement.
-<!-- agent:boundary:ac84c84c -->
+<!-- agent:boundary:9b474699 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
+- do [#preflight-image-extract]
 <!-- /agent:queue -->
 ###
 <!--

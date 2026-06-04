@@ -34,7 +34,18 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 Compacted content:
 - Archived 2 response topic(s): Codex stale-busy idle pane not detected; Codex stale-busy timeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e19f9a7d -->
+
+### Re: tsift.md response not committed — glm-5.1
+
+> **Queue prompt:**
+>
+> tsift.md response was not committed
+
+
+Committed the uncommitted tsift.md response (`### Re: #surreal-batch-bfs`) and tsift.done.md updates, plus the tsift submodule code changes (new `tsift-source-read` and `tsift-search` OpenCode commands in `init.rs`, test count update 10→12, AGENTS.md/CLAUDE.md navigation section updates). All 724 tsift tests pass. Binary rebuilt and installed. Pushed to main.
+
+Commits: `3fe5ff3` (tsift submodule), `cfa9d9cd2` (superproject pointer + document response).
+<!-- agent:boundary:7d10bd21 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->

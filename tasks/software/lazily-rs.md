@@ -70,7 +70,7 @@ Next queue head: `do [#mb9b]` → `#vd5v` (typed-cache lock-free cached reads in
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#4cn0]
+- ~[#4cn0]~
 - do [#mb9b]
 <!-- /agent:queue -->
 

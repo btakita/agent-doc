@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -84,7 +84,8 @@ Replaced dynamic `WHERE IN` string-per-chunk frontier expansion in `shortest_pat
 The single-node fast path (prepared statements with `WHERE from_id = ?1`) is replaced by the temp table JOIN since the INSERT+JOIN overhead is negligible and eliminates code duplication. Follows the existing `edges_between_nodes` temp table pattern.
 
 **Verification:** `cargo check -p tsift-sqlite` clean, all 13 tsift-sqlite tests pass (including `sqlite_shortest_path_uses_bounded_frontier`), all 9 tsift-cli tests pass, `cargo install` succeeds.
-<!-- agent:boundary:7ee37f14 -->
+Is `_tsift_frontier` concurrency-safe?
+<!-- agent:boundary:899b4378 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +94,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Is `_tsift_frontier` concurrency-safe?
 <!-- /agent:queue -->
 
 ## Backlog

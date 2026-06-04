@@ -34,7 +34,31 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 3 response topic(s): queue_active flip on JB Run Agent Doc; do #tn34; do #tn34
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9944c8a2 -->
+
+### Re: Reentrant finalize pipeline for crash recovery — glm-5.1
+
+**Root cause:** The finalize pipeline has one uncovered crash window — between `stdin.read_to_string()` and `repair::save_pending()`. If the tmux window crashes in this gap (write.rs:6771→6793 for inline, 6919→6984 for template), the response exists only in process memory and is irretrievably lost. The template path is especially vulnerable with ~65 lines of validation/parsing before `save_pending`.
+
+**Existing coverage (windows 2-6 are already handled):**
+
+| Phase | Crash Window | Recovery |
+|-------|-------------|----------|
+| `stdin → save_pending` | **UNCOVERED** — response in memory only | Silent loss or stale cycle abandonment |
+| `save_pending → atomic_write` | Pending file + capture ledger exist | `repair::run()` replays |
+| `atomic_write → mark_write_applied` | Document has response on disk | `repair::run()` detects visible response |
+| `mark_write_applied → git commit` | Write applied, commit missing | `recover_missing_commit_boundary()` |
+| `git commit → session-check` | Committed but state not updated | `recover_missing_commit_boundary()` |
+
+**Plan created:** `tasks/agent-doc/plans/reentrant-finalize-pipeline.md`
+
+Four phases:
+1. **Early persistence** — move `save_pending()` to immediately after stdin read, before all validation/parsing (eliminates Window 1)
+2. **Reentrant cycle resumption** — enhanced `repair_stale_preflight_started_cycle()` checks for pending/capture before abandoning
+3. **Queue prompt recovery** — store queue prompt text in cycle state for re-injection after crash
+4. **Reentrant `run_command()`** — check cycle state at entry and resume from last checkpoint
+
+**Backlog item added:** `#reentrant-finalize` — implement the plan.
+<!-- agent:boundary:9dec4e1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

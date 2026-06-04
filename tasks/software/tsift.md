@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -75,7 +75,17 @@ This would reduce tool calls from 3-4 (status → communities → neighborhood �
 
 Marking done as design analysis. Implementation can be queued as a new backlog item if approved.
 Add backlog #next-steps to implement the recommendation.
-<!-- agent:boundary:eb53330c -->
+
+### Re: #next-steps — glm-5.1
+
+Added backlog items for the `graph-db map` recommendation, ordered by dependency:
+
+1. **#graphdb-map-command** — Implement `tsift graph-db --json map` composing communities + ranked_neighborhood + status into a two-tier (overview + opt-in focus) response
+2. **#graphdb-map-overview-tier** — Overview tier: community count, top-10 degree hubs, edge-kind histogram, module containment tree (<500 tokens ultra-terse)
+3. **#graphdb-map-focus-tier** — Focus tier: `--focus <symbol>` flag reusing explain envelope for single-symbol deep-dive
+
+Top of backlog: `#graphdb-map-command`
+<!-- agent:boundary:6d83a905 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,13 +94,15 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- Add backlog #next-steps to implement the recommendation.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#cyba] #graphdb-map-command Implement tsift graph-db --json map composing communities + ranked_neighborhood + status into two-tier (overview + opt-in focus) response (high)
+- [ ] [#hxgp] #graphdb-map-overview-tier Overview tier: community count, top-10 degree hubs, edge-kind histogram, module containment tree, target <500 tokens ultra-terse (medium)
+- [ ] [#9tg6] #graphdb-map-focus-tier Focus tier: --focus <symbol> flag reusing explain envelope for single-symbol deep-dive (medium)
 <!-- /agent:backlog -->
 
 ## Review

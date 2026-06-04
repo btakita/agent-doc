@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -68,11 +68,14 @@ Commits: `3fe5ff3` (tsift submodule), `cfa9d9cd2` (superproject pointer + docume
 **Root cause:** OpenCode post-turn chrome (`Build · GLM-5.1`, `esc interrupt`, progress bars) is detected as non-idle content. The bottom-N-lines busy-cue fix (`#opencode-post-turn-false-active`) landed in the binary but the actor state machine still reports `busy` when this chrome is present, so `route_wait_for_ready` times out at 60s.
 
 **Existing tracking:** `#opencode-post-turn-false-active`, `#opencode-jb-stall`. The fix shipped (bottom-12-lines busy-cue) but the actor state stale-busy path still causes the 60s timeout. Needs live-verification that the installed binary's busy detection treats `Build · MODEL` chrome as idle at the actor-state level, not just the dispatch-blocker level.
-<!-- agent:boundary:5f88d434 -->
+queue cleanup
+<!-- agent:boundary:9920e045 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - JB `Run Agent Doc` on tsift.md and this file stalled. No routing. I had to run manually.
+- There are 3 tmux panes with 2 editor panes.
+- agent-doc deleted the contents of this queue.
 <!-- /agent:queue -->
 ###
 <!--

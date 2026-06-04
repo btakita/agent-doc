@@ -267,7 +267,7 @@ Implemented the synchronous cached-read fast-path for `AsyncContext` (`async_con
 All 42 async lib tests + 20 async integration tests + 101 spec compliance tests pass. `make check` clean.
 
 Commit: `5cc4ac5`. Pushed to `main`.
-<!-- agent:boundary:a7c374b2 -->
+<!-- agent:boundary:468550c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -286,7 +286,6 @@ Commit: `5cc4ac5`. Pushed to `main`.
 ## Review
 
 <!-- agent:review -->
-- [x] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 - [/] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [/] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads

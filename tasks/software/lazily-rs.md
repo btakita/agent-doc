@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -39,7 +39,7 @@ Compacted content:
 - Archived 9 response topic(s): Review evaluation; Typed cache fast-path implementation; Queue cleanup; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: Backpressure, offline peers, and state sync — glm-5.1
+### Re: Backpressure, offline peers, and state sync — glm-5.1 (HEAD)
 
 #### Backpressure handling
 
@@ -93,7 +93,12 @@ When a peer comes back online:
 | Version tracking | `SlotNode::version` | Vector clock per `(peer, signal)` |
 
 The key insight: **lazily's existing lazy invalidation and dirty-tracking infrastructure already solves most of the backpressure and sync problem at the graph level**. The network layer just needs to map dirty sets → delta streams and vector clocks → gap detection.
-<!-- agent:boundary:3408b3e7 -->
+
+### Re: Queue bookkeeping — glm-5.1 (HEAD)
+
+Recovered from queue divergence. Backpressure response committed in prior cycle. Struck resolved items (#ipc1-#ipc3). Queue active — next item: WebRTC P2P broker question.
+<!-- agent:boundary:a72dc00f -->
+<!-- agent:boundary:2b6d8342 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,9 +111,9 @@ The key insight: **lazily's existing lazy invalidation and dirty-tracking infras
 - Let's go with WebRTC to start. Do we need a broker server or can this be P2P?
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
 - What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do. There should be sensible presets.
-- do [#ipc1]
-- do [#ipc2]
-- do [#ipc3]
+- ~do [#ipc1]~
+- ~do [#ipc2]~
+- ~do [#ipc3]~
 <!-- /agent:queue -->
 
 ## Backlog

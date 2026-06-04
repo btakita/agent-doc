@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,7 +36,7 @@ Compacted content:
 - Archived 1 response topic(s): #next-steps to fix bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
-### Re: do [#08mg] cancel-orphans-preflight-cycle — opus-4-6
+### Re: do [#08mg] cancel-orphans-preflight-cycle — opus-4-6 (HEAD)
 
 **Implemented Option A:** JB plugin `cancelForReplacement()` now calls `agent_doc_cancel_preflight_cycle` FFI after process destruction.
 
@@ -55,6 +55,11 @@ Compacted content:
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- do [#54pz]
+- do [#engt]
+- do [#ba4b]
+- do [#kz2g]
+- do [#appe]
 <!-- /agent:queue -->
 ###
 <!--

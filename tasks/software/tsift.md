@@ -65,6 +65,11 @@ Tuned `SQLITE_GRAPH_WAL_AUTOCHECKPOINT_PAGES` from 256 to 4096 in `tsift-sqlite/
 
 ### Re: #sqlite-frontier-temp — glm-5.1
 
+> **Queue prompt:**
+>
+> do [#sqlite-frontier-temp]
+
+
 Replaced dynamic `WHERE IN` string-per-chunk frontier expansion in `shortest_path_with_max_hops` (`tsift-sqlite/src/lib.rs:2665`) with a pre-allocated temp table `_tsift_frontier`.
 
 **Before:** Each BFS iteration chunked the frontier into groups of 256 and built a new SQL statement with `N` placeholders per chunk, forcing SQLite to parse/compile a different statement for each chunk size. For deep BFS traversals this multiplied statement preparation overhead.
@@ -74,7 +79,7 @@ Replaced dynamic `WHERE IN` string-per-chunk frontier expansion in `shortest_pat
 The single-node fast path (prepared statements with `WHERE from_id = ?1`) is replaced by the temp table JOIN since the INSERT+JOIN overhead is negligible and eliminates code duplication. Follows the existing `edges_between_nodes` temp table pattern.
 
 **Verification:** `cargo check -p tsift-sqlite` clean, all 13 tsift-sqlite tests pass (including `sqlite_shortest_path_uses_bounded_frontier`), all 9 tsift-cli tests pass, `cargo install` succeeds.
-<!-- agent:boundary:2c601627 -->
+<!-- agent:boundary:725145f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +99,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#sqlite-ranked-cte]~
 - ~do [#sqlite-conflict-par]~
 - ~do [#sqlite-wal-tune]~
-- do [#sqlite-frontier-temp]
+- ~do [#sqlite-frontier-temp]~
 - re [#astnav-npm]: How do I configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm?
 <!-- /agent:queue -->
 

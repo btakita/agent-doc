@@ -34,11 +34,42 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 8 response topic(s): Preflight recovery; Queue [#takv] #opencode-image-support; Queue [#xrm7] #jb-init-from-claim; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a2982547 -->
+
+### Re: naked image path/URL detection + per-agent vision config — opencode
+
+> **Queue prompt:**
+>
+> [#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.
+
+
+Implemented both queue prompts:
+
+**1. Naked image path/URL detection** (`src/agent-doc/src/describe_image.rs`):
+- `extract_image_references(text) -> Vec<ImageRef>` detects three kinds:
+  - `ImageRefKind::Markdown` — `![alt](path)` syntax
+  - `ImageRefKind::Url` — `https://...png`, `http://...jpg` (with query string support)
+  - `ImageRefKind::NakedPath` — bare file paths ending in image extensions (e.g. `img_16.png`, `/tmp/opencode/img.png`)
+- Deduplicates across all three kinds
+- 8 new tests covering all detection modes + edge cases
+
+**2. Per-agent vision config** (`agent-doc-core/src/project_config.rs`):
+- `AgentVisionConfig` struct: `mode` (passthrough/describe), optional `provider`, `model`, `api_key`
+- `VisionConfig.agents: BTreeMap<String, AgentVisionConfig>` for per-agent overrides
+- Helper methods: `effective_provider()`, `effective_model()`, `effective_api_key()`, `agent_mode()`
+- Config example: Claude Code/Codex = passthrough, OpenCode = describe via GPT
+
+**3. Pre-existing fixes:**
+- Added `write_clear_cooldown`, `clear_cooldown_marker`, `clear_cooldown_active` to `queue_continuation.rs` (fixes compile errors in route.rs/start.rs/session_actor_cmd.rs)
+- Updated flowcore token budget 76 to 81 for session_check.rs
+
+**Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` Phase 4 (naked image detection) and Phase 5 (per-agent config)
+
+**Committed and pushed:** agent-doc `63a9b5f3`, superproject `a0f68993e`. All 31 new/existing tests pass. 2 pre-existing route test failures remain (unrelated).
+<!-- agent:boundary:668fbfd0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.
+- ~[#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.~
 - Add a per-agent configuration for image extraction. I will likely have a pass-through for Claude Code and Codex but that may change in the future. Opencode using GLM 5.1 needs the image description service. For the service, I want to use GPT from my current account to perform the description. Ideally this can be driven locally.
 <!-- /agent:queue -->
 ###

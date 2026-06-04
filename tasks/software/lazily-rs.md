@@ -73,7 +73,30 @@ Implemented `#asyncctx7`. Committed as 864728d, pushed.
 **Test counts:** 36 inline + 16 async integration + 13 integration + 101 spec + 12 loom + 2 doc = 180 total. All green on `make check`.
 
 **Note:** The async memo guard currently does not suppress downstream propagation (unlike sync `Context`). The `async_context_memo_blocks_downstream_on_equal` test documents this behavioral difference. This could be addressed in a follow-up if needed.
-<!-- agent:boundary:da78fb32 -->
+
+### Re: #35fc #asyncctx8 Async benchmarks — glm-5.1
+
+> **Queue prompt:**
+>
+> [#35fc]
+
+
+Implemented `#asyncctx8`. Committed as ccc89e6, pushed.
+
+**Changes:**
+
+- `benches/async_context.rs` — 7 benchmark groups with `Context` and `ThreadSafeContext` baselines:
+  - `async_cached_resolve` — cached async read latency after initial resolution
+  - `async_cold_resolve` — first `get_async` cold start (includes tokio spawn + watch channel setup)
+  - `async_invalidation_throughput` — 64-iteration set_cell + get_async rerun cycle
+  - `async_cancellation_throughput` — 32-context burst of in-flight invalidation
+  - `async_concurrent_contention` — multi-tokio-task write/read contention at 1/4/16 workers
+  - `async_effect_throughput` — async effect rerun with 10ms settle delays
+  - `async_batch_throughput` — 32-cell batch burst with 8 rounds
+- `Cargo.toml` — added `[[bench]] name = "async_context"` with `required-features = ["async"]`
+
+All 180 tests pass on `make check`. Benchmarks compile and are runnable via `cargo bench --features async --bench async_context`.
+<!-- agent:boundary:ec2c696e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,14 +110,16 @@ Implemented `#asyncctx7`. Committed as 864728d, pushed.
 - ~[#6z71]~
 - ~[#cmt9]~
 - ~[#eek4]~
-- [#r25x]
-- [#35fc]
+- ~[#r25x]~
+- ~[#35fc]~
+- ~do [#lazyperf32]~
+- [#lazyperf35]
+- [#lazyperf34]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
 - [ ] [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
 - [ ] [#lazyperf34] Fix finish_batch O(n2) dedup with sort-dedup — tsift-index batch scope guards scale with file count (medium)
 <!-- /agent:backlog -->

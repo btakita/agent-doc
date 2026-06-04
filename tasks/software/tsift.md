@@ -109,7 +109,16 @@ Option 1 depends on OpenCode's plugin API. Option 2 would add latency to every c
 
 
 Wait for npm publish and --claude init. Current docs cover all flows.
-<!-- agent:boundary:86b280e8 -->
+
+### Re: #surreal-nodes-by-kind — shipped (commit `da3d9e6`)
+
+> **Queue prompt:**
+>
+> [#surreal-nodes-by-kind]
+
+
+Added nodes_by_kind secondary index. O(1) kind lookup. 1 new test. 693 total pass.
+<!-- agent:boundary:23103e5a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,7 +135,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#astnav-init-claude]~
 - ~[#astnav-autoindex-oc]~
 - ~[#astnav-harness-docs]~
-- [#surreal-nodes-by-kind]
+- ~[#surreal-nodes-by-kind]~
 - [#surreal-skip-load]
 <!-- /agent:queue -->
 
@@ -135,7 +144,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:backlog -->
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
-- [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
 <!-- /agent:backlog -->
 

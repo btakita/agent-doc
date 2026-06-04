@@ -67,7 +67,19 @@ Increased `SQLITE_GRAPH_STAGING_CHUNK_ROWS` from 50 to 500 in `packages/tsift-sq
 **Rationale:** 500 rows × 9 edge params = 4500 SQLite variables, well under the 32766 limit in SQLite 3.53.1. This reduces INSERT statement count ~10x (from ~19k to ~1.9k for 952k rows), cutting per-statement overhead significantly.
 
 **Verification:** 13/13 tsift-sqlite tests pass. Updated the `sqlite_projection_refresh_handles_bulk_row_replacement` test assertion to match the new chunk size. Build + install succeeded. Committed + pushed as `2cc5177`.
-<!-- agent:boundary:473d3805 -->
+
+### Re: #sqlite-ranked-cte — glm-5.1
+
+Implemented recursive CTE-based `ranked_neighborhood` for `SqliteGraphStore`, eliminating the N+1 `outgoing_edges`/`node` query loop.
+
+**Changes:** `packages/tsift-sqlite/src/lib.rs` — added `ranked_neighborhood` override using a single recursive CTE that:
+- Walks from center_id up to configurable depth
+- Computes scores inline via SQL CASE expressions for all 3 strategies (BreadthFirst, EdgeKindWeighted, DegreeWeighted)
+- Orders by score desc, limits to max_nodes
+- Collects edges between retained nodes in the same query
+
+**Verification:** 13/13 tsift-sqlite tests pass. 6/6 ranked_neighborhood conformance tests pass (missing center, BFS max_nodes, edge kind weighted, center inclusion, edge kind filter, degree weighted). Committed + pushed as `ebdb441`.
+<!-- agent:boundary:9fa77ec6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +106,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)
 - [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
 - [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)
 - [ ] [#sqlite-frontier-temp] Pre-allocate temp table for multi-node frontier expansion instead of dynamic WHERE IN string per chunk — amortizes overhead for deep BFS traversals (low)

@@ -34,7 +34,12 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 Compacted content:
 - Archived 2 response topic(s): #jb-stale-busy-idle-footer + #clear-stops-running-process; queue processing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a9f81cf9 -->
+
+### Re: #jb-stale-busy-idle — glm-5.1
+
+Already shipped. Git confirms: `e3b1af769` (submodule pointer + plan) and `cc72dbf68` (gated to review). Status line confirms "Codex stale-busy bottom-idle fix shipped." Striking from queue.
+queue fixup: struck #jb-stale-busy-idle
+<!-- agent:boundary:e2229e97 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -48,16 +53,16 @@ Compacted content:
 - #codex-network-access-opencode
 - ~#cancel-orphans-preflight-cycle~
 - ~#backlog-priority-attribute~
-- do [#3hwr]
-- do [#vypc]
+- ~do [#3hwr]~
+- ~do [#vypc]~
 - do [#gyma]
 - do [#5qhn]
-- do [#0mgb]
-- do [#30h3]
-- do [#k5ne]
-- do [#7gy5]
+- ~do [#0mgb]~
+- ~do [#30h3]~
+- ~do [#k5ne]~
+- ~do [#7gy5]~
 - do [#sxjj]
-- do [#cd98]
+- ~do [#cd98]~
 - the console stdout bleeds behind opencode tui ![img_19.png](img_19.png)
 - lazily-rs.md tmux window crashed and auto-restarted
 <!-- /agent:queue -->

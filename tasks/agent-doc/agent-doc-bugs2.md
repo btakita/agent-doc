@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -55,6 +55,8 @@ Created plan at `tasks/agent-doc/plans/opencode-image-support.md`. Three design 
 
 **Recommended:** Option A + C combined. Three phases: Google provider, passthrough provider, auto-default for opencode sessions.
 
+How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?
+
 Key constraint: route dispatch uses tmux text injection — images cannot flow through that channel. The describe-image CLI must remain standalone HTTP calls; the fix is provider resolution, not pipeline integration.
 
 ### Re: Queue [#xrm7] #jb-init-from-claim — glm-5-1
@@ -91,10 +93,11 @@ Also: flowcore test fails (session_check.rs guard_ count: expected 76, got 81).
 These need separate resolution. The first make check run (480 tests passed) used a cached binary from a prior successful build.
 
 **Queue items [#takv], [#xrm7], [#qmg2] consumed.**
-<!-- agent:boundary:7588dc0a -->
+<!-- agent:boundary:f6faf89e -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?
 <!-- /agent:queue -->
 ###
 <!--

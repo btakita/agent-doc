@@ -181,7 +181,8 @@ The above response covered serialization, IPC, distributed coordination, P2P mod
 The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-phase items — not ready for spec/test/build preset. They stay in backlog.
 ❯ Can lazily-rs support serialization, transferring content between processes, and network communication? Would we need a DHT or another distributed consensus protocol for reliable coordination? Should the IPC and network coordination be a separate crate?
 Queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are [recommended] design-phase items — no spec, no test plan, no implementation exists. The `#spec-test-build-install-commit-push` preset requires concrete spec + test changes. BLOCKER: design documents must be created before these items can enter a build queue. Response to the serialization/IPC/distributed question is above. Keeping items in backlog for future design work.
-<!-- agent:boundary:3f0c1510 -->
+Restored backlog items #ipc1-#ipc3. Design-phase items, ready for future work.
+<!-- agent:boundary:e024ce05 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,11 +195,15 @@ Queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are [recommended] design-phase it
 - do [#ipc2]
 - do [#ipc3]
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
+- What about security? Remote users 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [ ] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
+- [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 <!-- /agent:backlog -->
 
 ## Review

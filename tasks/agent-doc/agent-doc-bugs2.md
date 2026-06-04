@@ -120,7 +120,17 @@ model = "gpt-4o"
 - All 33 describe_image tests pass (29 existing + 4 new)
 - Binary rebuilt + installed (`v0.34.0`)
 - 2 pre-existing route test failures confirmed on HEAD (unrelated)
-<!-- agent:boundary:075cf144 -->
+
+### Re: uncommitted prompts + describe_image — glm-5.1
+
+These prompts were already addressed in the previous response (submodule `69c9fef4`):
+
+1. **"I already have this in `.agent-doc/config.toml`. Please verify."** — Config verified. `[vision.agents.opencode]` present with correct settings.
+2. **"The last run crashed mid-run. Fix this. Do we need to renable the guard?"** — Supervisor auto-restart is working as designed. No guard to re-enable. Tracked in `#kdey`/`#ka9v`/`#xwad`.
+3. **"Please make changes to ensure describe_image works in this session."** — `shell_expand()` + tests committed + pushed. CLI and orchestration paths verified end-to-end.
+
+**Bug filed:** `#agent-doc-bug` — finalize committed the response snapshot but left the user prompts that triggered it as uncommitted working-tree drift. The snapshot matched HEAD (response only), but the user edits between the previous response and the new response were excluded from the commit. Session-check then correctly flagged them as unresolved prompt-bearing changes.
+<!-- agent:boundary:d5c9db31 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

@@ -39,7 +39,26 @@ Compacted content:
 - Archived 2 response topic(s): #sye8 AsyncContext design spec; #kp7w #asyncctx2 AsyncSlotNode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 test content
-<!-- agent:boundary:046e6f08 -->
+
+### Re: asyncctx3 AsyncContext core - glm-5.1
+
+> **Queue prompt:**
+>
+> [#8sqb]
+
+
+Implemented computed_async, memo_async, get_async, and batch on AsyncContext as 26b0b8a.
+
+Key additions to src/lazily-rs/src/async_context.rs:
+- computed_async: create async computed slot
+- memo_async: async computed slot with PartialEq memo guard  
+- get_async: async await-based read with in-flight deduplication via tokio sync watch
+- batch: synchronous batch boundary deferring cell invalidation until outermost exit
+- AsyncComputeContext owns Arc Mutex for spawn safety
+- spawn_async_compute helper, invalidate_async_slot, update_dependencies
+
+8 new tokio tests. All 132 tests pass. make check green. Committed as 26b0b8a, pushed to origin/main.
+<!-- agent:boundary:806cbe6e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +68,7 @@ test content
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#kp7w]~
-- [#8sqb]
+- ~[#8sqb]~
 - [#6z71]
 - [#cmt9]
 - [#eek4]

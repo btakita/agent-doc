@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #sqlite-doc-sync-safety; queue reactivation; #sqlite-reentrant-guard; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f8b10436 -->
+<!-- agent:boundary:8ffa271c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +52,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#sqlite-reentrant-guard]~
 - ~do [#refresh-skip-unchanged-staging]~
 - ~do [#terse-uniform]~
-- do [#edge-index-references]
+- ~do [#edge-index-references]~
 - do [#degree-cache]
 - do [#community-summary-default]
 - do [#property-sampling]
@@ -63,7 +63,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#edge-index-references] Compress edge output with positional node index references instead of full ID strings — est 30-50% edge token reduction (medium)
 - [ ] [#degree-cache] Pre-compute and cache degree counts for DegreeWeighted ranked_neighborhood scoring (medium)
 - [ ] [#community-summary-default] Community-aware truncation summary in neighborhood output when max_nodes prunes results (medium)
 - [ ] [#property-sampling] Add property_mode (full|sample|omit) to RankedNeighborhoodOptions for kind-redundant property maps (low)

@@ -1,8 +1,18 @@
 # Plan: Unified `queue:` frontmatter state (deprecate `auto` + `queue_active`)
 
-Status: phase 1+2 implemented (read normalization); phases 3-4 remaining
+Status: phases 1-3 implemented; phase 4 (writer migration) remaining
 
 ## Progress
+
+- **2026-06-04 — Phase 3 done** (`src/agent-doc` commit `60a466af`). Marker-side
+  control: `<!-- agent:queue go -->` / `start` fresh-activates the queue (Auto
+  trigger, like legacy `auto`); `stop` forces inactive + clears `queue_active`;
+  control token stripped on drain/halt; `start`/`go`/`stop` recognized as
+  queue-only attrs (no typo warning). `marker_control()` +
+  `strip_control_from_tag()` + 2 `run_queue_maintenance` integration tests + 1
+  allowlist test. Orchestration lib 2263 passed / 2 pre-existing route failures;
+  core 702 passed; clippy clean. Not live until install (concurrent uncommitted
+  route work still in tree).
 
 - **2026-06-04 — Phase 1+2 done** (`src/agent-doc` commit `3f9b32d4`,
   branch `20260422/codex-agent-backend`). Added `QueueControl` enum +

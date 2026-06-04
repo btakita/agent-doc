@@ -43,7 +43,11 @@ Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` document
 
 - Build: clean. Install: v0.1.62. Tests: 13/13 passed.
 - Commit: c5ec8d9 pushed to main.
-<!-- agent:boundary:6830c588 -->
+
+### Re: queue reactivation — glm-5.1
+
+Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
+<!-- agent:boundary:bcb619a9 -->
 <!-- /agent:exchange -->
 ###
 <!--

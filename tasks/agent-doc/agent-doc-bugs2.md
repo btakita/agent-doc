@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -137,15 +137,35 @@ Plan at `tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md`. Key su
 | Bypassed write detection | git.rs:1336 | Detects direct patchbacks, no body proof |
 
 Deferring — session accretion at warn (83 exchange lines, 5 cycles in 30 min). Recommend compacting before the next implementation cycle. The `#finalize-owned-pane-response-patchback` item stays in backlog.
-<!-- agent:boundary:d8a5eeda -->
+
+### Re: #next-steps from reentrant-finalize plan — glm-5.1
+
+**Phase 1 (Early persistence): SHIPPED.** Pending file written immediately after stdin read in both `run()` and `run_template()`.
+
+**Phase 5 (Frontmatter step tracker): PARTIALLY DONE.** `PipelineStep` struct + `frontmatter::update_pipeline_step()` function defined, but integration into `atomic_write` path is blocked — separate frontmatter write causes document drift between baseline capture and response write.
+
+**Remaining phases, prioritized:**
+
+| Priority | ID | Phase | Description |
+|----------|-----|-------|-------------|
+| 1 | `#reentrant-phase2` | Phase 2 | Reentrant cycle resumption — `repair_stale_preflight_started_cycle()` checks pending/capture before abandoning; adds `replay_response_from_pending/capture` |
+| 2 | `#reentrant-phase3` | Phase 3 | Queue prompt recovery — store consumed queue prompt in `cycle_state`, re-inject on crash repair |
+| 3 | `#reentrant-phase4` | Phase 4 | Reentrant `run_command()` — check cycle state at entry, resume from appropriate phase |
+| 4 | `#reentrant-phase5-integration` | Phase 5 | Frontmatter step tracker integration into `atomic_write` path |
+
+**Added 4 backlog items** in priority order. Top of backlog: `#reentrant-phase2`.
+
+**Session accretion is at warn** (111 exchange lines, 7 cycles in 30 min). Strongly recommend compacting before the next implementation cycle.
+<!-- agent:boundary:0543f43f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.~
 - ~Add a frontmatter field that updates with each step in the process. Each update should not commit to git, just show the current step in the reentrant pipeline. If the pipeline stalls, JB `Run Agent Doc` or `agent-doc ...` should continue from the current step. Add a run_id or turn_id in the frontmatter as well. The turn_id can include the backlog task id if one exists. We may want to consider converting free-form prompts into a task for the run. This behavior should be deterministic, reliable, and in the agent-doc binary.~
-- `#reentrant-finalize` did not match the generated id `[#kvw4]`. opencode did not correctly apply the format `[#reentrant-finalize]` and agent-doc should recognize `#reentrant-finalize` as a given id.
-- do [#kvw4]
-- do [#finalize-owned-pane-response-patchback]
+- ~`#reentrant-finalize` did not match the generated id `[#kvw4]`. opencode did not correctly apply the format `[#reentrant-finalize]` and agent-doc should recognize `#reentrant-finalize` as a given id.~
+- ~do [#kvw4]~
+- ~do [#finalize-owned-pane-response-patchback]~
+- #next-steps should have been added from tasks/agent-doc/plans/reentrant-finalize-pipeline.md. We need visibility into what needs to be done next.
 <!-- /agent:queue -->
 ###
 <!--
@@ -160,6 +180,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#reentrant-phase2] Phase 2 — reentrant cycle resumption in repair.rs: enhance repair_stale_preflight_started_cycle to check pending/capture before abandoning; add replay_response_from_pending/capture helpers. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md Phase 2.
+- [ ] [#reentrant-phase3] Phase 3 — queue prompt recovery: store consumed queue prompt text in cycle_state, re-inject on crash repair. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md Phase 3.
+- [ ] [#reentrant-phase4] Phase 4 — reentrant run_command: check cycle state at entry, resume from appropriate phase. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md Phase 4.
+- [ ] [#reentrant-phase5-integration] Phase 5 — frontmatter step tracker integration: integrate PipelineStep frontmatter update into atomic_write path (avoid document drift). Struct + function already defined. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md Phase 5.
 - [ ] [#finalize-owned-pane-response-patchback] [recommended] #agent-doc-bug 2026-06-04: Codex-owned same-pane manual fallback can finish with final chat output outside `agent-doc write` / `finalize`, leaving the response absent from `agent:exchange` until manual patchback. Plan: tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md. Fix by making the final gate require binary-owned response capture or fail closed with exact recovery.
 <!-- /agent:backlog -->
 

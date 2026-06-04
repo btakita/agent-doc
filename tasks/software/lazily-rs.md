@@ -114,7 +114,6 @@ Key changes:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
 - [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests
 - [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
 - [ ] [#lazyperf32] Rc<dyn Any> values in single-threaded Context — highest-impact for tsift: every get() avoids deep clone (high)

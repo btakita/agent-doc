@@ -103,11 +103,51 @@ model = "gpt-4o"
 
 Queue drained — no remaining items.
 Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
-<!-- agent:boundary:9b1a5d4d -->
+
+### Re: JB Run Agent Doc stall fix — opencode
+
+**Root cause:** Stale controller lease projecting `busy` while the opencode console was idle. The queue also had a contaminated item (assistant-like prose duplicated into the queue, triggering the `#jb-run-agent-doc-response-queue-contamination` guard).
+
+**Fix applied:**
+1. `agent-doc session clear` — reset controller lease from `busy` to `operator_ready`
+2. Removed contaminated queue item from `agent:queue`
+
+### Re: GPT-5 vision model availability — opencode
+
+Yes. The latest OpenAI models with vision support:
+- **GPT-5.5** — flagship, $5/$30 per MTok, 1M context, vision enabled
+- **GPT-5.4** — $2.50/$15 per MTok, 1M context, vision enabled
+- **GPT-5.4 mini** — $0.75/$4.50 per MTok, 400K context, vision enabled
+
+To configure for opencode vision, update `.agent-doc/config.toml`:
+
+```toml
+[vision]
+provider = "openai"
+model = "gpt-5.5"
+
+[vision.agents.opencode]
+mode = "describe"
+provider = "openai"
+model = "gpt-5.5"
+```
+
+Or use `AGENT_DOC_VISION_MODEL=gpt-5.5` env var.
+
+### Re: #preflight-image-extract — opencode
+
+Already implemented in the previous two cycles:
+- `extract_image_references()` in `describe_image.rs` with naked path/URL detection
+- `AgentVisionConfig` in `project_config.rs` with per-agent mode (passthrough/describe)
+- Committed: agent-doc `63a9b5f3`, superproject `a0f68993e`
+
+Remaining wiring work (Phase 2-3 from plan): integrate extraction into preflight pipeline, add `Passthrough` and `Google` providers.
+<!-- agent:boundary:7b0fa755 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
+- JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
+- do [#preflight-image-extract]
 <!-- /agent:queue -->
 ###
 <!--
@@ -122,7 +162,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#preflight-image-extract] #agent-doc-bug: detect image references in prompts during preflight, run describe-image to get text descriptions, inject descriptions into prompt before route dispatch. Replaces image transport through tmux with text-only context. Plan: tasks/agent-doc/plans/opencode-image-support.md (Option A+C + preflight extraction).
 <!-- /agent:backlog -->
 
 ## Review

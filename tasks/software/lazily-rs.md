@@ -66,7 +66,6 @@ Design-only change — `cargo test --test spec_compliance` stays green (101 pass
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#mvbj]
 - [#4rxf]
 - [#jwwc]
 - [#q5r1]

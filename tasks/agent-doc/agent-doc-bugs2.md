@@ -86,7 +86,7 @@ Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt test
 
 No code changes needed. Marking this plan as complete.
 
-### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6 (HEAD)
+### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
 
 
 Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
@@ -104,7 +104,7 @@ Not a routing bug — both panes were genuinely busy with active OpenCode turns.
 
 No code changes needed. Queue drains once active OpenCode turns complete.
 
-### Re: Stale busy state + queue_active flip — opus-4-6 (HEAD)
+### Re: Stale busy state + queue_active flip — opus-4-6
 
 
 I was wrong. You're right — the panes were idle.
@@ -121,7 +121,7 @@ I was wrong. You're right — the panes were idle.
 
 Both added to backlog as backlog items.
 
-### Re: Backlog items + new bugs — opus-4-6 (HEAD)
+### Re: Backlog items + new bugs — opus-4-6
 
 Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
 
@@ -137,7 +137,7 @@ Both added to backlog. The `no-pending-capture` was my error.
 
 Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
 
-### Re: Queue item processing — glm-5-1 (HEAD)
+### Re: Queue item processing — glm-5-1
 
 **#ens4 opencode-idle-context-bar-false-busy:** Implemented and tested. OpenCode idle pane with `⬝` context-usage-bar + `esc interrupt` keybinding hint no longer misclassified as busy. Added `is_opencode_context_bar_line`, `is_opencode_idle_keybinding_hint_line`, `is_opencode_footer_version_line` to harness idle chrome detection. Added bottom-N fallback in `live_pane_prompt_ready`. 5 new tests, all 2732 pass. Binary rebuilt and installed.
 
@@ -151,7 +151,7 @@ Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue
 
 **do plan-lazily-rs-queued-prompt-patchback-miss.md:** Plan exists. Deferring to next cycle.
 
-### Re: Queue assessment + #stash-session-ttl-prune wiring — glm-5-1 (HEAD)
+### Re: Queue assessment + #stash-session-ttl-prune wiring — glm-5-1
 
 Assessed 16 queue items. Summary of actionable state:
 
@@ -205,8 +205,7 @@ Both bugs now fixed by #ens4 and #3eea (shipped in prior cycle). No further code
 #### Backlog queue not populating from backlog items
 
 Added as #jb-backlog-queue-populate. The route path needs to scan backlog items with `queue` attribute and populate `agent:queue` before reporting nothing to process.
-<!-- agent:boundary:62791aa8 -->
-<!-- agent:boundary:4f8bde28 -->
+<!-- agent:boundary:90345e1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -231,10 +230,9 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 [route] authoritative actor generation 113 for tasks/software/tsift.md is busy on pane %83; queued pending dispatch "Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
 ---
-- There are 3 `agent:boundary` elements. None of the queue items are marked done from the last run.
+- Last response left 2 `agent:boundary` elements.
 - #opencode-idle-context-bar-false-busy and #jb-run-activate-queue were not added to the backlog even though the response said they were.
 - #opencode-idle-context-bar-false-busy
-- JB `Run Agent Doc` on lazily-rs.md removed the queue items and did not execute the items.
 - #jb-run-activate-queue
 - JB `Run Agent Doc` stalled for monsterrodholders.md. `Ran agent-doc again. It found no changes in tasks/monsterrodholders.md, so there was nothing to process.` but the queue had auto set. `queue_active: false` was set, but we should make this flag flip to true if JB `Run Agent Doc` is called and there are no other changes.
 - JB `Run Agent Doc` on monsterrodholders.md where there was an empty queue and a backlog with `queue` attribute should have poplated the queue then ran through the queue. Instead nothing happened.
@@ -242,13 +240,10 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 - The JB plugin loses color highlighting and backgrounds when a document is loaded in disk...such as by navigating to a document or from a `File Cache Conflict`. ![img_20.png](img_20.png)
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
-- Fix `agent-doc image` support for opencode. See #jb-color-highlighting-disk-load
-- Add a way to run `agent-doc init` from the JB plugin menu. JB `Claim for Tmux Pane` should call `agent-doc init` if there is no claiming pane and the document is no setup with agent-doc. 
-- do #jb-color-highlighting-disk-load
-- ~do [#ens4]~
-- ~do [#3eea]~
-- ~do [#7qfw]~
-- do #stash-session-ttl-prune
+- 
+- do [#ens4]
+- do [#3eea]
+- do [#7qfw]
 <!-- /agent:queue -->
 ###
 <!--

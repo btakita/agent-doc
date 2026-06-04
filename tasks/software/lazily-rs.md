@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,62 @@ queue_active: false
 Compacted content:
 - Archived 9 response topic(s): Review evaluation; Typed cache fast-path implementation; Queue cleanup; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:dc85fe53 -->
+
+### Re: Backpressure, offline peers, and state sync — glm-5.1 (HEAD)
+
+#### Backpressure handling
+
+WebRTC Data Channel uses SCTP, which has built-in flow control and congestion avoidance. But the reactive signal model adds a semantic layer on top:
+
+1. **Per-signal backpressure** — each signal subscription has its own delta stream. A slow consumer on one signal doesn't block others. The SCTP stream ID maps naturally to `(peer_id, signal_key)` tuples.
+
+2. **Delta compaction under pressure** — when the send buffer is full (SCTP `bufferedAmount` threshold), coalesce pending deltas for the same signal:
+   - Multiple `set(value)` deltas → keep only the latest value
+   - CRDT merge operations → fold into a single merged delta
+   - This is exactly what the existing `InvalidationPlan` infrastructure already does — the lazy invalidation frontier compacts dirty signals into a minimal recomputation set. The same logic applies to network-level delta compaction.
+
+3. **Priority-based dropping** — signal subscriptions declare priority:
+   - Critical (permissions, auth) → always deliver, block if buffer full
+   - Normal (data state) → compact deltas, drop intermediate values
+   - Low (analytics, telemetry) → drop freely under pressure
+
+4. **Explicit backpressure signal** — a `PeerOverloaded` message from the receiver tells the sender to switch to snapshot-mode: stop sending deltas, switch to periodic full-state checkpoints until the receiver signals recovery.
+
+#### Offline peer recovery
+
+When a peer goes offline, the remaining peers continue operating — the reactive graph is local-first. Each peer tracks:
+
+1. **Per-peer vector clock** — monotonic counter per `(peer_id, signal_key)`. Every delta increments the sender's clock. Enables gap detection on reconnect.
+
+2. **Retention window** — keep recent deltas in a ring buffer per peer (configurable, default: last N deltas or T seconds). This is the "replay buffer" for short disconnections.
+
+3. **Dirty set tracking** — the existing `ThreadSafeContext` already tracks which signals have changed since last read. Extend this to track which signals have changed since last successful delta send to each peer. This is the minimum set that needs reconciliation on reconnect.
+
+#### State sync on reconnect
+
+When a peer comes back online:
+
+1. **Handshake** — exchange vector clocks. Each peer identifies which `(signal_key, clock_range)` entries the other is missing.
+
+2. **Delta replay** — if the missing range fits within the retention window, replay the compacted deltas. Fast path for short disconnections (seconds to minutes).
+
+3. **Snapshot fallback** — if gaps exceed retention, send a full signal graph snapshot. The receiving peer merges via CRDT semantics (last-write-wins, OR-Set, etc. — configurable per signal type).
+
+4. **Incremental catch-up** — after snapshot sync, switch back to delta streaming. The transition is seamless because vector clocks provide a total ordering.
+
+5. **Conflict resolution** — if both peers modified the same signal while offline, CRDT merge resolves it. For signals requiring strong consistency, use a deterministic conflict resolver (e.g., last-writer-wins with timestamp + peer_id tiebreaker).
+
+#### Implementation mapping to existing lazily primitives
+
+| Concept | Existing primitive | Extension needed |
+|---------|-------------------|------------------|
+| Delta compaction | `InvalidationPlan` (thread_safe.rs:733-923) | Network-aware compaction layer |
+| Dirty set tracking | `ThreadSafeSlotFastPath` dirty flags | Per-peer dirty bitmask |
+| Snapshot serialization | `Context::snapshot()` (if exists) or new `GraphSnapshot` | Serialize slot/cell values + dependency edges |
+| Version tracking | `SlotNode::version` | Vector clock per `(peer, signal)` |
+
+The key insight: **lazily's existing lazy invalidation and dirty-tracking infrastructure already solves most of the backpressure and sync problem at the graph level**. The network layer just needs to map dirty sets → delta streams and vector clocks → gap detection.
+<!-- agent:boundary:4affb228 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,15 +101,14 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Would the WebRTC data channel be more efficient than WebSocket for distributed coordination?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - How would backpressure be handled? What if the peer is offline or overwhelmed? Can we sync the current state once the peer is available?
 - Let's go with WebRTC to start. Do we need a broker server or can this be P2P?
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
 - What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do. There should be sensible presets.
-- do [#ipc1]
-- do [#ipc2]
-- do [#ipc3]
+- ~do [#ipc1]~
+- ~do [#ipc2]~
+- ~do [#ipc3]~
 <!-- /agent:queue -->
 
 ## Backlog

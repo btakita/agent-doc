@@ -724,7 +724,7 @@ fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "preset"];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "preset", "start", "go", "stop"];
 
 /// Component attribute keys recognized anywhere in the document (excluding the
 /// queue-only set above). A key outside both sets is almost certainly a typo
@@ -795,7 +795,7 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
     Some(PreflightWarning {
         code: "misplaced_component_attr".to_string(),
         message: format!(
-            "{}: {}. The attribute is ignored (no mutation); the auto-loop only triggers from `<!-- agent:queue auto -->`.",
+            "{}: {}. The attribute is ignored (no mutation); the auto-loop triggers from `queue: start` (alias `go`) in frontmatter, the `start`/`go` marker control, or the legacy `<!-- agent:queue auto -->`.",
             file.display(),
             issues.join("; ")
         ),
@@ -3459,14 +3459,38 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
     }
 
-    // Read current state
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    // Read current state. A marker-side queue control (`start`/`go`/`stop`,
+    // #queue-state-unify) is the marker spelling of the canonical `queue:`
+    // frontmatter control: `start`/`go` are a fresh-activation gesture
+    // equivalent to the legacy `auto` attribute (routed through the Auto trigger,
+    // not the continuation-only Persisted path), and `stop` forces the queue
+    // inactive this cycle. The control token is stripped from the tag below when
+    // the queue drains, mirroring `auto`.
+    let marker_control = crate::queue::marker_control(&comp.attrs);
+    let marker_stop = matches!(
+        marker_control,
+        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+    );
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs)
+        || matches!(
+            marker_control,
+            Some(agent_doc_core::frontmatter::QueueControl::Start)
+        );
     let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
     let mut activation =
         crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
+    // A `stop` marker control forces the queue inactive this cycle regardless of
+    // any other activation signal (#queue-state-unify), so the later
+    // drain/clear path halts a running queue and strips the control token.
+    if marker_stop && activation.active {
+        activation = crate::queue::QueueActivation {
+            entries_after: activation.entries_after,
+            ..Default::default()
+        };
+    }
     let snapshot_was_active = snapshot_proves_queue_was_active(file);
 
     // Collapse duplicate live prompts before any other maintenance. Two
@@ -3811,11 +3835,17 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     }
 
     // Strip auto attribute from opening tag when queue drains
-    if need_strip_auto {
+    // Strip the activation token from the opening tag when the queue drains
+    // (`auto`/`go`/`start`) or when a `stop` marker halts it (#queue-state-unify).
+    // The token is the ephemeral activation gesture; once consumed it must not
+    // re-trigger on the next cycle.
+    if need_strip_auto || marker_stop {
         let comps = crate::component::parse(&current_content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         let raw_tag = &current_content[q.open_start..q.open_end];
-        let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+        let new_tag = crate::queue::strip_control_from_tag(&crate::queue::strip_auto_from_tag(
+            raw_tag,
+        ));
         if new_tag != raw_tag {
             let mut rebuilt = String::with_capacity(current_content.len());
             rebuilt.push_str(&current_content[..q.open_start]);
@@ -3823,7 +3853,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             rebuilt.push_str(&current_content[q.open_end..]);
             current_content = rebuilt;
             mutated = true;
-            eprintln!("[preflight] queue: stripped auto (queue drained)");
+            eprintln!(
+                "[preflight] queue: stripped activation token ({})",
+                if marker_stop { "stop" } else { "drained" }
+            );
         }
     }
 
@@ -5620,6 +5653,74 @@ mod tests {
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "already-synced queue must NOT emit backlog_queue_sync_pending warning, got {:?}",
             state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_marker_go_activates_like_auto() {
+        // #queue-state-unify: a `go`/`start` marker control freshly activates the
+        // queue through the Auto trigger, identical to the legacy `auto` attribute.
+        for token in ["go", "start"] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let content = format!(
+                concat!(
+                    "---\nagent_doc_session: test\nagent_doc_format: template\n",
+                    "agent_doc_write: crdt\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue {} -->\n- please do the thing\n<!-- /agent:queue -->\n",
+                ),
+                token
+            );
+            std::fs::write(&doc, &content).unwrap();
+            snapshot::save(&doc, &content).unwrap();
+
+            let state = run_queue_maintenance(&doc, None).unwrap();
+            assert_eq!(
+                state.queue_active,
+                Some(true),
+                "marker `{token}` must activate the queue"
+            );
+            assert_eq!(state.queue_trigger, Some(crate::queue::QueueTrigger::Auto));
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            assert!(
+                updated.contains("queue_active: true"),
+                "marker `{token}` must persist queue_active:\n{updated}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_queue_maintenance_marker_stop_halts_active_queue() {
+        // #queue-state-unify: a `stop` marker control forces an otherwise-active
+        // queue inactive and clears persisted queue_active.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue stop -->\n- please do the thing\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.queue_active,
+            Some(false),
+            "marker `stop` must halt the active queue"
+        );
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("queue_active: false"),
+            "marker `stop` must clear queue_active:\n{updated}"
+        );
+        assert!(
+            !updated.contains("agent:queue stop"),
+            "marker `stop` token must be stripped after halt:\n{updated}"
         );
     }
 
@@ -8855,6 +8956,21 @@ mod tests {
             misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
             "`auto` on queue plus recognized attrs elsewhere must not warn"
         );
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_control_markers() {
+        // `start` / `go` / `stop` are recognized queue-only control markers
+        // (#queue-state-unify) — preflight migrates them into `queue:` frontmatter.
+        for token in ["start", "go", "stop"] {
+            let content = format!(
+                "<!-- agent:queue preset=\"#p\" {token} -->\n- do #fix1\n<!-- /agent:queue -->\n",
+            );
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
+                "`{token}` on queue must be a recognized control marker, not a typo warning"
+            );
+        }
     }
 
     #[test]

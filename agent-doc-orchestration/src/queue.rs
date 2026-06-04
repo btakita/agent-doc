@@ -558,6 +558,33 @@ pub fn has_auto_attr(attrs: &std::collections::HashMap<String, String>) -> bool 
     attrs.contains_key("auto")
 }
 
+/// Detect a marker-side queue control (`start`/`go`/`stop`) on the
+/// `<!-- agent:queue ... -->` opening tag (`#queue-state-unify`). These are the
+/// marker spelling of the canonical `queue:` frontmatter control; preflight
+/// migrates a present control into frontmatter and strips it from the tag, so
+/// activation then flows through the normal persisted/frontmatter path. `auto`
+/// is handled separately via [`has_auto_attr`] as the legacy alias. `stop` wins
+/// over `start`/`go` if both are (erroneously) present.
+pub fn marker_control(
+    attrs: &std::collections::HashMap<String, String>,
+) -> Option<agent_doc_core::frontmatter::QueueControl> {
+    if attrs.contains_key("stop") {
+        return Some(agent_doc_core::frontmatter::QueueControl::Stop);
+    }
+    if attrs.contains_key("start") || attrs.contains_key("go") {
+        return Some(agent_doc_core::frontmatter::QueueControl::Start);
+    }
+    None
+}
+
+/// Reconstruct an `<!-- agent:queue -->` opening tag without any marker-side
+/// control token (`start` / `go` / `stop`). Mirrors [`strip_auto_from_tag`].
+pub fn strip_control_from_tag(tag: &str) -> String {
+    tag.replace(" start", "")
+        .replace(" go", "")
+        .replace(" stop", "")
+}
+
 pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
     entries
         .iter()
@@ -1425,6 +1452,45 @@ mod tests {
         let act = resolve_activation(&entries, false, false, persisted_active);
         assert!(act.active);
         assert_eq!(act.trigger, Some(QueueTrigger::Persisted));
+    }
+
+    #[test]
+    fn marker_control_detects_start_go_stop() {
+        use agent_doc_core::frontmatter::QueueControl;
+        let mut attrs = std::collections::HashMap::new();
+        assert_eq!(marker_control(&attrs), None);
+        attrs.insert("go".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Start));
+        attrs.clear();
+        attrs.insert("start".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Start));
+        attrs.clear();
+        attrs.insert("stop".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Stop));
+        // stop wins over start/go if both are present.
+        attrs.insert("go".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Stop));
+    }
+
+    #[test]
+    fn strip_control_from_tag_removes_control_tokens() {
+        assert_eq!(
+            strip_control_from_tag("<!-- agent:queue preset=\"#p\" go -->"),
+            "<!-- agent:queue preset=\"#p\" -->"
+        );
+        assert_eq!(
+            strip_control_from_tag("<!-- agent:queue start -->"),
+            "<!-- agent:queue -->"
+        );
+        assert_eq!(
+            strip_control_from_tag("<!-- agent:queue stop -->"),
+            "<!-- agent:queue -->"
+        );
+        // No control token → unchanged.
+        assert_eq!(
+            strip_control_from_tag("<!-- agent:queue auto -->"),
+            "<!-- agent:queue auto -->"
+        );
     }
 
     #[test]

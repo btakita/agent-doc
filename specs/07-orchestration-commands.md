@@ -246,10 +246,29 @@ control. It subsumes the deprecated `queue_active:` boolean and the deprecated
 - `queue_active:` and the `auto` marker attribute remain accepted as deprecated
   input for backward compatibility; new documents should use `queue: start` /
   `queue: stop`.
+
+#### Marker-side control (`start` / `go` / `stop` on `agent:queue`)
+
+`start`/`go`/`stop` are also accepted as **marker** control tokens on the
+`<!-- agent:queue ... -->` opening tag — the ephemeral gesture spelling of the
+frontmatter control:
+
+- `<!-- agent:queue go -->` / `<!-- agent:queue start -->` fresh-activates the
+  queue, identical to the legacy `auto` attribute (routed through the Auto
+  trigger, persisting `queue_active`). `go` is an alias for `start`.
+- `<!-- agent:queue stop -->` forces the queue inactive this cycle and clears
+  `queue_active`.
+- The control token is stripped from the opening tag once the queue drains or a
+  `stop` halts it, so it never re-triggers on the next cycle.
+
+These marker tokens are recognized queue-only attributes (no
+`misplaced_component_attr` typo warning).
+
 - **Remaining (`#queue-state-unify` follow-ups):** queue-maintenance write paths
-  still emit/clear `queue_active:`; migrating the writer to emit `queue: stop`
-  on drain, normalizing existing `auto` markers to `queue: start`, and the
-  harness-parity doc rewrites are tracked as later phases.
+  still emit/clear `queue_active:` rather than the canonical `queue: start` /
+  `queue: stop`; migrating the writer to emit `queue:`, normalizing existing
+  `auto` markers to `queue: start`, and the harness-parity doc rewrites are
+  tracked as later phases.
 
 ### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`)
 

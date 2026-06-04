@@ -144,7 +144,21 @@ All prompts resolved in prior cycles (submodule `69c9fef4` + tests):
 - describe_image: `shell_expand()` committed + pushed, CLI + orchestration paths verified
 
 **`#agent-doc-bug` filed:** finalize closeout commits the response snapshot but leaves inline user prompts that triggered the cycle as uncommitted working-tree drift. The snapshot matches HEAD (response only), user edits between responses excluded from commit. Session-check then correctly flags the orphaned prompts. Root cause: patch point is at end-of-exchange, but user prompts are mid-exchange. The commit path needs to absorb user edits above the new boundary, not just the response text below it.
-<!-- agent:boundary:3a6ae850 -->
+❯ I said `#next-steps` but the items were not added into the backlog. #agent-doc-bug
+
+### Re: #next-steps backlog items — glm-5.1
+
+Added 2 items to backlog in priority order.
+
+Top of backlog: **`#finalize-mid-exchange-drift`**
+
+**New backlog items:**
+
+1. `#finalize-mid-exchange-drift` — `#agent-doc-bug`: finalize commits response but not the user prompts that triggered it. Plan: `tasks/agent-doc/plan-finalize-mid-exchange-user-prompt-drift.md`
+2. `#describe-image-cli-config-read` [recommended] — `describe-image` CLI doesn't read from `.agent-doc/config.toml`. Users must pass `--api-key` even when config has `vision.api_key` set.
+
+**`#agent-doc-bug` plan created:** `tasks/agent-doc/plan-finalize-mid-exchange-user-prompt-drift.md` — recommends Option A (absorb user edits above boundary into committed blob in `git::commit()`).
+<!-- agent:boundary:cff1ea74 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
@@ -162,6 +176,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tn34] #finalize-mid-exchange-drift #agent-doc-bug 2026-06-04: finalize closeout commits response snapshot but leaves mid-exchange user prompts as uncommitted working-tree drift. session-check flags orphaned prompts. Plan: tasks/agent-doc/plan-finalize-mid-exchange-user-prompt-drift.md
+- [ ] [#pr5t] [recommended] #describe-image-cli-config-read: agent-doc describe-image CLI does not read from project config (.agent-doc/config.toml). Only accepts --api-key CLI arg and env vars. Orchestration path works correctly via config. Add project config loading to the CLI describe-image subcommand so users don't need --api-key when config.toml has vision.api_key set.
 <!-- /agent:backlog -->
 
 ## Review

@@ -47,7 +47,7 @@ Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` document
 ### Re: queue reactivation — glm-5.1
 
 Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
-<!-- agent:boundary:2bf360e6 -->
+<!-- agent:boundary:977283e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,11 +56,19 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~do [#frontier-unique-temp]~
 - ~do [#temp-table-audit]~
-- do [#sqlite-doc-sync-safety]
+- ~do [#sqlite-doc-sync-safety]~
 - do [#sqlite-reentrant-guard]
+- do [#refresh-skip-unchanged-staging]
+- do [#terse-uniform]
+- do [#edge-index-references]
+- do [#degree-cache]
+- do [#community-summary-default]
+- do [#property-sampling]
+- do [#edges-between-batch-optimization]
+- do [#wal-checkpoint-tuning]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -96,7 +96,20 @@ Is `_tsift_frontier` concurrency-safe?
 4. **Sequential calls** on the same connection are safe because `DELETE FROM _tsift_frontier` at `lib.rs:2671` and `lib.rs:2699` clears the table before each BFS iteration.
 
 The only theoretical risk: if `SqliteGraphStore` were wrapped in `Arc<Mutex<>>` and a caller released the mutex mid-BFS, two BFS traversals could interleave on the same connection and corrupt each other's frontier. That pattern does not exist in the current codebase, and `SqliteGraphStore`'s `!Sync` bound prevents it by default.
-<!-- agent:boundary:8bfd88e2 -->
+❯ What are #next-steps to fix this concurrency spoilage?
+### Re: #next-steps concurrency hardening — glm-5.1
+
+The current code is safe — `SqliteGraphStore` is `!Sync` so no concurrent access is possible. But if the API ever wraps it in `Arc<Mutex<>>` or similar, temp table names become a latent hazard. Priority-ordered hardening steps added to backlog:
+
+| Priority | ID | Description |
+|----------|----|-------------|
+| high | `#frontier-unique-temp` | Make temp table names unique per call (`_tsift_frontier_{call_id}`) so concurrent BFS on a shared connection cannot collide |
+| medium | `#temp-table-audit` | Audit all temp table uses (`edges_between_nodes`, `_tsift_frontier`) for the same single-connection pattern; document safety invariants |
+| medium | `#sqlite-doc-sync-safety` | Add doc comments on `SqliteGraphStore`/`SqliteReadOnlyConnection` stating the single-active-call-per-connection invariant for temp-table methods |
+| low | `#sqlite-reentrant-guard` | (Recommended) Add runtime `Cell<bool>` guard that panics on re-entrant temp-table calls on the same connection |
+
+Top of backlog: **`#frontier-unique-temp`**
+<!-- agent:boundary:a5695f35 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,6 +124,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#frontier-unique-temp] Make temp table names unique per call (e.g. _tsift_frontier_{call_id}) so concurrent BFS calls on a shared connection cannot collide (high)
+- [ ] [#temp-table-audit] Audit all temp table uses (edges_between_nodes, _tsift_frontier) for same single-connection pattern; document safety invariants (medium)
+- [ ] [#sqlite-doc-sync-safety] Add doc comments on SqliteGraphStore/SqliteReadOnlyConnection stating single-active-call-per-connection invariant for temp-table methods (medium)
+- [ ] [#sqlite-reentrant-guard] [recommended] Add runtime Cell<bool> guard that panics on re-entrant temp-table calls on same connection (low)
 <!-- /agent:backlog -->
 
 ## Review

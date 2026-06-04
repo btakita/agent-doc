@@ -38,7 +38,30 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): [#mvbj] #ipc1; [#4rxf] #ipc2
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:38d8147b -->
+
+### Re: [#jwwc] #ipc3 — Investigate CRDT vs Raft for lazily-distributed — opus-4-8 (HEAD)
+
+Investigated and committed (`lazily-rs` `933e8a8`, pushed to `main`). New **Multi-writer coordination: CRDT vs Raft (`lazily-distributed`)** section in `SPEC.md`. **Conclusion: CRDT (cell-plane HLC registers), not Raft** — with a narrow single-writer authority for irreversible effects.
+
+##### The reactive structure collapses most of the question
+Only **cells / source slots** are writable. **Derived slots** (`computed`/`memo`) and the dependency topology are pure deterministic functions of the cells — they recompute, they're never written. So coordination is needed *only on the small cell plane*; the entire derived graph converges for free once cells converge (given replicated compute closures — the same prerequisite #ipc2 flagged for mirror-lazy).
+
+##### Why CRDT over Raft
+The roadmap is **availability-first** — P2P signaling (#yxjw), offline peers. Raft buys a global total order (quorum round-trip per write, no minority-partition writes, leader election over WAN) that the reactive model doesn't need, since derived state is already deterministic and the writable surface is small. CRDT gives local-first writes that merge on reconnect.
+
+- Each replicated cell = a **register CRDT keyed by a hybrid logical clock (HLC)**: **LWW-register** default ("current value"), **MV-register** when dropping a concurrent write is unacceptable, **PN-counter** opt-in for additive cells.
+- The **PartialEq guard** and **memo equality suppression** still hold — *post-merge*: a merge yielding an equal value invalidates nothing.
+- #ipc2's single monotonic `ipc_epoch` generalizes to **per-peer causal stamps** (HLC/dot on each `CellSet`); commutative/associative/idempotent merge means out-of-order delivery self-heals — no snapshot-resync.
+
+##### The narrow exception — irreversible effects
+CRDT convergence is right for *state*, wrong for **effects with irreversible external actions** (email, charge, webhook) — merges could fire them zero/twice. Gate those behind a **single-writer effect authority** (a designated peer, or a small Raft group owning *only the effect-intent log*). Hybrid: **CRDT state plane + single-writer/Raft effect plane**, with #39c5 `RemoteOp` allowlist gating what a peer may trigger at all.
+
+Open prototype gates (deferred): HLC skew bounds + LWW/MV default per cell category; closure-replication encoding (gates how much derived plane can live remotely); delta-state vs op-based CRDT wire encoding (reusing `lazily-serde`).
+
+Design-only — `cargo test --test spec_compliance` green (101). The `ipc1→ipc2→ipc3` distributed-design arc is now complete. Queue next: `[#q5r1] #39c5` (implement RemoteOp enum + allowlist) — an *implement* task, not design.
+
+Note: your queue tag edit `auto`→`go` is an unrecognized attribute (preflight ignores it); the queue stays active as `persisted`, but the Claude-Code auto-loop only fires from `auto`. Restore `auto` if you want hands-off draining.
+<!-- agent:boundary:5d78dd2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +71,7 @@ Compacted content:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#4rxf]~
-- [#jwwc]
+- ~[#jwwc]~
 - [#q5r1]
 - [#4cn0]
 - do [#mb9b]
@@ -57,7 +80,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist
 - [ ] [#4cn0] #yxjw Build Cloudflare Worker signaling server
 - [ ] [#mb9b] #vd5v Leverage typed cache for lock-free cached reads in ThreadSafeContext

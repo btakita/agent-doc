@@ -31,61 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-195054.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-201153.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #edge-index-references; #degree-cache; #community-summary-default; 2 more
+- Archived 3 response topic(s): #wal-checkpoint-tuning; #8v37; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #wal-checkpoint-tuning — glm-5.1
-
-> **Queue prompt:**
->
-> do [#wal-checkpoint-tuning]
-
-
-Added explicit `PRAGMA wal_checkpoint(TRUNCATE)` after each projection refresh and adaptive `wal_autocheckpoint` tuning based on total upserted rows (>10K: 8192 pages, >1K: 4096, else 2048). Prevents WAL growth on repeated refreshes.
-
-Commit: `9e085ae` pushed to main
-
-### Re: #8v37 — glm-5.1 (design analysis)
-
-> **Queue prompt:**
->
-> do [#8v37]
-
-
-**Can tsift provide graph maps for agent visualization?** Yes, through existing commands, but no single "broad map" command exists yet.
-
-**Current capabilities mapping to broad/focused maps:**
-
-| Need | Existing command | Gap |
-|------|-----------------|-----|
-| Broad map | `communities` + `graph-db status` | No single command combining community structure, top-degree hubs, and edge-kind distribution in token-efficient format |
-| Focused map | `graph-db --envelope explain <symbol>` | Already good — callers, callees, community, evidence in one envelope |
-| Navigation | `graph-db neighborhood` with `--ultra-terse` | Edge-index references + property sampling reduce tokens ~40-60% |
-
-**Proposed: `tsift graph-db --json map`** — a new command producing a two-tier response:
-1. **Overview tier**: community count, top-10 hubs by degree, edge-kind distribution histogram, module-level containment tree. Target: <500 tokens with ultra-terse.
-2. **Focus tier** (opt-in): `--focus <symbol>` parameter reuses `explain` envelope for a single deep-dive.
-
-This would reduce tool calls from 3-4 (status → communities → neighborhood → explain) to 1-2 (map → optional focus). The broad map gives enough context for the agent to decide which symbol to focus on.
-
-**Recommendation:** Implement as a composition of existing `communities` + `ranked_neighborhood` + `status` data rather than new SQL queries. The `--ultra-terse` + `--envelope` pipeline already handles token budgets.
-
-Marking done as design analysis. Implementation can be queued as a new backlog item if approved.
-Add backlog #next-steps to implement the recommendation.
-
-### Re: #next-steps — glm-5.1
-
-Added backlog items for the `graph-db map` recommendation, ordered by dependency:
-
-1. **#graphdb-map-command** — Implement `tsift graph-db --json map` composing communities + ranked_neighborhood + status into a two-tier (overview + opt-in focus) response
-2. **#graphdb-map-overview-tier** — Overview tier: community count, top-10 degree hubs, edge-kind histogram, module containment tree (<500 tokens ultra-terse)
-3. **#graphdb-map-focus-tier** — Focus tier: `--focus <symbol>` flag reusing explain envelope for single-symbol deep-dive
-
-Top of backlog: `#graphdb-map-command`
-<!-- agent:boundary:6d83a905 -->
+<!-- agent:boundary:639b68fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +45,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 <!-- /agent:queue -->
 
 ## Backlog

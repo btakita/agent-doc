@@ -8594,11 +8594,19 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
         return Some("opencode idle status chrome".to_string());
     }
-    if matches!(harness.binary.as_str(), "codex" | "opencode")
-        && harness.is_bottom_idle_chrome(content, 12)
-    {
+    // OpenCode treats a bottom idle composer (including a bare status/footer
+    // splash) as dispatch-ready. Codex does not: its composer always renders an
+    // actual `›` dispatch-ready prompt when ready, so a status/footer line alone
+    // is not a dispatch-ready prompt and must not be accepted as one.
+    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
         return latest_dispatch_ready_prompt
             .or_else(|| Some("bottom idle chrome".to_string()));
+    }
+    if harness.binary == "codex"
+        && latest_dispatch_ready_prompt.is_some()
+        && harness.is_bottom_idle_chrome(content, 12)
+    {
+        return latest_dispatch_ready_prompt;
     }
     latest_dispatch_ready_prompt
 }

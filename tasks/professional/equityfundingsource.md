@@ -32,31 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260604-031956.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260604-033714.md`*
 
 Compacted content:
-- Archived 6 response topic(s): apply4 P2; apply4 P3; deploy to production (after P3); 3 more
+- Archived 1 response topic(s): #zr5z
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: #zr5z — re-deploy after apply4 P4–P6 land — opus-4-8
-
-> **Queue prompt:**
->
-> [#zr5z]
-
-
-All six apply4 phases are in and pushed in `equityfundingsource-dev`, so the P4–P6 gate on `#zr5z` is cleared:
-
-- P1 `17bfb6b` · P2 `a2b68f8` · P3 `379ac66` · P4 `678cd59` · P5 `a91d791` · P6 `31a0381`
-- Tests: 24/24 apply4 tests green (`tests/apply4-full-application-p1…p6.test.ts`).
-- Spec: §5 of `prds/apply4-full-application-build-plan.md` already marked every phase `✅ Implemented`; I fixed the stale top-level **Status** header (it still read "Plan — not yet built") to reflect P1–P6 complete + deploy-pending. Committed + pushed as `071d8fe`.
-
-**`#spec-test-commit-push` done.** Tree is clean (only an untracked `compress-video.sh`, not part of this work).
-
-**Production deploy held.** The core of `#zr5z` is the live deploy — `cf:d1:migrate:remote` + `deploy:worker` + smoke-test against the production EFS lending Worker. The queue used `#spec-test-commit-push` (no deploy), not `#spec-test-commit-push-deploy`, so I have not touched production. I've gated `#zr5z` on explicit deploy authorization rather than guess.
-
-To ship it: re-queue `#zr5z` with `#spec-test-commit-push-deploy` (or just say "deploy"). I'll then run remote D1 migrations, `deploy:worker`, and smoke-test `/apply` → full-application submit on the workers.dev host.
-<!-- agent:boundary:682bd751 -->
+<!-- agent:boundary:38c4be3c -->
 <!-- /agent:exchange -->
 ###
 <!--

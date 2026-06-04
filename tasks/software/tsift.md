@@ -77,7 +77,47 @@ Making tsift a hard dependency of agent-doc would create several problems:
 4. **Alternative path:** If tighter integration is desired, the better approach is an **optional tsift plugin** for agent-doc (similar to how opencode-tsift works as a plugin for OpenCode). This keeps the core agent-doc binary dependency-free while offering tsift-enhanced workflows as an opt-in layer.
 
 Recommendation: keep the current soft-dependency model. Add a `tsift` feature flag or plugin to agent-doc that enables enhanced closeout hooks when tsift is detected on `$PATH`, but don't require it.
-<!-- agent:boundary:8f16947c -->
+
+### Re: tsift plugin for agent-doc — opus-4-8
+
+Building on the earlier "alternative path" recommendation, here's the focused pros/cons for a *plugin* model specifically — versus the current `$PATH`-detect soft integration.
+
+**What "plugin" would mean here:** agent-doc defines an integration contract (named hooks — closeout digest, context-pack, session-review, diff/test digest, memory write) that an external component registers against, instead of agent-doc hard-coding optional `tsift ...` CLI calls behind `$PATH` detection.
+
+#### Pros
+
+- **Core stays dependency-free.** The plugin lives outside the binary; graceful degradation (raw transcript fallback) is preserved by construction, not by careful conditionals.
+- **Opt-in by install.** Users who only need session management never carry tsift; those who want ~60–80% transcript-replay savings add the plugin.
+- **Explicit contract beats implicit detection.** A declared hook interface advertises the integration and pins expectations, versus today's "if `tsift` is on `$PATH`, call it" heuristic that's invisible until it fires.
+- **Independent release cadence.** tsift can evolve without lockstep agent-doc releases; the host only depends on the hook contract, not tsift's build state.
+- **Test isolation.** Core test matrix stays free of tsift; the plugin is tested against the contract separately.
+- **Proven shape.** Mirrors opencode-tsift (plugin for OpenCode) — consistent mental model across harnesses.
+
+#### Cons
+
+- **New infra to own.** agent-doc has no plugin loader today. A real one means hook registration, lifecycle, discovery, config precedence, and a versioned API/ABI surface — all maintenance the current CLI-invocation model avoids.
+- **Version-skew breakage.** Host/plugin compatibility needs contract tests; a skewed plugin can break the closeout hot path.
+- **Security & support surface.** A general plugin API invites third-party hooks running *inside* the finalize/closeout path — arbitrary-code surface plus a support burden.
+- **Over-engineering risk for N=1.** tsift is the only (and first-party, same-author) integration. A dynamic plugin system is heavy machinery to serve a single consumer that a cargo feature flag + `$PATH` detection already serves at near-zero cost.
+- **Latency.** Dispatch indirection in a hot path that runs every cycle.
+
+#### Recommendation
+
+Don't build a full dynamic plugin loader yet. Take the lightweight middle ground: keep `$PATH`-detect soft integration but **formalize it as a thin, documented capability contract** — a fixed set of named hooks (`closeout-digest`, `context-pack`, `session-review`, `diff-digest`, `test-digest`, `memory-write`) that any conforming binary on `$PATH` can satisfy. That captures the "explicit contract" pro without the loader/ABI/security cost. Graduate to a real plugin system only when a *second* provider appears (N>1) — that's the point where the abstraction earns its keep.
+
+```mermaid
+flowchart TD
+    A[agent-doc core loop] -->|optional, fail-open| H{integration capability?}
+    H -->|none on PATH| R[raw transcript fallback]
+    H -->|tsift on PATH| C[named hooks:<br/>closeout-digest · context-pack<br/>session-review · diff/test-digest · memory-write]
+    C --> T[tsift CLI]
+    style A fill:#1f2937,color:#fff
+    style R fill:#7c2d12,color:#fff
+    style C fill:#14532d,color:#fff
+```
+
+The dashed/optional edge is the whole point: the contract is the seam, the loader is deferred until a second consumer justifies it.
+<!-- agent:boundary:89959c84 -->
 <!-- /agent:exchange -->
 ###
 <!--

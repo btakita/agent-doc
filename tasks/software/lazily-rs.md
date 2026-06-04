@@ -55,7 +55,7 @@ A/B results (same_slot_write_read, parking_lot vs std::sync):
   16 workers: 6.7ms vs 7.2ms (similar)
 
 Conclusion: no significant difference. parking_lot remains default.
-<!-- agent:boundary:2ee03b7b -->
+<!-- agent:boundary:a221ae03 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +78,6 @@ Conclusion: no significant difference. parking_lot remains default.
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
 <!-- /agent:backlog -->
 
 ## Review

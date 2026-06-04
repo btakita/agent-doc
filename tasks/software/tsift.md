@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -67,6 +67,11 @@ Tuned `SQLITE_GRAPH_WAL_AUTOCHECKPOINT_PAGES` from 256 to 4096 in `tsift-sqlite/
 
 > **Queue prompt:**
 >
+> re [#astnav-npm]: How do I configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm?
+
+
+> **Queue prompt:**
+>
 > do [#sqlite-frontier-temp]
 
 
@@ -79,7 +84,7 @@ Replaced dynamic `WHERE IN` string-per-chunk frontier expansion in `shortest_pat
 The single-node fast path (prepared statements with `WHERE from_id = ?1`) is replaced by the temp table JOIN since the INSERT+JOIN overhead is negligible and eliminates code duplication. Follows the existing `edges_between_nodes` temp table pattern.
 
 **Verification:** `cargo check -p tsift-sqlite` clean, all 13 tsift-sqlite tests pass (including `sqlite_shortest_path_uses_bounded_frontier`), all 9 tsift-cli tests pass, `cargo install` succeeds.
-<!-- agent:boundary:725145f7 -->
+<!-- agent:boundary:7ee37f14 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,30 +93,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~do [#tokegate-seed]~
-- ~do [#source-body-cap]~
-- ~do [#diff-parse-cap]~
-- ~do [#evidence-page]~
-- ~do [#packet-cache-evict]~
-- ~do [#terse-edge-codes]~
-- ~do [#sqlite-chunk]~
-- ~do [#sqlite-ranked-cte]~
-- ~do [#sqlite-conflict-par]~
-- ~do [#sqlite-wal-tune]~
-- ~do [#sqlite-frontier-temp]~
-- re [#astnav-npm]: How do I configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [/] [#surreal-batch-bfs] #surreal-batch-bfs-gated: Batch frontier expansion - gated (low)
 - [/] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [/] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done

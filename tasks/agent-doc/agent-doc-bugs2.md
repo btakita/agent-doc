@@ -29,37 +29,16 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-005406.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-010037.md`*
 
 Compacted content:
-- Archived 2 response topic(s): tsift.md response not committed; JB Run Agent Doc stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Log Review 2026-06-04 OpenCode Pass
-
-Searched ops.log (367K lines), session log b26b9957 (11K lines), and recent ops entries through timestamp 1780534534. **No review items are proven complete.** The previous Codex log review pass (1780462778) also concluded "no reviewed item met the complete threshold."
-
-**Still-reproducing evidence:**
-- `session_clear_live_busy_guard_blocked` with `reason=opencode_active_turn` and `tail="ctrl+p commands"` for tsift.md pane %62 at 1780454068–1780460259 (#clear-stops-running-process, #jb-stale-busy-idle-footer)
-- `cross_document_execution_context` at 1780511376: agent-doc-bugs2.md running inside monsterrodholders.md pane %82 (#route-busy-wrong-owner-diagnostic, #jb-tsift-pane-sync)
-- `prompt_ready_barrier outcome=failed_closed reason=dispatch_only_busy_actor_not_ready` at 1780502233–1780520180 (#snrun)
-- `ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight` for equityfundingsource.md, tsift.md, lazily-rs.md (#adoc-queue-ipc-buffer-divergence)
-- `route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched` for agent-doc-bugs2.md at 1780520180 (#opencode-jb-stall)
-- `route_wait_for_ready_timeout_diagnostic bottom_idle_chrome=false has_busy_cue=false` for tsift.md pane %83 and agent-doc-bugs2.md pane %70 (#jb-stale-busy-idle-footer, #opencode-jb-stall)
-
-**Positive signals (but insufficient for completion):**
-- `foreign_owned_sweep_skip` proves cross-document sweep is working (but focus aliasing root cause still open)
-- `codex_stop_foreign_queue_marker_skip` proves stop hook marker is active (but no negative-case block proof)
-- `route_dispatch_start_proven proof=pane_state_changed` proves dispatch reaches OpenCode (but no consumed proof from preset)
-- `idle_queue_watch_drain` proves idle drain is working (but no same-cycle JB click proof)
-- `session_check_commit_boundary_recovered` proves session check recovery (but interrupted more often than recovered)
-
-**New bugs discovered from Codex queue pass (1780462778 prompt diff):** Added #codex-403-429-fallback and #codex-network-access-opencode-guard to review.
-<!-- agent:boundary:71882883 -->
-Which review items are proven to be complete in the logs? Mark those complete.
+<!-- agent:boundary:6103cc17 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- What are #next-steps to fix bugs?
+- The response in this document took a long time to commit.
 <!-- /agent:queue -->
 ###
 <!--

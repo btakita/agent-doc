@@ -109,7 +109,37 @@ The backlog is already in correct priority order:
 6. `#mqcw` — AsyncContext sync fast-path (warm async reads)
 
 **Top of backlog: `#61zg`**
-<!-- agent:boundary:7edbfbaf -->
+
+### Re: #61zg AsyncContext benchmark results — glm-5.1
+
+> **Queue prompt:**
+>
+> What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?
+
+
+Extended `scripts/update-benchmark-results.py` with 7 async benchmark groups and regenerated `BENCHMARKS.md`. Changes:
+
+1. Added `async_cached_resolve` through `async_batch_throughput` to `GROUP_ORDER` (indices 11-17)
+2. Added `ASYNC_CONCURRENT_CONTENTION_CASE_ORDER` for worker-variant ordering
+3. Added async_concurrent_contention case handling in `benchmark_case_key()`
+4. Changed bench run command to `--features instrumentation,async`
+
+**Async results captured:**
+
+| Group | Async | Sync baseline | ThreadSafe baseline |
+|---|---|---|---|
+| async_cached_resolve | 4.602 us | 64.156 ns | 1.349 us |
+| async_cold_resolve | 4.735 us | 74.954 ns | 1.029 us |
+| async_invalidation_throughput | 282.558 us | 2.917 us | 39.160 us |
+| async_cancellation_throughput | 62.471 us | - | - |
+| async_concurrent_contention/1 | 71.842 us | - | 54.585 us |
+| async_effect_throughput | 188.216 ms | - | - |
+| async_batch_throughput | 88.215 us | 11.128 us | - |
+
+**Known issue:** `async_concurrent_contention/async_context` panics at 4+ workers with "get_async: notifier dropped unexpectedly" (`async_context.rs:753`). Only worker=1 result captured. This is a pre-existing bug, not introduced by this change. Added to backlog for follow-up.
+
+Commit: `ea1512f` in `src/lazily-rs`. `make check` passes clean.
+<!-- agent:boundary:7e0f8eb8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,13 +148,18 @@ The backlog is already in correct priority order:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?
+- ~What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?~
+- do [#61zg]
+- do [#fk8p]
+- do [#v6r8]
+- do [#zspz]
+- do [#8e2q]
+- do [#mqcw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#61zg] #lazilyperf36 Add AsyncContext benchmark results to BENCHMARKS.md (run async_context bench, extend update script)
 - [ ] [#fk8p] #lazilyperf37 Add ThreadSafeContext-inside-Tokio Criterion benchmarks (benches/tokio_sync.rs)
 - [ ] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
 - [ ] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling

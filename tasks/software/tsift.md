@@ -74,7 +74,8 @@ This would reduce tool calls from 3-4 (status → communities → neighborhood �
 **Recommendation:** Implement as a composition of existing `communities` + `ranked_neighborhood` + `status` data rather than new SQL queries. The `--ultra-terse` + `--envelope` pipeline already handles token budgets.
 
 Marking done as design analysis. Implementation can be queued as a new backlog item if approved.
-<!-- agent:boundary:7d9aa111 -->
+Add backlog #next-steps to implement the recommendation.
+<!-- agent:boundary:21ab8075 -->
 <!-- /agent:exchange -->
 ###
 <!--

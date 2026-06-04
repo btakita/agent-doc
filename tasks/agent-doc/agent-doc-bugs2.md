@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -36,11 +36,30 @@ Compacted content:
 - Archived 9 response topic(s): #jb-stale-busy-idle; queue fixup; #adoc-queue-ipc-buffer; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 What are #next-steps to fix bugs?
-<!-- agent:boundary:bd2ad152 -->
+
+### Re: #next-steps to fix bugs — opus-4-6
+
+Reviewed all 58 review items. Most are gated on live verification (Paths A/B/C), installed plugin versions, or IPC capture sessions. The implementable-now items in priority order:
+
+**Top of backlog (implementable this cycle):**
+
+1. **#cancel-orphans-preflight-cycle** — cancel abandons orphaned `preflight_started` cycle; Option A (JB cancel emits abandon signal) is scoped and has a plan.
+2. **#prompt-duplicated-while-typing** (#gyma) — idempotent retry convergence on IPC `already_applied`; dedup prompt text in `normalize_user_prompts`. Focused fix.
+3. **#clear-stops-running-process** — confirmed still reproduces (ops.log proof 2026-06-03). OpenCode active-turn guard blocks clear on busy pane.
+4. **#backlog-priority-attribute** — pure feature; automates the manual `--pending-reorder` done every cycle. No external deps.
+5. **#route-busy-wrong-owner-diagnostic** — ops.log confirms cross-document execution context but no diagnostic names the routed file, busy pane, and owning file. Diagnostic-only change.
+6. **#lr-queue-patchback-miss** — queue-head provenance primitive; record seen free-text queue heads and require committed response proof.
+
+**Live-verify gated (batch into Path A/B sessions):**
+- **Path A** (#jkvs): install signed JB plugin → batch-close ~11 live-verify items
+- **Path B** (#wy0y/#6cmx): IPC debug logging capture → unblock duplication family
+- **Path C** (#qasm): continue no-live-pane review items after queue-provenance cluster
+
+Top of backlog: **#cancel-orphans-preflight-cycle**
+<!-- agent:boundary:67a92acb -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- What are #next-steps to fix bugs?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -55,6 +74,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#08mg] #cancel-orphans-cancel-orphan — cancel emits abandon signal for orphaned preflight_started cycle. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (Option A)
+- [ ] [#54pz] #dedup-prompt-normalize — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts. Relates #gyma
+- [ ] [#engt] #clear-busy-pane-guard — clear command must stop/repair busy pane with active OpenCode turn. Confirmed reproducing #clear-stops-running-process
+- [ ] [#ba4b] #backlog-priority-auto — add priority attribute to agent:backlog/agent:queue for automatic ordering. Replaces manual --pending-reorder
+- [ ] [#kz2g] #route-busy-diagnostic-name-owner — diagnostic names routed file, busy pane, and owning file on wrong-owner busy refusal. #route-busy-wrong-owner-diagnostic
+- [ ] [#appe] #queue-head-provenance — record seen free-text queue heads and require committed response/binary consume proof. #lr-queue-patchback-miss
 <!-- /agent:backlog -->
 
 ## Review

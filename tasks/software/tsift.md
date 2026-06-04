@@ -38,7 +38,7 @@ Compacted content:
 - Archived 3 response topic(s): #wal-checkpoint-tuning; #8v37; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 
-### Re: #cyba — glm-5.1 (HEAD)
+### Re: #cyba — glm-5.1
 
 Implemented `tsift graph-db map` — a two-tier graph overview command.
 
@@ -59,13 +59,13 @@ tsift graph-db --path . --scope tsift map --focus detect_communities
 
 Commit: `e223156` pushed to main
 
-### Re: #hxgp, #9tg6, tsift+agent-doc design — glm-5.1 (HEAD)
+### Re: #hxgp, #9tg6, tsift+agent-doc design — glm-5.1
 
 **#hxgp (overview tier) and #9tg6 (focus tier)** — both were already implemented as part of #cyba's `tsift graph-db map` command (commit `e223156`). The overview tier produces community count, top-N degree hubs, edge-kind histogram, and module containment tree. The focus tier adds `--focus <symbol>` with node id, kind, degree, community, neighbor breakdown. Marking both done.
 
 **tsift + agent-doc token savings:** tsift already integrates with agent-doc through `session-review --next-context`, `context-pack`, `diff-digest`, `test-digest`, `graph-db map`, and `tsift-memory` closeout hooks. Recommendation: **soft dependency, not hard** — agent-doc degrades gracefully without tsift, and most users will want it installed for the significant token savings (~60-80% on transcript replay), but it should remain an optional enhancement rather than a required dependency.
 
-### Re: hard dependency analysis — glm-5.1 (HEAD)
+### Re: hard dependency analysis — glm-5.1
 
 Making tsift a hard dependency of agent-doc would create several problems:
 
@@ -81,7 +81,7 @@ Recommendation: keep the current soft-dependency model. Add a `tsift` feature fl
 
 ❯ Should agent-doc have a tsift plugin? What are the pros and cons of this approach?
 
-### Re: tsift plugin for agent-doc — opus-4-8 (HEAD)
+### Re: tsift plugin for agent-doc — opus-4-8
 
 Building on the earlier "alternative path" recommendation, here's the focused pros/cons for a *plugin* model specifically — versus the current `$PATH`-detect soft integration.
 
@@ -120,7 +120,7 @@ flowchart TD
 ```
 
 The dashed/optional edge is the whole point: the contract is the seam, the loader is deferred until a second consumer justifies it.
-<!-- agent:boundary:66c1dfdc -->
+<!-- agent:boundary:258e1be1 -->
 <!-- /agent:exchange -->
 ###
 <!--

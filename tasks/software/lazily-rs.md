@@ -399,7 +399,20 @@ Created plan file at `tasks/software/plan-lazily-rs-distributed-communication.md
 Dependency chain: Phases 1-3 are sequential. Phase 4 depends on 2. Phases 5-7 depend on 4.
 
 The plan maps existing lazily primitives to distributed extensions and proposes the file structure under `lazily/src/`.
-<!-- agent:boundary:cd2eb776 -->
+
+### Re: Next steps into backlog — glm-5.1
+
+Backlog populated with 6 items, ordered by the dependency chain from `plan-lazily-rs-distributed-communication.md`:
+
+1. **#ipc1** — Design lazily-serde feature gate (foundation for all distributed work)
+2. **#ipc2** — Design lazily-ipc snapshot + incremental protocol (depends on #ipc1)
+3. **#ipc3** — Investigate CRDT vs Raft trade-offs (depends on #ipc2)
+4. **#39c5** — Implement RemoteOp enum + permission allowlist (depends on #ipc2)
+5. **#yxjw** — Build Cloudflare Worker signaling server (depends on transport layer)
+6. **#vd5v** — Typed cache lock-free reads (independent perf optimization)
+
+Top of backlog: **#ipc1**
+<!-- agent:boundary:d097c030 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -407,23 +420,29 @@ The plan maps existing lazily primitives to distributed extensions and proposes 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- If a remote user adds a task to a backlog, the task should be clearly annotated.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Add #next-steps into the backlog. Priori
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#mvbj] #ipc1 Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [ ] [#4rxf] #ipc2 Design lazily-ipc snapshot + incremental update protocol
+- [ ] [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist
+- [ ] [#4cn0] #yxjw Build Cloudflare Worker signaling server
+- [ ] [#mb9b] #vd5v Leverage typed cache for lock-free cached reads in ThreadSafeContext
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
-- [/] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
 - [/] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [/] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
+- [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:review -->
 

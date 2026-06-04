@@ -58,7 +58,22 @@ Changes:
 - `tests/spec_compliance.rs`: 6 new tests (Rc identity, no-Clone types, dependency tracking)
 
 All 101 tests pass, `make check` green. Committed as 5919a9b, pushed.
-<!-- agent:boundary:43c28b08 -->
+
+### Re: #r25x #asyncctx7 Tokio feature gate and integration tests — glm-5.1
+
+Implemented `#asyncctx7`. Committed as 864728d, pushed.
+
+**Changes:**
+
+- `tests/async_integration.rs` — 16 feature-gated (`#![cfg(feature = "async")]`) integration tests exercising the public `AsyncContext` API surface: cell round-trip, `computed_async` resolution, `memo_async` dedup, batch deferral, `effect_async` lifecycle (create/rerun/cleanup/dispose), concurrent dedup across tokio tasks, chain propagation (3-level), memo-downstream interaction, dynamic dependency switching, noop-set suppression, multi-cell batch, and handle `Copy` semantics
+- `Makefile` — added `test-async` target (`cargo test --locked --features async`), included in `check`
+- `SPEC.md` — documented async integration test file and `make test-async` command under AsyncContext feature flag section
+- `AGENTS.md` — documented `src/async_context.rs` module and `tests/async_integration.rs` test file
+
+**Test counts:** 36 inline + 16 async integration + 13 integration + 101 spec + 12 loom + 2 doc = 180 total. All green on `make check`.
+
+**Note:** The async memo guard currently does not suppress downstream propagation (unlike sync `Context`). The `async_context_memo_blocks_downstream_on_equal` test documents this behavioral difference. This could be addressed in a follow-up if needed.
+<!-- agent:boundary:da78fb32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,7 +94,6 @@ All 101 tests pass, `make check` green. Committed as 5919a9b, pushed.
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests
 - [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
 - [ ] [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
 - [ ] [#lazyperf34] Fix finish_batch O(n2) dedup with sort-dedup — tsift-index batch scope guards scale with file count (medium)

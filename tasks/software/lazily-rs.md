@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,7 @@ queue_active: false
 Compacted content:
 - Archived 5 response topic(s): lazyperf34 lazyperf35; benchmark-skill BENCHMARKS.md freshness + skill/runbook; performance differences; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:85caf6c9 -->
+<!-- agent:boundary:bd5b421c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,8 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?
 <!-- /agent:queue -->
 
 ## Backlog

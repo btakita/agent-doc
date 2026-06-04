@@ -65,7 +65,31 @@ Completed `#diff-parse-cap`: default max_parsed_files to 25 in standalone diff-d
 - `--max-parsed-files 0` opts out (unlimited tree-sitter parsing)
 - Updated SPEC.md with flag documentation and behavior description
 - All 592 tests pass; built + installed + pushed: `d1a3be6`
-<!-- agent:boundary:cae2bdd8 -->
+
+### Re: #evidence-page — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#evidence-page]
+
+
+Completed `#evidence-page`: cursor-based evidence pagination for incremental evidence expansion.
+
+**Problem:** Single 6k-token budget cap either floods small contexts or cuts aggressively with no way to retrieve dropped items.
+
+**Solution:** `--cursor` flag on `tsift graph-db evidence` enables incremental paging through budget-ranked evidence.
+
+- `GraphDbQuery::Evidence` now accepts `--cursor <node_id>` to resume from a prior page
+- `GraphDbEvidenceReport` gains `truncated: bool` and `next_cursor: Option<String>` fields
+- New `graph_db_apply_output_budget_with_depths_and_cursor()` function handles cursor-based skip in the scored candidate list
+- Each page applies fresh per-kind quotas and token cap (reset per page)
+- Pages are disjoint: no node appears in more than one page for the same projection state
+- Invalid/stale cursor gracefully returns first page with diagnostic
+- SPEC.md updated with evidence pagination documentation and CLI example
+- 3 new unit tests: truncated pagination, within-budget no-truncation, invalid-cursor
+- All 665 tests pass (348+3 new in tsift-cli, plus all other suites)
+- Built + installed + pushed: `65bc129`
+<!-- agent:boundary:cd2a9f9c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +102,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#tokegate-seed]~
 - ~do [#source-body-cap]~
 - ~do [#diff-parse-cap]~
-- do [#evidence-page]
+- ~do [#evidence-page]~
 - do [#packet-cache-evict]
 - do [#terse-edge-codes]
 - do [#sqlite-chunk]
@@ -92,7 +116,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#evidence-page] Cursor-based evidence pagination — single 6k-token cap either floods or cuts aggressively; incremental paging lets agents expand on demand (medium)
 - [ ] [#packet-cache-evict] Add cycle packet cache eviction to tsift status --fix — no TTL/size/cleanup policy exists for .tsift/cycle-packet-cache/ (low)
 - [ ] [#terse-edge-codes] Map common edge kinds to short codes in ultra-terse — calls->c, defines->d, etc; strip provenance/freshness for further compression (low)
 - [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)

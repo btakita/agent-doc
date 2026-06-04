@@ -57,7 +57,7 @@ Composes with the existing `TypeId`-at-creation typed cache, zero overhead on th
 `serde = ["dep:serde"]` (+ `dep:erased-serde`, both optional); a sealed `MaybeSerialize<T>` helper resolves the vtable so existing constructor signatures are unchanged; `Context::snapshot()` / `ThreadSafeContext::snapshot()` emit `ContextSnapshot { nodes: Vec<NodeSnapshot { slot_id, type_tag, payload | Opaque }> }`. That snapshot type is the direct input to **#ipc2** (snapshot + incremental update protocol) and the value substrate for **#ipc3** (CRDT vs Raft).
 
 Design-only change — `cargo test --test spec_compliance` stays green (101 passed). The uncommitted `Cargo.toml`/`Cargo.lock` `serde`/`serde_json` groundwork in the working tree predates this cycle and was left untouched (a design task shouldn't bundle dep wiring). Next queue item: `[#4rxf] #ipc2`.
-<!-- agent:boundary:bd31f735 -->
+<!-- agent:boundary:80c452b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +77,6 @@ Design-only change — `cargo test --test spec_compliance` stays green (101 pass
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [x] [#mvbj] #ipc1 Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [ ] [#4rxf] #ipc2 Design lazily-ipc snapshot + incremental update protocol
 - [ ] [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist

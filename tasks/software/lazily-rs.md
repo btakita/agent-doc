@@ -63,7 +63,30 @@ make check passes all 83 spec compliance tests, 13 integration tests, 12 loom mo
 Created GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.6.0
 
 Release notes summarize #lazyperf25–36 performance work, new handle-centric APIs, feature flags, and CI infrastructure.
-<!-- agent:boundary:5f87c642 -->
+
+### Re: What are #next-steps to implement AsyncContext? — glm-5.1
+
+AsyncContext needs to solve: async compute closures, in-flight slot state, cancellation of stale futures, and non-blocking propagation. Current `ThreadSafeContext` uses `Condvar` for blocking waits — AsyncContext would replace those with async-aware wakers.
+
+#### Architecture sketch
+
+`AsyncSlotNode` extends the slot state machine from `{unset, cached}` to `{unset, pending(Future), cached, error}`. When a slot's async compute is in-flight and a dependency invalidates, the stale future is cancelled and restarted. `AsyncContext` wraps a `ThreadSafeContext`-style graph but uses `tokio::task::spawn` for compute and `tokio::sync::Notify` for awaiting dependents.
+
+#### Priority backlog
+
+Top of backlog: `#asyncctx1`
+
+- `#asyncctx1` Design spec — AsyncContext API surface, slot state machine, cancellation contract
+- `#asyncctx2` AsyncSlotNode — pending/resolved/error states, JoinHandle tracking
+- `#asyncctx3` AsyncContext core — computed_async, get_async (.await-based read), batch support
+- `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
+- `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
+- `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
+- `#asyncctx7` Tokio feature gate and integration tests
+- `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
+
+What are #next-steps to implement AsyncContext?
+<!-- agent:boundary:eba45d2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,6 +100,14 @@ Release notes summarize #lazyperf25–36 performance work, new handle-centric AP
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#sye8] `#asyncctx1` Design spec — AsyncContext API surface, slot state machine, cancellation contract
+- [ ] [#kp7w] `#asyncctx2` AsyncSlotNode — pending/resolved/error states, JoinHandle tracking
+- [ ] [#8sqb] `#asyncctx3` AsyncContext core — computed_async, get_async (.await-based read), batch support
+- [ ] [#6z71] `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
+- [ ] [#cmt9] `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
+- [ ] [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
+- [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests
+- [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
 <!-- /agent:backlog -->
 
 ## Review

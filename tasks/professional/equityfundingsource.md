@@ -48,7 +48,18 @@ Done — `corky transcribe --diarize` (GPU auto) on the 228.6M video. Exit 0.
 - Frontmatter typed it `phone-call`, dated 2026-06-03. Content is EFS-relevant — Judith joins late, talk of borrower sign-up, loan amount, and "more aggressive" rate scenarios.
 
 **Labels are generic** (`Speaker 1`–`Speaker 6`). corky's interactive "Who is Speaker N?" prompts can't be answered in a background run, so it skipped naming. To get named turns, re-run with `--speakers "Judith,Robert,Brian,…"` (order maps to first-appearance) — say the word and I'll relabel.
-<!-- agent:boundary:55447a27 -->
+❯ The speakers are brian-takita, judith-krug, robert-waldman, april-armas.
+
+### Re: speaker names — relabel transcript — opus-4-8
+
+Relabeled. Re-ran `corky transcribe --diarize --speakers "Brian Takita,Judith Krug,Robert Waldman,April Armas"` (GPU/CUDA0). The 6 raw diarization clusters resolved down to the 4 named people via LLM attribution. Exit 0.
+
+- **Output (overwritten):** [file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md](file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md)
+- **Turn tally:** Judith Krug 156 · Robert Waldman 102 · April Armas 71 · Brian Takita 67
+- Frontmatter `participants` now lists all four; also re-transcribed 3 low-confidence blocks (avg +0.39).
+
+**Accuracy caveat:** attribution in the noisy opening minute is approximate — e.g. the `[00:00:25]` "Judith will be late, let me give her a call" turn is tagged Judith but is almost certainly someone else announcing her. The bulk of the call attributes cleanly. If you spot specific mis-tags, point me at the timestamps and I'll correct them.
+<!-- agent:boundary:0a4f76a4 -->
 <!-- /agent:exchange -->
 ###
 <!--

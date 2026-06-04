@@ -132,6 +132,18 @@ pub struct DocumentsConfig {
     pub auto_session_for_all_md: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VisionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
 /// Project-level configuration, read from `.agent-doc/config.toml` relative to CWD.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -157,6 +169,20 @@ pub struct ProjectConfig {
     /// Opt-in gating for which `.md` files become agent-doc session documents.
     #[serde(default)]
     pub documents: DocumentsConfig,
+    /// Vision (describe-image) provider configuration.
+    #[serde(default)]
+    pub vision: VisionConfig,
+    /// `#stash-session-ttl-prune`: idle TTL in seconds for stash-window agent-doc
+    /// panes. When set (> 0), resync logs which panes *would* be reaped. Set
+    /// `stash_session_ttl_prune_enabled = true` to enable destructive kill.
+    /// Default 0 (disabled).
+    #[serde(default)]
+    pub stash_session_ttl_secs: u64,
+    /// `#stash-session-ttl-prune`: enable destructive kill of idle stash panes
+    /// that exceed `stash_session_ttl_secs`. Report-only when false.
+    /// Default false.
+    #[serde(default)]
+    pub stash_session_ttl_prune_enabled: bool,
 }
 
 /// Parse a TOML string into a [`ProjectConfig`]. Pure — no fs I/O.

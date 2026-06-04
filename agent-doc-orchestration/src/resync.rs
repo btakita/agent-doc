@@ -2491,6 +2491,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         purge_unregistered_stash_panes(&tmux);
         purge_unregistered_dead_non_stash_panes(&tmux);
         purge_orphaned_agent_panes(&tmux);
+        apply_stash_ttl_prune(&tmux);
     }
 
     // Show current state
@@ -2508,6 +2509,120 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     }
 
     Ok(())
+}
+
+/// `#stash-session-ttl-prune`: query live tmux state, build candidates, and
+/// either log report-only or kill idle stash panes that exceed the configured TTL.
+fn apply_stash_ttl_prune(tmux: &Tmux) {
+    let config = crate::project_config::load_project();
+    let ttl_secs = config.stash_session_ttl_secs;
+    if ttl_secs == 0 {
+        return;
+    }
+
+    let registry = sessions::load().unwrap_or_default();
+    let registered_panes: std::collections::HashSet<&str> =
+        registry.values().map(|e| e.pane.as_str()).collect();
+
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+
+    let window_output = tmux
+        .cmd()
+        .args([
+            "list-windows",
+            "-a",
+            "-F",
+            "#{window_id}\t#{window_name}\t#{window_activity}",
+        ])
+        .output();
+    let window_output = match window_output {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut candidates: Vec<StashTtlCandidate> = Vec::new();
+
+    for line in String::from_utf8_lossy(&window_output.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let (window_id, window_name, activity_str) = (parts[0], parts[1], parts[2]);
+
+        if !is_stash_window_name(window_name) {
+            continue;
+        }
+
+        let window_activity = activity_str.parse::<u64>().unwrap_or(0);
+        let idle_secs = now.saturating_sub(window_activity);
+
+        let panes = tmux.list_window_panes(window_id).unwrap_or_default();
+        for pane_id in panes {
+            let is_active = false;
+            let is_agent_doc = registered_panes.contains(pane_id.as_str())
+                || live_supervisors
+                    .iter()
+                    .any(|(_session_id, _pid)| {
+                        pane_hosts_live_supervisor_session(
+                            tmux,
+                            &pane_id,
+                            &live_supervisors,
+                        )
+                            .is_some()
+                    });
+
+            candidates.push(StashTtlCandidate {
+                pane_id: pane_id.clone(),
+                idle_secs,
+                is_active_pane: is_active,
+                is_agent_doc_stash_pane: is_agent_doc,
+            });
+        }
+    }
+
+    let targets = stash_ttl_prune_targets(&candidates, ttl_secs);
+
+    if targets.is_empty() {
+        return;
+    }
+
+    let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    for pane_id in &targets {
+        crate::ops_log::log_op(
+            &current_root,
+            &format!(
+                "stash_ttl_prune_candidate pane={} idle_secs={} ttl={} kill_enabled={}",
+                pane_id,
+                candidates
+                    .iter()
+                    .find(|c| c.pane_id == *pane_id)
+                    .map(|c| c.idle_secs)
+                    .unwrap_or(0),
+                ttl_secs,
+                config.stash_session_ttl_prune_enabled,
+            ),
+        );
+
+        if config.stash_session_ttl_prune_enabled {
+            let _ = tmux.cmd().args(["kill-pane", "-t", pane_id]).output();
+            eprintln!(
+                "stash-ttl-prune: killed idle stash pane {} (exceeded {}s TTL)",
+                pane_id, ttl_secs
+            );
+        } else {
+            eprintln!(
+                "stash-ttl-prune: pane {} exceeded {}s TTL (report-only; enable stash_session_ttl_prune_enabled to kill)",
+                pane_id, ttl_secs
+            );
+        }
+    }
 }
 
 /// `#stash-session-ttl-prune`: one stash pane's candidacy for opt-in TTL reaping.

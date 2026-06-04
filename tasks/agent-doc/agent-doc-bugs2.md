@@ -34,7 +34,29 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 Compacted content:
 - Archived 2 response topic(s): tsift.md response not committed; JB Run Agent Doc stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+
+### Log Review 2026-06-04 OpenCode Pass
+
+Searched ops.log (367K lines), session log b26b9957 (11K lines), and recent ops entries through timestamp 1780534534. **No review items are proven complete.** The previous Codex log review pass (1780462778) also concluded "no reviewed item met the complete threshold."
+
+**Still-reproducing evidence:**
+- `session_clear_live_busy_guard_blocked` with `reason=opencode_active_turn` and `tail="ctrl+p commands"` for tsift.md pane %62 at 1780454068–1780460259 (#clear-stops-running-process, #jb-stale-busy-idle-footer)
+- `cross_document_execution_context` at 1780511376: agent-doc-bugs2.md running inside monsterrodholders.md pane %82 (#route-busy-wrong-owner-diagnostic, #jb-tsift-pane-sync)
+- `prompt_ready_barrier outcome=failed_closed reason=dispatch_only_busy_actor_not_ready` at 1780502233–1780520180 (#snrun)
+- `ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight` for equityfundingsource.md, tsift.md, lazily-rs.md (#adoc-queue-ipc-buffer-divergence)
+- `route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched` for agent-doc-bugs2.md at 1780520180 (#opencode-jb-stall)
+- `route_wait_for_ready_timeout_diagnostic bottom_idle_chrome=false has_busy_cue=false` for tsift.md pane %83 and agent-doc-bugs2.md pane %70 (#jb-stale-busy-idle-footer, #opencode-jb-stall)
+
+**Positive signals (but insufficient for completion):**
+- `foreign_owned_sweep_skip` proves cross-document sweep is working (but focus aliasing root cause still open)
+- `codex_stop_foreign_queue_marker_skip` proves stop hook marker is active (but no negative-case block proof)
+- `route_dispatch_start_proven proof=pane_state_changed` proves dispatch reaches OpenCode (but no consumed proof from preset)
+- `idle_queue_watch_drain` proves idle drain is working (but no same-cycle JB click proof)
+- `session_check_commit_boundary_recovered` proves session check recovery (but interrupted more often than recovered)
+
+**New bugs discovered from Codex queue pass (1780462778 prompt diff):** Added #codex-403-429-fallback and #codex-network-access-opencode-guard to review.
 <!-- agent:boundary:71882883 -->
+Which review items are proven to be complete in the logs? Mark those complete.
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -57,6 +79,8 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-403-429-fallback] #agent-doc-bug 2026-06-03: agent-doc in a Codex session received 403 Forbidden on WebSocket handshake to `wss://chatgpt.com/backend-api/codex/responses` (cf-ray: a05c18067af0dce4-IAD), then HTTPS fallback hit 429 Too Many Requests (request id: 3e924ff6-fde4-4fb2-8b00-08dfdd74e1a3). Other concurrent Codex sessions continued working. Possible causes: per-session rate limit, Cloudflare edge block, or session-specific token/auth state. Agent-doc should detect this pattern (403 on WS → 429 on HTTPS fallback) and (a) surface a clear diagnostic distinguishing transport rejection from agent-doc routing failure, (b) optionally retry with backoff or suggest restarting the codex session, and (c) not treat the 429 as a permanent failure that exhausts the retry budget without operator visibility.
+- [/] [#codex-network-access-opencode-guard] #agent-doc-bug 2026-06-03: frontmatter field `codex_network_access: enabled` is Codex-specific but agent-doc does not guard it when the session runs under opencode. When `agent: opencode` (or no Codex agent), `codex_network_access` has no effect — opencode does not have an equivalent network sandbox flag. Agent-doc should either (a) warn/ignore `codex_network_access` when the agent is not codex, or (b) not emit it into the dispatched prompt/session config for opencode sessions.
 - [/] [#ec9k] [recommended] #recover-ownership-command #agent-doc-bug 2026-06-03: implement agent-doc recover-ownership <FILE> command that atomically clears session actor+cycle state, reaps dead/stuck pane, applies closeout recovery, starts fresh supervisor, and routes document to new pane. Replaces the manual session-clear+repair+route flow. Natural composition of existing primitives. Plan: extend tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#img-review] #img-17-18-review #agent-doc-bug 2026-06-03: review img_17.png and img_18.png from a vision-capable session to diagnose #t9xf stdout bleed and TUI corruption. Blocked on GLM model (no image support).
 - [/] [#opencode-jb-stall] #agent-doc-bug 2026-06-03: JB `Run Agent Doc` stalls in an OpenCode session. Related to #opencode-post-turn-false-active (implemented, needs live-verify — bottom-12-lines busy-cue fix), #jbrunstallreg (plugin-side stage ledger, needs live-verify), and #opencode-preset-not-dispatched (in review). Plan: live-verify the installed binary + JB plugin to confirm the stall is resolved by the false-active-turn fix.

@@ -64,7 +64,26 @@ Added `Cell<bool>` re-entrancy guard to `SqliteGraphStore`. Three temp-table met
 - SPEC.md updated to document the runtime guard
 - Build: clean. Install: v0.1.62. Tests: 15/15 passed.
 - Commit: `ffd4c01` pushed to main
-<!-- agent:boundary:0cb2771b -->
+
+### Re: #refresh-skip-unchanged-staging — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#refresh-skip-unchanged-staging]
+
+
+Pre-filter unchanged rows before temp-table staging in projection refresh. Row hashes are compared against existing `graph_nodes`/`graph_edges` in Rust; only changed/new rows are INSERTed into `next_graph_nodes`/`next_graph_edges`. A lightweight ID-only temp table (`next_graph_all_node_ids`, `next_graph_all_edge_keys`) tracks all projection IDs for tombstone detection without staging full unchanged rows.
+
+For <1% change rates, this skips ~99% of rows before the expensive multi-row INSERT and delta comparison, targeting <5s refresh.
+
+- `sqlite_stage_all_ids()` populates ID-only tables with all projection node/edge IDs
+- Existing staging functions now accept `&[&GraphNode]`/`&[&GraphEdge]` (filtered slices)
+- Tombstone detection, delete anti-joins, and reused-owner-property queries updated to use all-IDs tables
+- Unchanged counts derived from pre-filter skip counts instead of SQL joins
+- 15/15 tests pass (2 test assertions updated for new phase timing format)
+- SPEC.md updated
+- Commit: `1145dfc` pushed to main
+<!-- agent:boundary:a49dc474 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +97,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#temp-table-audit]~
 - ~do [#sqlite-doc-sync-safety]~
 - ~do [#sqlite-reentrant-guard]~
-- do [#refresh-skip-unchanged-staging]
+- ~do [#refresh-skip-unchanged-staging]~
 - do [#terse-uniform]
 - do [#edge-index-references]
 - do [#degree-cache]
@@ -91,7 +110,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#refresh-skip-unchanged-staging] Pre-staging row-hash comparison to skip unchanged rows before temp INSERT in projection refresh — target <5s for <1% change rates (high)
 - [ ] [#terse-uniform] Audit and enforce TerseGraphNode/TerseGraphEdge on all agent-facing envelope output paths — est 15-25% token reduction (high)
 - [ ] [#edge-index-references] Compress edge output with positional node index references instead of full ID strings — est 30-50% edge token reduction (medium)
 - [ ] [#degree-cache] Pre-compute and cache degree counts for DegreeWeighted ranked_neighborhood scoring (medium)

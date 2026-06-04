@@ -47,7 +47,24 @@ Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` document
 ### Re: queue reactivation — glm-5.1
 
 Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
-<!-- agent:boundary:977283e4 -->
+
+### Re: #sqlite-reentrant-guard — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#sqlite-reentrant-guard]
+
+
+Added `Cell<bool>` re-entrancy guard to `SqliteGraphStore`. Three temp-table methods now assert not-re-entrant at entry and clear the flag at exit: `replace_projection_with_version`, `edges_between_nodes`, `shortest_path_with_max_hops`.
+
+- `temp_table_active: Cell<bool>` field added to struct; initialized `false` in all constructors
+- `assert_not_in_temp_table_section()` panics with diagnostic message on re-entrant call
+- Guard wraps method bodies with set-true / closure / set-false pattern (avoids RAII borrow conflicts with `&mut self`)
+- 2 new tests: `sqlite_reentrant_temp_table_guard_panics` and `sqlite_temp_table_guard_clears_after_method`
+- SPEC.md updated to document the runtime guard
+- Build: clean. Install: v0.1.62. Tests: 15/15 passed.
+- Commit: `ffd4c01` pushed to main
+<!-- agent:boundary:0cb2771b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +77,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#frontier-unique-temp]~
 - ~do [#temp-table-audit]~
 - ~do [#sqlite-doc-sync-safety]~
-- do [#sqlite-reentrant-guard]
+- ~do [#sqlite-reentrant-guard]~
 - do [#refresh-skip-unchanged-staging]
 - do [#terse-uniform]
 - do [#edge-index-references]
@@ -82,7 +99,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#property-sampling] Add property_mode (full|sample|omit) to RankedNeighborhoodOptions for kind-redundant property maps (low)
 - [ ] [#edges-between-batch-optimization] Use IN-clause expansion or session-scoped temp table for small edges_between_nodes ID sets (low)
 - [ ] [#wal-checkpoint-tuning] Add explicit PRAGMA wal_checkpoint(TRUNCATE) after refresh; tune autocheckpoint by projection size (low)
-- [ ] [#sqlite-reentrant-guard] [recommended] Add runtime Cell<bool> guard that panics on re-entrant temp-table calls on same connection (low)
 <!-- /agent:backlog -->
 
 ## Review

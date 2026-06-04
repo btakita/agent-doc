@@ -38,7 +38,30 @@ queue_active: true
 Compacted content:
 - Archived 1 response topic(s): [#q5r1] Implement RemoteOp + per-peer permission allowlist (#39c5)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:632efc5f -->
+
+### Re: [#4cn0] Build Cloudflare Worker signaling server (#yxjw) — opus-4-8
+
+Done (full Worker implementation, per your scope choice). Built the lazily-distributed signaling server as a standalone TypeScript Cloudflare Worker under `signaling/`, committed + pushed to `lazily-rs` `main` (`06fd3c2`).
+
+**Architecture** — one `SignalingRoom` Durable Object per session id (`GET /session/:id` WebSocket upgrade, routed via `idFromName`). Cloudflare guarantees a single global DO per id → a lock-free per-session coordination point; internet-scale comes from sharding sessions across DO instances, not one big server. It's a *discovery + relay* layer only — it never interprets CRDT state.
+
+- `src/protocol.ts` — wire types + untrusted-frame validation. `PeerId` mirrors Rust `PeerId(u64)` (serde serializes as a bare number; guarded ≤ `MAX_SAFE_INTEGER`).
+- `src/permissions.ts` — `SignalingPermissions`, the discovery-layer mirror of `#39c5` `PeerPermissions`: `open` mode, or default-deny `allowlist` mode gating join + per-target signal.
+- `src/room-core.ts` — transport-agnostic `RoomCore` (roster, routing, **anti-spoofing**: `from` is taken from the connection, never the client message).
+- `src/room.ts` — `SignalingRoom` Durable Object (thin WebSocket adapter); `src/index.ts` — Worker entry (`/health` + `/session/:id`).
+
+**Protocol:** client `join`/`offer`/`answer`/`ice`/`relay`/`leave`; server `welcome`/`peer-joined`/`peer-left`/forwarded frames (stamped `from`)/`error`. WebRTC SDP/ICE is brokered for direct P2P channels, with opaque `relay` fallback for CRDT deltas.
+
+**Preset `#spec-test-build-install-commit-push`:**
+- **spec** — new SPEC.md `## Internet-scale peer discovery: signaling server (#yxjw)` section (rationale, protocol, #39c5 permission reuse, reconnect, deferred gates).
+- **tests** — **24 vitest tests, all green**: protocol/permissions/room-core units + an end-to-end Worker + Durable Object + WebSocket test in the real `workerd` runtime (`@cloudflare/vitest-pool-workers`).
+- **build/install** — `npm install` + `npm run check` (tsc typecheck + tests) clean. This is a deployable Worker (`wrangler dev`/`deploy`), not a binary install; `node_modules` is gitignored, `package-lock.json` committed.
+- **commit + push** — `06fd3c2` on `lazily-rs` `main`; added a Node CI job for the Worker.
+
+Note: this introduces a Node/TS toolchain into the repo (the Cloudflare Worker is self-contained under `signaling/`, separate from the Rust crate build). The approved `workerd`/`esbuild` install scripts are recorded in a project-local `allowScripts` block.
+
+Next queue head: `do [#mb9b]` → `#vd5v` (typed-cache lock-free cached reads in ThreadSafeContext).
+<!-- agent:boundary:fcf136a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,9 +70,6 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#4rxf]~
-- ~[#jwwc]~
-- ~[#q5r1]~
 - [#4cn0]
 - do [#mb9b]
 <!-- /agent:queue -->
@@ -57,7 +77,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#4cn0] #yxjw Build Cloudflare Worker signaling server
 - [ ] [#mb9b] #vd5v Leverage typed cache for lock-free cached reads in ThreadSafeContext
 <!-- /agent:backlog -->
 

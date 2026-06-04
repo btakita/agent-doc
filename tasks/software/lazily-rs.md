@@ -188,7 +188,42 @@ The serialization/IPC/distributed question has been fully answered above. No fur
 
 Answered fully above in the "Serialization, IPC, and distributed coordination" and "Internet-friendly coordination" responses. Summary: yes, via separate crate layering (lazily-serde, lazily-ipc, lazily-distributed). P2P with gossip discovery recommended. WebSocket relay for internet use.
 Gating #ipc1, #ipc2, #ipc3 — design-phase items awaiting design documents before implementation.
-<!-- agent:boundary:707f90b9 -->
+
+### Re: WebRTC Data Channel vs WebSocket — glm-5.1
+
+**Yes, WebRTC Data Channel is more efficient for distributed coordination** — but with important caveats.
+
+#### Where WebRTC Data Channel wins
+
+1. **True P2P, no relay hop** — data flows directly between peers after ICE handshake. Signal deltas skip the server entirely, reducing per-message latency by one network round-trip.
+2. **SCTP partial reliability** — configurable reliable, unreliable, timed-retransmit, and limited-retransmit modes. Maps naturally to reactive signals:
+   - Frequent volatile signals (mouse position, animations) → unreliable delivery (stale values get overwritten)
+   - CRDT merge operations → reliable ordered delivery
+   - Invalidation notifications → limited retransmit (retry N times, then drop — the next periodic gossip reconciles)
+3. **Congestion-aware flow control** — SCTP has built-in backpressure, unlike raw WebSocket over TCP where head-of-line blocking can stall signal propagation.
+4. **Lower CPU cost at scale** — no relay server serializing/deserializing every message. At 100+ peers propagating signal deltas, the relay becomes a bottleneck.
+
+#### Where WebSocket wins
+
+1. **Simpler infrastructure** — no STUN/TURN servers, no ICE negotiation. A basic WebSocket relay deploys anywhere HTTP works.
+2. **Firewall traversal** — WebSocket upgrades over HTTP/HTTPS pass through corporate firewalls. WebRTC requires UDP, which many enterprise networks block (requiring TURN relay, which re-introduces the relay bottleneck).
+3. **Connection establishment** — WebSocket: TCP + HTTP upgrade (~1 RTT). WebRTC: ICE gathering + connectivity checks + DTLS handshake (~3-10 RTTs depending on NAT type). For short-lived connections, WebSocket is faster.
+4. **Easier auth/security** — WebSocket inherits HTTP auth (cookies, tokens, TLS client certs). WebRTC DTLS requires certificate exchange via signaling channel, adding complexity.
+
+#### Recommendation for lazily-distributed
+
+**Pluggable transport from day one.** Both transports serve different deployment scenarios:
+
+- `lazily-ipc` MVP: WebSocket relay (simplest path, works everywhere)
+- `lazily-distributed`: add WebRTC Data Channel as a transport backend for P2P mesh topologies
+
+The transport abstraction should expose the same `SignalTransport` trait:
+- `send_delta(node_id, signal_key, delta)` — unreliable-eligible
+- `send_snapshot(node_id, graph_state)` — reliable
+- `on_incoming(callback)` — receive stream
+
+WebRTC becomes the better choice when: peers > 10, latency matters (< 50ms), UDP is reachable, and the deployment model is P2P mesh rather than client-server. WebSocket remains the pragmatic default for controlled deployments and firewall-constrained environments.
+<!-- agent:boundary:87561c1d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,6 +232,7 @@ Gating #ipc1, #ipc2, #ipc3 — design-phase items awaiting design documents befo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Would the WebRTC data channel be more efficient than WebSocket for distributed coordination?
 - do [#ipc1]
 - do [#ipc2]
 - do [#ipc3]

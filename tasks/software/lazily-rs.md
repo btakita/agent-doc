@@ -187,7 +187,8 @@ The serialization/IPC/distributed question has been fully answered above. No fur
 ### Re: Can lazily-rs support serialization? — glm-5.1
 
 Answered fully above in the "Serialization, IPC, and distributed coordination" and "Internet-friendly coordination" responses. Summary: yes, via separate crate layering (lazily-serde, lazily-ipc, lazily-distributed). P2P with gossip discovery recommended. WebSocket relay for internet use.
-<!-- agent:boundary:a95601e5 -->
+Gating #ipc1, #ipc2, #ipc3 — design-phase items awaiting design documents before implementation.
+<!-- agent:boundary:707f90b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -206,14 +207,14 @@ Answered fully above in the "Serialization, IPC, and distributed coordination" a
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
-- [ ] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
-- [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
+- [/] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:review -->
 

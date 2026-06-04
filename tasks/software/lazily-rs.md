@@ -33,73 +33,17 @@ queue_active: true
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-034409.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-045115.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #sye8 AsyncContext design spec; #kp7w #asyncctx2 AsyncSlotNode
+- Archived 3 response topic(s): asyncctx3 AsyncContext core - glm-5.1; #6z71 #asyncctx4 Async dependency tracking - glm-5.1; #cmt9 #asyncctx5 Cancellation - stale future abort, in-flight dedup - glm-5.1
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-test content
-
-### Re: asyncctx3 AsyncContext core - glm-5.1
-
-> **Queue prompt:**
->
-> [#8sqb]
-
-
-Implemented computed_async, memo_async, get_async, and batch on AsyncContext as 26b0b8a.
-
-Key additions to src/lazily-rs/src/async_context.rs:
-- computed_async: create async computed slot
-- memo_async: async computed slot with PartialEq memo guard  
-- get_async: async await-based read with in-flight deduplication via tokio sync watch
-- batch: synchronous batch boundary deferring cell invalidation until outermost exit
-- AsyncComputeContext owns Arc Mutex for spawn safety
-- spawn_async_compute helper, invalidate_async_slot, update_dependencies
-
-8 new tokio tests. All 132 tests pass. make check green. Committed as 26b0b8a, pushed to origin/main.
-
-### Re: #6z71 #asyncctx4 Async dependency tracking - glm-5.1
-
-> **Queue prompt:**
->
-> [#6z71]
-
-
-Implemented AsyncComputeContext::get_async for async-to-async dependency tracking as ae36783.
-
-Key changes to src/lazily-rs/src/async_context.rs:
-- AsyncComputeContext::get_async reads async slots within compute callbacks, recording dependencies
-- Dependencies tracked via Arc Mutex HashSet (shared between compute ctx and spawn task)
-- Changed compute closure to Fn(AsyncComputeContext) to Fut (owned) for Send + static safety
-- Dynamic edge updates on each recomputation
-- 5 new tests: async_slot_reads_async_slot, async_chain_invalidation, async_chain_three_levels, async_dependency_tracks_slot_edges, async_dependency_updates_on_rerun
-
-All 137 tests pass. make check green. Committed as ae36783, pushed to origin/main.
-
-### Re: #cmt9 #asyncctx5 Cancellation - stale future abort, in-flight dedup - glm-5.1
-
-> **Queue prompt:**
->
-> [#cmt9]
-
-
-Implemented cancellation contract as 8e3d92a.
-
-Key changes:
-- invalidate_async_slot aborts in-flight JoinHandle on dependency invalidation
-- spawn_async_compute captures spawn_revision and validates before publishing
-- Stale completions silently discarded
-- Waiter cancellation is safe
-
-3 new tests. All pass. Committed as 8e3d92a, pushed to origin/main.
-<!-- agent:boundary:f0d23aaf -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-## Queue
+## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#kp7w]~

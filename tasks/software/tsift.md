@@ -39,6 +39,11 @@ Compacted content:
 
 ### Re: #surreal-sidecar — glm-5.1
 
+> **Queue prompt:**
+>
+> [ ] [#surreal-nodes-by-kind]
+
+
 Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load_indexes()` on cache-hit opens.
 
 **Changes:**
@@ -59,7 +64,7 @@ Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load
 - `surrealdb_store_sidecar_no_file_for_in_memory`
 
 **Verification:** `make check` — 687 tests pass (all suites green), `cargo install` succeeds, pushed to `main` in both tsift and agent-loop.
-<!-- agent:boundary:de7d1cca -->
+<!-- agent:boundary:76ab93eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +74,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [ ] [#surreal-nodes-by-kind]
+- ~[ ] [#surreal-nodes-by-kind]~
 - [ ] [#surreal-skip-load]
 - [ ] [#surreal-arc]
 - [ ] [#surreal-fixture]
@@ -80,6 +85,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
+- [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
+- [ ] [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)
+- [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
+- [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
+- [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 <!-- /agent:backlog -->
 
 ## Review

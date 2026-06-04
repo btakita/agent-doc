@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -31,28 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-172551.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-174002.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #sqlite-conflict-par; #sqlite-wal-tune; #sqlite-frontier-temp; 2 more
+- Archived 1 response topic(s): #frontier-unique-temp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #frontier-unique-temp — glm-5.1
-
-Implemented in `src/tsift/packages/tsift-sqlite/src/lib.rs:2666-2748`.
-
-**Changes:**
-- Added `static BFS_CALL_ID: AtomicU64` counter at module level
-- `shortest_path_with_max_hops` now generates a unique temp table name per call: `_tsift_frontier_{call_id}` using `AtomicU64::fetch_add`
-- All SQL statements (CREATE, SELECT, INSERT, DELETE, DROP) reference the unique table name via format strings stored in local variables
-- Replaced early returns inside the BFS loop with a `found_path` accumulator + `break` pattern, ensuring the DROP TABLE cleanup always runs
-- Also fixed a pre-existing `clippy::useless_format` warning in the `score_expr` match arm
-
-**Verification:**
-- `cargo clippy -p tsift-sqlite --all-targets -- -D warnings` — clean
-- `cargo test -p tsift-sqlite` — 13/13 pass
-- Committed as `334ca03`
-<!-- agent:boundary:a7b9d01c -->
+<!-- agent:boundary:5b3c3e41 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,6 +46,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- do [#frontier-unique-temp]
+- do [#temp-table-audit]
+- do [#sqlite-doc-sync-safety]
+- do [#sqlite-reentrant-guard]
 <!-- /agent:queue -->
 
 ## Backlog

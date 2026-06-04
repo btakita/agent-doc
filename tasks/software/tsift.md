@@ -51,7 +51,16 @@ Completed `#source-body-cap`: body preview token cap for source-read/symbol-read
 - Both source-read and symbol-read apply token cap; `expand.body` emitted when truncated
 - SPEC.md updated; 12 unit tests added; all 592 tests pass
 - Committed + pushed: `cbea35f`
-<!-- agent:boundary:1f92a295 -->
+
+### Re: #diff-parse-cap — glm-5.1
+
+Completed `#diff-parse-cap`: default max_parsed_files to 25 in standalone diff-digest.
+
+- Added `--max-parsed-files` CLI arg (default 25) to diff-digest command
+- `--max-parsed-files 0` opts out (unlimited tree-sitter parsing)
+- Updated SPEC.md with flag documentation and behavior description
+- All 592 tests pass; built + installed + pushed: `d1a3be6`
+<!-- agent:boundary:2c4f52e1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +87,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#diff-parse-cap] Default max_parsed_files to 20-30 in standalone diff-digest — unlimited tree-sitter parsing on large working-tree diffs is wasteful; opt out with --max-parsed-files 0 (medium)
 - [ ] [#evidence-page] Cursor-based evidence pagination — single 6k-token cap either floods or cuts aggressively; incremental paging lets agents expand on demand (medium)
 - [ ] [#packet-cache-evict] Add cycle packet cache eviction to tsift status --fix — no TTL/size/cleanup policy exists for .tsift/cycle-packet-cache/ (low)
 - [ ] [#terse-edge-codes] Map common edge kinds to short codes in ultra-terse — calls->c, defines->d, etc; strip provenance/freshness for further compression (low)

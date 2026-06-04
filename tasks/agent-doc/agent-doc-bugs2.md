@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -102,10 +102,12 @@ model = "gpt-4o"
 - Agent-specific override → top-level `[vision]` → env vars (`AGENT_DOC_VISION_*`, `OPENAI_API_KEY`) → defaults
 
 Queue drained — no remaining items.
-<!-- agent:boundary:14ed3433 -->
+Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
+<!-- agent:boundary:9b1a5d4d -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
 <!-- /agent:queue -->
 ###
 <!--

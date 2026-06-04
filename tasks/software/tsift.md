@@ -36,7 +36,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): #astnav-autoindex-oc auto-reindex on plugin load; surrealdb vs sqlite benchmark results
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:71772168 -->
+
+### Re: BENCHMARKS.md created with benchmark results — glm-5.1
+
+> **Queue prompt:**
+>
+> Please create a BENCHMARKS.md file. Add the sqlite vs surrealdb benchmark results
+
+
+Created `src/tsift/BENCHMARKS.md` with:
+
+- **SQLite vs SurrealDB (2026-06-02):** Aggregate workloads, refresh/load, and promotion verdict (hold). SurrealDB ~220x slower on real workload, 6.5x faster on full-projection refresh, competitive on full-projection total, and faster on synthetic high-degree and deep-chain.
+- **Multi-Backend Comparison (2026-05-24 fixture):** SQLite, DuckDB/DuckPGQ, FalkorDB, Kuzu, Ladybug totals for full-projection and real workloads from `fixtures/graph-db-performance-history.json`. Per-operation breakdown showing SQLite dominates hot reads (sub-ms) while candidates show faster refresh/projection load.
+- **Synthetic workloads:** Deep-chain and high-degree totals across all backends.
+- **Run command** for reproducing benchmarks.
+
+Verification: `make check` passes all 695 tests. Pre-existing `surrealdb_store_multi_process_reader_writer_lock` race condition unrelated to this change (markdown-only file).
+<!-- agent:boundary:d2b2cc1f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +62,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- Please create a BENCHMARKS.md file. Add the sqlite vs surrealdb benchmark results
+- ~Please create a BENCHMARKS.md file. Add the sqlite vs surrealdb benchmark results~
 - [#ehj2]
 <!-- /agent:queue -->
 

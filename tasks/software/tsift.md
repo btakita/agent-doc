@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -52,7 +52,26 @@ Created `src/tsift/BENCHMARKS.md` with:
 - **Run command** for reproducing benchmarks.
 
 Verification: `make check` passes all 695 tests. Pre-existing `surrealdb_store_multi_process_reader_writer_lock` race condition unrelated to this change (markdown-only file).
-<!-- agent:boundary:d2b2cc1f -->
+
+### Re: #ehj2 deferred index load regression test — glm-5.1
+
+> **Queue prompt:**
+>
+> [#ehj2]
+
+
+Added `surrealdb_store_deferred_index_load_regression` test in `packages/tsift-surrealdb/src/lib.rs:2056`.
+
+The test verifies that `from_rows_file_backed()` correctly populates all hot-read indexes without calling `load_indexes()`:
+
+1. **Node indexes:** `graph_counts()`, `nodes_by_kind("symbol")`, `node()` lookups all return correct results
+2. **Edge indexes:** `edge()` by stable id, `outgoing_edges()` with kind filter, `incident_edges()` with kind filter
+3. **Path traversal:** `shortest_path()` resolves through the derived index
+4. **Row hash persistence:** `stored_row_hash()` is set, sidecar file exists
+5. **Reopen correctness:** `open()` reopens and all indexes remain valid via sidecar or fallback
+
+Verification: `cargo test -p tsift-surrealdb --lib` — 20/20 pass (pre-existing `multi_process_reader_writer_lock` race excluded).
+<!-- agent:boundary:9f858ad7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,15 +80,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~Please create a BENCHMARKS.md file. Add the sqlite vs surrealdb benchmark results~
-- [#ehj2]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ehj2] #surreal-skip-load-test Add regression test for deferred index load
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 <!-- /agent:backlog -->
 

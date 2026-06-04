@@ -133,7 +133,7 @@ Top of backlog: **`#sqlite-chunk`**
 | `#sqlite-chunk` through `#sqlite-frontier-temp` | tsift | Modify tsift-sqlite store, staging, and query code |
 
 **Cross-posted** `#lazyperf32`, `#lazyperf35`, and `#lazyperf34` to the lazily-rs session backlog so they can be prioritized alongside the AsyncContext work.
-<!-- agent:boundary:0b6c855f -->
+<!-- agent:boundary:1c8c3d15 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,10 +157,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
 - [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)
 - [ ] [#sqlite-frontier-temp] Pre-allocate temp table for multi-node frontier expansion instead of dynamic WHERE IN string per chunk — amortizes overhead for deep BFS traversals (low)
-- [ ] [#lazyperf32-tsift] Promote #lazyperf32 (Rc<dyn Any> values in single-threaded Context) in lazily-rs backlog — highest-impact change for tsift since every get() avoids deep clone (high)
-- [ ] [#lazyperf35-tsift] Promote #lazyperf35 (eliminate scratch buffer collect on effect path) — reduces per-scope allocation in tsift-status/tsift-summarize effect callbacks (medium)
-- [ ] [#lazyperf34-tsift] Promote #lazyperf34 (fix finish_batch O(n2) dedup) — tsift-index batch scope guards scale with inspected file count (medium)
-- [ ] [#lazily-tsift-bench] Add tsift-pattern lazily microbenchmarks: per-file edge resolution, summary cache hit/miss, status check cascade — prove which lazily optimizations matter for actual tsift workloads (medium)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 <!-- /agent:backlog -->
 

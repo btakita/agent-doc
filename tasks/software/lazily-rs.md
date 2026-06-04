@@ -38,7 +38,8 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): #sye8 AsyncContext design spec; #kp7w #asyncctx2 AsyncSlotNode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:76421fcd -->
+test content
+<!-- agent:boundary:046e6f08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,7 +60,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#8sqb] `#asyncctx3` AsyncContext core — computed_async, get_async (.await-based read), batch support
 - [ ] [#6z71] `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
 - [ ] [#cmt9] `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
 - [ ] [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change

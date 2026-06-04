@@ -30,86 +30,12 @@ Queue drain complete: 8 consumed. Session needs compact.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-022100.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-023959.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #jb-stale-busy-idle-footer + #clear-stops-running-process; queue processing
+- Archived 9 response topic(s): #jb-stale-busy-idle; queue fixup; #adoc-queue-ipc-buffer; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #jb-stale-busy-idle — glm-5.1
-
-Already shipped. Git confirms: `e3b1af769` (submodule pointer + plan) and `cc72dbf68` (gated to review). Status line confirms "Codex stale-busy bottom-idle fix shipped." Striking from queue.
-queue fixup: struck #jb-stale-busy-idle
-
-### Re: queue fixup — glm-5.1
-
-Queue housekeeping: struck `#jb-stale-busy-idle` (already shipped per `e3b1af769`/`cc72dbf68`), re-enabled `queue_active: true` after halt from inter-cycle head modification. Next head: `#adoc-queue-ipc-buffer`.
-
-### Re: #adoc-queue-ipc-buffer — glm-5.1
-
-> **Queue prompt:**
->
-> #adoc-queue-ipc-buffer
-
-
-Still gated on IPC capture session #6cmx (Path B). Review entry `#5qhn` confirms: "consume->halt cycle with no recurring agent:queue diff (stays open: gated on IPC capture session #6cmx)." Root cause #2 landed in submodule `c483080a` but LOG REVIEW 2026-06-03 found no clean consume->halt cycle. No new evidence since last review. Striking from queue; implementation blocked until #6cmx capture session runs.
-
-### Re: #codex-network-access-opencode — glm-5.1
-
-> **Queue prompt:**
->
-> #codex-network-access-opencode
-
-
-Already implemented. The warning guard exists at `preflight.rs:1854-1870`: when `codex_network_access` is set in frontmatter and the active harness is not Codex, preflight emits a `codex_network_access_non_codex_harness` warning with diagnostic message and code. Test coverage at `preflight.rs:9822-9846` confirms the guard fires for `agent: opencode` + `codex_network_access: enabled`. Option (a) from the review (warn/ignore) is satisfied. Option (b) (suppress emission into session config) would be a stronger follow-up but is not required — the env var `CODEX_SANDBOX_NETWORK_DISABLED` is harmless for non-Codex agents. Striking from queue.
-
-### Re: do [#gyma] #prompt-duplicated-while-typing — glm-5.1
-
-> **Queue prompt:**
->
-> do [#gyma]
-
-
-Partially fixed (prefix-agnostic dedup shipped), but structural remainder still gated on live IPC capture session #6cmx (Path B). The plan at `plan-prompt-duplicated-while-typing.md` confirms: the buffer-snapshot race (L1 — exclude live post-boundary user text from synthesized patch) needs live instrumentation to capture the race before Option A implementation is safe. No new evidence since LOG REVIEW 2026-06-03. Cannot implement further without the captured trace. Gating as blocked on #6cmx.
-
-### Re: do [#5qhn] #adoc-queue-ipc-buffer-divergence — glm-5.1
-
-> **Queue prompt:**
->
-> do [#5qhn]
-
-
-Same gate as #gyma: blocked on IPC capture session #6cmx (Path B). Root cause #2 landed in submodule `c483080a` but LOG REVIEW 2026-06-03 found no clean consume->halt cycle. Cannot proceed without live capture evidence. Gating as blocked on #6cmx.
-
-### Re: do [#sxjj] #cancel-orphans-preflight-cycle — glm-5.1
-
-> **Queue prompt:**
->
-> do [#sxjj]
-
-
-Deferred — plan at `plan-cancel-orphans-preflight-cycle.md` is triage-capture only and explicitly says "no code changes until the cancel-signal seam (Option A) vs. shortened-reclaim (Option B) is chosen." Option A (JB cancel → FFI/IPC signal → abandon `preflight_started` cycle) is recommended but needs operator confirmation before a multi-component change (JB plugin + Rust binary). The binary's current fail-closed behavior is correct; this is a UX improvement, not a data-safety fix. Gating as awaiting design decision.
-
-### Re: console stdout bleeds behind OpenCode TUI — glm-5.1
-
-> **Queue prompt:**
->
-> the console stdout bleeds behind opencode tui ![img_19.png](img_19.png)
-
-
-Added to review as `#opencode-stdout-bleed-tui`. Cannot view `img_19.png` (no image support). Previous report `img_16.png` noted in commented-out section. Likely a tmux/alternate-screen rendering issue. Needs vision-capable session to diagnose. Related to `#img-review`.
-
-**Session accretion warn (62 lines, 7 sections, 8 cycles). Recommend compacting before continuing.**
-
-### Re: lazily-rs.md tmux window crashed — glm-5.1
-
-> **Queue prompt:**
->
-> lazily-rs.md tmux window crashed and auto-restarted
-
-
-Added to review as `#lazily-rs-tmux-crash`. Transient — low priority unless recurring. Queue drained.
-<!-- agent:boundary:870ffd18 -->
+<!-- agent:boundary:86f15830 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

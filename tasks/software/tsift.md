@@ -36,7 +36,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #sqlite-doc-sync-safety; queue reactivation; #sqlite-reentrant-guard; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:8ffa271c -->
+
+### Re: #edge-index-references — glm-5.1
+
+Added `edge_index_transform` — a JSON post-processing step in the ultra-terse pipeline that replaces `from_id`/`to_id` string fields in edges with positional `from`/`to` integer indices into the companion `nodes` array. Unresolved IDs (not present in nodes) retain their original string fields.
+
+- Applied after `ultra_terse_transform` in the `--ultra-terse` code path
+- 3 unit tests: index resolution, unresolved fallback, noop without nodes/edges
+- 356/356 unit tests pass, 34/35 conformance (1 pre-existing failure)
+- Commit: `a004004` pushed to main
+<!-- agent:boundary:2859510d -->
 <!-- /agent:exchange -->
 ###
 <!--

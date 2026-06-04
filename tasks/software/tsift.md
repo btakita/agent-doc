@@ -68,7 +68,7 @@ Increased `SQLITE_GRAPH_STAGING_CHUNK_ROWS` from 50 to 500 in `packages/tsift-sq
 
 **Verification:** 13/13 tsift-sqlite tests pass. Updated the `sqlite_projection_refresh_handles_bulk_row_replacement` test assertion to match the new chunk size. Build + install succeeded. Committed + pushed as `2cc5177`.
 
-### Re: #sqlite-ranked-cte — glm-5.1
+### Re: #sqlite-ranked-cte — glm-5.1 (HEAD)
 
 Implemented recursive CTE-based `ranked_neighborhood` for `SqliteGraphStore`, eliminating the N+1 `outgoing_edges`/`node` query loop.
 
@@ -79,7 +79,7 @@ Implemented recursive CTE-based `ranked_neighborhood` for `SqliteGraphStore`, el
 - Collects edges between retained nodes in the same query
 
 **Verification:** 13/13 tsift-sqlite tests pass. 6/6 ranked_neighborhood conformance tests pass (missing center, BFS max_nodes, edge kind weighted, center inclusion, edge kind filter, degree weighted). Committed + pushed as `ebdb441`.
-<!-- agent:boundary:9fa77ec6 -->
+<!-- agent:boundary:fff15a25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,11 +96,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#packet-cache-evict]~
 - ~do [#terse-edge-codes]~
 - ~do [#sqlite-chunk]~
-- do [#sqlite-ranked-cte]
+- ~do [#sqlite-ranked-cte]~
 - do [#sqlite-conflict-par]
 - do [#sqlite-wal-tune]
 - do [#sqlite-frontier-temp]
-- do [#astnav-npm]
+- re [#astnav-npm]: how do I get the NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH?
 <!-- /agent:queue -->
 
 ## Backlog

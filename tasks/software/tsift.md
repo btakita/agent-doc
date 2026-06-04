@@ -36,7 +36,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #source-body-cap; #diff-parse-cap; #evidence-page; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:8f4650e8 -->
+
+### Re: #terse-edge-codes — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#terse-edge-codes]
+
+
+Implemented terse edge kind abbreviation in ultra-terse mode.
+
+**Changes:**
+- Added `abbreviate_edge_kind()` in `lib.rs` — maps 37 common edge kinds to short codes (calls->c, defines->d, contains->ct, imports->i, mentions->m, etc.)
+- Updated `ultra_terse_transform()` to apply edge kind compression on graph edge `k` fields + strip provenance/freshness from edges
+- Updated SPEC.md ultra-terse section with edge kind abbreviation docs and updated expected savings to ~30-50%
+
+**Files changed:** `packages/tsift-cli/src/lib.rs`, `SPEC.md`
+
+**Verification:** 9/9 ultra-terse tests pass (including 3 new: `ultra_terse_abbreviates_edge_kinds`, `ultra_terse_strips_provenance_freshness_from_edges`, updated `ultra_terse_strips_properties_from_graph_edges`). Build + install succeeded. Committed + pushed as `c376242`.
+<!-- agent:boundary:55662c45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +69,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#diff-parse-cap]~
 - ~do [#evidence-page]~
 - ~do [#packet-cache-evict]~
-- do [#terse-edge-codes]
+- ~do [#terse-edge-codes]~
 - do [#sqlite-chunk]
 - do [#sqlite-ranked-cte]
 - do [#sqlite-conflict-par]
@@ -63,7 +81,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#terse-edge-codes] Map common edge kinds to short codes in ultra-terse — calls->c, defines->d, etc; strip provenance/freshness for further compression (low)
 - [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)
 - [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)
 - [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)

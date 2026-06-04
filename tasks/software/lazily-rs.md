@@ -47,7 +47,18 @@ Implemented effect_async with cleanup and rerun support as b9999ba.
 ### Re: queue-drain #eek4 cleanup — glm-5.1
 
 Struck completed #eek4 (#asyncctx6) from queue, reaped from backlog. Queue continues with #r25x.
-<!-- agent:boundary:fe1b2942 -->
+
+### Re: #lazyperf32 get_rc/get_cell_rc — glm-5.1
+
+Added `get_rc()` and `get_cell_rc()` to `Context`, returning `Rc<T>` instead of cloning `T`. Since values are already stored as `Rc<dyn Any>`, these methods only clone the `Rc` pointer (reference count bump) and downcast — no deep clone. Also works for types that don't implement `Clone`.
+
+Changes:
+- `src/context.rs`: `get_rc<T: 'static>` and `get_cell_rc<T: 'static>` methods
+- `SPEC.md`: documented new API entries
+- `tests/spec_compliance.rs`: 6 new tests (Rc identity, no-Clone types, dependency tracking)
+
+All 101 tests pass, `make check` green. Committed as 5919a9b, pushed.
+<!-- agent:boundary:43c28b08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +71,7 @@ Struck completed #eek4 (#asyncctx6) from queue, reaped from backlog. Queue conti
 - ~[#8sqb]~
 - ~[#6z71]~
 - ~[#cmt9]~
-- [#eek4]
+- ~[#eek4]~
 - [#r25x]
 - [#35fc]
 <!-- /agent:queue -->
@@ -70,7 +81,6 @@ Struck completed #eek4 (#asyncctx6) from queue, reaped from backlog. Queue conti
 <!-- agent:backlog queue -->
 - [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests
 - [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
-- [ ] [#lazyperf32] Rc<dyn Any> values in single-threaded Context — highest-impact for tsift: every get() avoids deep clone (high)
 - [ ] [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
 - [ ] [#lazyperf34] Fix finish_batch O(n2) dedup with sort-dedup — tsift-index batch scope guards scale with file count (medium)
 <!-- /agent:backlog -->

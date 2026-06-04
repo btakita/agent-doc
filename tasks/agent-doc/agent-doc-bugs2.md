@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -29,45 +29,16 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-184821.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-191128.md`*
 
 Compacted content:
-- Archived 3 response topic(s): queue_active flip on JB Run Agent Doc; do #tn34; do #pr5t
+- Archived 3 response topic(s): queue_active flip on JB Run Agent Doc; do #tn34; do #tn34
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: queue_active flip on JB Run Agent Doc — glm-5.1
-
-Acknowledged (from previous cycle): `queue_active` should flip to `true` when JB Run Agent Doc is invoked on a document whose queue has the `auto` attribute. Queue auto-struck the already-resolved `do [#pr5t]` head and activated correctly.
-
-### Re: do #tn34 — glm-5.1
-
-**Implemented, tested, and pushed.** The finalize closeout now absorbs mid-exchange user prompts into the committed blob via the out-of-band mutation classifier.
-
-Root cause: `snapshot_persist_mode` chose `ContentOurs` (baseline + response, no user edits) when detecting prompt-bearing drift, so `git::commit()` staged only the snapshot — leaving user prompts as uncommitted working-tree drift.
-
-Fix: added `is_safe_exchange_user_prompt_insert()` in `git.rs` which detects the pattern where the file exchange differs from the snapshot only by user prompt lines inserted before the response heading and boundary. The `classify_safe_agent_doc_mutation` function now accepts this as a safe `exchange` mutation, allowing the existing absorb path in `commit_with_outcome()` to save the full file content (including user prompts) as the snapshot before staging.
-
-Safety checks: rejects insertions after the response, rejects deletions/modifications, rejects insertions containing agent markers or response headings, requires the suffix to contain a response heading.
-
-8 new tests: basic insert, after-response rejection, deletion rejection, agent marker rejection, no-boundary case, identical content, multiline prompts, classify integration. All 94 git module tests pass.
-
-Submodule commit `bfea9dad`, superproject `05286a82e`, pushed.
-
-### Re: do #tn34 — glm-5.1
-
-> **Queue prompt:**
->
-> queue_active should flip to true on JB `Run Agent Doc` with queue having `auto`
-
-
-Implemented and pushed in prior attempt. Submodule `bfea9dad`, superproject `05286a82e`.
-<!-- agent:boundary:d8cafcfc -->
+<!-- agent:boundary:0594a366 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~queue_active should flip to true on JB `Run Agent Doc` with queue having `auto`~
-- do [#tn34]
-- ~do [#pr5t]~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.
 <!-- /agent:queue -->
 ###
 <!--

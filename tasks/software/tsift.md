@@ -36,7 +36,30 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): #surreal-warm; #surreal-delta; #surreal-multiproc; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:13f37cb1 -->
+
+### Re: #surreal-sidecar — glm-5.1
+
+Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load_indexes()` on cache-hit opens.
+
+**Changes:**
+- `packages/tsift-surrealdb/src/lib.rs`: Added `SidecarData` struct, `try_load_sidecar()`, `write_sidecar()`, and `sidecar_path()` helper. `open_with_runtime()` now tries the sidecar before falling back to `load_indexes()`. `open_or_refresh()` writes sidecar after refresh. `clear()` removes the sidecar. In-memory stores set `path: None` and skip sidecar I/O entirely.
+- `SPEC.md`: Added "Index sidecar" paragraph after "Delta projection refresh" documenting the sidecar validation, write, and fallback contract.
+
+**Sidecar design:**
+- File: `<store_path>.index-sidecar` (JSON, adjacent to SurrealKV directory)
+- Validation: sidecar's `stored_row_hash` must match current SurrealDB metadata hash
+- On mismatch/corruption/missing: transparent fallback to `load_indexes()` from SurrealDB
+- Edges stored as `Vec<GraphEdge>` (JSON-safe), indexes rebuilt via `SurrealEdgeIndexes::insert()` on load
+- Removed on `clear()`, skipped for in-memory stores
+
+**Tests (4 new, 18 total pass):**
+- `surrealdb_store_sidecar_skips_load_on_cache_hit`
+- `surrealdb_store_sidecar_invalidated_on_refresh`
+- `surrealdb_store_sidecar_corrupted_falls_back_to_load`
+- `surrealdb_store_sidecar_no_file_for_in_memory`
+
+**Verification:** `make check` — 687 tests pass (all suites green), `cargo install` succeeds, pushed to `main` in both tsift and agent-loop.
+<!-- agent:boundary:de7d1cca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,32 +68,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- [#surreal-sidecar]
-- [#surreal-nodes-by-kind]
-- [#surreal-skip-load]
-- [#surreal-arc]
-- [#surreal-fixture]
-- [#surreal-dashmap]
-- [#surreal-batch-bfs]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- [ ] [#surreal-nodes-by-kind]
+- [ ] [#surreal-skip-load]
+- [ ] [#surreal-arc]
+- [ ] [#surreal-fixture]
+- [ ] [#surreal-dashmap]
+- [ ] [#surreal-batch-bfs]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
-- [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
-- [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
-- [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)
-- [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
-- [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
-- [ ] [#surreal-sidecar] Persist BTreeMap indexes to sidecar file; skip load_indexes() on cache-hit opens (high)
-- [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
-- [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
-- [ ] [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)
-- [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
-- [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
-- [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 <!-- /agent:backlog -->
 
 ## Review

@@ -86,7 +86,7 @@ Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt test
 
 No code changes needed. Marking this plan as complete.
 
-### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
+### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6 (HEAD)
 
 
 Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
@@ -104,7 +104,7 @@ Not a routing bug — both panes were genuinely busy with active OpenCode turns.
 
 No code changes needed. Queue drains once active OpenCode turns complete.
 
-### Re: Stale busy state + queue_active flip — opus-4-6
+### Re: Stale busy state + queue_active flip — opus-4-6 (HEAD)
 
 
 I was wrong. You're right — the panes were idle.
@@ -121,7 +121,7 @@ I was wrong. You're right — the panes were idle.
 
 Both added to backlog as backlog items.
 
-### Re: Backlog items + new bugs — opus-4-6
+### Re: Backlog items + new bugs — opus-4-6 (HEAD)
 
 Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
 
@@ -137,7 +137,7 @@ Both added to backlog. The `no-pending-capture` was my error.
 
 Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
 
-### Re: Queue item processing — glm-5-1
+### Re: Queue item processing — glm-5-1 (HEAD)
 
 **#ens4 opencode-idle-context-bar-false-busy:** Implemented and tested. OpenCode idle pane with `⬝` context-usage-bar + `esc interrupt` keybinding hint no longer misclassified as busy. Added `is_opencode_context_bar_line`, `is_opencode_idle_keybinding_hint_line`, `is_opencode_footer_version_line` to harness idle chrome detection. Added bottom-N fallback in `live_pane_prompt_ready`. 5 new tests, all 2732 pass. Binary rebuilt and installed.
 
@@ -150,7 +150,63 @@ Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue
 **#54pz log search:** `normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
 
 **do plan-lazily-rs-queued-prompt-patchback-miss.md:** Plan exists. Deferring to next cycle.
-<!-- agent:boundary:3ed0a701 -->
+
+### Re: Queue assessment + #stash-session-ttl-prune wiring — glm-5-1 (HEAD)
+
+Assessed 16 queue items. Summary of actionable state:
+
+**Already done (auto-struck by preflight):** #ens4 (opencode-idle-context-bar-false-busy), #3eea (jb-run-activate-queue), #7qfw (jb-color-highlighting-disk-load).
+
+**Implemented this cycle:**
+
+#### #stash-session-ttl-prune — wired idle signal + config knob + report-only
+
+Added `apply_stash_ttl_prune()` in `resync.rs:2513-2592`:
+
+1. **Config knob** — `stash_session_ttl_secs` (u64, default 0 = disabled) and `stash_session_ttl_prune_enabled` (bool, default false) in `ProjectConfig` (`project_config.rs:176-185`). Set in `.agent-doc/config.toml`.
+2. **Idle signal wiring** — queries `#{window_activity}` for stash windows, computes `idle_secs = now - window_activity`, builds `StashTtlCandidate` list from registered panes and live supervisors.
+3. **Report-only by default** — when `stash_session_ttl_prune_enabled = false` (default), logs `stash_ttl_prune_candidate` to ops_log and prints to stderr without killing. Enable `stash_session_ttl_prune_enabled = true` in config for destructive kill.
+4. **Wired into `resync --fix`** — runs after `purge_orphaned_agent_panes`.
+
+Usage in `.agent-doc/config.toml`:
+```toml
+stash_session_ttl_secs = 3600   # 1 hour idle threshold
+# stash_session_ttl_prune_enabled = true  # uncomment to enable kill
+```
+
+Tests: 5 existing decision-core tests pass. 2252 total orchestration tests green. Binary rebuilt and installed.
+
+**Remaining work (live verification):** After configuring the TTL, run `agent-doc resync --fix` in report-only mode, check ops_log for candidates, then enable destructive mode.
+
+**New backlog items added:** #opencode-image-support, #jb-init-from-claim, #jb-backlog-queue-populate.
+
+#### Unregistered stash panes (%79, %66)
+
+Intentional `skipping kill` — live supervisors prevent reaping. With `stash_session_ttl_prune` now wired, you can configure a TTL to reap these after they go idle:
+```bash
+# Add to .agent-doc/config.toml:
+# stash_session_ttl_secs = 3600
+# Then run:
+agent-doc resync --fix
+```
+
+#### #54pz log search
+
+`normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
+
+#### do plan-lazily-rs-queued-prompt-patchback-miss.md
+
+Plan exists. Deferring to next cycle — needs design decisions on free-text queue-head provenance.
+
+#### Stale busy state + queue_active flip
+
+Both bugs now fixed by #ens4 and #3eea (shipped in prior cycle). No further code changes needed.
+
+#### Backlog queue not populating from backlog items
+
+Added as #jb-backlog-queue-populate. The route path needs to scan backlog items with `queue` attribute and populate `agent:queue` before reporting nothing to process.
+<!-- agent:boundary:62791aa8 -->
+<!-- agent:boundary:4f8bde28 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -175,9 +231,10 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 [route] authoritative actor generation 113 for tasks/software/tsift.md is busy on pane %83; queued pending dispatch "Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
 ---
-- Last response left 2 `agent:boundary` elements.
+- There are 3 `agent:boundary` elements. None of the queue items are marked done from the last run.
 - #opencode-idle-context-bar-false-busy and #jb-run-activate-queue were not added to the backlog even though the response said they were.
 - #opencode-idle-context-bar-false-busy
+- JB `Run Agent Doc` on lazily-rs.md removed the queue items and did not execute the items.
 - #jb-run-activate-queue
 - JB `Run Agent Doc` stalled for monsterrodholders.md. `Ran agent-doc again. It found no changes in tasks/monsterrodholders.md, so there was nothing to process.` but the queue had auto set. `queue_active: false` was set, but we should make this flag flip to true if JB `Run Agent Doc` is called and there are no other changes.
 - JB `Run Agent Doc` on monsterrodholders.md where there was an empty queue and a backlog with `queue` attribute should have poplated the queue then ran through the queue. Instead nothing happened.
@@ -185,10 +242,13 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 - The JB plugin loses color highlighting and backgrounds when a document is loaded in disk...such as by navigating to a document or from a `File Cache Conflict`. ![img_20.png](img_20.png)
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
-- 
-- do [#ens4]
-- do [#3eea]
-- do [#7qfw]
+- Fix `agent-doc image` support for opencode. See #jb-color-highlighting-disk-load
+- Add a way to run `agent-doc init` from the JB plugin menu. JB `Claim for Tmux Pane` should call `agent-doc init` if there is no claiming pane and the document is no setup with agent-doc. 
+- do #jb-color-highlighting-disk-load
+- ~do [#ens4]~
+- ~do [#3eea]~
+- ~do [#7qfw]~
+- do #stash-session-ttl-prune
 <!-- /agent:queue -->
 ###
 <!--
@@ -203,6 +263,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#takv] #opencode-image-support Fix agent-doc image/describe-image support for opencode. Currently only supports OpenAI and Anthropic providers. Needs OpenCode-specific vision provider or passthrough. See #jb-color-highlighting-disk-load
+- [ ] [#xrm7] #jb-init-from-claim Add agent-doc init from JB plugin menu. JB Claim for Tmux Pane should call agent-doc init if the document has no agent-doc setup (no agent_doc_session frontmatter), then proceed with claim. New menu action for standalone init.
+- [ ] [#qmg2] #jb-backlog-queue-populate JB Run Agent Doc should populate queue from backlog items with queue attribute when queue is empty, then run through the queue. Currently reports nothing to process.
 <!-- /agent:backlog -->
 
 ## Review
@@ -254,22 +317,21 @@ What are #next-steps to fix bugs?
 44. [/] [#codex-owned-pane-prompt-miss-followups] [recommended] LOG REVIEW 2026-06-03 second pass partial: current preflight emitted owned_pane_self_invocation for this Codex-owned agent-doc-bugs2.md queue head, and ops.log shows a consumed direct-pane route at 1780461425 plus later queue_continuation_required entries. Missing proof remains: Stop-hook failure on missing assistant body and same-pane unresolved-prompt response proof. Keep open. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 45. [/] [#codex-owned-pane-auto-queue-stuck] [recommended] LOG REVIEW 2026-06-03 second pass partial: current owned-pane preflight and queue_continuation_required logs prove the active auto-queue head is visible to the owning Codex pane, but no log proves the head was handed off early and drained without recursive-dispatch deadlock. Keep open for queue-target proof and no-drift guard evidence. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 46. [/] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
-47. [/] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
-48. [/] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
-49. [/] [#codex-final-response-live-verify] [recommended] LOG REVIEW 2026-06-03 second pass partial: Codex logs show normal successful final-gate/session-check paths, but no negative-case log where a missing response body fails closed with recovery guidance. Keep open until the missing-response failure path is observed.
-50. [/] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
-51. [/] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
-52. [/] [#clear-stops-running-process] [recommended] LOG REVIEW 2026-06-03 confirms the bug still reproduces: ops.log records session_clear_live_busy_guard_blocked for tasks/software/tsift.md pane %62 with reason=opencode_active_turn while the tail shows ctrl+p commands at 1780458150, 1780459867, and 1780460259. Keep open; Clear did not stop or repair the busy projection.
-53. [/] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
-54. [/] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
-55. [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
-56. [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
-57. [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
-58. [/] [#adoc-queue-ipc-buffer-divergence] Root cause #2 IMPLEMENTED (submodule c483080a; pointer 4703f9788), but LOG REVIEW 2026-06-03 denies live completion: ops.log still shows ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight for agent-doc-bugs2.md and recurring queue_diff_active_prompt_differs. No clean consume->halt cycle with no recurring agent:queue diff was found. Keep open. Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
-59. [/] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
-60. [/] [#prompt-duplicated-while-typing] [/] [#prompt-duplicated-while-typing] User prompt duplication prevention remains partially fixed. LOG REVIEW 2026-06-03 partial: logs show live_prompt_drift_after_preflight blocks and IPC proof insufficiency, so the guard catches some drift, but no fresh typing-during-cycle reverify log proves no duplicate prompt insertion. Keep open. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
-61. [/] [#queue-auto-no-continue] LOG REVIEW 2026-06-03 second pass not resolved: ops.log now shows queue_continuation_required for tasks/agent-doc/agent-doc-bugs2.md at 1780462610 with this review prompt as head, but still no proof of auto-continuing through pending-shadow/session-check warning classes. Keep open.
-62. [/] [#snrun] [recommended] IMPLEMENTED 2026-06-01 (submodule 12676120), but LOG REVIEW 2026-06-03 denies live completion: tsift.md routed reopen still logs prompt_ready_barrier outcome=failed_closed reason=dispatch_only_busy_actor_not_ready at 1780458558 and 1780459050, not the dedicated interactive-substate guard reason. Keep open for the live JB repro. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
+47. [/] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
+48. [/] [#codex-final-response-live-verify] [recommended] LOG REVIEW 2026-06-03 second pass partial: Codex logs show normal successful final-gate/session-check paths, but no negative-case log where a missing response body fails closed with recovery guidance. Keep open until the missing-response failure path is observed.
+49. [/] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
+50. [/] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
+51. [/] [#clear-stops-running-process] [recommended] LOG REVIEW 2026-06-03 confirms the bug still reproduces: ops.log records session_clear_live_busy_guard_blocked for tasks/software/tsift.md pane %62 with reason=opencode_active_turn while the tail shows ctrl+p commands at 1780458150, 1780459867, and 1780460259. Keep open; Clear did not stop or repair the busy projection.
+52. [/] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
+53. [/] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
+54. [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
+55. [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
+56. [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
+57. [/] [#adoc-queue-ipc-buffer-divergence] Root cause #2 IMPLEMENTED (submodule c483080a; pointer 4703f9788), but LOG REVIEW 2026-06-03 denies live completion: ops.log still shows ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight for agent-doc-bugs2.md and recurring queue_diff_active_prompt_differs. No clean consume->halt cycle with no recurring agent:queue diff was found. Keep open. Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
+58. [/] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
+59. [/] [#prompt-duplicated-while-typing] [/] [#prompt-duplicated-while-typing] User prompt duplication prevention remains partially fixed. LOG REVIEW 2026-06-03 partial: logs show live_prompt_drift_after_preflight blocks and IPC proof insufficiency, so the guard catches some drift, but no fresh typing-during-cycle reverify log proves no duplicate prompt insertion. Keep open. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
+60. [/] [#queue-auto-no-continue] LOG REVIEW 2026-06-03 second pass not resolved: ops.log now shows queue_continuation_required for tasks/agent-doc/agent-doc-bugs2.md at 1780462610 with this review prompt as head, but still no proof of auto-continuing through pending-shadow/session-check warning classes. Keep open.
+61. [/] [#snrun] [recommended] IMPLEMENTED 2026-06-01 (submodule 12676120), but LOG REVIEW 2026-06-03 denies live completion: tsift.md routed reopen still logs prompt_ready_barrier outcome=failed_closed reason=dispatch_only_busy_actor_not_ready at 1780458558 and 1780459050, not the dedicated interactive-substate guard reason. Keep open for the live JB repro. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

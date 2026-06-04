@@ -31,24 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-022209.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-023641.md`*
 
 Compacted content:
-- Archived 9 response topic(s): #surreal-batch-bfs-gated; #astnav-hooks; #astnav-npm; 6 more
+- Archived 1 response topic(s): surreal-skip-load
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#surreal-skip-load]. #spec-test-build-install-commit-push
-### Re: surreal-skip-load — glm-5.1
-
-Implemented deferred index load for `from_rows_file_backed()`.
-
-- **Extracted `connect_file_backed()`** — opens SurrealKV connection with empty in-memory indexes, no `load_indexes()` or sidecar load.
-- **Refactored `open_with_runtime()`** — calls `connect_file_backed()` + sidecar/load (existing behavior preserved).
-- **Updated `from_rows_file_backed()`** — uses `connect_file_backed()` directly, skipping redundant `load_indexes()` scan. Also persists row hash and writes sidecar after replacement for warm-start cache hits.
-- **Added test** `surrealdb_store_from_rows_skips_load_and_enables_warm_start`.
-- **Updated SPEC.md** — added "Deferred index load" paragraph.
-
-Verification: 19/19 surrealdb tests pass. Build + install succeeded. Commit `35c26b2` pushed.
-<!-- agent:boundary:5e866429 -->
+<!-- agent:boundary:d8f59edd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,8 +45,9 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - [#astnav-autoindex-oc]
+- Please benchmark surrealdb vs sqlite
 <!-- /agent:queue -->
 
 ## Backlog

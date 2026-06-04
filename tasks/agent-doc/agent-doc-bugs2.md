@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -29,221 +29,18 @@ Assessed 5 queue items. #ba4b fully implemented. Others need live verification o
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-034142.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-142925.md`*
 
 Compacted content:
-- Archived 8 response topic(s): do [#08mg] cancel-orphans-preflight-cycle; queue assessment; do [#54pz] #dedup-prompt-normalize; 5 more
+- Archived 7 response topic(s): How to initialize seo.md as agent-doc; do plan-jb-clear-session-busy-pane-ux.md; JB Run Agent Doc stall; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: How to initialize seo.md as agent-doc — opus-4-6
-
-> **Queue prompt:**
->
-> How do I initialize seo.md as an agent-doc? I tried JB `Claim for Tmux Pane`. What is the proper way to init a new agent doc?
-> ```
-> Claim failed (exit 1): [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill Error: pane %64 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
-> ```
-
-
-Two-step flow:
-
-1. **Scaffold the document** with frontmatter:
-   ```
-   agent-doc init tasks/software/seo.md
-   ```
-   This creates the file with the required `agent_doc_session`, `agent`, `agent_doc_format`, and `agent_doc_write` frontmatter.
-
-2. **Claim it for a tmux pane:**
-   ```
-   agent-doc claim tasks/software/seo.md
-   ```
-
-The claim error you hit (`pane %64 is in tmux session '1' but project session is '0'`) is a tmux session mismatch — the JB "Claim for Tmux Pane" action was invoked from a pane in session `1`, but agent-doc is configured to use session `0`. Either switch to a pane in the project tmux session (session `0`) before claiming, or pass `--force`:
-```
-agent-doc claim tasks/software/seo.md --force
-```
-
-After claim succeeds, run the first turn via `agent-doc route tasks/software/seo.md` or JB `Run Agent Doc`.
-
-### Re: do plan-jb-clear-session-busy-pane-ux.md — opus-4-6
-
-> **Queue prompt:**
->
-> do plan-jb-clear-session-busy-pane-ux.md
-
-
-The plan is **already fully implemented and tested**. All 5 items ship:
-
-| # | Plan Item | Status | Evidence |
-|---|-----------|--------|----------|
-| 1 | `session clear` fail-closed for alive-busy | Done | `reconcile_idle_projection_before_clear` in `session_actor_cmd.rs:675` classifies into `OperatorClearInputState::Busy` → bails with refusal |
-| 2 | JB typed result for protected busy panes | Done | `BusySessionClearRefusal` data class + `parseBusySessionClearRefusal` + `notifyBusySessionClearBlocked` notification with action buttons in `TerminalUtil.kt:659-731` |
-| 3 | Explicit interrupt flow | Done | `InterruptClearSessionContextAction` → `interruptAndClearSessionContext` → `agent-doc session interrupt-clear` → `session_actor_cmd::interrupt_clear` at line 1028 |
-| 4 | Retry/wait path | Done | `refreshAndRetryClearSessionContext` runs `session status` then retries clear if idle (`TerminalUtil.kt:683-704`) |
-| 5 | Regressions | Done | 9 Rust tests pass (`session_actor_cmd::tests::*clear*`), 1 orchestration test (`busy_clear_blocks_without_destructive_confirmation`), 5+ JB Kotlin tests (`TerminalUtilTest.kt`) |
-
-Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt tests green.
-
-No code changes needed. Marking this plan as complete.
-
-### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
-
-
-Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
-
-**tsift.md (pane %83):**
-- `actor: state=ready` via `dispatch_bind` at 03:56:02, but `live_pane: state=alive-busy` with an active OpenCode progress indicator.
-- Controller lease: `runtime_state=busy`, cycle state: `preflight_started` with 3 active queue heads.
-- Route correctly queued dispatch instead of injecting into a busy pane. Stall = active OpenCode turn still running.
-
-**agent-doc-bugs2.md (pane %70):**
-- 60s route readiness timeout fired, then recovery path dispatched successfully via `route_timeout_idle_recovery`.
-- The wait was the previous auto-queue turn occupying the pane.
-
-**Bug cluster #1** (`route/start replay gap`): common pattern is `proof=accepted proof_scope=accepted_only` — pane-input acceptance, not consumed/dispatch-start proof.
-
-No code changes needed. Queue drains once active OpenCode turns complete.
-
-### Re: Stale busy state + queue_active flip — opus-4-6
-
-
-I was wrong. You're right — the panes were idle.
-
-**Evidence confirming idle state:** Pane %83 (tsift.md) shows `esc interrupt` (without "to"), `ctrl+p commands`, `OpenCode 1.15.13`, `Build ·` — all idle chrome patterns. This is a standard OpenCode idle TUI, not an active turn. The `Working (Ns - esc to interrupt)` busy cue is absent. The `⬝⬝⬝⬝⬝⬝⬝⬝` is the context usage bar, not a busy indicator.
-
-**Root cause:** `live_pane_prompt_ready` in `session_actor_cmd.rs:2006` returned `false` for this idle pane. The likely gap: the specific OpenCode TUI layout (context bar `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13` on the bottom line) is not recognized as idle by `is_idle_chrome_only_output` or the prompt candidate path, so `prompt_ready` stays `false` and the pane is classified `AliveBusy` despite being genuinely idle. The controller lease `runtime_state=busy` then compounds this by making the stale state persistent.
-
-**Two bugs to fix:**
-
-1. **#opencode-idle-context-bar-false-busy** — the OpenCode context-usage-bar + keybinding-hint bottom line is misclassified as busy. The `live_pane_prompt_ready` path and/or `is_opencode_idle_chrome_line` need to recognize this specific idle chrome layout. The `busy_projection_repaired_by_ready_prompt` guard then cannot fire because `prompt_ready` is `false`, so the stale busy persists.
-
-2. **#jb-run-activate-queue** — JB "Run Agent Doc" should flip `queue_active: true` when the document has queue items but `queue_active: false`, even if there are no other changes. Currently the route sees no diff and reports "nothing to process" without checking the queue.
-
-Both added to backlog as backlog items.
-
-### Re: Backlog items + new bugs — opus-4-6
-
-Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
-
-#### #opencode-idle-context-bar-false-busy + #jb-run-activate-queue
-
-Both added to backlog. The `no-pending-capture` was my error.
-
-#### JB Run Agent Doc stalled for monsterrodholders.md
-
-`queue_active: false` + queue items + JB Run Agent Doc = "nothing to process" is the `#jb-run-activate-queue` bug. Route sees no diff and bails without checking the queue. Fix: route dispatch-only should call `activate_existing_route_queue_head` before reporting no changes.
-
-#### JB plugin color highlighting loss on disk load
-
-Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
-
-### Re: Queue item processing — glm-5-1
-
-**#ens4 opencode-idle-context-bar-false-busy:** Implemented and tested. OpenCode idle pane with `⬝` context-usage-bar + `esc interrupt` keybinding hint no longer misclassified as busy. Added `is_opencode_context_bar_line`, `is_opencode_idle_keybinding_hint_line`, `is_opencode_footer_version_line` to harness idle chrome detection. Added bottom-N fallback in `live_pane_prompt_ready`. 5 new tests, all 2732 pass. Binary rebuilt and installed.
-
-**#3eea jb-run-activate-queue:** Implemented and tested. JB Run Agent Doc now calls `activate_existing_route_queue_head` in both `DispatchOnlyDirectPane` and `FocusOnly` non-busy paths, flipping `queue_active: true` for inactive queues. All 12 route sim tests pass. Binary rebuilt and installed.
-
-**#7qfw jb-color-highlighting-disk-load:** Implemented, gated on live-verify. Added `VirtualFileListener` in `VisualHighlighterManager` for `.md` file `contentsChanged` events — drops PSI caches and schedules highlighter refresh after disk reload. Plugin signed: `agent-doc-jetbrains-0.2.147-signed.zip`. Requires IDE restart + live-verify of File Cache Conflict color preservation.
-
-**Unregistered stash panes (%79, %66):** Intentional `skipping kill` — live supervisors prevent reaping. Manual cleanup if stale: `tmux kill-pane -t %79 && tmux kill-pane -t %66`. Recurring cases tracked in `#stash-session-ttl-prune` (review #47).
-
-**#54pz log search:** `normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
-
-**do plan-lazily-rs-queued-prompt-patchback-miss.md:** Plan exists. Deferring to next cycle.
-
-### Re: Queue assessment + #stash-session-ttl-prune wiring — glm-5-1
-
-Assessed 16 queue items. Summary of actionable state:
-
-**Already done (auto-struck by preflight):** #ens4 (opencode-idle-context-bar-false-busy), #3eea (jb-run-activate-queue), #7qfw (jb-color-highlighting-disk-load).
-
-**Implemented this cycle:**
-
-#### #stash-session-ttl-prune — wired idle signal + config knob + report-only
-
-Added `apply_stash_ttl_prune()` in `resync.rs:2513-2592`:
-
-1. **Config knob** — `stash_session_ttl_secs` (u64, default 0 = disabled) and `stash_session_ttl_prune_enabled` (bool, default false) in `ProjectConfig` (`project_config.rs:176-185`). Set in `.agent-doc/config.toml`.
-2. **Idle signal wiring** — queries `#{window_activity}` for stash windows, computes `idle_secs = now - window_activity`, builds `StashTtlCandidate` list from registered panes and live supervisors.
-3. **Report-only by default** — when `stash_session_ttl_prune_enabled = false` (default), logs `stash_ttl_prune_candidate` to ops_log and prints to stderr without killing. Enable `stash_session_ttl_prune_enabled = true` in config for destructive kill.
-4. **Wired into `resync --fix`** — runs after `purge_orphaned_agent_panes`.
-
-Usage in `.agent-doc/config.toml`:
-```toml
-stash_session_ttl_secs = 3600   # 1 hour idle threshold
-# stash_session_ttl_prune_enabled = true  # uncomment to enable kill
-```
-
-Tests: 5 existing decision-core tests pass. 2252 total orchestration tests green. Binary rebuilt and installed.
-
-**Remaining work (live verification):** After configuring the TTL, run `agent-doc resync --fix` in report-only mode, check ops_log for candidates, then enable destructive mode.
-
-**New backlog items added:** #opencode-image-support, #jb-init-from-claim, #jb-backlog-queue-populate.
-
-#### Unregistered stash panes (%79, %66)
-
-Intentional `skipping kill` — live supervisors prevent reaping. With `stash_session_ttl_prune` now wired, you can configure a TTL to reap these after they go idle:
-```bash
-# Add to .agent-doc/config.toml:
-# stash_session_ttl_secs = 3600
-# Then run:
-agent-doc resync --fix
-```
-
-#### #54pz log search
-
-`normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
-
-#### do plan-lazily-rs-queued-prompt-patchback-miss.md
-
-Plan exists. Deferring to next cycle — needs design decisions on free-text queue-head provenance.
-
-#### Stale busy state + queue_active flip
-
-Both bugs now fixed by #ens4 and #3eea (shipped in prior cycle). No further code changes needed.
-
-#### Backlog queue not populating from backlog items
-
-Added as #jb-backlog-queue-populate. The route path needs to scan backlog items with `queue` attribute and populate `agent:queue` before reporting nothing to process.
-<!-- agent:boundary:90345e1d -->
+<!-- agent:boundary:ca2b0211 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
----
-JB `Run Agent Doc` on tsift.md and this file stalled...no dispatch.
-```
-[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
-[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
-[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
-resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
-[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
-[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
-[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
-resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
-[route] target tmux session: 0
-[route] authoritative actor generation 113 for tasks/software/tsift.md is busy on pane %83; queued pending dispatch "Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
-- Last response left 2 `agent:boundary` elements.
-- #opencode-idle-context-bar-false-busy and #jb-run-activate-queue were not added to the backlog even though the response said they were.
-- #opencode-idle-context-bar-false-busy
-- #jb-run-activate-queue
-- JB `Run Agent Doc` stalled for monsterrodholders.md. `Ran agent-doc again. It found no changes in tasks/monsterrodholders.md, so there was nothing to process.` but the queue had auto set. `queue_active: false` was set, but we should make this flag flip to true if JB `Run Agent Doc` is called and there are no other changes.
-- JB `Run Agent Doc` on monsterrodholders.md where there was an empty queue and a backlog with `queue` attribute should have poplated the queue then ran through the queue. Instead nothing happened.
-- Why are these panes unregistered?...`resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill` and `resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill`? Should we kill these panes?
-- The JB plugin loses color highlighting and backgrounds when a document is loaded in disk...such as by navigating to a document or from a `File Cache Conflict`. ![img_20.png](img_20.png)
-- Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
-- do plan-lazily-rs-queued-prompt-patchback-miss.md
-- 
-- do [#ens4]
-- do [#3eea]
-- do [#7qfw]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- [#takv]
+- [#xrm7]
+- [#qmg2]
 <!-- /agent:queue -->
 ###
 <!--

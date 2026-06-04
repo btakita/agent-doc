@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -54,24 +54,39 @@ Compacted content:
    - `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` — updated: footer-only Codex is now IdleNoOpKeep (not GenuineMissReap)
 
 All 2231 + 69 tests pass, clippy clean, binary installed.
-<!-- agent:boundary:a5ed3e17 -->
+
+### Re: Codex stale-busy timeout — timeout-idle recovery — opencode
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on monsterrodholders.md stalled again. The codex session was idle. We need a way to have a robust recovery so it runs. When I manually ran `agent-doc .../monsterrodholders.md`, it ran...so we should just send the command to tmux in this case. I don't care if you think it's correct...it's not correct behavior. Some instrumentation is missing.
+> ```
+> [sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
+> [sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
+> resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+> [sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
+> [sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
+> resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
+> [route] target tmux session: 0
+> Error: authoritative actor generation 276 for tasks/monsterrodholders.md owns pane %82 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+> ```
+
+
+**Root cause:** The `ready_prompt_candidate` function in `route.rs` can return `None` for an idle Codex pane when the footer format does not match the `is_ignorable_output_line` pattern (requires both the middle-dot and `Context N% used`). If the Codex output uses an unrecognized format, the wait loop polls for 60s, `current_generation_ready_prompt_proven` always returns false, and the stale-busy repair at `route.rs:4110` never fires because it requires a positive prompt detection. The 60s timeout expires and the route bails with the did not return to a dispatch-ready prompt error, even though the pane is idle (confirmed by manual `agent-doc` invocation succeeding).
+
+**Fix (2 changes in `route.rs`, 3 regression tests):**
+
+1. **`route.rs` — track wait timeout and add recovery:** The wait loop call at line 3952 now tracks whether it timed out via a `waited_and_timed_out` flag. After the existing stale-busy repair (which requires positive prompt detection), a new timeout-idle recovery block fires when: the wait loop was entered and timed out; the actor state is still Busy; `prompt_ready` is false; and a fresh pane capture shows no busy cue (`has_busy_cue` returns false). When all four conditions hold, the stale Busy projection is promoted to Ready and dispatch proceeds. This uses absence-of-work as the idle signal. The recovery logs `route_timeout_idle_recovery` (with pane tail content) or `route_timeout_idle_recovery_blocked` (when a busy cue is present) to ops.log.
+
+2. **`route.rs` — diagnostic logging at timeout:** In `wait_for_authoritative_actor_ready`, when the wait loop times out for a non-Starting actor, the function now captures the pane content and logs `route_wait_for_ready_timeout_diagnostic` with the `ready_prompt_candidate` result, `is_bottom_idle_chrome` status, `has_busy_cue` status, and line count.
+
+3. **Tests:** `ready_prompt_candidate_returns_none_for_codex_unrecognized_footer_format` demonstrates the gap. `timeout_idle_recovery_fires_when_no_busy_cue_after_timeout` validates the predicate. `timeout_idle_recovery_blocked_by_active_busy_cue` confirms active Codex turn blocks recovery.
+
+All 2234 + 3 tests pass, clippy clean, binary installed.
+<!-- agent:boundary:d6981405 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->
-- ~JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.~
----
-JB `Run Agent Doc` on monsterrodholders.md stalled again. The codex session was idle. We need a way to have a robust recovery so it runs. When I manually ran `agent-doc .../monsterrodholders.md`, it ran...so we should just send the command to tmux in this case. I don't care if you think it's correct...it's not correct behavior. Some instrumentation is missing.
-```
-[sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
-[sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
-resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
-[sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
-[sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
-resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
-[route] target tmux session: 0
-Error: authoritative actor generation 276 for tasks/monsterrodholders.md owns pane %82 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
-```
----
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

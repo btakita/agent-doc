@@ -92,7 +92,22 @@ Shipped `#surreal-arc`: switch indexes to `Arc<GraphEdge>`/`Arc<GraphNode>` to e
 ### Re: #surreal-fixture — glm-5.1
 
 Gated `#surreal-fixture`: requires running `tsift graph-db --json backend-eval --candidate surrealdb` to capture real benchmark samples, which timed out in this queue cycle. The fixture (`fixtures/graph-db-performance-history.json`) has no SurrealDB samples yet. After a successful backend-eval run, append the captured metrics to the fixture under the `surrealdb` key prefix.
-<!-- agent:boundary:3be2198d -->
+
+### Re: #surreal-dashmap — glm-5.1
+
+> **Queue prompt:**
+>
+> [ ] [#surreal-dashmap]
+
+
+Shipped `#surreal-dashmap`: replaced `BTreeMap` with `HashMap` for the primary `by_id` edge index.
+
+**Changes:**
+- `packages/tsift-surrealdb/src/lib.rs`: `by_id: HashMap<String, Arc<GraphEdge>>` for O(1) amortized point lookups. Secondary ordered indexes remain `BTreeMap` for range-based traversal.
+- `SPEC.md`: Updated Arc-backed indexes section noting HashMap.
+
+**Verification:** All 18 surrealdb tests pass, pushed to `main`.
+<!-- agent:boundary:6bd945ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,7 +121,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[ ] [#surreal-skip-load]~
 - ~[ ] [#surreal-arc]~
 - ~[ ] [#surreal-fixture]~
-- [ ] [#surreal-dashmap]
+- ~[ ] [#surreal-dashmap]~
 - [ ] [#surreal-batch-bfs]
 <!-- /agent:queue -->
 
@@ -121,7 +136,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
-- [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
 - [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 <!-- /agent:backlog -->
 

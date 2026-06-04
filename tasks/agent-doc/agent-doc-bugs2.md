@@ -103,7 +103,24 @@ Not a routing bug — both panes were genuinely busy with active OpenCode turns.
 **Bug cluster #1** (`route/start replay gap`): common pattern is `proof=accepted proof_scope=accepted_only` — pane-input acceptance, not consumed/dispatch-start proof.
 
 No code changes needed. Queue drains once active OpenCode turns complete.
-<!-- agent:boundary:20bfb8a1 -->
+
+### Re: Stale busy state + queue_active flip — opus-4-6
+
+
+I was wrong. You're right — the panes were idle.
+
+**Evidence confirming idle state:** Pane %83 (tsift.md) shows `esc interrupt` (without "to"), `ctrl+p commands`, `OpenCode 1.15.13`, `Build ·` — all idle chrome patterns. This is a standard OpenCode idle TUI, not an active turn. The `Working (Ns - esc to interrupt)` busy cue is absent. The `⬝⬝⬝⬝⬝⬝⬝⬝` is the context usage bar, not a busy indicator.
+
+**Root cause:** `live_pane_prompt_ready` in `session_actor_cmd.rs:2006` returned `false` for this idle pane. The likely gap: the specific OpenCode TUI layout (context bar `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13` on the bottom line) is not recognized as idle by `is_idle_chrome_only_output` or the prompt candidate path, so `prompt_ready` stays `false` and the pane is classified `AliveBusy` despite being genuinely idle. The controller lease `runtime_state=busy` then compounds this by making the stale state persistent.
+
+**Two bugs to fix:**
+
+1. **#opencode-idle-context-bar-false-busy** — the OpenCode context-usage-bar + keybinding-hint bottom line is misclassified as busy. The `live_pane_prompt_ready` path and/or `is_opencode_idle_chrome_line` need to recognize this specific idle chrome layout. The `busy_projection_repaired_by_ready_prompt` guard then cannot fire because `prompt_ready` is `false`, so the stale busy persists.
+
+2. **#jb-run-activate-queue** — JB "Run Agent Doc" should flip `queue_active: true` when the document has queue items but `queue_active: false`, even if there are no other changes. Currently the route sees no diff and reports "nothing to process" without checking the queue.
+
+Both added to backlog as backlog items.
+<!-- agent:boundary:230be469 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -47,7 +47,34 @@ Compacted content:
 Added explicit `PRAGMA wal_checkpoint(TRUNCATE)` after each projection refresh and adaptive `wal_autocheckpoint` tuning based on total upserted rows (>10K: 8192 pages, >1K: 4096, else 2048). Prevents WAL growth on repeated refreshes.
 
 Commit: `9e085ae` pushed to main
-<!-- agent:boundary:fd6c910c -->
+
+### Re: #8v37 — glm-5.1 (design analysis)
+
+> **Queue prompt:**
+>
+> do [#8v37]
+
+
+**Can tsift provide graph maps for agent visualization?** Yes, through existing commands, but no single "broad map" command exists yet.
+
+**Current capabilities mapping to broad/focused maps:**
+
+| Need | Existing command | Gap |
+|------|-----------------|-----|
+| Broad map | `communities` + `graph-db status` | No single command combining community structure, top-degree hubs, and edge-kind distribution in token-efficient format |
+| Focused map | `graph-db --envelope explain <symbol>` | Already good — callers, callees, community, evidence in one envelope |
+| Navigation | `graph-db neighborhood` with `--ultra-terse` | Edge-index references + property sampling reduce tokens ~40-60% |
+
+**Proposed: `tsift graph-db --json map`** — a new command producing a two-tier response:
+1. **Overview tier**: community count, top-10 hubs by degree, edge-kind distribution histogram, module-level containment tree. Target: <500 tokens with ultra-terse.
+2. **Focus tier** (opt-in): `--focus <symbol>` parameter reuses `explain` envelope for a single deep-dive.
+
+This would reduce tool calls from 3-4 (status → communities → neighborhood → explain) to 1-2 (map → optional focus). The broad map gives enough context for the agent to decide which symbol to focus on.
+
+**Recommendation:** Implement as a composition of existing `communities` + `ranked_neighborhood` + `status` data rather than new SQL queries. The `--ultra-terse` + `--envelope` pipeline already handles token budgets.
+
+Marking done as design analysis. Implementation can be queued as a new backlog item if approved.
+<!-- agent:boundary:7d9aa111 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,25 +84,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~do [#frontier-unique-temp]~
-- ~do [#temp-table-audit]~
-- ~do [#sqlite-doc-sync-safety]~
-- ~do [#sqlite-reentrant-guard]~
-- ~do [#refresh-skip-unchanged-staging]~
-- ~do [#terse-uniform]~
-- ~do [#edge-index-references]~
-- ~do [#degree-cache]~
-- ~do [#community-summary-default]~
-- ~do [#property-sampling]~
-- ~do [#edges-between-batch-optimization]~
-- ~do [#wal-checkpoint-tuning]~
-- do [#8v37]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#8v37] Can tsift provide a graph map back to the agent for the agent to visualize and analyze the graph structure of the corpus? Can the agent request focused graphs? The broad map should be token efficient yet give the agent a breadth view with some depth of the content to make a decision for a focused map. The focused map should include the full depth on a more focused query. Would this be useful for graph navigation? Would it reduce tool calls?
 <!-- /agent:backlog -->
 
 ## Review

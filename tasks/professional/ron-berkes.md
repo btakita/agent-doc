@@ -96,14 +96,60 @@ Details:
 - Commit: `mail` submodule commit `ef418d7` (`Add Ron Berkes May 11 transcript`)
 
 Key topics: reverting recent Monster Rod Holders site/template changes, Steve's traffic/order concerns, Shopify as a possible next-step platform, getting Brian paid/retained for ongoing work, and shipping table rules for rod holders/nets/anchors.
-<!-- agent:boundary:553c70c1 -->
+❯ Use corky gpu to transcribe + diarize the following phone recording. Most are between ron-berkes and brian-takita. A couple may be a 3-way call with stephen-douglas as well:
+❯ - [phone_20260601-171353_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260601-171353_6504368181.m4a)
+❯ - [phone_20260601-132256_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260601-132256_6504368181.m4a)
+❯ - [phone_20260602-202333_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260602-202333_6504368181.m4a)
+❯ - [phone_20260529-133704_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260529-133704_6504368181.m4a)
+❯ - [phone_20260527-154943_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260527-154943_6504368181.m4a)
+❯ - [phone_20260527-140800_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260527-140800_6504368181.m4a)
+❯ - [phone_20260526-235409_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260526-235409_6504368181.m4a)
+❯ - [phone_20260603-112718_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260603-112718_6504368181.m4a)
+❯ - [phone_20260602-220905_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260602-220905_6504368181.m4a)
+❯ - [phone_20260601-184338_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260601-184338_6504368181.m4a)
+❯ - [phone_20260601-170813_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260601-170813_6504368181.m4a)
+❯ - [phone_20260601-145130_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260601-145130_6504368181.m4a)
+❯ - [phone_20260530-224934_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260530-224934_6504368181.m4a)
+❯ - [phone_20260530-152000_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260530-152000_6504368181.m4a)
+❯ - [phone_20260530-002322_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260530-002322_6504368181.m4a)
+❯ - [phone_20260529-140407_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260529-140407_6504368181.m4a)
+❯ - [phone_20260528-191453_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260528-191453_6504368181.m4a)
+❯ - [phone_20260528-150053_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260528-150053_6504368181.m4a)
+❯ - [phone_20260526-204951_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260526-204951_6504368181.m4a)
+❯ - [phone_20260521-210805_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260521-210805_6504368181.m4a)
+❯ - [phone_20260518-163109_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260518-163109_6504368181.m4a)
+❯ - [phone_20260513-111318_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260513-111318_6504368181.m4a)
+
+### Re: June Ron call transcriptions — gpt-5
+
+Transcribed and diarized all 22 requested Ron Berkes recordings with Corky GPU. Outputs were written beside the source audio files in `mail/contacts/ron-berkes/recordings/` with matching `.md` names.
+
+Implementation details:
+- Used `corky 0.28.2` with `large-v3-turbo`, `--diarize`, `--language en`, and CUDA GPU acceleration (`NVIDIA GeForce RTX 5090`).
+- Used Ron/Brian speaker constraints for 21 files.
+- `phone_20260529-140407_6504368181.md` uses neutral `Speaker N` labels because the forced Ron/Brian pass collapsed the whole 10:45 call into one block; the neutral rerun produced a useful segmented diarization instead.
+- Restored the four missing live backlog items that preflight required before the cycle could proceed: `#r16r`, `#9g9d`, `#d2p6`, `#qm7w`.
+
+Commits:
+- `mail` submodule: `78b89ed` (`Add Ron Berkes June call transcripts`)
+- superproject pointer: `73d3d1bbe` (`Update Ron Berkes call transcripts`)
+
+Verification:
+- Confirmed all 22 transcript files exist, are non-empty, and contain speaker blocks.
+- Batch log showed all 22 `Written to:` outputs.
+- Corky retranscribed low-confidence blocks where detected; one file used best-available neutral diarization as noted above.
+- `make check` was run through `tsift` digest runner and failed in existing `src/agent-doc` route tests, unrelated to the transcript artifacts: `route::tests::fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` and `route::tests::ready_prompt_candidate_rejects_codex_footer_without_prompt`.
+- `gh run list --workflow CI --limit 1` could not run because there is no workflow named `CI`; the available `Agent Doc` workflow's latest run was already failing (`26971161692`).
+
+Escalation: none.
+<!-- agent:boundary:c21e7cc1 -->
 <!-- /agent:exchange -->
 ###
 <!--
 /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/
 -->
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#r16r] Start MRH WordPress optimization (admin access: vtac1)
 - [ ] [#9g9d] Research Liquid Web dedicated WordPress hosting vs alternatives
 - [ ] [#d2p6] Set up Cloudflare CDN for MonsterRodHolders.com

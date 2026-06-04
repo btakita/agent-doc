@@ -38,7 +38,16 @@ queue_active: false
 Compacted content:
 - Archived 9 response topic(s): next-steps for single-threaded, Tokio, and multi-threaded performance; next-steps performance analysis; #61zg AsyncContext benchmark results; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:b18c7894 -->
+❯ Update BENCHMARK.md to include the Tokio results.
+
+### Re: Update BENCHMARKS.md with Tokio results — glm-5.1
+
+BENCHMARKS.md already contained tokio_sync results (6 groups: `tokio_sync_cached_read`, `tokio_sync_cold_first_get`, `tokio_sync_invalidation`, `tokio_sync_concurrent_contention`, `tokio_sync_batch`, `tokio_sync_effect`). Ran `python3 scripts/update-benchmark-results.py --no-run` to regenerate from existing Criterion data with fresh instrumentation profiles. The Criterion benchmark numbers (means, CIs) are unchanged; the instrumentation profile lock wait/hold timings were updated from a fresh profile run.
+
+`make check` passes clean (101 spec tests, 20 async integration tests, 2 tokio sync tests, 12 loom model tests, benchmark check).
+
+Commit: `e8dd8c5` in `src/lazily-rs`.
+<!-- agent:boundary:6f0d350a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -54,7 +54,15 @@ Implemented terse edge kind abbreviation in ultra-terse mode.
 **Files changed:** `packages/tsift-cli/src/lib.rs`, `SPEC.md`
 
 **Verification:** 9/9 ultra-terse tests pass (including 3 new: `ultra_terse_abbreviates_edge_kinds`, `ultra_terse_strips_provenance_freshness_from_edges`, updated `ultra_terse_strips_properties_from_graph_edges`). Build + install succeeded. Committed + pushed as `c376242`.
-<!-- agent:boundary:55662c45 -->
+
+### Re: #sqlite-chunk — glm-5.1
+
+Increased `SQLITE_GRAPH_STAGING_CHUNK_ROWS` from 50 to 500 in `packages/tsift-sqlite/src/lib.rs`.
+
+**Rationale:** 500 rows × 9 edge params = 4500 SQLite variables, well under the 32766 limit in SQLite 3.53.1. This reduces INSERT statement count ~10x (from ~19k to ~1.9k for 952k rows), cutting per-statement overhead significantly.
+
+**Verification:** 13/13 tsift-sqlite tests pass. Updated the `sqlite_projection_refresh_handles_bulk_row_replacement` test assertion to match the new chunk size. Build + install succeeded. Committed + pushed as `2cc5177`.
+<!-- agent:boundary:0bd90ca8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +89,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)
 - [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)
 - [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
 - [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)

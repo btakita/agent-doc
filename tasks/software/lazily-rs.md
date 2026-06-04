@@ -56,7 +56,14 @@ make check passes all 83 spec compliance tests, 13 integration tests, 12 loom mo
 - Pushed to origin/main
 - Tag v0.6.0 moved to 6228653 and force-pushed
 - v0.6.0 was already published on crates.io
-<!-- agent:boundary:69d5c3ed -->
+❯ The 0.6.0 release is not on github.
+
+### Re: The 0.6.0 release is not on github. — glm-5.1
+
+Created GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.6.0
+
+Release notes summarize #lazyperf25–36 performance work, new handle-centric APIs, feature flags, and CI infrastructure.
+<!-- agent:boundary:5f87c642 -->
 <!-- /agent:exchange -->
 ###
 <!--

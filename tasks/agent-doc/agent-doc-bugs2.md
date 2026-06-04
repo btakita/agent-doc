@@ -44,7 +44,7 @@ queue fixup: struck #jb-stale-busy-idle
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~#clear-stops-running-process~
-- #jb-stale-busy-idle
+- ~#jb-stale-busy-idle~
 - ~#prompt-duplicated-while-typing~
 - #adoc-queue-ipc-buffer
 - ~#lr-queue-patchback-miss~

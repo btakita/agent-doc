@@ -86,7 +86,7 @@ Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt test
 
 No code changes needed. Marking this plan as complete.
 
-### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6 (HEAD)
+### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
 
 
 Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
@@ -104,7 +104,7 @@ Not a routing bug — both panes were genuinely busy with active OpenCode turns.
 
 No code changes needed. Queue drains once active OpenCode turns complete.
 
-### Re: Stale busy state + queue_active flip — opus-4-6 (HEAD)
+### Re: Stale busy state + queue_active flip — opus-4-6
 
 
 I was wrong. You're right — the panes were idle.
@@ -121,7 +121,7 @@ I was wrong. You're right — the panes were idle.
 
 Both added to backlog as backlog items.
 
-### Re: Backlog items + new bugs — opus-4-6 (HEAD)
+### Re: Backlog items + new bugs — opus-4-6
 
 Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
 
@@ -137,7 +137,7 @@ Both added to backlog. The `no-pending-capture` was my error.
 
 Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
 
-### Re: Queue item processing — glm-5-1 (HEAD)
+### Re: Queue item processing — glm-5-1
 
 **#ens4 opencode-idle-context-bar-false-busy:** Implemented and tested. OpenCode idle pane with `⬝` context-usage-bar + `esc interrupt` keybinding hint no longer misclassified as busy. Added `is_opencode_context_bar_line`, `is_opencode_idle_keybinding_hint_line`, `is_opencode_footer_version_line` to harness idle chrome detection. Added bottom-N fallback in `live_pane_prompt_ready`. 5 new tests, all 2732 pass. Binary rebuilt and installed.
 
@@ -150,10 +150,7 @@ Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue
 **#54pz log search:** `normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
 
 **do plan-lazily-rs-queued-prompt-patchback-miss.md:** Plan exists. Deferring to next cycle.
-<!-- no-pending-capture -->
-<!-- agent:boundary:a79cfb2d -->
-<!-- agent:boundary:777541b7 -->
-<!-- agent:boundary:e5bf4ce5 -->
+<!-- agent:boundary:3ed0a701 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -188,6 +185,7 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 - The JB plugin loses color highlighting and backgrounds when a document is loaded in disk...such as by navigating to a document or from a `File Cache Conflict`. ![img_20.png](img_20.png)
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
+- 
 - do [#ens4]
 - do [#3eea]
 - do [#7qfw]

@@ -33,21 +33,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-174400.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-180738.md`*
 
 Compacted content:
-- Archived 9 response topic(s): next-steps for single-threaded, Tokio, and multi-threaded performance; next-steps performance analysis; #61zg AsyncContext benchmark results; 6 more
+- Archived 1 response topic(s): Update BENCHMARKS.md with Tokio results
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ Update BENCHMARK.md to include the Tokio results.
-
-### Re: Update BENCHMARKS.md with Tokio results — glm-5.1
-
-BENCHMARKS.md already contained tokio_sync results (6 groups: `tokio_sync_cached_read`, `tokio_sync_cold_first_get`, `tokio_sync_invalidation`, `tokio_sync_concurrent_contention`, `tokio_sync_batch`, `tokio_sync_effect`). Ran `python3 scripts/update-benchmark-results.py --no-run` to regenerate from existing Criterion data with fresh instrumentation profiles. The Criterion benchmark numbers (means, CIs) are unchanged; the instrumentation profile lock wait/hold timings were updated from a fresh profile run.
-
-`make check` passes clean (101 spec tests, 20 async integration tests, 2 tokio sync tests, 12 loom model tests, benchmark check).
-
-Commit: `e8dd8c5` in `src/lazily-rs`.
-<!-- agent:boundary:6f0d350a -->
+<!-- agent:boundary:c370e26d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -34,11 +34,21 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 6 response topic(s): naked image path/URL detection + per-agent vision config; per-agent image extraction config; JB Run Agent Doc stall fix; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e41099dd -->
+
+### Re: stdout bleed in front of OpenCode TUI — glm-5.1
+
+> **Queue prompt:**
+>
+> This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+
+
+Cannot view `img_16.png` — this model does not support image input. The stdout-bleed report aligns with existing backlog item `#424b` (#opencode-stdout-bleed-tui), which is already gated on image review by a vision-capable model.
+
+No new action taken. Re-queue or re-run with a vision-capable model to diagnose the screenshot.
+<!-- agent:boundary:80355769 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

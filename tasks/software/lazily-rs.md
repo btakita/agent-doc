@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue_active: true
 ---
 
 
@@ -38,7 +38,7 @@ queue: go
 Compacted content:
 - Archived 1 response topic(s): [#jwwc] #ipc3
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:5158b05c -->
+<!-- agent:boundary:9b9e4064 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#4rxf]~
 - ~[#jwwc]~
 - [#q5r1]

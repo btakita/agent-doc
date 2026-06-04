@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): lazily-rs performance next-steps; sqlite graph performance + effectiveness next-steps; lazily-rs vs tsift task ownership; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:ef95abb8 -->
+<!-- agent:boundary:a1f35f32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,13 +45,24 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~do [#tokegate-seed]~
+- do [#source-body-cap]
+- do [#diff-parse-cap]
+- do [#evidence-page]
+- do [#packet-cache-evict]
+- do [#terse-edge-codes]
+- do [#sqlite-chunk]
+- do [#sqlite-ranked-cte]
+- do [#sqlite-conflict-par]
+- do [#sqlite-wal-tune]
+- do [#sqlite-frontier-temp]
+- do [#astnav-npm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#tokegate-seed] Populate token-gate-history.json with baseline samples (3+ per surface) — currently empty, so no regression detection exists for any of the 6 token metrics across 5 surfaces (high)
 - [ ] [#source-body-cap] Add body preview token cap to source-read/symbol-read envelopes — long function bodies dominate envelopes with no truncation or expansion command (high)
 - [ ] [#diff-parse-cap] Default max_parsed_files to 20-30 in standalone diff-digest — unlimited tree-sitter parsing on large working-tree diffs is wasteful; opt out with --max-parsed-files 0 (medium)
 - [ ] [#evidence-page] Cursor-based evidence pagination — single 6k-token cap either floods or cuts aggressively; incremental paging lets agents expand on demand (medium)

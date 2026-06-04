@@ -198,7 +198,24 @@ Approaches:
 3. **Epoch-based reclamation** — use `crossbeam-epoch` for hazard-pointer reads of the slot array, allowing lock-free reads with deferred reclamation on slot disposal.
 
 Option 1 is lowest risk and should be attempted first. Needs a plan doc and benchmark before/after comparison against the existing 64.4 ns cached read baseline.
-<!-- agent:boundary:0f6480c8 -->
+
+### Re: #8e2q lazy invalidation frontier — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#8e2q]
+
+
+**Gated** — modifies core invalidation propagation algorithm in `try_invalidate_cell_dependents_fast` (thread_safe.rs:1924).
+
+Current state: when a cell changes, `try_invalidate_cell_dependents_fast` walks all dependents eagerly, setting `dirty` and `force_recompute` on each through sidecars. For fan-out=256, this is 256 atomic writes even if only a subset of dependents are ever read.
+
+Proposed: instead of eagerly marking all dependents dirty, mark a "frontier" — the set of direct dependents whose values may change. Deeper dependents are only marked when their parent is actually accessed and recomputed to a different value. This turns O(fan-out) into O(accessed-fan-out).
+
+The existing `lazy_dirty_epochs` benchmark group already shows the benefit pattern: 3.8 ms vs 5.8 ms for eager validation at 16 workers. The frontier approach would extend this laziness to the invalidation propagation phase itself.
+
+Risk: effects must still be eagerly scheduled (they have no accessor to trigger lazy expansion). The implementation needs to carefully distinguish "must-propagate" (effects) from "may-defer" (slots). Requires Loom model test updates.
+<!-- agent:boundary:bbddf5f2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -212,20 +229,20 @@ Option 1 is lowest risk and should be attempted first. Needs a plan doc and benc
 - ~do [#fk8p]~
 - ~do [#v6r8]~
 - ~do [#zspz]~
-- do [#8e2q]
+- ~do [#8e2q]~
 - do [#mqcw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [ ] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [/] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
 <!-- /agent:review -->

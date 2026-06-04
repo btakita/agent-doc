@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -307,7 +307,7 @@ Remote peer -> RemoteOp enum -> validated handler -> deterministic action
 
 Additional defenses:
 
-- **Content sanitization**: strip control chars, limit length, reject forged `<!-- agent:* -->` tags.
+❯ - **Content sanitization**: strip control chars, limit length, reject forged agent-doc HTML comment tags.
 - **Provenance tagging**: every mutation tagged `source=remote:alice`.
 - **Audit log**: peer ID, operation, target, timestamp.
 - **Approval mode**: `require_approval: true` queues for explicit local approval.
@@ -321,7 +321,64 @@ Execute shell commands, invoke agents/LLMs, modify exchange content, access sign
 Add to backlog/review, read signals, subscribe to signal changes, append context, request state snapshots.
 
 Data-plane API only. Your desktop is the sole execution authority.
-<!-- agent:boundary:a7235676 -->
+
+### Re: Plan for gated IPC tasks — glm-5.1
+
+The three gated review items (#ipc1, #ipc2, #ipc3) form a layered dependency chain.
+
+#### Phase 1: lazily-serde feature gate (#ipc1)
+
+**Goal**: Make serialization optional so `lazily` core compiles without `serde` bounds, while `lazily-distributed` can enable them.
+
+**Steps**:
+1. Add `features = ["serde"]` to `lazily/Cargo.toml`, default off
+2. Gate all `Serialize`/`Deserialize` derives behind `#[cfg(feature = "serde")]`
+3. For closures in computed/effect signals: type-erased `Box<dyn Any + Send + Sync>` when serde is off; when serde is on, require `Serialize + DeserializeOwned` bounds on value types (not closures)
+4. Add `lazily-serde` feature providing `SerializableSignal<V>` wrapper
+5. Test: compile without serde, compile with serde, roundtrip signal values
+
+**Key insight**: Closures are never serialized — only signal values are. Feature gate applies to value types, not function types.
+
+#### Phase 2: lazily-ipc snapshot + incremental protocol (#ipc2)
+
+**Depends on**: Phase 1
+
+**Steps**:
+1. Define `WireMessage` enum with Handshake, Snapshot, Delta, Subscribe, Unsubscribe, RemoteOp, PeerOverloaded, PeerRecovered variants
+2. Define `SignalKey` as newtype over `String`
+3. Define `SignalValue` as enum covering primitives + common containers
+4. Implement `Context::snapshot()` — walks signal graph, collects leaf values + dependency edges
+5. Implement `DeltaStream` — wraps dirty tracking, emits deltas per changed signal
+6. Test: snapshot roundtrip, delta application, ordering
+
+#### Phase 3: CRDT vs Raft trade-offs (#ipc3)
+
+**Depends on**: Phase 2
+
+**Recommendation**: CRDTs for signal values, authority-peer leader for permission/auth signals.
+
+- Data signals: CRDT with last-writer-wins (timestamp + peer_id tiebreaker). Extends `SlotNode::version` to include peer origin.
+- Permission/auth: your desktop as authority leader. Simple since you own the machine.
+
+#### Dependency graph
+
+```
+Phase 1 (serde gate) -> Phase 2 (wire protocol) -> Phase 3 (CRDT/Raft)
+```
+
+### Re: do #39c5 — RemoteOp enum + permission allowlist — glm-5.1
+
+Design incorporated into Phase 2 above. Implementation deferred until Phase 1 lands. Gated on #ipc1.
+
+### Re: do #yxjw — Cloudflare Worker signaling server — glm-5.1
+
+> **Queue prompt:**
+>
+> Create a plan for the gated ipc tasks
+
+
+Independent of lazily core but depends on Phase 2 wire format. Design in prior response. Gated on #ipc2.
+<!-- agent:boundary:7b4fb3c2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -329,21 +386,22 @@ Data-plane API only. Your desktop is the sole execution authority.
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Are there any free and lightweight signaling servers or do I need a deployment? Can Cloudflare help if I need a deployment?
-- I don't want another user to execute arbitrary code or agents on my desktop. I want prescribed agent-doc operations such as adding to the backlog, adding context to an agent-doc, and requesting state. If we need a sandbox, do so. How can we guard against prompt injection?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~Create a plan for the gated ipc tasks~
+- do [#39c5]
+- do [#yxjw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
-- [ ] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
+- [/] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
 - [/] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed

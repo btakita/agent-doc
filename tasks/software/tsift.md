@@ -31,78 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-180831.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-192455.md`*
 
 Compacted content:
-- Archived 2 response topic(s): sqlite graph performance next-steps; token efficiency next-steps
+- Archived 5 response topic(s): #sqlite-doc-sync-safety; queue reactivation; #sqlite-reentrant-guard; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #sqlite-doc-sync-safety — glm-5.1
-
-Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` documenting the single-active-call-per-connection invariant for temp-table methods. Updated SPEC.md with the same invariant.
-
-- Build: clean. Install: v0.1.62. Tests: 13/13 passed.
-- Commit: c5ec8d9 pushed to main.
-
-### Re: queue reactivation — glm-5.1
-
-Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
-
-### Re: #sqlite-reentrant-guard — glm-5.1
-
-> **Queue prompt:**
->
-> do [#sqlite-reentrant-guard]
-
-
-Added `Cell<bool>` re-entrancy guard to `SqliteGraphStore`. Three temp-table methods now assert not-re-entrant at entry and clear the flag at exit: `replace_projection_with_version`, `edges_between_nodes`, `shortest_path_with_max_hops`.
-
-- `temp_table_active: Cell<bool>` field added to struct; initialized `false` in all constructors
-- `assert_not_in_temp_table_section()` panics with diagnostic message on re-entrant call
-- Guard wraps method bodies with set-true / closure / set-false pattern (avoids RAII borrow conflicts with `&mut self`)
-- 2 new tests: `sqlite_reentrant_temp_table_guard_panics` and `sqlite_temp_table_guard_clears_after_method`
-- SPEC.md updated to document the runtime guard
-- Build: clean. Install: v0.1.62. Tests: 15/15 passed.
-- Commit: `ffd4c01` pushed to main
-
-### Re: #refresh-skip-unchanged-staging — glm-5.1
-
-> **Queue prompt:**
->
-> do [#refresh-skip-unchanged-staging]
-
-
-Pre-filter unchanged rows before temp-table staging in projection refresh. Row hashes are compared against existing `graph_nodes`/`graph_edges` in Rust; only changed/new rows are INSERTed into `next_graph_nodes`/`next_graph_edges`. A lightweight ID-only temp table (`next_graph_all_node_ids`, `next_graph_all_edge_keys`) tracks all projection IDs for tombstone detection without staging full unchanged rows.
-
-For <1% change rates, this skips ~99% of rows before the expensive multi-row INSERT and delta comparison, targeting <5s refresh.
-
-- `sqlite_stage_all_ids()` populates ID-only tables with all projection node/edge IDs
-- Existing staging functions now accept `&[&GraphNode]`/`&[&GraphEdge]` (filtered slices)
-- Tombstone detection, delete anti-joins, and reused-owner-property queries updated to use all-IDs tables
-- Unchanged counts derived from pre-filter skip counts instead of SQL joins
-- 15/15 tests pass (2 test assertions updated for new phase timing format)
-- SPEC.md updated
-- Commit: `1145dfc` pushed to main
-
-### Re: #terse-uniform — glm-5.1
-
-> **Queue prompt:**
->
-> do [#terse-uniform]
-
-
-Converted three envelope report structs to use `TerseGraphNode`/`TerseGraphEdge`, stripping `provenance` and `freshness` at the Rust type level instead of relying on post-hoc JSON transforms.
-
-**Changed structs:** `GraphDbReport`, `GraphDbEvidenceReport`, `DispatchTraceReport` — all node/edge fields now use terse types.
-
-**Key changes:**
-- Re-exported `TerseGraphNode`/`TerseGraphEdge` through `tsift-sqlite`
-- Added reverse `From<Terse*>` impls in `tsift-core` for back-conversion where needed
-- Updated ~20 construction/assignment sites in `lib.rs` and `conflict_matrix.rs`
-- Pre-filtering skipped when `force_refresh_writes=true` (triggers need all rows staged)
-- 15/15 tsift-sqlite, 15/15 tsift-core, 34/35 conformance tests pass (1 pre-existing failure)
-- Commit: `115ee8b` pushed to main
-<!-- agent:boundary:d91944f0 -->
+<!-- agent:boundary:f8b10436 -->
 <!-- /agent:exchange -->
 ###
 <!--

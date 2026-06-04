@@ -100,6 +100,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#kvw4] #reentrant-finalize [recommended] Make the finalize pipeline reentrant so it can resume from any incomplete step. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md. Phases: (1) early persistence, (2) reentrant cycle resumption, (3) queue prompt recovery, (4) reentrant run_command, (5) frontmatter step tracker.
+- [ ] [#finalize-owned-pane-response-patchback] [recommended] #agent-doc-bug 2026-06-04: Codex-owned same-pane manual fallback can finish with final chat output outside `agent-doc write` / `finalize`, leaving the response absent from `agent:exchange` until manual patchback. Plan: tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md. Fix by making the final gate require binary-owned response capture or fail closed with exact recovery.
 <!-- /agent:backlog -->
 
 ## Review

@@ -65,7 +65,11 @@ route_eager_busy_cue_recovery file=... pane=... harness=opencode busy_cue=false
 
 
 Snapshot resync after repair commit.
-<!-- agent:boundary:c10f9220 -->
+
+### Re: JB stall + queue items — glm-5.1
+
+JB stall fixed (eager busy-cue check, route.rs). Frontmatter step/run_id not yet implemented. Recommend queue: start/stop (Option B). Queue driving exchange prompts is follow-up. Review management: split actionable items + annotations.
+<!-- agent:boundary:80a23d03 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -47,7 +47,7 @@ Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` document
 ### Re: queue reactivation — glm-5.1
 
 Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
-<!-- agent:boundary:bcb619a9 -->
+<!-- agent:boundary:4e9d21a9 -->
 <!-- /agent:exchange -->
 ###
 <!--

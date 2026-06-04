@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -42,7 +42,8 @@ Compacted content:
 ### Re: lazyperf34 lazyperf35
 
 Done. Commit 1fb4b5c pushed.
-<!-- agent:boundary:202cd076 -->
+Is BENCHMARK.md up to date? We should have a skill + runbook support for updating BENCHMARK.md in src/lazily-rs.
+<!-- agent:boundary:1d8eb2c9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +51,8 @@ Done. Commit 1fb4b5c pushed.
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Is BENCHMARK.md up to date? We should have a skill + runbook support for updating BENCHMARK.md in src/lazily-rs.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: go
 ---
 
 ## Status
@@ -118,20 +118,38 @@ Full orchestration lib suite in a clean-HEAD sibling worktree (with my files app
 #### Your new queue item
 
 Captured *"Implement `run_id` + `step` frontmatter…for re-entrancy / pipeline state"* as backlog `[#fm-run-id-step]` (relates the reentrant-finalize-pipeline plan). It's a separate substantial feature — flagged, not folded into this turn.
-<!-- agent:boundary:79e43509 -->
+
+### Re: test suite green + marker control (phase 3) — opus-4-8
+
+Did the test-suite fix you asked for, and shipped the marker-side queue control. All committed.
+
+#### Test suite — fixed, `make check` green (exit 0, 0 failures)
+
+Root cause of the 2 pre-existing route failures: `ready_prompt_candidate` treated a Codex **status/footer-only** capture (`gpt-5.5 high · … Context 70% used`, no `›` prompt) as dispatch-ready. Codex always renders a real `›` prompt when ready, so a footer alone is not ready — only OpenCode treats a bare footer/idle splash as ready. Split the branch by harness. `src/agent-doc` `40859a62`. Both `ready_prompt_candidate_rejects_codex_footer_without_prompt` and `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` now pass; verified green in a clean-HEAD worktree (independent of the concurrent uncommitted `route.rs` work, which I left untouched).
+
+#### Marker control `start`/`go`/`stop` — phase 3 (`60a466af`)
+
+`&lt;!-- agent:queue go --&gt;` / `start` now fresh-activates the queue (Auto trigger, like legacy `auto`); `stop` halts + clears; the token is stripped on drain/halt; `start`/`go`/`stop` are recognized (no typo warning). With phase 1+2, `queue: go` in frontmatter also activates. 5 new tests.
+
+#### Why your `go` warned and the queue items didn't strike
+
+Both are the **same root cause**: the *live* `agent-doc` binary predates my commits (install is deferred — the working tree still carries another session's uncommitted `route.rs`/`session_check.rs`, so a `cargo install` would bundle their incomplete work). So the running binary:
+- doesn't recognize marker `go` → emits `misplaced_component_attr` and ignores it;
+- doesn't recognize `queue: go` → the queue never activated → **nothing consumed the heads, so no `~strikethrough~`**.
+
+Your strikethrough expectation is correct existing behavior — it just never fired because the queue stayed inactive under the old binary. Once the concurrent route work lands and I can `cargo install`, marker `go` / `queue: go` will activate and the consume pass will strike completed `do [#id]` heads. (Note: the queue heads `- [#fm-run-id-step]` / `- [#queue-state-unify]` are bare `[#id]` refs, not `do [#id]` directives — the strike/consume pass keys off `do [#id]`.) I did not hand-strike them: striking is the binary's job and a manual edit would be lossy.
+
+#### State
+
+Committed: phase 3 `60a466af`, route fix `40859a62`, superproject `66a841dfc`. `#queue-state-unify` remains for phase 4 (writer emits canonical `queue:`) + the live install once the concurrent work lands.
+<!-- agent:boundary:418917ee -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~I don't see `step`, `run_id`, `turn_id`, `queue_task_id` in the frontmatter.~
-- ~do [#reentrant-phase2]~
-- ~do [#reentrant-phase3]~
-- ~do [#reentrant-phase4]~
-- ~do [#reentrant-phase5-integration]~
-- ~do [#finalize-owned-pane-response-patchback]~
-- JB `Run Agent Doc` stalls after 1 turn on opencode documents. An attempt was made in lazily-rs.md and this document.
-- I still don't see `step`, `run_id`, `turn_id`, `queue_task_id` in the frontmatter of this document or any other document. It is not working.
-- The `auto` attribute on `agent:queue` should set `queue_active: true` in the front-matter and kick off the queue. I do like the behavior where the queue just starts without having to use JB `Run Agent Doc` when I manually set `queue_active: true`. I just want a convenient way for `auto` to set `queue_active: true`. This should be bi-directional, so manually setting `queue_active: false` should remove `auto` from `agent:queue`. Would it make sense to deprecate the word `queue_active` and use something that indicates `auto` instead such as `queue: auto`/`queue: stop` or `queue_auto: true`. Should we rename `auto` to `start` with `queue: start` and no `start` links with `queue: stop` in the frontmatter? Please evaluate a good semantic framework.
-- Can we have `queue: start` drive prompts in `agent:exchange`, where `queue: start` will add the exchange prompts into the backlog and prepend the new backlog item ids into the queue?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#fm-run-id-step]
+- [#queue-state-unify]
+- Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
+- When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
 - We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
 <!-- /agent:queue -->
 ###
@@ -147,6 +165,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tagpath-lint-queue-control] Teach the tagpath agent-doc lint dialect (tagpath::lint::agent_doc) that `start`/`go`/`stop` are valid bare attributes on `agent:queue` so a `<!-- agent:queue go -->` marker stops tripping agent-doc/malformed-attr. Part of #queue-state-unify (src/tagpath submodule).
 - [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 - [ ] [#queue-state-unify] Unify queue activation under one tri-state `queue: start|go|stop` frontmatter key (deprecate `auto` + `queue_active`). **Phase 1+2 DONE** (read normalization; src/agent-doc `3f9b32d4`). Remaining: phase 3 harness-parity doc rewrites, phase 4 writer emits `queue:`/drain→`queue: stop` + `auto`→`queue: start` migration + live build/install. Plan: tasks/agent-doc/plan-queue-state-frontmatter-unification.md
 <!-- /agent:backlog -->

@@ -114,6 +114,7 @@ use anyhow::{Context, Result};
 use portable_pty::PtySize;
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
@@ -239,6 +240,7 @@ enum AutoTriggerOutcome {
     Timeout = 3,
     SendFailed = 4,
     Cancelled = 5,
+    SkippedClearCooldown = 6,
 }
 
 impl AutoTriggerOutcome {
@@ -249,6 +251,7 @@ impl AutoTriggerOutcome {
             3 => Self::Timeout,
             4 => Self::SendFailed,
             5 => Self::Cancelled,
+            6 => Self::SkippedClearCooldown,
             _ => Self::NotNeeded,
         }
     }
@@ -261,6 +264,7 @@ impl AutoTriggerOutcome {
             Self::Timeout => "timeout",
             Self::SendFailed => "send_failed",
             Self::Cancelled => "cancelled",
+            Self::SkippedClearCooldown => "skipped_clear_cooldown",
         }
     }
 }
@@ -332,6 +336,9 @@ impl AutoTriggerMonitor {
 enum IdleQueueDrainDecision {
     /// Inject the harness trigger so the next cycle drains the active queue head.
     Dispatch,
+    /// A recent explicit session clear suppresses passive queue dispatch until
+    /// the cooldown expires or an explicit route invocation clears the marker.
+    SkipClearCooldown,
     /// The pane is still busy on an active turn — never inject (no-inject-into-active-turn).
     SkipNotIdle,
     /// No active `queue_active: true` head remains to drain.
@@ -349,10 +356,14 @@ enum IdleQueueDrainDecision {
 /// head (`queue_continuation::live_continuation_head`), and `last_dispatched`
 /// is the head this watch last injected a trigger for.
 fn idle_queue_drain_decision(
+    clear_cooldown_active: bool,
     prompt_visible: bool,
     active_head: Option<&str>,
     last_dispatched: Option<&str>,
 ) -> IdleQueueDrainDecision {
+    if clear_cooldown_active {
+        return IdleQueueDrainDecision::SkipClearCooldown;
+    }
     match active_head {
         // No active head: nothing to drain. The caller clears `last_dispatched`
         // so a future re-enqueue of the same prompt text fires again.
@@ -1236,7 +1247,17 @@ fn current_child_prompt_visible(
 }
 
 fn child_output_prompt_visible(harness: &crate::harness::HarnessConfig, output: &str) -> bool {
-    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(output) {
+    // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
+    // N lines for idle chrome instead of requiring the entire scrollback to be
+    // ignorable chrome. After a turn completes the pane keeps completed-turn
+    // output in scrollback above the idle bottom chrome; the all-lines
+    // is_idle_chrome_only_output returns false for those non-ignorable
+    // scrollback lines, preventing idle detection. The bottom-N approach
+    // mirrors dispatch_blocker_reason's strategy.
+    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(output, 12) {
+        return true;
+    }
+    if harness.is_idle_chrome_only_output(output) {
         return true;
     }
     let Some(line) = harness.last_prompt_candidate(output) else {
@@ -1351,6 +1372,8 @@ fn spawn_auto_trigger_thread(
     std::thread::Builder::new()
         .name("auto-trigger".into())
         .spawn(move || {
+            let path = PathBuf::from(&file);
+            let mut clear_cooldown_logged = false;
             let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
             for attempt in 0.. {
                 let delay = if attempt == 0 {
@@ -1362,6 +1385,18 @@ fn spawn_auto_trigger_thread(
                     shared
                         .auto_trigger_outcome
                         .store(monitor.stop_outcome() as u8, Ordering::Relaxed);
+                    return;
+                }
+                if clear_cooldown_blocks_auto_dispatch(
+                    &path,
+                    &harness,
+                    "auto_trigger",
+                    &mut session_log,
+                    &mut clear_cooldown_logged,
+                ) {
+                    shared
+                        .auto_trigger_outcome
+                        .store(AutoTriggerOutcome::SkippedClearCooldown as u8, Ordering::Relaxed);
                     return;
                 }
                 if current_child_prompt_visible(&shared, &harness) {
@@ -1473,6 +1508,58 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     crate::queue_continuation::live_continuation_head(file, &content)
 }
 
+fn clear_cooldown_blocks_auto_dispatch(
+    path: &Path,
+    harness: &crate::harness::HarnessConfig,
+    source: &str,
+    session_log: &mut Option<std::fs::File>,
+    logged: &mut bool,
+) -> bool {
+    match crate::queue_continuation::clear_cooldown_active(path) {
+        Ok(true) => {
+            if !*logged {
+                log_event(
+                    session_log,
+                    &format!(
+                        "{source}_skipped harness={} reason=clear_cooldown file={}",
+                        harness.binary,
+                        path.display()
+                    ),
+                );
+                eprintln!(
+                    "[agent-doc] {source}: clear cooldown active for {}, skipping passive queue dispatch",
+                    path.display()
+                );
+                *logged = true;
+            }
+            true
+        }
+        Ok(false) => {
+            *logged = false;
+            false
+        }
+        Err(err) => {
+            if !*logged {
+                log_event(
+                    session_log,
+                    &format!(
+                        "{source}_skipped harness={} reason=clear_cooldown_error file={} error={:?}",
+                        harness.binary,
+                        path.display(),
+                        err.to_string()
+                    ),
+                );
+                eprintln!(
+                    "[agent-doc] {source}: failed to inspect clear cooldown for {}, skipping passive queue dispatch: {err:#}",
+                    path.display()
+                );
+                *logged = true;
+            }
+            true
+        }
+    }
+}
+
 /// Long-lived idle-queue watch thread for the supervisor
 /// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
 ///
@@ -1501,6 +1588,7 @@ fn spawn_idle_queue_watch_thread(
         .spawn(move || {
             let path = PathBuf::from(&file);
             let mut last_dispatched: Option<String> = None;
+            let mut clear_cooldown_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -1511,9 +1599,17 @@ fn spawn_idle_queue_watch_thread(
                 if shared.capability_proof_gate() == CapabilityProofGate::Pending {
                     continue;
                 }
+                let clear_cooldown_active = clear_cooldown_blocks_auto_dispatch(
+                    &path,
+                    &harness,
+                    "idle_queue_watch",
+                    &mut session_log,
+                    &mut clear_cooldown_logged,
+                );
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 match idle_queue_drain_decision(
+                    clear_cooldown_active,
                     prompt_visible,
                     active_head.as_deref(),
                     last_dispatched.as_deref(),
@@ -1557,6 +1653,7 @@ fn spawn_idle_queue_watch_thread(
                         last_dispatched = None;
                     }
                     IdleQueueDrainDecision::SkipNotIdle
+                    | IdleQueueDrainDecision::SkipClearCooldown
                     | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
                 }
             }
@@ -2664,6 +2761,26 @@ pub fn run_with_reap_policy(
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = crate::harness::HarnessConfig::from_context(&fm, &global_config);
     let resolved_agent_args = resolve_agent_args(&fm, &global_config, &harness);
+    {
+        let (source, _resolved_name) = if fm.agent.is_some() {
+            ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
+        } else if global_config.default_agent.is_some() {
+            ("config", global_config.default_agent.as_deref().unwrap_or("?"))
+        } else {
+            ("fallback", "claude")
+        };
+        let env_harness = agent_doc_core::model_tier::detect_harness();
+        eprintln!(
+            "[start] harness resolved: binary={} source={} env={}",
+            harness.binary, source, env_harness
+        );
+        if env_harness != "default" && env_harness != harness.binary {
+            eprintln!(
+                "[start] WARNING: harness mismatch — from_context resolved {} (via {}) but env detect_harness returned {}",
+                harness.binary, source, env_harness
+            );
+        }
+    }
 
     // Must be inside tmux
     if !sessions::in_tmux() {
@@ -3076,6 +3193,40 @@ pub fn run_with_reap_policy(
     // this, the outer pty's cooked mode silently converts \r to \n before
     // we even read it, breaking Enter for Claude Code's TUI.
     let raw_mode = RawMode::enable();
+
+    // Redirect stderr to a log file for TUI harnesses (e.g. OpenCode) so that
+    // supervisor eprintln! diagnostics do not bleed over the child TUI render.
+    if harness.is_tui_harness() {
+        let logs_dir = project_root.join(".agent-doc").join("logs");
+        if let Ok(()) = std::fs::create_dir_all(&logs_dir) {
+            let stderr_path = logs_dir.join("supervisor-stderr.log");
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&stderr_path)
+            {
+                Ok(f) => {
+                    let fd = f.as_raw_fd();
+                    unsafe {
+                        libc::dup2(fd, libc::STDERR_FILENO);
+                    }
+                    eprintln!(
+                        "[start] stderr redirected to {} for {} TUI",
+                        stderr_path.display(),
+                        harness.binary
+                    );
+                }
+                Err(e) => {
+                    // Keep stderr as-is; the TUI bleed is cosmetic, not fatal.
+                    eprintln!(
+                        "[start] warning: could not open {}: {}",
+                        stderr_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
 
     // --- Supervisor restart loop ---
     let mut first_run = true;
@@ -4538,6 +4689,7 @@ mod tests {
             dropped_exchange_prompts: Vec::new(),
             dropped_queue_prompts: Vec::new(),
             active_queue_heads: Vec::new(),
+            active_free_text_queue_heads: Vec::new(),
         }
     }
 
@@ -4900,7 +5052,7 @@ Done.
     #[test]
     fn idle_queue_drain_dispatches_when_idle_with_fresh_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(true, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, true, Some("do [#a]"), None),
             IdleQueueDrainDecision::Dispatch
         );
     }
@@ -4910,19 +5062,27 @@ Done.
         // No-inject-into-active-turn: a busy pane (no dispatch-ready prompt)
         // never receives an injected trigger, mirroring the route busy path.
         assert_eq!(
-            idle_queue_drain_decision(false, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipNotIdle
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_during_clear_cooldown() {
+        assert_eq!(
+            idle_queue_drain_decision(true, true, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipClearCooldown
         );
     }
 
     #[test]
     fn idle_queue_drain_skips_when_no_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(true, None, None),
+            idle_queue_drain_decision(false, true, None, None),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
         assert_eq!(
-            idle_queue_drain_decision(false, None, Some("do [#a]")),
+            idle_queue_drain_decision(false, false, None, Some("do [#a]")),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
     }
@@ -4933,7 +5093,7 @@ Done.
         // it yet, or the dispatch failed to drain) — suppress re-firing so a
         // stuck head cannot spin the watch every idle tick.
         assert_eq!(
-            idle_queue_drain_decision(true, Some("do [#a]"), Some("do [#a]")),
+            idle_queue_drain_decision(false, true, Some("do [#a]"), Some("do [#a]")),
             IdleQueueDrainDecision::SkipAlreadyDispatched
         );
     }
@@ -4943,7 +5103,7 @@ Done.
         // A different head than the last dispatched one re-fires — the queue
         // advanced to a new prompt that still needs an idle drain.
         assert_eq!(
-            idle_queue_drain_decision(true, Some("do [#b]"), Some("do [#a]")),
+            idle_queue_drain_decision(false, true, Some("do [#b]"), Some("do [#a]")),
             IdleQueueDrainDecision::Dispatch
         );
     }
@@ -4979,6 +5139,11 @@ Done.
             true,
             false,
             AutoTriggerOutcome::NotNeeded
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::SkippedClearCooldown
         ));
     }
 
@@ -5652,6 +5817,45 @@ Done.
             .as_bytes(),
         );
         assert!(current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn current_child_prompt_visible_detects_opencode_post_turn_idle() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+    Finished test profile
+     Running unittests src/lib.rs
+test result: ok. 2219 passed; 0 failed
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass.
+src/harness.rs: added is_bottom_idle_chrome method
+src/harness.rs: tests for is_bottom_idle_chrome
+src/start.rs: updated child_output_prompt_visible
+src/start.rs: test for post-turn idle detection
+cargo test -p agent-doc-orchestration — 2219 passed
+cargo check --bin agent-doc — clean
+cargo install — installed agent-doc 0.34.0
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+                                                                                         ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+"
+            .as_bytes(),
+        );
+        assert!(
+            current_child_prompt_visible(&shared, &harness),
+            "post-turn OpenCode pane with idle bottom chrome must be detected as prompt-visible"
+        );
     }
 
     #[test]

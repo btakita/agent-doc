@@ -145,6 +145,13 @@ pub struct CycleState {
     /// `agent:backlog` and the cycle never targeted it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_queue_heads: Vec<String>,
+    /// `#lr-queue-patchback-miss`: free-text (non-`do [#id]`) queue head prompt
+    /// texts present in the visible `agent:queue` at preflight time. Unlike
+    /// `active_queue_heads` (which carries id-backed directive heads), these
+    /// free-text heads have no backlog id to track — the guard instead checks
+    /// for a committed response, binary consume, or explicit deferral proof.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_free_text_queue_heads: Vec<String>,
 }
 
 /// Extract the queue prompt head texts (e.g. `do [#convqa-rerun]`) from a
@@ -167,6 +174,32 @@ pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
         .map(|prompt| prompt.text.trim().to_string())
         .filter(|text| !text.is_empty())
         .collect()
+}
+
+/// Extract free-text (non-`do [#id]`) queue prompt head texts from a
+/// document's `agent:queue` component. These are recorded alongside
+/// `active_queue_heads` so `session-check` can require committed-response /
+/// consume / deferral proof for free-text queue heads that have no backlog id.
+pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
+    let Ok(components) = crate::component::parse(doc) else {
+        return Vec::new();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return Vec::new();
+    };
+    let Ok(entries) = crate::queue::parse(queue.content(doc)) else {
+        return Vec::new();
+    };
+    crate::queue::prompts(&entries)
+        .into_iter()
+        .map(|prompt| prompt.text.trim().to_string())
+        .filter(|text| !text.is_empty() && !is_do_directive(text))
+        .collect()
+}
+
+fn is_do_directive(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.starts_with("do [#") || lower.starts_with("do #")
 }
 
 impl CycleState {
@@ -222,6 +255,9 @@ pub fn start_preflight(
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: file_content
             .map(active_queue_directive_heads)
+            .unwrap_or_default(),
+        active_free_text_queue_heads: file_content
+            .map(active_free_text_queue_heads)
             .unwrap_or_default(),
     };
     save(file, &state)?;
@@ -860,6 +896,7 @@ fn synthetic_state_with_id(
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: Vec::new(),
+        active_free_text_queue_heads: Vec::new(),
     }
 }
 

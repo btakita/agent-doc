@@ -284,6 +284,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_gated_phase_split_guard(file, &rc)?,
             check_queue_audit_partial_completion_guard(file)?,
             check_queue_head_removal_guard(file, &rc)?,
+            check_free_text_queue_head_provenance(file, &rc)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -2687,6 +2688,115 @@ fn check_queue_head_removal_guard(
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
+}
+
+/// `#lr-queue-patchback-miss`: require committed-response / consume / deferral
+/// proof for each free-text (non-`do [#id]`) queue head recorded at preflight.
+/// Free-text heads have no backlog id, so the guard checks that: (a) the head
+/// text is still present in the committed queue (deferral / not yet consumed),
+/// (b) a committed `### Re:` response exists that plausibly answers it, or
+/// (c) the cycle recorded binary consume proof. If none hold, fail closed.
+fn check_free_text_queue_head_provenance(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.active_free_text_queue_heads.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    if state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    if state.capture_id.is_some() || state.response_sha256.is_some() {
+        return Ok(GuardResult::None);
+    }
+    let content = rc.doc_content();
+    if content.contains("<!-- no-free-text-queue-head-guard -->") {
+        return Ok(GuardResult::None);
+    }
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(GuardResult::None);
+    };
+    let committed_queue_text: String = components
+        .iter()
+        .find(|c| c.name == "queue")
+        .map(|c| c.content(&content).to_string())
+        .unwrap_or_default();
+    let mut unresolved: Vec<String> = Vec::new();
+    for head in &state.active_free_text_queue_heads {
+        let normalized = head.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+        if committed_queue_text.to_ascii_lowercase().contains(&normalized) {
+            continue;
+        }
+        if response_head_plausibly_answers(&content, head) {
+            continue;
+        }
+        if state.dropped_queue_prompts.iter().any(|d| d.trim().eq_ignore_ascii_case(head.trim())) {
+            continue;
+        }
+        unresolved.push(head.clone());
+    }
+    if unresolved.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let heads_text = unresolved
+        .iter()
+        .map(|h| format!("\"{}\"", h))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "free_text_queue_head_provenance_guard_fired file={} unresolved={}",
+            file.display(),
+            heads_text
+        ),
+    );
+    let warn_line = format!(
+        "[session-check] warn: free-text agent:queue head(s) {heads_text} were seen at preflight but have no committed response, binary consume, or explicit deferral proof in the closeout — the prompt may have been silently lost"
+    );
+    let repair = format!(
+        "either respond to the unresolved head(s) and run `agent-doc finalize {}`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was intentional",
+        file.display()
+    );
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #lr-queue-patchback-miss)"),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #lr-queue-patchback-miss)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
+fn response_head_plausibly_answers(content: &str, head: &str) -> bool {
+    let head_words: Vec<&str> = head
+        .split_whitespace()
+        .filter(|w| w.len() > 3 && !matches!(w.to_ascii_lowercase().as_str(), "the" | "this" | "that" | "with" | "from" | "also" | "does" | "what" | "when" | "how"))
+        .collect();
+    if head_words.is_empty() {
+        return false;
+    }
+    let lower = content.to_ascii_lowercase();
+    let mut matched = 0;
+    for word in &head_words {
+        if lower.contains(&word.to_ascii_lowercase()) {
+            matched += 1;
+        }
+    }
+    matched * 2 >= head_words.len()
 }
 
 /// Tight list of "deferred live work" phrases that, combined with a shipped
@@ -8901,6 +9011,89 @@ Body\n\
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard must not fire when the removed heads' backlog items are no longer open"
+        );
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_fires_on_missing_response() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "Can CellHandle::set also apply to the multi-threaded Context?";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let without_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, without_head).unwrap();
+        crate::snapshot::save(&doc, without_head).unwrap();
+
+        let result = inspect(&doc).unwrap();
+        match result {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(msg.contains("free-text"), "got: {msg}");
+            }
+            SessionCheckStatus::Ok(warnings) => {
+                assert!(warnings.contains("free-text"), "got: {warnings}");
+            }
+        }
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_passes_when_head_still_queued() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n- Can CellHandle::set also apply to the multi-threaded Context?\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "head still queued = no fire"
+        );
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_suppressed_by_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "some question";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let without_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+            "<!-- no-free-text-queue-head-guard -->\n",
+        );
+        fs::write(&doc, without_head).unwrap();
+        crate::snapshot::save(&doc, without_head).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "marker suppresses guard"
         );
     }
 

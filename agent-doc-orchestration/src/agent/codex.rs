@@ -189,6 +189,37 @@ fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
     );
 }
 
+fn looks_like_codex_transport_403_429(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let ws_403 = lower.contains("403")
+        && (lower.contains("websocket") || lower.contains("handshake") || lower.contains("wss://"));
+    let https_429 = lower.contains("429")
+        && (lower.contains("too many requests") || lower.contains("rate limit"));
+    ws_403 || https_429
+}
+
+fn format_transport_403_429_diagnostic(stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+    let is_ws_403 = lower.contains("403")
+        && (lower.contains("websocket") || lower.contains("handshake") || lower.contains("wss://"));
+    let is_https_429 = lower.contains("429")
+        && (lower.contains("too many requests") || lower.contains("rate limit"));
+    let primary = if is_ws_403 && is_https_429 {
+        "Codex transport rejection: 403 Forbidden on WebSocket handshake, then 429 Too Many Requests on HTTPS fallback"
+    } else if is_ws_403 {
+        "Codex transport rejection: 403 Forbidden on WebSocket handshake"
+    } else {
+        "Codex transport rejection: 429 Too Many Requests on HTTPS fallback"
+    };
+    format!(
+        "{primary}. Possible causes: per-session rate limit, Cloudflare edge block, \
+         or session-specific token/auth state. Suggestions: (1) wait a few minutes and \
+         retry, (2) restart the codex session, or (3) check Codex service status. \
+         Original error: {}",
+        stderr.trim()
+    )
+}
+
 fn looks_like_ssh_dns_failure(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("could not resolve hostname")
@@ -1654,6 +1685,9 @@ impl Codex {
 
         if !output.status.success() {
             let stderr = filter_codex_stderr_noise(&String::from_utf8_lossy(&output.stderr));
+            if looks_like_codex_transport_403_429(&stderr) {
+                anyhow::bail!("{}", format_transport_403_429_diagnostic(&stderr));
+            }
             anyhow::bail!("codex command failed: {}", stderr.trim());
         }
 
@@ -2167,6 +2201,13 @@ impl Iterator for CodexStreamIterator {
                                 &detail
                             ))));
                         }
+                        if looks_like_codex_transport_403_429(&stderr) {
+                            self.done = true;
+                            return Some(Err(anyhow::anyhow!(
+                                "{}",
+                                format_transport_403_429_diagnostic(&stderr)
+                            )));
+                        }
                         self.done = true;
                         let msg = if stderr.trim().is_empty() {
                             format!("codex subprocess exited with {status}")
@@ -2372,6 +2413,76 @@ real stderr
 
         assert_eq!(filtered, stderr);
         assert_eq!(report.suppressed_marketplace_manifest_warnings, 0);
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_detects_ws_403() {
+        assert!(looks_like_codex_transport_403_429(
+            "403 Forbidden on wss://chatgpt.com/backend-api/codex/responses"
+        ));
+        assert!(looks_like_codex_transport_403_429(
+            "WebSocket handshake failed: 403"
+        ));
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_detects_https_429() {
+        assert!(looks_like_codex_transport_403_429(
+            "429 Too Many Requests"
+        ));
+        assert!(looks_like_codex_transport_403_429(
+            "rate limit exceeded 429"
+        ));
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_rejects_unrelated() {
+        assert!(!looks_like_codex_transport_403_429("sandbox violation"));
+        assert!(!looks_like_codex_transport_403_429("permission denied"));
+    }
+
+    #[test]
+    fn format_transport_403_429_diagnostic_names_both_rejections() {
+        let msg = format_transport_403_429_diagnostic(
+            "403 on wss://example.com then 429 Too Many Requests",
+        );
+        assert!(msg.contains("403 Forbidden on WebSocket"));
+        assert!(msg.contains("429 Too Many Requests"));
+        assert!(msg.contains("restart the codex session"));
+    }
+
+    #[test]
+    fn send_surfaces_transport_403_429_diagnostic() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec![
+                "-c".into(),
+                "cat >/dev/null; echo >&2 '403 Forbidden on wss://chatgpt.com/backend-api/codex/responses'; exit 1".into(),
+            ]),
+        );
+        let result = codex.send("ignored", None, false, None);
+        assert!(result.is_err(), "expected error for 403 transport rejection");
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("transport rejection"), "got: {msg}");
+        assert!(msg.contains("403 Forbidden"), "got: {msg}");
+    }
+
+    #[test]
+    fn streaming_surfaces_transport_403_429_diagnostic() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec![
+                "-c".into(),
+                "cat >/dev/null; echo >&2 '429 Too Many Requests'; exit 1".into(),
+            ]),
+        );
+        let iter = codex.send_streaming("ignored", None, false, None).unwrap();
+        let chunks: Vec<_> = iter.collect();
+        assert_eq!(chunks.len(), 1);
+        let err = chunks[0].as_ref().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("transport rejection"), "got: {msg}");
+        assert!(msg.contains("429"), "got: {msg}");
     }
 
     #[test]

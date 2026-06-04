@@ -77,14 +77,39 @@ Updated the plan (`tasks/agent-doc/plans/reentrant-finalize-pipeline.md`) with *
 The frontmatter fields enable any `agent-doc` invocation (JB Run Agent Doc, CLI, or auto-loop) to detect and resume from the exact step without operator intervention.
 
 Adding `#reentrant-finalize` to backlog. Implementation follows in the next cycle (`do #reentrant-finalize`).
-<!-- agent:boundary:80467cb1 -->
+
+### Re: #kvw4 reentrant-finalize implementation — glm-5.1
+
+> **Queue prompt:**
+>
+> Add a frontmatter field that updates with each step in the process. Each update should not commit to git, just show the current step in the reentrant pipeline. If the pipeline stalls, JB `Run Agent Doc` or `agent-doc ...` should continue from the current step. Add a run_id or turn_id in the frontmatter as well. The turn_id can include the backlog task id if one exists. We may want to consider converting free-form prompts into a task for the run. This behavior should be deterministic, reliable, and in the agent-doc binary.
+
+
+**Phase 1 (Early persistence): IMPLEMENTED + installed.**
+
+Moved raw response write to `.agent-doc/pending/<hash>.md` immediately after `stdin.read_to_string()` in both `run()` (write.rs:6781) and `run_template()` (write.rs:6952). This eliminates the crash window where the response exists only in process memory. The canonical `save_pending()` call (which also creates the capture ledger + advances cycle state) still runs after validation, overwriting the early-persist file.
+
+**Changes:**
+- `agent-doc-orchestration/src/write.rs`: Added early-persist block after stdin read in `run()` and `run_template()`
+- Empty response handling: clears the early-persist file before bailing
+- No cycle state side effects from the early write — capture/ledger only created by the canonical `save_pending`
+
+**Phase 5 (Frontmatter step tracker): PARTIALLY IMPLEMENTED — struct + function only.**
+
+Added `PipelineStep` struct and `agent_doc_pipeline` frontmatter field with `step`, `run_id`, `turn_id`, `queue_task_id`. Added `frontmatter::update_pipeline_step()` function. However, the `mark_*` integration caused document drift (frontmatter write changes file content between baseline capture and response write, invalidating hashes). The frontmatter update must be integrated into the atomic_write path inside `run()`/`run_template()`, not as a separate file write after cycle state transitions. This is deferred to a follow-up cycle.
+
+**Remaining phases (2, 3, 4, 5 integration):** Plan at `tasks/agent-doc/plans/reentrant-finalize-pipeline.md`. The frontmatter integration note is captured in the plan.
+
+**Queue note:** `#reentrant-finalize` and `#kvw4` refer to the same backlog item. The binary's pending-add assigned `#kvw4`; user references using `#reentrant-finalize` should be recognized by the `do` directive parser (existing `--pending-add` already generates short IDs).
+<!-- agent:boundary:68c4b705 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.~
-- Add a frontmatter field that updates with each step in the process. Each update should not commit to git, just show the current step in the reentrant pipeline. If the pipeline stalls, JB `Run Agent Doc` or `agent-doc ...` should continue from the current step. Add a run_id or turn_id in the frontmatter as well. The turn_id can include the backlog task id if one exists. We may want to consider converting free-form prompts into a task for the run. This behavior should be deterministic, reliable, and in the agent-doc binary.
-- #reentrant-finalize was not added to the backlog
-- do #reentrant-finalize
+- ~Add a frontmatter field that updates with each step in the process. Each update should not commit to git, just show the current step in the reentrant pipeline. If the pipeline stalls, JB `Run Agent Doc` or `agent-doc ...` should continue from the current step. Add a run_id or turn_id in the frontmatter as well. The turn_id can include the backlog task id if one exists. We may want to consider converting free-form prompts into a task for the run. This behavior should be deterministic, reliable, and in the agent-doc binary.~
+- `#reentrant-finalize` did not match the generated id `[#kvw4]`. opencode did not correctly apply the format `[#reentrant-finalize]` and agent-doc should recognize `#reentrant-finalize` as a given id.
+- do [#kvw4]
+- do [#finalize-owned-pane-response-patchback]
 <!-- /agent:queue -->
 ###
 <!--
@@ -99,7 +124,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kvw4] #reentrant-finalize [recommended] Make the finalize pipeline reentrant so it can resume from any incomplete step. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md. Phases: (1) early persistence, (2) reentrant cycle resumption, (3) queue prompt recovery, (4) reentrant run_command, (5) frontmatter step tracker.
+- [ ] [#finalize-owned-pane-response-patchback] [recommended] #agent-doc-bug 2026-06-04: Codex-owned same-pane manual fallback can finish with final chat output outside `agent-doc write` / `finalize`, leaving the response absent from `agent:exchange` until manual patchback. Plan: tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md. Fix by making the final gate require binary-owned response capture or fail closed with exact recovery.
 <!-- /agent:backlog -->
 
 ## Review

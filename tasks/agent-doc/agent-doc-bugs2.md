@@ -39,12 +39,16 @@ Compacted content:
 
 Already shipped. Git confirms: `e3b1af769` (submodule pointer + plan) and `cc72dbf68` (gated to review). Status line confirms "Codex stale-busy bottom-idle fix shipped." Striking from queue.
 queue fixup: struck #jb-stale-busy-idle
-<!-- agent:boundary:1f18c8dc -->
+
+### Re: queue fixup — glm-5.1
+
+Queue housekeeping: struck `#jb-stale-busy-idle` (already shipped per `e3b1af769`/`cc72dbf68`), re-enabled `queue_active: true` after halt from inter-cycle head modification. Next head: `#adoc-queue-ipc-buffer`.
+<!-- agent:boundary:ca83c66d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~#clear-stops-running-process~
-- #jb-stale-busy-idle
+- ~#jb-stale-busy-idle~
 - ~#prompt-duplicated-while-typing~
 - #adoc-queue-ipc-buffer
 - ~#lr-queue-patchback-miss~

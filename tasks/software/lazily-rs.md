@@ -38,7 +38,7 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): #eek4 #asyncctx6 Async effects - glm-5.1; queue-drain #eek4 cleanup; #lazyperf32 get_rc/get_cell_rc; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:7d668fbe -->
+<!-- agent:boundary:343ce7c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,14 +47,6 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#kp7w]~
-- ~[#8sqb]~
-- ~[#6z71]~
-- ~[#cmt9]~
-- ~[#eek4]~
-- ~[#r25x]~
-- ~[#35fc]~
-- ~do [#lazyperf32]~
 - [#lazyperf34]
 - [#lazyperf35]
 <!-- /agent:queue -->

@@ -31,85 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-155432.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-172551.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #terse-edge-codes; #sqlite-chunk; #sqlite-ranked-cte
+- Archived 5 response topic(s): #sqlite-conflict-par; #sqlite-wal-tune; #sqlite-frontier-temp; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #sqlite-conflict-par — glm-5.1
-
-> **Queue prompt:**
->
-> do [#sqlite-conflict-par]
-
-
-Parallelized `collect_conflict_matrix_evidence_packets` in `conflict_matrix.rs:2292`. The previous implementation iterated targets sequentially, calling `graph_db_evidence_report_from_store` (the expensive graph traversal) for each cache miss in series.
-
-**Approach:** Two-phase collection with `std::thread::scope`:
-1. Cache-first pass: check disk cache for all targets, separate into hits and misses
-2. Parallel pass: for 2+ cache misses with an existing SQLite db, spawn scoped threads where each opens its own `SqliteGraphStore::open_read_only` connection and collects evidence independently
-3. Fallback: single-target or missing db_path cases use the original sequential path
-
-Each thread owns its own read-only SQLite connection (WAL mode allows concurrent readers), so no `Sync` bound is needed on `GraphStore`. A shared helper `collect_evidence_for_target` encapsulates the per-target cache-check + traversal + cache-write logic.
-
-**Verification:** `cargo check -p tsift-cli` clean, all 6 conflict_matrix tests pass, `cargo install` succeeds. Pre-existing clippy lint in `tsift-sqlite` (unrelated `useless_format`) and surrealdb test flake are unchanged.
-
-### Re: #sqlite-wal-tune — glm-5.1
-
-Tuned `SQLITE_GRAPH_WAL_AUTOCHECKPOINT_PAGES` from 256 to 4096 in `tsift-sqlite/src/lib.rs:127`.
-
-**Rationale:** The previous value of 256 pages triggered frequent auto-checkpoints during bulk projection writes (node/edge upserts). At 4096 pages (~16MB with default 4KB page size), SQLite batches more WAL writes before checkpointing, reducing fsync overhead during the write-heavy projection refresh phase. The WAL file grows larger transiently but is cleaned up after the write completes.
-
-**Verification:** `cargo check -p tsift-sqlite -p tsift-cli` clean, all 13 tsift-sqlite tests pass, all 9 tsift-cli tests pass, `cargo install` succeeds.
-
-### Re: #sqlite-frontier-temp — glm-5.1
-
-> **Queue prompt:**
->
-> re [#astnav-npm]: How do I configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm?
-
-
-> **Queue prompt:**
->
-> do [#sqlite-frontier-temp]
-
-
-Replaced dynamic `WHERE IN` string-per-chunk frontier expansion in `shortest_path_with_max_hops` (`tsift-sqlite/src/lib.rs:2665`) with a pre-allocated temp table `_tsift_frontier`.
-
-**Before:** Each BFS iteration chunked the frontier into groups of 256 and built a new SQL statement with `N` placeholders per chunk, forcing SQLite to parse/compile a different statement for each chunk size. For deep BFS traversals this multiplied statement preparation overhead.
-
-**After:** A single temp table `_tsift_frontier(id TEXT PRIMARY KEY)` is created once before the loop. Each depth iteration: DELETE old frontier, INSERT new frontier IDs, then JOIN against the temp table with a single fixed prepared statement. The edge scan query is compiled once and reused across all iterations and depths.
-
-The single-node fast path (prepared statements with `WHERE from_id = ?1`) is replaced by the temp table JOIN since the INSERT+JOIN overhead is negligible and eliminates code duplication. Follows the existing `edges_between_nodes` temp table pattern.
-
-**Verification:** `cargo check -p tsift-sqlite` clean, all 13 tsift-sqlite tests pass (including `sqlite_shortest_path_uses_bounded_frontier`), all 9 tsift-cli tests pass, `cargo install` succeeds.
-Is `_tsift_frontier` concurrency-safe?
-
-### Re: #sqlite-frontier-temp concurrency — glm-5.1
-
-**Yes, `_tsift_frontier` is concurrency-safe.**
-
-1. **Temp tables are connection-scoped** in SQLite — each `Connection` gets its own `_tsift_frontier` namespace.
-2. **`SqliteGraphStore` owns a single `Connection`** (`lib.rs:131`) with no `Mutex`/`Arc` — it does not implement `Sync`, so it cannot be shared across threads.
-3. **The parallel conflict-matrix code** (`#sqlite-conflict-par`) creates separate `SqliteGraphStore::open_read_only` connections per thread, each with their own temp table namespace — no collision.
-4. **Sequential calls** on the same connection are safe because `DELETE FROM _tsift_frontier` at `lib.rs:2671` and `lib.rs:2699` clears the table before each BFS iteration.
-
-The only theoretical risk: if `SqliteGraphStore` were wrapped in `Arc<Mutex<>>` and a caller released the mutex mid-BFS, two BFS traversals could interleave on the same connection and corrupt each other's frontier. That pattern does not exist in the current codebase, and `SqliteGraphStore`'s `!Sync` bound prevents it by default.
-❯ What are #next-steps to fix this concurrency spoilage?
-### Re: #next-steps concurrency hardening — glm-5.1
-
-The current code is safe — `SqliteGraphStore` is `!Sync` so no concurrent access is possible. But if the API ever wraps it in `Arc<Mutex<>>` or similar, temp table names become a latent hazard. Priority-ordered hardening steps added to backlog:
-
-| Priority | ID | Description |
-|----------|----|-------------|
-| high | `#frontier-unique-temp` | Make temp table names unique per call (`_tsift_frontier_{call_id}`) so concurrent BFS on a shared connection cannot collide |
-| medium | `#temp-table-audit` | Audit all temp table uses (`edges_between_nodes`, `_tsift_frontier`) for the same single-connection pattern; document safety invariants |
-| medium | `#sqlite-doc-sync-safety` | Add doc comments on `SqliteGraphStore`/`SqliteReadOnlyConnection` stating the single-active-call-per-connection invariant for temp-table methods |
-| low | `#sqlite-reentrant-guard` | (Recommended) Add runtime `Cell<bool>` guard that panics on re-entrant temp-table calls on the same connection |
-
-Top of backlog: **`#frontier-unique-temp`**
-<!-- agent:boundary:a5695f35 -->
+<!-- agent:boundary:8f034502 -->
 <!-- /agent:exchange -->
 ###
 <!--

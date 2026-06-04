@@ -93,10 +93,58 @@ Also: flowcore test fails (session_check.rs guard_ count: expected 76, got 81).
 These need separate resolution. The first make check run (480 tests passed) used a cached binary from a prior successful build.
 
 **Queue items [#takv], [#xrm7], [#qmg2] consumed.**
-<!-- agent:boundary:f6faf89e -->
+
+### Re: JB Run Agent Doc stall — disable busy guard — glm-5-1
+
+The JB plugin's `is_busy` guard was already removed in TerminalUtil.kt:252-253. The remaining stall comes from the **route.rs binary busy guard** — specifically `DispatchOnlyBusyQueue` at route.rs:4310, which queued the prompt behind a stale `Busy` actor projection.
+
+**Root cause:** The authoritative actor state projected `Busy` for generation 224 on pane %70, but the opencode session was idle. The two existing recovery mechanisms didn't trigger:
+
+1. `busy_projection_repaired_by_ready_prompt` (route.rs:4133) — requires the live pane to show a recognized dispatch-ready prompt. The opencode idle chrome didn't match.
+2. `timeout-idle recovery` (route.rs:4159) — requires waiting the full timeout first (60s by default).
+
+**The guard is not redundant** — it prevents duplicate injection into actually-active turns. But the stale-projection case is the bug. The fix is to make the busy guard **trust live pane evidence over actor state** for dispatch-only routes when the pane shows no active turn marker (`esc to interrupt`).
+
+**Recommended fix:** In the `DispatchOnlyBusyQueue` branch (route.rs:4310), before queuing, capture the live pane and check `harness.has_busy_cue()`. If no busy cue is found, promote to `Ready` and dispatch instead of queuing. This is already the pattern used by `timeout-idle recovery` — just apply it immediately instead of waiting for timeout.
+
+This avoids the 60s wait and eliminates the stall while preserving the safety invariant for genuinely active turns.
+
+**No code changes this cycle** — this needs a design decision. Should I implement the eager busy-cue check in `DispatchOnlyBusyQueue`?
+
+#### Re: GPT model delegation
+
+Already addressed in the prior response: the key constraint is that tmux text injection cannot carry images. The describe-image CLI must use standalone HTTP calls. Option A+C combined (Google provider + passthrough) remains the recommended path.
+
+OpenCode does not expose a `--image` flag on its run command, and the agent-doc HTTP server is a document-IPC bridge, not an LLM proxy. Delegating to a GPT model would require either:
+- A standalone HTTP client call from within the agent-doc binary (Option C)
+- A passthrough to the configured provider (Option A)
+
+Neither requires the opencode harness.
+<!-- agent:boundary:32dfbe0d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+---
+JB `Run Agent Doc` stalled. The opencode session is idle. Disable the guard. It is redundant and a source of bugs. Claude Code, Codex, and OpenCode already have guards.
+```
+[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
+[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
+resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
+[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
+[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
+resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+[route] target tmux session: 0
+[route] authoritative actor generation 224 for tasks/agent-doc/agent-doc-bugs2.md is busy on pane %70; queued pending dispatch "How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 - How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?
 <!-- /agent:queue -->
 ###

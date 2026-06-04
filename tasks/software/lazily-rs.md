@@ -180,7 +180,25 @@ The core challenge: `SlotNode` is type-erased (`value: Option<Rc<dyn Any>>`, `co
 All three paths need a design doc and correctness review before implementation. Created plan: `tasks/software/plan-typed-cache-fastpath.md` (to be authored).
 
 Remaining `get()` cost on warm path (8.2 ns): ~2-3 ns is `downcast_ref` (TypeId check + pointer cast), ~3-4 ns is `RefCell::borrow()` + array index. The typed cache only eliminates the downcast portion.
-<!-- agent:boundary:a1a49f14 -->
+
+### Re: #zspz per-slot fine-grained locking — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#zspz]
+
+
+**Gated** — requires redesign of the `slot_fast_paths`/`cell_fast_paths` storage arrays.
+
+Current state: `ThreadSafeContext` stores sidecars in `RwLock<Vec<Option<Arc<ThreadSafeSlotFastPath>>>>` (thread_safe.rs). Every cached read acquires this array-level `RwLock` to index the slot, even though each slot has its own fine-grained `RwLock` for the value. At 16 workers, this shared `RwLock` becomes a bottleneck.
+
+Approaches:
+1. **Sharded array** — split into N shards (e.g., 16) by `SlotId % N`, each with its own `RwLock`. Reduces contention without lock-free complexity.
+2. **Lock-free slab** — `Arc<dashmap::DashMap>` or atomic slab. Eliminates the array-level lock entirely but adds allocation overhead for slot creation.
+3. **Epoch-based reclamation** — use `crossbeam-epoch` for hazard-pointer reads of the slot array, allowing lock-free reads with deferred reclamation on slot disposal.
+
+Option 1 is lowest risk and should be attempted first. Needs a plan doc and benchmark before/after comparison against the existing 64.4 ns cached read baseline.
+<!-- agent:boundary:0f6480c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,7 +211,7 @@ Remaining `get()` cost on warm path (8.2 ns): ~2-3 ns is `downcast_ref` (TypeId 
 - ~do [#61zg]~
 - ~do [#fk8p]~
 - ~do [#v6r8]~
-- do [#zspz]
+- ~do [#zspz]~
 - do [#8e2q]
 - do [#mqcw]
 <!-- /agent:queue -->
@@ -201,7 +219,6 @@ Remaining `get()` cost on warm path (8.2 ns): ~2-3 ns is `downcast_ref` (TypeId 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [ ] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [ ] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 <!-- /agent:backlog -->
@@ -209,6 +226,7 @@ Remaining `get()` cost on warm path (8.2 ns): ~2-3 ns is `downcast_ref` (TypeId 
 ## Review
 
 <!-- agent:review -->
+- [/] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
 <!-- /agent:review -->
 

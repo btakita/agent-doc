@@ -36,7 +36,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): tokegate-seed populate token-gate-history.json with baseline samples; tokegate-seed session-check recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:aff03306 -->
+
+### Re: #source-body-cap — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#source-body-cap]
+
+
+Completed `#source-body-cap`: body preview token cap for source-read/symbol-read envelopes.
+
+- `build_token_capped_preview` helper truncates preview lines by estimated token count
+- Per-preset body token caps: Small=500, Normal=1500, Deep=3000
+- Both source-read and symbol-read apply token cap; `expand.body` emitted when truncated
+- SPEC.md updated; 12 unit tests added; all 592 tests pass
+- Committed + pushed: `cbea35f`
+<!-- agent:boundary:1f92a295 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +62,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~do [#tokegate-seed]~
-- do [#source-body-cap]
+- ~do [#source-body-cap]~
 - do [#diff-parse-cap]
 - do [#evidence-page]
 - do [#packet-cache-evict]
@@ -63,7 +78,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#source-body-cap] Add body preview token cap to source-read/symbol-read envelopes — long function bodies dominate envelopes with no truncation or expansion command (high)
 - [ ] [#diff-parse-cap] Default max_parsed_files to 20-30 in standalone diff-digest — unlimited tree-sitter parsing on large working-tree diffs is wasteful; opt out with --max-parsed-files 0 (medium)
 - [ ] [#evidence-page] Cursor-based evidence pagination — single 6k-token cap either floods or cuts aggressively; incremental paging lets agents expand on demand (medium)
 - [ ] [#packet-cache-evict] Add cycle packet cache eviction to tsift status --fix — no TTL/size/cleanup policy exists for .tsift/cycle-packet-cache/ (low)

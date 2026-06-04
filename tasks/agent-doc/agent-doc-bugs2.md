@@ -64,7 +64,28 @@ agent-doc claim tasks/software/seo.md --force
 ```
 
 After claim succeeds, run the first turn via `agent-doc route tasks/software/seo.md` or JB `Run Agent Doc`.
-<!-- agent:boundary:762a55d8 -->
+
+### Re: do plan-jb-clear-session-busy-pane-ux.md — opus-4-6
+
+> **Queue prompt:**
+>
+> do plan-jb-clear-session-busy-pane-ux.md
+
+
+The plan is **already fully implemented and tested**. All 5 items ship:
+
+| # | Plan Item | Status | Evidence |
+|---|-----------|--------|----------|
+| 1 | `session clear` fail-closed for alive-busy | Done | `reconcile_idle_projection_before_clear` in `session_actor_cmd.rs:675` classifies into `OperatorClearInputState::Busy` → bails with refusal |
+| 2 | JB typed result for protected busy panes | Done | `BusySessionClearRefusal` data class + `parseBusySessionClearRefusal` + `notifyBusySessionClearBlocked` notification with action buttons in `TerminalUtil.kt:659-731` |
+| 3 | Explicit interrupt flow | Done | `InterruptClearSessionContextAction` → `interruptAndClearSessionContext` → `agent-doc session interrupt-clear` → `session_actor_cmd::interrupt_clear` at line 1028 |
+| 4 | Retry/wait path | Done | `refreshAndRetryClearSessionContext` runs `session status` then retries clear if idle (`TerminalUtil.kt:683-704`) |
+| 5 | Regressions | Done | 9 Rust tests pass (`session_actor_cmd::tests::*clear*`), 1 orchestration test (`busy_clear_blocks_without_destructive_confirmation`), 5+ JB Kotlin tests (`TerminalUtilTest.kt`) |
+
+Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt tests green.
+
+No code changes needed. Marking this plan as complete.
+<!-- agent:boundary:30883e3b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -81,7 +102,7 @@ How do I initialize seo.md as an agent-doc? I tried JB `Claim for Tmux Pane`. Wh
 Claim failed (exit 1): [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill Error: pane %64 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
 ```
 ~~~
-- do plan-jb-clear-session-busy-pane-ux.md
+- ~do plan-jb-clear-session-busy-pane-ux.md~
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
 <!-- /agent:queue -->

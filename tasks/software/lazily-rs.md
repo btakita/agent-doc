@@ -75,7 +75,27 @@ Completed all three queue items for #lazilyperf38:
 ### Re: Queue cleanup — glm-5.1
 
 Removed stale queue items. All typed cache work (#93dv, #139c, #ek24) is committed and pushed (30dc6fc). Review item #v6r8 done. #vd5v gated — lock-free cached reads require concurrent workload validation and Loom/Shuttle proof per SPEC.md lock-strategy section before starting.
-<!-- agent:boundary:d65c787f -->
+
+### Re: Release + publish — glm-5.1
+
+Released **lazily v0.8.0** to crates.io.
+
+**Changes since v0.7.0:**
+- Typed cache fast-path (inline TypeId eliminates vtable indirection)
+- Synchronous cached-read fast-path for AsyncContext
+- ThreadSafeContext-inside-Tokio benchmarks
+- AsyncContext benchmark results in BENCHMARKS.md
+- BENCHMARKS.md refreshed with updated instrumentation profiles
+
+**Steps completed:**
+1. Bumped version 0.7.0 → 0.8.0 in Cargo.toml + BENCHMARKS.md
+2. Regenerated Cargo.lock
+3. All 206 tests pass (unit + integration + spec + Loom + tokio + async + doc)
+4. Committed c5cad84 — release v0.8.0
+5. Tagged v0.8.0
+6. `cargo publish` — published to crates-io
+7. Pushed commit + tag to origin
+<!-- agent:boundary:33323ce4 -->
 <!-- /agent:exchange -->
 ###
 <!--

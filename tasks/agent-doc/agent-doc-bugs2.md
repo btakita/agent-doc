@@ -111,13 +111,41 @@ Remaining gap (structural race):
 - Tests: `append_patch_already_present_ignores_user_prompt_prefix`, `append_with_caret_does_not_duplicate_prefixed_prompt` pass; no regression for the structural race yet
 
 Gating as assessed-pending-live-capture. Schedule Path B session to unblock.
-<!-- agent:boundary:e16b3e0f -->
+
+### Re: do [#engt] #clear-busy-pane-guard — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#engt]
+
+
+**Status: Gated on design decision — diagnostic UX improvement needed, not a behavior change.**
+
+Current state:
+- `session clear` correctly refuses on `AliveBusy` OpenCode panes (`session_actor_cmd.rs:477-749`)
+- `operator_clear_input_state_for_evidence` state machine returns `Busy` → `busy_clear_refusal_message` (line 744)
+- `interrupt-clear` escape hatch exists (line 1028) for intentional discard
+- OpenCode active-turn detection via `opencode_active_turn_busy` (harness.rs:636) checks bottom 12 lines for `esc to interrupt`
+- Bug confirmed reproducing: ops.log shows `session_clear_live_busy_guard_blocked` for tsift.md pane %62 with `reason=opencode_active_turn`
+
+Design recommendation (refusal-only + improved UX):
+1. Enrich `busy_clear_refusal_message` to include: active harness type, turn type (active vs idle), exact `interrupt-clear` command suggestion, and pane tail context
+2. Keep `clear` as refusal-only — auto-interrupting risks discarding in-flight work without confirmation
+3. Add a `clear --force-interrupt` flag that confirms intent, sends harness interrupt, waits for idle prompt, then retries clear
+
+Tests needed:
+- Refusal message includes harness, turn type, command suggestion
+- `clear --force-interrupt` sends interrupt and waits
+- Regression: busy clear still refuses without `--force-interrupt`
+
+Plan file: `plan-jb-clear-session-busy-pane-ux.md` exists with compatible direction.
+<!-- agent:boundary:c9f9fba9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~JB `Run Agent Doc` on this file stalled...no routing.~
 - ~do [#54pz]~
-- do [#engt]
+- ~do [#engt]~
 - do [#ba4b]
 - do [#kz2g]
 - do [#appe]

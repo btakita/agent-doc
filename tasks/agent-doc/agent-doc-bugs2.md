@@ -34,7 +34,29 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 5 response topic(s): Frontmatter pipeline fields & reentrant phases; #finalize-owned-pane-response-patchback remaining work; #reentrant-phase5-integration & #finalize-owned-pane-response-patchback; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e4599e8a -->
+
+### Re: JB Run Agent Doc stall + #finalize-owned-pane-response-patchback — glm-5.1
+
+Two fixes implemented, tested, and installed:
+
+#### 1. JB `Run Agent Doc` stalls after 1 turn (#opencode-jb-stall)
+
+**Root cause:** When `busy_dispatch_only_should_wait_for_ready()` skipped the 60s wait because a queue fallback existed (`prompt_context.is_some()` from JB), neither the ready-prompt recovery nor the timeout-idle recovery ran. The project controller projected the actor as `Busy` even though the opencode pane was idle (no busy cue in the bottom 12 lines). Every subsequent JB Run Agent Doc queued into `agent:queue auto` instead of dispatching, and the queue never drained.
+
+**Fix:** Added an **eager busy-cue check** in `route_via_authoritative_actor()` (route.rs:4197) — when dispatch-only, actor is Busy, wait was skipped, and the live pane shows no busy cue, promote the stale Busy projection to Ready and dispatch immediately.
+
+```
+route_eager_busy_cue_recovery file=... pane=... harness=opencode busy_cue=false
+```
+
+#### 2. #finalize-owned-pane-response-patchback recovery adoption
+
+**Plan step 5 implemented:** When the codex_final_gate detects an abandoned recursive-direct-invocation cycle with no captured response, but a response heading (`### Re:`) is already visible in `agent:exchange` (manually patched in), the gate adopts it idempotently instead of blocking. New `exchange_tail_has_response_heading()` helper. Original block (exit 2) preserved when no response heading exists.
+
+**Files:** `route.rs` (eager busy-cue recovery), `session_check.rs` (patchback adoption + helper + regression test).
+
+**Verification:** `make check` 2256 passed, 2 pre-existing failures unrelated. Binary rebuilt and installed.
+<!-- agent:boundary:9f9c3779 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -44,6 +66,7 @@ Compacted content:
 - ~do [#reentrant-phase4]~
 - do [#reentrant-phase5-integration]
 - do [#finalize-owned-pane-response-patchback]
+- JB `Run Agent Doc` stalls after 1 turn on opencode documents. An attempt was made in lazily-rs.md and this document.
 <!-- /agent:queue -->
 ###
 <!--

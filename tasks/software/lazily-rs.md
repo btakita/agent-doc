@@ -39,7 +39,7 @@ Compacted content:
 - Archived 2 response topic(s): [#mvbj] #ipc1; [#4rxf] #ipc2
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: [#jwwc] #ipc3 — Investigate CRDT vs Raft for lazily-distributed — opus-4-8 (HEAD)
+### Re: [#jwwc] #ipc3 — Investigate CRDT vs Raft for lazily-distributed — opus-4-8
 
 Investigated and committed (`lazily-rs` `933e8a8`, pushed to `main`). New **Multi-writer coordination: CRDT vs Raft (`lazily-distributed`)** section in `SPEC.md`. **Conclusion: CRDT (cell-plane HLC registers), not Raft** — with a narrow single-writer authority for irreversible effects.
 
@@ -61,7 +61,7 @@ Open prototype gates (deferred): HLC skew bounds + LWW/MV default per cell categ
 Design-only — `cargo test --test spec_compliance` green (101). The `ipc1→ipc2→ipc3` distributed-design arc is now complete. Queue next: `[#q5r1] #39c5` (implement RemoteOp enum + allowlist) — an *implement* task, not design.
 
 Note: your queue tag edit `auto`→`go` is an unrecognized attribute (preflight ignores it); the queue stays active as `persisted`, but the Claude-Code auto-loop only fires from `auto`. Restore `auto` if you want hands-off draining.
-<!-- agent:boundary:5d78dd2c -->
+<!-- agent:boundary:5d77879e -->
 <!-- /agent:exchange -->
 ###
 <!--

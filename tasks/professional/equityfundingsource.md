@@ -32,107 +32,19 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260603-203838.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260604-031956.md`*
 
 Compacted content:
-- Archived 14 response topic(s): TMO BorrowerView links; Should these replace our portal for the demo?; Can we replicate these workflows in our portal?; 11 more
+- Archived 6 response topic(s): apply4 P2; apply4 P3; deploy to production (after P3); 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: apply4 P2 — personal + addresses + e-sign — done — opus-4-8
-
-> **Queue prompt:**
->
-> [#f3b2]
-
-
-P2 shipped (commit `a2b68f8`, pushed). `bun run check` green — 246 tests.
-
-- **Migration 0037**: `application_personal` (SSN stored as a **masked token only**, never raw — security-tier-0), `application_addresses` (current/former/mailing), `application_signatures` (ESIGN/UETA `esign_consent` + `declaration_version` + IP/UA audit trail).
-- **Section repo + API**: `GET …/sections` (resume), `PUT …/personal`, `PUT …/addresses`, `POST …/sign` (consent-gated; captures `cf-connecting-ip`/`x-forwarded-for` + `user-agent`), all ownership-checked.
-- **Wizard UI**: 3 steps (Personal → Addresses → Review & e-sign) with save-per-step and resume from saved sections.
-
-Continuing the queue to P3 (`#2eaf` — employment & income).
-
-### Re: apply4 P3 — employment & income — done — opus-4-8
-
-> **Queue prompt:**
->
-> [#2eaf]. deploy to production
-
-
-P3 shipped (commit `379ac66`, pushed). `bun run check` green — 249 tests.
-
-- **Migration 0038**: `application_employment` (current/additional/former with the apply4 gross monthly income breakdown — base/overtime/bonus/commission/military/other), `application_income` (other-source income).
-- **Repo + routes**: employment/income replace+read; `PUT …/employment`, `PUT …/income`, both folded into `GET …/sections` for resume.
-- **Wizard**: new Employment step (current employer + self-employed, gross-income breakdown, add-more other-income rows) with save/resume.
-
-Continuing the queue to P4 (`#1tk7` — assets/liabilities + Real Estate Owned).
-
-### Re: deploy to production (after P3) — done — opus-4-8
-
-Deployed P1–P3 live. Worker version `85fa9cfc` at https://equityfundingsource.brian-takita.workers.dev.
-
-- **Applied prod D1 migrations 0034–0038** (chat admin owner; `loan_payment_transactions`; `full_applications` + personal/addresses/employment/income/signatures).
-- **Prod collision fixed:** migration 0036 first failed — production has a **legacy `applications` table** (old intake schema, predates the migration system, unused by current code). Renamed the apply4 table to `full_applications` (FKs + repo + test updated; legacy table left untouched), re-migrated, redeployed. Commit `712b91e`.
-- **Live smoke tests green:** `/apply` → 200; `/portal-borrower/full-application` (unauth) → 303 → `/login?role=borrower&next=…` (hybrid handoff + `next` live); `/api/borrower/payments/config` → `{stripe_enabled:false}`; `/api/stripe/webhook` (unsigned) → 501. All gated features fail-closed.
-
-Note: public `/apply` now routes prequal submits into the partial wizard (Personal → Addresses → Employment → e-sign; final submit is P5). Continuing the queue to P4 (`#1tk7`); prod stays at P1–P3 until a re-deploy (queued reminder added).
-
-### Re: apply4 P4 — assets, liabilities & REO — done — opus-4-8
-
-> **Queue prompt:**
->
-> [#1tk7]
-
-
-P4 shipped (commit `678cd59`, pushed). `bun run check` green — 253 tests.
-
-- **Migration 0039**: `application_assets` (account number stored as a **masked token**), `application_liabilities`, `application_reo` + `application_reo_mortgages` child table (cascade; masked tokens).
-- **Repo + routes**: assets/liabilities replace+read; REO replace+read with **nested per-property mortgages**; `PUT …/assets`, `…/liabilities`, `…/reo`, all in `GET …/sections`.
-- **Wizard**: new "Assets & property" step (add-more assets, liabilities, and REO properties with creditor/balance) with save/resume.
-
-Continuing the queue to P5 (`#az2w` — subject property + Declarations A–M + submit). Prod stays at P1–P3 until the queued re-deploy.
-
-### Re: apply4 P5 — subject property + declarations + submit — done — opus-4-8
-
-> **Queue prompt:**
->
-> [#az2w]
-
-
-P5 shipped (commit `a91d791`, pushed). `bun run check` green — 256 tests. **This completes the borrower-facing apply4 wizard (P1–P5).**
-
-- **Migration 0040**: `application_subject_property` (loan amount/purpose/occupancy/value/units/flags), `application_declarations` (JSON answers map for A–M).
-- **Repo + routes**: subject-property + declarations upsert/read (in `…/sections`); `POST …/submit` transitions draft→submitted, **gated on a recorded e-signature**, idempotent (only promotes a draft).
-- **Wizard**: Property & declarations step (loan/property fields + A–M yes/no) and a Submit action after e-sign, with a submitted-state confirmation.
-
-The borrower can now complete and submit the full URLA end-to-end. Continuing to the final phase P6 (`#k9p5` — admin review of the full application + gated TMO writeback). Prod stays at P1–P3 until the queued re-deploy.
-
-### Re: apply4 P6 — admin review + gated TMO writeback — done — opus-4-8
-
-> **Queue prompt:**
->
-> [#k9p5]
-
-
-P6 shipped (commit `31a0381`, pushed). `bun run check` green — 261 tests. **This completes the full apply4 build (P1–P6).**
-
-- **Repo**: admin list (submitted+), read-by-id, set-status (in_review/accepted/declined).
-- **`tmo_writeback.ts`**: maps an application onto a TMO `NewLoanApplication` body; `Fields[]` is empty without a custom-field key map, so the writeback **fails closed**. Flag+token gate via `tmo_application_write_enabled_`.
-- **Admin API** (admin-guarded): `GET /api/admin/full-applications`, `GET …/:id` (all sections), `POST …/:id/status`, `POST …/:id/tmo-writeback` (**501 gated** until a key map is configured).
-- **Admin UI**: "Full Applications" section — list submitted, review detail across all sections, approve/decline, and a Push-to-TMO button (gated).
-
-The apply4 full URLA is now end-to-end: public prequal → auth → wizard (personal → addresses → employment → assets/property → property/declarations → e-sign → submit) → admin review → gated TMO writeback. Queue drained.
-
-**Reminder still open:** prod is at P1–P3 (worker `85fa9cfc`). To take P4–P6 live, run the queued re-deploy (`cf:d1:migrate:remote` for 0039–0040, then `deploy:worker`).
-<!-- agent:boundary:f50ab007 -->
+<!-- agent:boundary:33135c41 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" auto -->
 <!-- /agent:queue -->
 
 ## Backlog

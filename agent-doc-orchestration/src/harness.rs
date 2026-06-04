@@ -726,7 +726,7 @@ fn is_opencode_footer_version_line(trimmed: &str) -> bool {
         return false;
     }
     lower.contains("opencode")
-        && lower.split_whitespace().next_back().map_or(false, |last| {
+        && lower.split_whitespace().next_back().is_some_and(|last| {
             let mut parts = last.split('.');
             parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
                 && parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))

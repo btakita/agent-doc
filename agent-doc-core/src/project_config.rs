@@ -142,6 +142,62 @@ pub struct VisionConfig {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    #[serde(default)]
+    pub agents: BTreeMap<String, AgentVisionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentVisionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl VisionConfig {
+    pub fn agent_config(&self, agent_name: &str) -> Option<&AgentVisionConfig> {
+        self.agents.get(agent_name)
+    }
+
+    pub fn effective_provider(&self, agent_name: Option<&str>) -> Option<&str> {
+        if let Some(name) = agent_name
+            && let Some(ac) = self.agents.get(name)
+            && let Some(ref p) = ac.provider
+        {
+            return Some(p.as_str());
+        }
+        self.provider.as_deref()
+    }
+
+    pub fn effective_model(&self, agent_name: Option<&str>) -> Option<&str> {
+        if let Some(name) = agent_name
+            && let Some(ac) = self.agents.get(name)
+            && let Some(ref m) = ac.model
+        {
+            return Some(m.as_str());
+        }
+        self.model.as_deref()
+    }
+
+    pub fn effective_api_key(&self, agent_name: Option<&str>) -> Option<&str> {
+        if let Some(name) = agent_name
+            && let Some(ac) = self.agents.get(name)
+            && let Some(ref k) = ac.api_key
+        {
+            return Some(k.as_str());
+        }
+        self.api_key.as_deref()
+    }
+
+    pub fn agent_mode(&self, agent_name: &str) -> Option<&str> {
+        self.agents
+            .get(agent_name)
+            .and_then(|ac| ac.mode.as_deref())
+    }
 }
 
 /// Project-level configuration, read from `.agent-doc/config.toml` relative to CWD.

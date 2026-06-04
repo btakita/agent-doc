@@ -290,6 +290,58 @@ pub fn clear_marker(file: &Path) -> Result<()> {
     }
 }
 
+fn cooldown_marker_path(file: &Path) -> Result<Option<PathBuf>> {
+    let Some(root) = crate::fs_util::find_project_root(file) else {
+        return Ok(None);
+    };
+    let hash = crate::snapshot::doc_hash(file)?;
+    Ok(Some(
+        root.join(".agent-doc/queue-cooldowns")
+            .join(format!("{hash}.json")),
+    ))
+}
+
+pub fn write_clear_cooldown(file: &Path) -> Result<()> {
+    let Some(path) = cooldown_marker_path(file)? else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let payload = serde_json::json!({
+        "file": file.to_string_lossy(),
+        "written_at": now_secs(),
+    });
+    let json = serde_json::to_string_pretty(&payload)
+        .context("serialize cooldown marker")?;
+    std::fs::write(&path, json)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn clear_cooldown_marker(file: &Path) -> Result<()> {
+    let Some(path) = cooldown_marker_path(file)? else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
+    }
+}
+
+pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
+    let Some(path) = cooldown_marker_path(file)? else {
+        return Ok(false);
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+    }
+}
+
 pub fn load_marker(file: &Path) -> Result<Option<ContinuationMarker>> {
     let Some(path) = marker_path(file)? else {
         return Ok(None);

@@ -28,6 +28,7 @@ dependencies = [
  "agent-kit",
  "anyhow",
  "assert_cmd",
+ "base64 0.22.1",
  "clap",
  "existence",
  "filetime",
@@ -1322,8 +1323,9 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
+ "parking_lot",
  "smallvec",
 ]
 

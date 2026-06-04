@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -6,6 +7,95 @@ const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-20250514";
 const DEFAULT_PROMPT: &str = "Describe this image in detail.";
 
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub struct ImageRef {
+    pub kind: ImageRefKind,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub enum ImageRefKind {
+    Markdown,
+    NakedPath,
+    Url,
+}
+
+#[allow(dead_code)]
+fn has_image_extension(s: &str) -> bool {
+    let path = s.split('?').next().unwrap_or(s);
+    let lower = path.to_lowercase();
+    IMAGE_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
+}
+
+#[allow(dead_code)]
+pub fn extract_image_references(text: &str) -> Vec<ImageRef> {
+    let mut refs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // Phase 1: markdown images ![alt](path)
+    let mut pos = 0;
+    let bytes = text.as_bytes();
+    while pos < text.len() {
+        if bytes[pos] == b'!' && pos + 1 < text.len() && bytes[pos + 1] == b'[' {
+            let rest = &text[pos..];
+            if let Some(close_bracket) = rest.find(']') {
+                let after = &rest[close_bracket + 1..];
+                if after.starts_with('(')
+                    && let Some(close_paren) = after.find(')')
+                {
+                    let path = &after[1..close_paren];
+                    if !path.is_empty() && seen.insert(path.to_string()) {
+                        refs.push(ImageRef {
+                            kind: ImageRefKind::Markdown,
+                            path: path.to_string(),
+                        });
+                    }
+                    pos += close_bracket + 1 + close_paren + 1;
+                    continue;
+                }
+            }
+        }
+        pos += 1;
+    }
+
+    // Phase 2: image URLs (https://...png, http://...jpg)
+    for word in text.split_whitespace() {
+        let word = word.trim_matches(&['"', '\'', '(', ')', '[', ']', ',', ';', ':'][..]);
+        if (word.starts_with("https://") || word.starts_with("http://"))
+            && has_image_extension(word)
+            && seen.insert(word.to_string())
+        {
+            refs.push(ImageRef {
+                kind: ImageRefKind::Url,
+                path: word.to_string(),
+            });
+        }
+    }
+
+    // Phase 3: naked file paths with image extensions
+    for word in text.split_whitespace() {
+        let word = word.trim_matches(&['"', '\'', '(', ')', '[', ']', ',', ';', ':'][..]);
+        if word.starts_with("http://") || word.starts_with("https://") || word.starts_with("![") {
+            continue;
+        }
+        if has_image_extension(word)
+            && seen.insert(word.to_string())
+        {
+            refs.push(ImageRef {
+                kind: ImageRefKind::NakedPath,
+                path: word.to_string(),
+            });
+        }
+    }
+
+    refs
+}
+
+#[derive(Debug)]
 pub enum Provider {
     OpenAI,
     Anthropic,
@@ -326,8 +416,10 @@ mod tests {
 
     #[test]
     fn resolve_api_key_missing() {
-        std::env::remove_var("AGENT_DOC_VISION_API_KEY");
-        std::env::remove_var("OPENAI_API_KEY");
+        unsafe {
+            std::env::remove_var("AGENT_DOC_VISION_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
         let err = resolve_api_key(&Provider::OpenAI, None).unwrap_err();
         assert!(err.to_string().contains("no API key found"));
     }
@@ -336,5 +428,68 @@ mod tests {
     fn resolve_api_key_cli() {
         let key = resolve_api_key(&Provider::OpenAI, Some("test-key")).unwrap();
         assert_eq!(key, "test-key");
+    }
+
+    #[test]
+    fn extract_markdown_image() {
+        let refs = extract_image_references("See ![img](img_1.png) for details.");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::Markdown);
+        assert_eq!(refs[0].path, "img_1.png");
+    }
+
+    #[test]
+    fn extract_naked_path() {
+        let refs = extract_image_references("The bug is in screenshot.png");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::NakedPath);
+        assert_eq!(refs[0].path, "screenshot.png");
+    }
+
+    #[test]
+    fn extract_image_url() {
+        let refs = extract_image_references("See https://example.com/img.png");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::Url);
+        assert_eq!(refs[0].path, "https://example.com/img.png");
+    }
+
+    #[test]
+    fn extract_mixed_references() {
+        let refs = extract_image_references(
+            "![alt](img.png) and screenshot.jpg plus https://host.com/photo.gif",
+        );
+        assert_eq!(refs.len(), 3);
+        assert_eq!(refs[0].kind, ImageRefKind::Markdown);
+        assert_eq!(refs[1].kind, ImageRefKind::Url);
+        assert_eq!(refs[2].kind, ImageRefKind::NakedPath);
+    }
+
+    #[test]
+    fn extract_deduplication() {
+        let refs = extract_image_references("![a](img.png) and also img.png again");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::Markdown);
+    }
+
+    #[test]
+    fn extract_no_matches() {
+        let refs = extract_image_references("Just some text without images.");
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn extract_absolute_path() {
+        let refs = extract_image_references("/tmp/opencode/img_16.png");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::NakedPath);
+        assert_eq!(refs[0].path, "/tmp/opencode/img_16.png");
+    }
+
+    #[test]
+    fn extract_url_with_query() {
+        let refs = extract_image_references("https://cdn.com/img.jpg?w=800");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].kind, ImageRefKind::Url);
     }
 }

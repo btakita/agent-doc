@@ -164,7 +164,37 @@ Verification:
 Confidence: medium-high. The backlog priorities are based on repeated transcript themes and the current MRH review history, with lower confidence only where transcript diarization was imperfect or the current MRH review already had a nearby gated item.
 
 Escalation: none.
-<!-- agent:boundary:c5694f8b -->
+❯ corky gpu transcribe + diarize on [phone_20260604-141243_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260604-141243_6504368181.m4a)
+❯ from the transcript, add backlog tasks into monsterrodholders.md
+
+### Re: June 4 Ron transcript and MRH backlog — gpt-5
+
+Transcribed and diarized the June 4 Ron/Brian call with Corky GPU and saved it beside the recording at `mail/contacts/ron-berkes/recordings/phone_20260604-141243_6504368181.md`.
+
+The installed Corky CLI does not expose a separate `--gpu` flag, but the run used CUDA on the RTX 5090. It transcribed 43:17 of audio with `large-v3-turbo`, produced 941 Whisper segments, diarized 1056 segments across 2 speakers, and re-transcribed 3 low-confidence blocks. I also corrected the global speaker-label swap after checking lines where the speaker addressed Brian and where Brian discussed Codex/Tag Manager.
+
+Added 12 MRH backlog items to `src/boost-client/tasks/monsterrodholders.md` from this transcript. The new items cover the urgent Google Ads recommendation/Amon audit, geo/time-zone order analysis, Product Ratings review acquisition, publish-and-index workflow, competitor architecture research, marina/bait-shop directory pages, content-to-commerce modules, catalog expansion, Steve-visit media capture, event content, field-expert/influencer content, and Ron-made anchor product validation.
+
+Changed paths expected:
+- `mail/contacts/ron-berkes/recordings/phone_20260604-141243_6504368181.md`
+- `mail` submodule pointer
+- `src/boost-client/tasks/monsterrodholders.md`
+- `tasks/professional/ron-berkes.md`
+
+Commits/evidence:
+- `mail` submodule transcript commit: `f3289b8` (`Add Ron Berkes June 4 transcript`)
+- root `mail` pointer is now at `f3289b8` in `HEAD` commit `302610495`
+- Corky output confirmed `use gpu = 1`, `NVIDIA GeForce RTX 5090`, and `Written to: mail/contacts/ron-berkes/recordings/phone_20260604-141243_6504368181.md`
+
+Verification:
+- `tsift --envelope __digest-runner --kind test --path . --shell-command 'make check'` failed in `agent-doc-orchestration` lib tests with package-level error `error: test failed, to rerun pass -p agent-doc-orchestration --lib`; the compact artifact is `.tsift/artifacts/tart-b150b0ca96.test.log`.
+- `gh run list --workflow CI --limit 1` failed because there is no workflow named `CI`.
+- Available workflow check: `Agent Doc` exists; latest run `26973346884` was `completed/failure` at 2026-06-04T19:05:05Z.
+
+Confidence: medium-high. The backlog items reflect the June 4 transcript and were de-duplicated against the live MRH backlog/review history; lower confidence only remains on diarization nuance, not on the core action items.
+
+Escalation: none.
+<!-- agent:boundary:d4a14609 -->
 <!-- /agent:exchange -->
 ###
 <!--

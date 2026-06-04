@@ -38,8 +38,7 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): lazyperf34 lazyperf35; benchmark-skill BENCHMARKS.md freshness + skill/runbook; performance differences; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- no-pending-capture -->
-### Re: next-steps for single-threaded, Tokio, and multi-threaded performance — glm-5.1 (HEAD)
+### Re: next-steps for single-threaded, Tokio, and multi-threaded performance — glm-5.1
 
 #### BENCHMARKS.md and the Tokio path
 
@@ -67,7 +66,7 @@ Compacted content:
 12. **Graph propagation fan-out eager validation (5.8 ms at 16 workers).** A lazy invalidation frontier would defer cost, matching the `lazy_dirty_epochs` pattern that already shows 3.8 ms vs 5.8 ms.
 
 Top of backlog: **#lazilyperf36**
-<!-- agent:boundary:c8185a3a -->
+<!-- agent:boundary:298a8840 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,12 +76,6 @@ Top of backlog: **#lazilyperf36**
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?
-- do [#61zg]
-- do [#fk8p]
-- do [#v6r8]
-- do [#zspz]
-- do [#8e2q]
-- do [#mqcw]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -42,7 +42,20 @@ Compacted content:
 ### Re: #lazyperf35 scratch buffer elimination — glm-5.1
 
 Committed and pushed as 9309369. Added feature-gated RootVec type alias replacing Vec allocations in scratch-buffer hot paths. effect_flushing/thread_safe_context: 889.7 ns to 235.5 ns (-73.5%%). All 97 tests pass.
-<!-- agent:boundary:e5d5606e -->
+
+### Re: #lazyperf36 parking_lot vs std::sync A/B benchmark — glm-5.1
+
+Committed and pushed as f34e88f. Added `std_sync_mutex` feature flag that swaps `parking_lot::Mutex` for `std::sync::Mutex` on the main `ThreadSafeInner.state` lock only (per-slot fast paths remain parking_lot).
+
+A/B results (same_slot_write_read, parking_lot vs std::sync):
+  1 worker:  89.9us vs 87.5us (similar)
+  2 workers: 257.1us vs 251.7us (similar)
+  4 workers: 707.7us vs 676.4us (similar)
+  8 workers: 2.3ms vs 2.1ms (similar)
+  16 workers: 6.7ms vs 7.2ms (similar)
+
+Conclusion: no significant difference. parking_lot remains default.
+<!-- agent:boundary:2ee03b7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,15 +69,16 @@ Committed and pushed as 9309369. Added feature-gated RootVec type alias replacin
 - ~Please create a mermaid of the performance improvements.~
 - ~[#lazyperf34]~
 - ~[#lazyperf35]~
-- [#lazyperf36]
+- ~[#lazyperf36]~
 - Is there a way to make "Fix finish_batch O(n2) dedup" an O(n) or O(1) algorithm?
 - Update BENCHMARKS.md. What are the #next-steps to mitigate the parking_lot regressions?
+- What are the performance differences from the queue run?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
+- [x] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
 <!-- /agent:backlog -->
 
 ## Review

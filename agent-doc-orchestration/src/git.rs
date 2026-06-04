@@ -863,6 +863,66 @@ fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_content: &st
     !suffix.is_empty() && suffix.starts_with("### Re:")
 }
 
+fn is_safe_exchange_user_prompt_insert(snapshot_exchange: &str, file_exchange: &str) -> bool {
+    let snap_lines: Vec<&str> = snapshot_exchange.lines().collect();
+    let file_lines: Vec<&str> = file_exchange.lines().collect();
+
+    if snap_lines.len() >= file_lines.len() {
+        return false;
+    }
+
+    let prefix_len = snap_lines
+        .iter()
+        .zip(file_lines.iter())
+        .take_while(|(s, f)| s.trim() == f.trim())
+        .count();
+
+    let suffix_len = snap_lines
+        .iter()
+        .rev()
+        .zip(file_lines.iter().rev())
+        .take_while(|(s, f)| s.trim() == f.trim())
+        .count();
+
+    if suffix_len == 0 {
+        return false;
+    }
+
+    let suffix_start_in_snap = snap_lines.len().saturating_sub(suffix_len);
+    let suffix_has_response = snap_lines[suffix_start_in_snap..]
+        .iter()
+        .any(|line| line.trim().starts_with("### Re:"));
+
+    if !suffix_has_response {
+        return false;
+    }
+
+    let insert_start = prefix_len;
+    let insert_end = file_lines.len().saturating_sub(suffix_len);
+
+    if insert_start >= insert_end {
+        return false;
+    }
+
+    let inserted_lines = &file_lines[insert_start..insert_end];
+
+    for line in inserted_lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("### Re:")
+            || trimmed.starts_with("#### Re:")
+            || trimmed.starts_with("<!-- agent:")
+            || trimmed.starts_with("<!-- /agent:")
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn flush_exchange_insert_block(block: &mut String) -> bool {
     let trimmed = block.trim();
     if trimmed.is_empty() {
@@ -1171,7 +1231,8 @@ fn classify_safe_agent_doc_mutation(
                 let safe_exchange =
                     is_safe_out_of_band_exchange_growth(&snap_content, &file_content)
                         || (allow_historical_exchange_growth
-                            && is_safe_historical_exchange_growth(&snap_content, &file_content));
+                            && is_safe_historical_exchange_growth(&snap_content, &file_content))
+                        || is_safe_exchange_user_prompt_insert(&snap_content, &file_content);
                 if !safe_exchange {
                     return None;
                 }
@@ -8575,6 +8636,83 @@ More content.
         assert_eq!(
             verify_snapshot_committed(&doc).unwrap(),
             SnapshotCommitStatus::NoHead,
+        );
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_basic() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\nUSER PROMPT\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_after_response() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response\nEXTRA TEXT";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_deletions() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_agent_markers() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\n### Re: injected — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_no_boundary() {
+        let snapshot = "### Re: new — model\nnew response";
+        let file = "USER PROMPT\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_identical() {
+        let snapshot = "### Re: prev — model\nprev response\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, snapshot));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_multiline_prompts() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\nline one\nline two\nline three\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+
+    #[test]
+    fn safe_exchange_user_prompt_insert_classify_integration() {
+        let snapshot_doc = "---\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: prev — model\nprev response\n\
+            <!-- agent:boundary:abc -->\n\
+            ### Re: new — model\nnew response\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] item\n\
+            <!-- /agent:backlog -->\n";
+
+        let file_doc = "---\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: prev — model\nprev response\n\
+            USER PROMPT\n\
+            <!-- agent:boundary:abc -->\n\
+            ### Re: new — model\nnew response\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] item\n\
+            <!-- /agent:backlog -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot_doc, file_doc),
+            Some("exchange")
         );
     }
 }

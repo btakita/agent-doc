@@ -33,7 +33,7 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ca1da0c5 -->
+<!-- agent:boundary:3065e93d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -61,16 +61,16 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. #clear-stops-running-process — detect idle-composer footer pattern in busy guard; reclassify as idle/repairable
-2. #jb-stale-busy-idle-footer — treat ctrl+p context-% footer as idle repair evidence
-3. #prompt-duplicated-while-typing — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts
-4. #adoc-queue-ipc-buffer-divergence — consume->halt cycle with no recurring agent:queue diff
-5. #lr-queue-patchback-miss — record seen free-text queue heads; require committed response proof
-6. #queue-auto-no-continue — auto-continue through non-fatal session-check outcomes
-7. #codex-403-429-fallback — add 403→429 transport rejection detection and diagnostic
-8. #codex-network-access-opencode-guard — guard codex_network_access for non-codex agents
-9. #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
-10. #backlog-priority-attribute — add priority attribute to backlog items
+1. [ ] [#3hwr] #clear-stops-running-process — detect idle-composer footer pattern in busy guard; reclassify as idle/repairable
+2. [ ] [#vypc] #jb-stale-busy-idle-footer — treat ctrl+p context-% footer as idle repair evidence
+3. [ ] [#gyma] #prompt-duplicated-while-typing — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts
+4. [ ] [#5qhn] #adoc-queue-ipc-buffer-divergence — consume->halt cycle with no recurring agent:queue diff
+5. [ ] [#0mgb] #lr-queue-patchback-miss — record seen free-text queue heads; require committed response proof
+6. [ ] [#30h3] #queue-auto-no-continue — auto-continue through non-fatal session-check outcomes
+7. [ ] [#k5ne] #codex-403-429-fallback — add 403→429 transport rejection detection and diagnostic
+8. [ ] [#7gy5] #codex-network-access-opencode-guard — guard codex_network_access for non-codex agents
+9. [ ] [#sxjj] #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
+10. [ ] [#cd98] #backlog-priority-attribute — add priority attribute to backlog items
 <!-- /agent:backlog -->
 
 ## Review

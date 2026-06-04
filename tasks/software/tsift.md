@@ -37,9 +37,21 @@ Compacted content:
 - Archived 1 response topic(s): surreal-skip-load
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 
-### Re: test
+### Re: #astnav-autoindex-oc auto-reindex on plugin load — glm-5.1
 
-Test response.
+Implemented auto-reindex for OpenCode in `packages/opencode-tsift/src/index.js`:
+
+- On plugin load and `installation.updated` hook, `ensureIndexFresh()` runs `tsift status --json` to check index state
+- If `index.state` is `"stale"` or `"missing"`, it runs `tsift status --fix` to reindex
+- Errors are logged via `ctx.client.app.log` but never block plugin load
+- Gracefully handles missing `tsift` binary (no-op)
+
+**Files changed:**
+- `packages/opencode-tsift/src/index.js` — added `ensureIndexFresh()` with freshness check + auto-reindex
+- `packages/opencode-tsift/test/install.test.js` — 3 new tests (fresh-skip, missing-tsift, hook-return)
+- `SPEC.md` — documented auto-reindex behavior
+
+**Verification:** `npm test` — 8/8 pass (3 new + 5 existing)
 <!-- agent:boundary:307fa882 -->
 <!-- /agent:exchange -->
 ###
@@ -50,7 +62,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#astnav-autoindex-oc]
+- ~[#astnav-autoindex-oc]~
 - Please benchmark surrealdb vs sqlite
 <!-- /agent:queue -->
 

@@ -67,6 +67,8 @@ provider = "openai"
 model = "gpt-4o"
 ```
 
+I already have this in `.agent-doc/config.toml`. Please verify.
+
 This tells agent-doc: when the agent is `opencode` (GLM-5.1, no vision), run image detection during orchestrate, send detected images to OpenAI GPT-4o for description, and inject the text descriptions into the agent prompt as `<image-descriptions>` XML.
 
 **Flow after fix:**
@@ -79,7 +81,7 @@ This tells agent-doc: when the agent is `opencode` (GLM-5.1, no vision), run ima
 
 No code changes required — this is a config-only fix.
 
-### Re: verify config + make describe_image work — glm-5.1
+### Re: verify config + make describe_image work — glm-5.1 (HEAD)
 
 **Verified the config and fixed two issues:**
 
@@ -104,7 +106,7 @@ model = "gpt-4o"
 
 **Installed binary:** `cargo install --path .` completed. 69 agent-doc tests pass (2 pre-existing failures in unrelated route tests confirmed on HEAD).
 
-### Re: verify config + make describe_image work — glm-5.1
+### Re: verify config + make describe_image work — glm-5.1 (HEAD)
 
 **Config verified** — `.agent-doc/config.toml` has `[vision.agents.opencode]` with `mode = "describe"`, `provider = "openai"`, `model = "gpt-4o"`, and the top-level `api_key` uses `$(passage show dreamable/claudescore/OPENAI_API_KEY)` which `shell_expand()` resolves correctly.
 
@@ -121,7 +123,7 @@ model = "gpt-4o"
 - Binary rebuilt + installed (`v0.34.0`)
 - 2 pre-existing route test failures confirmed on HEAD (unrelated)
 
-### Re: uncommitted prompts + describe_image — glm-5.1
+### Re: uncommitted prompts + describe_image — glm-5.1 (HEAD)
 
 These prompts were already addressed in the previous response (submodule `69c9fef4`):
 
@@ -130,7 +132,9 @@ These prompts were already addressed in the previous response (submodule `69c9fe
 3. **"Please make changes to ensure describe_image works in this session."** — `shell_expand()` + tests committed + pushed. CLI and orchestration paths verified end-to-end.
 
 **Bug filed:** `#agent-doc-bug` — finalize committed the response snapshot but left the user prompts that triggered it as uncommitted working-tree drift. The snapshot matched HEAD (response only), but the user edits between the previous response and the new response were excluded from the commit. Session-check then correctly flagged them as unresolved prompt-bearing changes.
-<!-- agent:boundary:d5c9db31 -->
+The last run crashed mid-run. A new tmux session auto-started. Fix this. Do we need to renable the guard?
+Please make changes to ensure describe_image works in this session.
+<!-- agent:boundary:13db98ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

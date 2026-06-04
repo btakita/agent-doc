@@ -118,7 +118,19 @@ Triaged the [2026-06-03 call task list](file:///home/brian/Videos/2026-06-03%201
 **EFS-to-provide inputs** (from the call, tracked in the task-list file, not repo backlog items): TMO workflow screenshots, the two TMO app links, the lender-doc list + investor questionnaire, Dropbox naming conventions, and a broker test sign-up to surface TMO's minimum broker fields.
 
 None of this touches code yet — it's backlog organization. Point me at any of the 7 new items (or an existing id) when you want to start implementing.
-<!-- agent:boundary:20a1f73c -->
+❯ Move the tasks md and transcript into equityfundingsource-dev.
+
+### Re: move tasks md + transcript into equityfundingsource-dev — opus-4-8
+
+Moved both into the EFS repo under a new `docs/calls/` directory, committed and pushed (`37fc374`):
+
+- `docs/calls/2026-06-03 16-58-49-tasks.md`
+- `docs/calls/2026-06-03 16-58-49-compressed.transcript.md`
+
+Kept the original filenames so the tasks file's `source:` frontmatter still resolves to the transcript in the same directory. The two `.mp4` recordings (compressed + original) stayed in `~/Videos` — you asked to move the tasks md and transcript only.
+
+Also repointed the 3 backlog items that cited the old `~/Videos` path (`#knpa`, `#19gv`, `#rpzm`) to `src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md`.
+<!-- agent:boundary:93587187 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -131,11 +143,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#knpa] [recommended] Homepage copy + loan-parameters revisions (2026-06-03 call): min $50k, terms 12-36mo, drop Points, 'Primarily California', rename products (drop tract-development; 'equity extraction' -> bridge/equity/pay-off-existing), fix 'proof' label, 'Licensed loan originator', contact-block reorder (contact/email/phone/fax/address; license+NMLS small last), 'first, second, and other junior lien positions'. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
-- [ ] [#19gv] Rate estimator LTV fixes (2026-06-03 call): show loan amount, hard-stop at 100% LTV, dynamic recalc on property value, 'Above guidelines -> contact for custom quote' in the 65-80% band, currency formatting. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
+- [ ] [#knpa] [recommended] Homepage copy + loan-parameters revisions (2026-06-03 call): min $50k, terms 12-36mo, drop Points, 'Primarily California', rename products (drop tract-development; 'equity extraction' -> bridge/equity/pay-off-existing), fix 'proof' label, 'Licensed loan originator', contact-block reorder (contact/email/phone/fax/address; license+NMLS small last), 'first, second, and other junior lien positions'. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
+- [ ] [#19gv] Rate estimator LTV fixes (2026-06-03 call): show loan amount, hard-stop at 100% LTV, dynamic recalc on property value, 'Above guidelines -> contact for custom quote' in the 65-80% band, currency formatting. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
-- [ ] [#rpzm] [recommended] Investor portal dashboard rework (2026-06-03 call): available-deals-first on login, new-deal email + 'I'm interested' button/email package, drop Returns/Distributions/Statements, simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only), special-instructions/vestings (populate TMO; multi-vesting/multi-lender per loan), requirements/questionnaire (annual), workflow-priority items. Relates to #qakx. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
+- [ ] [#rpzm] [recommended] Investor portal dashboard rework (2026-06-03 call): available-deals-first on login, new-deal email + 'I'm interested' button/email package, drop Returns/Distributions/Statements, simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only), special-instructions/vestings (populate TMO; multi-vesting/multi-lender per loan), requirements/questionnaire (annual), workflow-priority items. Relates to #qakx. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

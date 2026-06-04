@@ -119,7 +119,21 @@ SQLite hot reads are already excellent — sub-ms BFS (65µs), sub-ms incident e
 - **Evidence target resolution multi-strategy** — Already implements exact -> handle property -> ref_id -> label -> #normalized. Consider adding fuzzy/typo-tolerance for handle misses when the graph has symbols with similar names.
 
 Top of backlog: **`#sqlite-chunk`**
-<!-- agent:boundary:4b6f9b22 -->
+
+### Re: lazily-rs vs tsift task ownership — opus-4-6
+
+**The lazily-rs backlog items (`#lazyperf32-tsift`, `#lazyperf35-tsift`, `#lazyperf34-tsift`) are for the lazily-rs project to implement.** They modify lazily-rs's `Context`, `ThreadSafeContext`, batch/invalidation internals, and Criterion benchmarks. tsift benefits by upgrading its `lazily` dependency after each lands.
+
+| Backlog item | Implementer | Why |
+|---|---|---|
+| `#lazyperf32-tsift` Rc<dyn Any> | lazily-rs | Changes Context value storage in lazily crate |
+| `#lazyperf35-tsift` Scratch buffer elimination | lazily-rs | Changes invalidation frontier path in lazily crate |
+| `#lazyperf34-tsift` finish_batch O(n²) fix | lazily-rs | Changes batch close in lazily crate |
+| `#lazily-tsift-bench` tsift-pattern benchmarks | lazily-rs | Benchmarks live in lazily-rs, but model tsift usage patterns |
+| `#sqlite-chunk` through `#sqlite-frontier-temp` | tsift | Modify tsift-sqlite store, staging, and query code |
+
+**Cross-posted** `#lazyperf32`, `#lazyperf35`, and `#lazyperf34` to the lazily-rs session backlog so they can be prioritized alongside the AsyncContext work.
+<!-- agent:boundary:0b6c855f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,11 +142,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" auto -->
 - ~What are #next-steps for lazily-rs help with performance?~
 - ~What are #next-steps to improve the sqlite graph performance + effectiveness?~
+- ~Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?~
 - What are #next-steps for tsift to save tokens?
-- Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -72,7 +72,54 @@ tsift uses single-threaded `Context` (not `ThreadSafeContext`) since each CLI in
 
 Top of backlog: **`#lazyperf32`**
 Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
-<!-- agent:boundary:03ace922 -->
+
+### Re: sqlite graph performance + effectiveness next-steps — opus-4-6
+
+> **Queue prompt:**
+>
+> What are #next-steps to improve the sqlite graph performance + effectiveness?
+
+
+SQLite hot reads are already excellent — sub-ms BFS (65µs), sub-ms incident edges (343µs), and the real workload median is 2.6ms. The bottlenecks are concentrated in two areas: **projection refresh** and **conflict_matrix**.
+
+#### Current state
+
+| Operation | Time | Status |
+|---|---|---|
+| BFS path (64 hops) | 65 µs | Fast |
+| Incident edges | 343 µs | Fast |
+| Edge lookup | 15.8 ms | Acceptable |
+| Edge property scan | 19.1 ms | Acceptable |
+| Conflict matrix | 817 ms | **Slowest hot-read** |
+| Full refresh (~952k rows) | ~22 s | **96% of total eval time** |
+
+#### Effectiveness wins (already shipped)
+
+- Ranked neighborhood scoring with `BinaryHeap` priority queue — 30-60% token reduction over unranked
+- Community co-membership bonus (+18) for Louvain-clustered neighbors
+- Source watermark skip — avoids full refresh when code inputs unchanged
+- Cycle packet cache keyed on blake3(version+target+depth+limit)
+- `#rankdefault` review item tracking promotion of ranked into default output after quality gates
+
+#### Recommended next steps (priority order)
+
+1. **`#sqlite-chunk` Increase staging chunk size** — The single highest-impact optimization. `SQLITE_GRAPH_STAGING_CHUNK_ROWS = 50` means ~19,040 separate INSERT statements for ~952k rows. Testing 200-500 rows/chunk should cut refresh wall time significantly with minimal risk (chunked multi-row INSERT is already implemented, just the count needs tuning + benchmark validation).
+
+2. **`#sqlite-ranked-cte` Push ranked_neighborhood into SQL** — The current Rust-side ranked loop calls `outgoing_edges()` + `node()` per expansion step (N+1 pattern). The unranked `paged_neighborhood` already uses a single recursive CTE. Adding scoring into the CTE with a priority-ordered expansion would eliminate round-trips and let SQLite's query planner optimize the join.
+
+3. **`#sqlite-conflict-par` Parallelize conflict_matrix** — At 817ms this is the slowest hot-read by 40x. The per-target evidence packets are independent read-only traversals. Parallel preparation (via rayon or scoped threads) could cut this close to the single-target ceiling.
+
+4. **`#sqlite-wal-tune` WAL checkpoint tuning** — `WAL_AUTOCHECKPOINT_PAGES = 256` is conservative. During bulk projection write, this triggers frequent checkpoints. Testing 1024-4096 pages would reduce checkpoint stalls during refresh.
+
+5. **`#sqlite-frontier-temp` Temp table for multi-node frontier** — Deep BFS builds dynamic `WHERE from_id IN (...)` strings per chunk. A pre-allocated temp table (like `edges_between_nodes` already uses) would amortize parse overhead for traversals deeper than 4-5 hops.
+
+#### Effectiveness improvements (non-performance)
+
+- **Promote `#rankdefault`** — Run quality gates comparing ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens. If gates pass, ranked becomes the default for graph lookup/context-pack/evidence output.
+- **Evidence target resolution multi-strategy** — Already implements exact -> handle property -> ref_id -> label -> #normalized. Consider adding fuzzy/typo-tolerance for handle misses when the graph has symbols with similar names.
+
+Top of backlog: **`#sqlite-chunk`**
+<!-- agent:boundary:39038d0c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,7 +130,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~What are #next-steps for lazily-rs help with performance?~
-- What are #next-steps to improve the sqlite graph performance + effectiveness?
+- ~What are #next-steps to improve the sqlite graph performance + effectiveness?~
 - What are #next-steps for tsift to save tokens?
 - Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
 <!-- /agent:queue -->
@@ -91,6 +138,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)
+- [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)
+- [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
+- [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)
+- [ ] [#sqlite-frontier-temp] Pre-allocate temp table for multi-node frontier expansion instead of dynamic WHERE IN string per chunk — amortizes overhead for deep BFS traversals (low)
 - [ ] [#lazyperf32-tsift] Promote #lazyperf32 (Rc<dyn Any> values in single-threaded Context) in lazily-rs backlog — highest-impact change for tsift since every get() avoids deep clone (high)
 - [ ] [#lazyperf35-tsift] Promote #lazyperf35 (eliminate scratch buffer collect on effect path) — reduces per-scope allocation in tsift-status/tsift-summarize effect callbacks (medium)
 - [ ] [#lazyperf34-tsift] Promote #lazyperf34 (fix finish_batch O(n2) dedup) — tsift-index batch scope guards scale with inspected file count (medium)

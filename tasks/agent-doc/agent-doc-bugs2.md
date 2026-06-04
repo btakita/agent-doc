@@ -45,7 +45,40 @@ Compacted content:
 Cannot view `img_16.png` — this model does not support image input. The stdout-bleed report aligns with existing backlog item `#424b` (#opencode-stdout-bleed-tui), which is already gated on image review by a vision-capable model.
 
 No new action taken. Re-queue or re-run with a vision-capable model to diagnose the screenshot.
-<!-- agent:boundary:80355769 -->
+❯ How can we fix "Cannot view `img_16.png`" using the new preflight image detection + gpt-5 image model?
+
+### Re: fixing image detection for non-vision models — glm-5.1
+
+The "Cannot view `img_16.png`" problem is already solvable with the existing `describe_image` infrastructure. Here's what's needed:
+
+**Current state:**
+- `describe_image.rs` detects images (markdown `![]()`, naked paths, URLs) and sends them to a vision API (OpenAI/Anthropic) for text description
+- `build_image_description_block()` in `orchestrate.rs:1543` gates on `agent_mode == "describe"` per agent
+- `img_16.png` exists at `tasks/agent-doc/img_16.png` — the file is on disk
+- `.agent-doc/config.toml` already has `vision.provider = "openai"` and `vision.api_key` set
+- **Missing piece:** no per-agent `opencode` entry with `mode = "describe"`
+
+**Fix — add to `.agent-doc/config.toml`:**
+
+```toml
+[vision.agents.opencode]
+mode = "describe"
+provider = "openai"
+model = "gpt-4o"
+```
+
+This tells agent-doc: when the agent is `opencode` (GLM-5.1, no vision), run image detection during orchestrate, send detected images to OpenAI GPT-4o for description, and inject the text descriptions into the agent prompt as `<image-descriptions>` XML.
+
+**Flow after fix:**
+1. `preflight` detects the session document has image refs
+2. `orchestrate.rs` calls `build_image_description_block()` → sees `agent=opencode`, `mode=describe`
+3. `describe_images_in_text()` finds `img_16.png` on disk, base64-encodes it, calls OpenAI GPT-4o vision API
+4. Text descriptions injected into the GLM-5.1 prompt — no model-side vision needed
+
+**To use GPT-5 specifically** instead of GPT-4o, set `model = "gpt-5"` in the agent config above.
+
+No code changes required — this is a config-only fix.
+<!-- agent:boundary:40a7d04a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

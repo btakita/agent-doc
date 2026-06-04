@@ -115,7 +115,27 @@ Ran all benchmarks with `--features instrumentation --sample-size 10` and update
 | graph fan_in_batched_flush_16 | 1177 | 1311 | +11.4% |
 
 **Summary:** The #lazyperf34 push-then-dedup optimization shows clear wins on effect contention and graph propagation batched flush paths (fewer lock acquisitions, lower latency). Some lazy-dirty-epochs profiles show slight increases — likely measurement noise at 10 samples. The batch_storms and dependency_fan_out thread-safe paths also improved. All within budget.
-<!-- agent:boundary:3de4d57b -->
+❯ release + publish
+<!-- append:202cd076 -->
+
+#### Re: release + publish — glm-5.1
+
+Bumped to **v0.7.0** and published to crates.io.
+
+**Steps:**
+1. Updated `Cargo.toml` version 0.6.0 → 0.7.0
+2. Updated `Cargo.lock` via `cargo update`
+3. Updated version reference in `BENCHMARKS.md` (spec compliance test requires match)
+4. `make check` — all 100 tests + benchmark-check pass
+5. Committed as `6e6ac41`, tagged `v0.7.0`, pushed to origin
+6. `cargo publish` — `lazily v0.7.0` live on crates.io
+
+**Changes since v0.6.0 (12 commits):**
+- Async context suite (#asyncctx1–8): `AsyncContext`, `computed_async`, `memo_async`, `get_async`, async effects with cleanup, cancellation, async benchmarks
+- `get_rc`/`get_cell_rc` — avoid deep clone on read
+- #lazyperf34/#lazyperf35 — eliminate O(n²) batch dedup and scratch buffer collects
+- Updated benchmark results and AGENTS.md
+<!-- agent:boundary:c80ad1c7 -->
 <!-- /agent:exchange -->
 ###
 <!--

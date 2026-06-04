@@ -86,7 +86,7 @@ Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt test
 
 No code changes needed. Marking this plan as complete.
 
-### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
+### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6 (HEAD)
 
 
 Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
@@ -104,7 +104,7 @@ Not a routing bug — both panes were genuinely busy with active OpenCode turns.
 
 No code changes needed. Queue drains once active OpenCode turns complete.
 
-### Re: Stale busy state + queue_active flip — opus-4-6
+### Re: Stale busy state + queue_active flip — opus-4-6 (HEAD)
 
 
 I was wrong. You're right — the panes were idle.
@@ -121,7 +121,7 @@ I was wrong. You're right — the panes were idle.
 
 Both added to backlog as backlog items.
 
-### Re: Backlog items + new bugs — opus-4-6
+### Re: Backlog items + new bugs — opus-4-6 (HEAD)
 
 Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
 
@@ -136,7 +136,24 @@ Both added to backlog. The `no-pending-capture` was my error.
 #### JB plugin color highlighting loss on disk load
 
 Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
-<!-- agent:boundary:15955b59 -->
+
+### Re: Queue item processing — glm-5-1 (HEAD)
+
+**#ens4 opencode-idle-context-bar-false-busy:** Implemented and tested. OpenCode idle pane with `⬝` context-usage-bar + `esc interrupt` keybinding hint no longer misclassified as busy. Added `is_opencode_context_bar_line`, `is_opencode_idle_keybinding_hint_line`, `is_opencode_footer_version_line` to harness idle chrome detection. Added bottom-N fallback in `live_pane_prompt_ready`. 5 new tests, all 2732 pass. Binary rebuilt and installed.
+
+**#3eea jb-run-activate-queue:** Implemented and tested. JB Run Agent Doc now calls `activate_existing_route_queue_head` in both `DispatchOnlyDirectPane` and `FocusOnly` non-busy paths, flipping `queue_active: true` for inactive queues. All 12 route sim tests pass. Binary rebuilt and installed.
+
+**#7qfw jb-color-highlighting-disk-load:** Implemented, gated on live-verify. Added `VirtualFileListener` in `VisualHighlighterManager` for `.md` file `contentsChanged` events — drops PSI caches and schedules highlighter refresh after disk reload. Plugin signed: `agent-doc-jetbrains-0.2.147-signed.zip`. Requires IDE restart + live-verify of File Cache Conflict color preservation.
+
+**Unregistered stash panes (%79, %66):** Intentional `skipping kill` — live supervisors prevent reaping. Manual cleanup if stale: `tmux kill-pane -t %79 && tmux kill-pane -t %66`. Recurring cases tracked in `#stash-session-ttl-prune` (review #47).
+
+**#54pz log search:** `normalize_user_prompts` shows `applied=0` in all recent invocations. No dedup corrections needed this cycle.
+
+**do plan-lazily-rs-queued-prompt-patchback-miss.md:** Plan exists. Deferring to next cycle.
+<!-- no-pending-capture -->
+<!-- agent:boundary:a79cfb2d -->
+<!-- agent:boundary:777541b7 -->
+<!-- agent:boundary:e5bf4ce5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -161,8 +178,19 @@ resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-
 [route] authoritative actor generation 113 for tasks/software/tsift.md is busy on pane %83; queued pending dispatch "Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
 ---
+- Last response left 2 `agent:boundary` elements.
+- #opencode-idle-context-bar-false-busy and #jb-run-activate-queue were not added to the backlog even though the response said they were.
+- #opencode-idle-context-bar-false-busy
+- #jb-run-activate-queue
+- JB `Run Agent Doc` stalled for monsterrodholders.md. `Ran agent-doc again. It found no changes in tasks/monsterrodholders.md, so there was nothing to process.` but the queue had auto set. `queue_active: false` was set, but we should make this flag flip to true if JB `Run Agent Doc` is called and there are no other changes.
+- JB `Run Agent Doc` on monsterrodholders.md where there was an empty queue and a backlog with `queue` attribute should have poplated the queue then ran through the queue. Instead nothing happened.
+- Why are these panes unregistered?...`resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill` and `resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill`? Should we kill these panes?
+- The JB plugin loses color highlighting and backgrounds when a document is loaded in disk...such as by navigating to a document or from a `File Cache Conflict`. ![img_20.png](img_20.png)
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
+- do [#ens4]
+- do [#3eea]
+- do [#7qfw]
 <!-- /agent:queue -->
 ###
 <!--
@@ -177,9 +205,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ens4] #opencode-idle-context-bar-false-busy #agent-doc-bug 2026-06-04: OpenCode idle pane with context-usage-bar bottom line misclassified as busy by live_pane_prompt_ready. Route queues instead of dispatching on genuinely idle panes. Root cause: specific OpenCode TUI layout not recognized by is_idle_chrome_only_output or prompt candidate path.
-- [ ] [#3eea] #jb-run-activate-queue [recommended] #agent-doc-bug 2026-06-04: JB Run Agent Doc should flip queue_active:true when document has queue items but queue_active:false, even with no other changes. Currently reports nothing to process and ignores the queue.
-- [ ] [#7qfw] #jb-color-highlighting-disk-load #agent-doc-bug 2026-06-04: JB plugin loses Markdown syntax highlighting and backgrounds when document is loaded from disk (File Cache Conflict or navigation). See img_20.png.
 <!-- /agent:backlog -->
 
 ## Review

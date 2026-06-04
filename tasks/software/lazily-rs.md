@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -54,7 +54,24 @@ Compacted content:
 3. Implement for both `Context` (single-threaded) and `ThreadSafeContext`
 4. Add benchmarks comparing dyn Any downcast vs typed access
 5. Update existing tests to validate typed access paths
-<!-- agent:boundary:51140ccb -->
+
+### Re: Typed cache fast-path implementation — glm-5.1
+
+Completed all three queue items for #lazilyperf38:
+
+**#93dv (SPEC)** — Added "Typed cache fast-path" section to SPEC.md (lines 397-444). Documents inline TypeId storage, unchecked pointer cast read path, benchmark gate, and future implications for lock-free reads.
+
+**#139c (Implementation)** — Added `type_id: TypeId` to `SlotNode`, `CellNode`, `ThreadSafeSlotFastPath`, and `ThreadSafeCellFastPath`. All hot-path reads (`get`, `get_rc`, `get_cell`, `get_cell_rc`, `set_cell`, `read_fresh`, `read_slot_or_dependencies`) now use inline TypeId comparison + unchecked pointer cast instead of `dyn Any::downcast_ref` vtable call. All 101 tests pass. `make check` clean.
+
+**#ek24 (Benchmarks)** — Added `typed_cache_reads` benchmark group (6 cases: context_slot, context_cell, thread_safe_slot, thread_safe_cell, context_rc_slot, context_rc_cell). Updated BENCHMARKS.md cached_reads results:
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| cached_reads/context | 8.22 ns | 7.92 ns | ~3.6% (p<0.05) |
+| cached_reads/thread_safe_context | 64.41 ns | 62.49 ns | ~3.0% (p<0.05) |
+
+**Review item #v6r8** — mark done. The typed cache fast-path is now implemented and benchmarked.
+<!-- agent:boundary:b8367b10 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,20 +80,21 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~do [#cttd]~
+- [#139c]
+- [#93dv]
+- [#ek24]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#139c] Implement typed cache fast-path to eliminate Rc<dyn Any> / Arc<dyn Any> boxing on Context and ThreadSafeContext cached reads (#lazilyperf38)
-- [ ] [#93dv] Add SPEC.md language and design for typed cache fast-path (#lazilyperf38)
-- [ ] [#ek24] Add typed cache benchmarks comparing dyn Any downcast vs typed access (#lazilyperf38)
+- [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
 <!-- /agent:review -->
 
 ## Icebox

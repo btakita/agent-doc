@@ -37,7 +37,18 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): #zr5z
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:38c4be3c -->
+❯ Use corky GPU to transcribe + diarize [2026-06-03 16-58-49-compressed.mp4](../../../../../Videos/2026-06-03%2016-58-49-compressed.mp4)
+
+### Re: transcribe + diarize 2026-06-03 16-58-49-compressed.mp4 — opus-4-8
+
+Done — `corky transcribe --diarize` (GPU auto) on the 228.6M video. Exit 0.
+
+- **Output:** [file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md](file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md) (94.8K)
+- **Duration:** 95:38 · **Speakers:** 6 diarized
+- Frontmatter typed it `phone-call`, dated 2026-06-03. Content is EFS-relevant — Judith joins late, talk of borrower sign-up, loan amount, and "more aggressive" rate scenarios.
+
+**Labels are generic** (`Speaker 1`–`Speaker 6`). corky's interactive "Who is Speaker N?" prompts can't be answered in a background run, so it skipped naming. To get named turns, re-run with `--speakers "Judith,Robert,Brian,…"` (order maps to first-appearance) — say the word and I'll relabel.
+<!-- agent:boundary:55447a27 -->
 <!-- /agent:exchange -->
 ###
 <!--

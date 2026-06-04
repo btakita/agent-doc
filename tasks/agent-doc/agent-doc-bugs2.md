@@ -78,7 +78,32 @@ This tells agent-doc: when the agent is `opencode` (GLM-5.1, no vision), run ima
 **To use GPT-5 specifically** instead of GPT-4o, set `model = "gpt-5"` in the agent config above.
 
 No code changes required — this is a config-only fix.
-<!-- agent:boundary:40a7d04a -->
+
+### Re: verify config + make describe_image work — glm-5.1
+
+**Verified the config and fixed two issues:**
+
+1. **Missing per-agent config** — `.agent-doc/config.toml` had `vision.provider` and `vision.api_key` but no `[vision.agents.opencode]` section. Without `mode = "describe"` for the `opencode` agent, `build_image_description_block()` returns `None` immediately (defaults to `"passthrough"`). Added:
+
+```toml
+[vision.agents.opencode]
+mode = "describe"
+provider = "openai"
+model = "gpt-4o"
+```
+
+2. **`$(passage ...)` shell expansion not applied** — `resolve_api_key()` in `describe_image.rs` passed the raw `$(passage open ...)` string to the OpenAI API, causing auth failures. Added `shell_expand()` that runs `set -e; v=<value>; printf '%s' "$v"` through `sh -c` so `$(...)` and `$VAR` expressions are resolved before use.
+
+3. **Wrong passage command/path** — The config had `passage open btak/openai/api_key` but the correct command is `passage show dreamable/claudescore/OPENAI_API_KEY`. Fixed in config.
+
+**Verification:** `agent-doc describe-image img_16.png --api-key '$(passage show dreamable/claudescore/OPENAI_API_KEY)'` successfully produced a detailed image description via GPT-4o vision.
+
+**Changes:**
+- `src/describe_image.rs` — added `shell_expand()` for `$(...)` / `$VAR` expansion in `resolve_api_key()`
+- `.agent-doc/config.toml` — added `[vision.agents.opencode]` with `mode = "describe"`, fixed passage path
+
+**Installed binary:** `cargo install --path .` completed. 69 agent-doc tests pass (2 pre-existing failures in unrelated route tests confirmed on HEAD).
+<!-- agent:boundary:6043a481 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

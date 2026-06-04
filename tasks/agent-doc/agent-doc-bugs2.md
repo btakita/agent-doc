@@ -172,7 +172,31 @@ Fix (narrow):
 3. Regression: wrong-owner busy refusal names all three (routed file, busy pane, owning file)
 
 Plan file exists at `plan-jb-clear-session-busy-pane-ux.md` but this item needs its own focused plan. Will create `plan-route-busy-wrong-owner-diagnostic.md`.
-<!-- agent:boundary:8147ae1b -->
+
+### Re: do [#appe] #queue-head-provenance — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#appe]
+
+
+**Status: Substantially implemented. Gated on plausibility matcher hardening.**
+
+Shipped:
+- `active_free_text_queue_heads` field in `CycleState` (`cycle_state.rs:147-154`)
+- `check_free_text_queue_head_provenance` guard (`session_check.rs:2699-2793`) — requires committed response, binary consume, or explicit deferral for free-text heads
+- `check_queue_head_removal_guard` for id-backed heads (`session_check.rs:2576-2689`)
+- `observe_live_queue_heads` for late manual insertions (`cycle_state.rs:301`)
+- Write-path free-text consume logic (`write.rs:1525-1527`)
+- Tests: `free_text_queue_head_guard_fires_on_missing_response`, `free_text_queue_head_guard_passes_when_head_still_queued`
+
+Remaining gap:
+- Mixed-capture case where `#agent-doc-bug` text in queue gets consumed by `plan_backlog_only` without provenance guard catching it (bugs2.md #20)
+- `response_head_plausibly_answers` heuristic (`session_check.rs:2784`) uses word-overlap matcher — may have false negatives for short/vague free-text heads
+- Plan file: `plan-lazily-rs-queued-prompt-patchback-miss.md` covers this under "Shared Primitive" section
+
+Next steps: harden plausibility matcher, add mixed-capture regression, verify `plan_backlog_only` path records deferral proof for free-text heads.
+<!-- agent:boundary:3d78e07b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -181,8 +205,9 @@ Plan file exists at `plan-jb-clear-session-busy-pane-ux.md` but this item needs 
 - ~do [#engt]~
 - ~do [#ba4b]~
 - ~do [#kz2g]~
-- do [#appe]
+- ~do [#appe]~
 - do plan-jb-clear-session-busy-pane-ux.md
+- Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 <!-- /agent:queue -->
 ###
 <!--

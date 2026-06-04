@@ -87,7 +87,20 @@ Added /tsift-explain, /tsift-symbol-read, /tsift-graph OpenCode commands. Update
 
 
 Requires Claude Code hook installation flow design. Best done as standalone session.
-<!-- agent:boundary:f56bebe5 -->
+
+### Re: #astnav-autoindex-oc — gated (OpenCode plugin API needed)
+
+> **Queue prompt:**
+>
+> [#astnav-autoindex-oc]
+
+
+OpenCode does not expose a `UserPromptSubmit` or `PreToolUse` hook mechanism. Auto-reindex would require either:
+1. An OpenCode plugin lifecycle hook (on-load or on-prompt freshness check)
+2. Or embedding staleness check + rebuild in each `/tsift-*` command body
+
+Option 1 depends on OpenCode's plugin API. Option 2 would add latency to every command invocation. Best deferred until OpenCode gains hook support or the plugin gains a lifecycle event.
+<!-- agent:boundary:8773f089 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,7 +115,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#astnav-npm]~
 - ~[#astnav-commands]~
 - ~[#astnav-init-claude]~
-- [#astnav-autoindex-oc]
+- ~[#astnav-autoindex-oc]~
 - [#astnav-harness-docs]
 - [#surreal-nodes-by-kind]
 - [#surreal-skip-load]

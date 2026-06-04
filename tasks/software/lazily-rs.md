@@ -33,60 +33,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-005829.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260604-023458.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #lazyperf35 scratch buffer elimination; #lazyperf36 parking_lot vs std::sync A/B benchmark; finish_batch O(n) algorithm; 1 more
+- Archived 3 response topic(s): release + publish; The 0.6.0 release is not on github.; What are #next-steps to implement AsyncContext?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ release + publish
-
-### Re: release + publish — glm-5.1
-
-#### BENCHMARKS.md version fix
-
-BENCHMARKS.md referenced version 0.5.1 while Cargo.toml was at 0.6.0. Regenerated via update-benchmark-results.py --no-run to update both the version header and benchmark data from existing criterion results.
-
-#### Verification
-
-make check passes all 83 spec compliance tests, 13 integration tests, 12 loom model tests, 2 tokio sync tests, fmt, clippy, and benchmark-check.
-
-#### Release and publish
-
-- Committed: 6228653 chore: update BENCHMARKS.md for v0.6.0 release
-- Pushed to origin/main
-- Tag v0.6.0 moved to 6228653 and force-pushed
-- v0.6.0 was already published on crates.io
-❯ The 0.6.0 release is not on github.
-
-### Re: The 0.6.0 release is not on github. — glm-5.1
-
-Created GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.6.0
-
-Release notes summarize #lazyperf25–36 performance work, new handle-centric APIs, feature flags, and CI infrastructure.
-
-### Re: What are #next-steps to implement AsyncContext? — glm-5.1
-
-AsyncContext needs to solve: async compute closures, in-flight slot state, cancellation of stale futures, and non-blocking propagation. Current `ThreadSafeContext` uses `Condvar` for blocking waits — AsyncContext would replace those with async-aware wakers.
-
-#### Architecture sketch
-
-`AsyncSlotNode` extends the slot state machine from `{unset, cached}` to `{unset, pending(Future), cached, error}`. When a slot's async compute is in-flight and a dependency invalidates, the stale future is cancelled and restarted. `AsyncContext` wraps a `ThreadSafeContext`-style graph but uses `tokio::task::spawn` for compute and `tokio::sync::Notify` for awaiting dependents.
-
-#### Priority backlog
-
-Top of backlog: `#asyncctx1`
-
-- `#asyncctx1` Design spec — AsyncContext API surface, slot state machine, cancellation contract
-- `#asyncctx2` AsyncSlotNode — pending/resolved/error states, JoinHandle tracking
-- `#asyncctx3` AsyncContext core — computed_async, get_async (.await-based read), batch support
-- `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
-- `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
-- `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
-- `#asyncctx7` Tokio feature gate and integration tests
-- `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
-
-What are #next-steps to implement AsyncContext?
-<!-- agent:boundary:eba45d2c -->
+<!-- agent:boundary:c5115a21 -->
 <!-- /agent:exchange -->
 ###
 <!--

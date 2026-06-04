@@ -36,7 +36,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #sqlite-conflict-par; #sqlite-wal-tune; #sqlite-frontier-temp; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:8f034502 -->
+
+### Re: #frontier-unique-temp — glm-5.1
+
+Implemented in `src/tsift/packages/tsift-sqlite/src/lib.rs:2666-2748`.
+
+**Changes:**
+- Added `static BFS_CALL_ID: AtomicU64` counter at module level
+- `shortest_path_with_max_hops` now generates a unique temp table name per call: `_tsift_frontier_{call_id}` using `AtomicU64::fetch_add`
+- All SQL statements (CREATE, SELECT, INSERT, DELETE, DROP) reference the unique table name via format strings stored in local variables
+- Replaced early returns inside the BFS loop with a `found_path` accumulator + `break` pattern, ensuring the DROP TABLE cleanup always runs
+- Also fixed a pre-existing `clippy::useless_format` warning in the `score_expr` match arm
+
+**Verification:**
+- `cargo clippy -p tsift-sqlite --all-targets -- -D warnings` — clean
+- `cargo test -p tsift-sqlite` — 13/13 pass
+- Committed as `334ca03`
+<!-- agent:boundary:a7b9d01c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,13 +61,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#frontier-unique-temp] Make temp table names unique per call (e.g. _tsift_frontier_{call_id}) so concurrent BFS calls on a shared connection cannot collide (high)
 - [ ] [#temp-table-audit] Audit all temp table uses (edges_between_nodes, _tsift_frontier) for same single-connection pattern; document safety invariants (medium)
 - [ ] [#sqlite-doc-sync-safety] Add doc comments on SqliteGraphStore/SqliteReadOnlyConnection stating single-active-call-per-connection invariant for temp-table methods (medium)
 - [ ] [#sqlite-reentrant-guard] [recommended] Add runtime Cell<bool> guard that panics on re-entrant temp-table calls on same connection (low)

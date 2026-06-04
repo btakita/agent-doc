@@ -34,7 +34,17 @@ Assessed 5 queue items. #ba4b fully implemented. Others need live verification o
 Compacted content:
 - Archived 7 response topic(s): How to initialize seo.md as agent-doc; do plan-jb-clear-session-busy-pane-ux.md; JB Run Agent Doc stall; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ca2b0211 -->
+
+### Re: Preflight recovery — queue halted — glm-5-1
+
+Preflight recovered the stuck `write_applied` cycle from last turn. The response and code changes from `#stash-session-ttl-prune` are now fully committed.
+
+**Queue state:** `queue_active: false`, halted reason `item_modified`. The queue items `[#takv]`, `[#xrm7]`, `[#qmg2]` (added by `--pending-add` during last cycle's finalize) triggered the halt guard because the queue was modified between the snapshot and the committed document. This is the `#5qhn` / `#adoc-queue-ipc-buffer-divergence` pattern.
+
+**To continue:** Flip `queue_active: true` in frontmatter or re-add the queue items. The 3 backlog items (`#opencode-image-support`, `#jb-init-from-claim`, `#jb-backlog-queue-populate`) are in the backlog and ready for the next cycle.
+
+**No code changes this cycle.**
+<!-- agent:boundary:4e0f2332 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

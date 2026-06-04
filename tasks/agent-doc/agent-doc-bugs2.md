@@ -59,8 +59,13 @@ route_eager_busy_cue_recovery file=... pane=... harness=opencode busy_cue=false
 
 ### Re: snapshot resync — glm-5.1
 
+> **Queue prompt:**
+>
+> do [#finalize-owned-pane-response-patchback]
+
+
 Snapshot resync after repair commit.
-<!-- agent:boundary:7287e041 -->
+<!-- agent:boundary:c10f9220 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -69,7 +74,7 @@ Snapshot resync after repair commit.
 - ~do [#reentrant-phase3]~
 - ~do [#reentrant-phase4]~
 - ~do [#reentrant-phase5-integration]~
-- do [#finalize-owned-pane-response-patchback]
+- ~do [#finalize-owned-pane-response-patchback]~
 - JB `Run Agent Doc` stalls after 1 turn on opencode documents. An attempt was made in lazily-rs.md and this document.
 - I still don't see `step`, `run_id`, `turn_id`, `queue_task_id` in the frontmatter of this document or any other document. It is not working.
 - The `auto` attribute on `agent:queue` should set `queue_active: true` in the front-matter and kick off the queue. I do like the behavior where the queue just starts without having to use JB `Run Agent Doc` when I manually set `queue_active: true`. I just want a convenient way for `auto` to set `queue_active: true`. This should be bi-directional, so manually setting `queue_active: false` should remove `auto` from `agent:queue`. Would it make sense to deprecate the word `queue_active` and use something that indicates `auto` instead such as `queue: auto`/`queue: stop` or `queue_auto: true`. Should we rename `auto` to `start` with `queue: start` and no `start` links with `queue: stop` in the frontmatter? Please evaluate a good semantic framework.

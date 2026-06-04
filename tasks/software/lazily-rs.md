@@ -71,7 +71,11 @@ Completed all three queue items for #lazilyperf38:
 | cached_reads/thread_safe_context | 64.41 ns | 62.49 ns | ~3.0% (p<0.05) |
 
 **Review item #v6r8** — mark done. The typed cache fast-path is now implemented and benchmarked.
-<!-- agent:boundary:b8367b10 -->
+
+### Re: Queue cleanup — glm-5.1
+
+Removed stale queue items. All typed cache work (#93dv, #139c, #ek24) is committed and pushed (30dc6fc). Review item #v6r8 done. #vd5v gated — lock-free cached reads require concurrent workload validation and Loom/Shuttle proof per SPEC.md lock-strategy section before starting.
+<!-- agent:boundary:d65c787f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,21 +84,17 @@ Completed all three queue items for #lazilyperf38:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~do [#cttd]~
-- [#139c]
-- [#93dv]
-- [#ek24]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:review -->
 
 ## Icebox

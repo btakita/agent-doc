@@ -154,9 +154,26 @@ fn resolve_provider(cli_provider: Option<&str>) -> Result<Provider> {
     Ok(Provider::OpenAI)
 }
 
+fn shell_expand(value: &str) -> Result<String> {
+    if !value.contains("$(") && !value.starts_with('$') {
+        return Ok(value.to_string());
+    }
+    let script = format!("set -e; v={}; printf '%s' \"$v\"", value);
+    let output = std::process::Command::new("sh")
+        .args(["-c", &script])
+        .output()
+        .context("failed to run shell expansion for vision api_key")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("shell expansion failed for '{}': {}", value, stderr.trim());
+    }
+    let expanded = String::from_utf8_lossy(&output.stdout);
+    Ok(expanded.to_string())
+}
+
 fn resolve_api_key(provider: &Provider, cli_key: Option<&str>) -> Result<String> {
     if let Some(k) = cli_key {
-        return Ok(k.to_string());
+        return shell_expand(k);
     }
     if let Ok(k) = std::env::var("AGENT_DOC_VISION_API_KEY") {
         return Ok(k);
@@ -602,6 +619,35 @@ mod tests {
         }
         let err = resolve_vision_config(None, None, None).unwrap_err();
         assert!(err.to_string().contains("no API key found"));
+    }
+
+    #[test]
+    fn shell_expand_plain() {
+        assert_eq!(shell_expand("plain-key").unwrap(), "plain-key");
+    }
+
+    #[test]
+    fn shell_expand_env_var() {
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_SHELL_EXPAND", "expanded-value");
+        }
+        let result = shell_expand("$AGENT_DOC_TEST_SHELL_EXPAND").unwrap();
+        assert_eq!(result, "expanded-value");
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_SHELL_EXPAND");
+        }
+    }
+
+    #[test]
+    fn shell_expand_command_substitution() {
+        let result = shell_expand("$(echo hello-world)").unwrap();
+        assert_eq!(result, "hello-world");
+    }
+
+    #[test]
+    fn shell_expand_failure() {
+        let err = shell_expand("$(exit 1)").unwrap_err();
+        assert!(err.to_string().contains("shell expansion failed"));
     }
 
     #[test]

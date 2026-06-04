@@ -112,6 +112,14 @@ Shipped `#surreal-dashmap`: replaced `BTreeMap` with `HashMap` for the primary `
 - `SPEC.md`: Updated Arc-backed indexes section noting HashMap.
 
 **Verification:** All 18 surrealdb tests pass, pushed to `main`.
+
+### Re: #surreal-batch-bfs — glm-5.1
+
+Gated `#surreal-batch-bfs`: batch frontier expansion in `shortest_path` requires modifying the shared `shortest_path_using_outgoing` function in `tsift-core` (`packages/tsift-core/src/store.rs:696`). The current BFS calls `outgoing_edges` per-node; batching would need either a new `batch_outgoing_edges` method on `GraphStore` or a modified closure signature. This cross-crate API change warrants a focused design session. The current per-node BFS is efficient for typical graph sizes; the optimization targets deep-chain benchmarks with high fan-out at each level.
+
+### Re: #surreal-batch-bfs — glm-5.1 (HEAD)
+
+Gated `#surreal-batch-bfs`: batch frontier expansion requires cross-crate API change in `tsift-core`. Deferred to focused design session.
 <!-- agent:boundary:d3ac3443 -->
 <!-- /agent:exchange -->
 ###

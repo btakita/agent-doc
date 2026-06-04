@@ -290,3 +290,23 @@
 - 2026-06-02 [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.
 - 2026-06-02 [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.
 - 2026-06-02 [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.
+- 2026-06-02 [#tokegate] Add a cross-surface token/performance gate for context-pack, session-review --next-context, graph-db evidence, conflict-matrix, and dispatch-trace: benchmark representative agent-doc sessions and graph queries; record prompt tokens, envelope bytes, runtime, cache-hit rate, raw-read avoidance, and useful-hit density; fail CI on regressions.
+- 2026-06-02 [#gpackreuse] Reuse graph/context packets across a single agent-doc cycle: share graph-db status/refresh, evidence, conflict-matrix preparation, context-pack diff, and impact packets by source/document/staged-diff watermark; prove repeated calls report skipped phases and stable packet ids.
+- 2026-06-03 [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.
+- 2026-06-03 [#greadiness] Make graph-readiness states actionable at the lookup boundary: if summaries, tagpath handles, graph freshness, or scoped indexes are missing, emit exact repair commands and suppress broad low-signal graph expansion.
+- 2026-06-03 [#libmod2] Phase 2: Extract Rewrite (~1,400 lines), Community Detection (~450), Dependency DAG (~700), Dispatch Trace (~350) from lib.rs
+- 2026-06-03 [#libmod3] Phase 3: Extract Semantic Edit (~4,000 lines), Traversal/Exploration (~1,300) from lib.rs
+- 2026-06-03 [#libmod4] Phase 4: Extract Convex (~3,000 lines), Graph DB core (~5,000+) from lib.rs
+- 2026-06-03 [#libmod5] Phase 5: Extract Context Pack, Conflict Matrix, Session Review Budget from lib.rs (SearchBudget done; 3 remaining)
+- 2026-06-03 [#libmod5b] Phase 5b: Extract ConflictMatrix (~2,657 lines), ContextPack (~1,633 lines), SessionReviewBudget (~530 lines) from tsift-cli/src/lib.rs into separate modules
+- 2026-06-03 [#opencode-read] OpenCode: replace Read tool with tsift AST API (tsift --envelope source-read) for source code reading
+- 2026-06-03 [#opencode-grep] OpenCode: replace grep/rg with tsift search for content search
+- 2026-06-03 [#codex-read] Codex: adopt tsift AST API for source reading instead of raw file reads
+- 2026-06-03 [#surreal-warm] Warm-start SurrealDB store: reuse SurrealdbGraphStore across backend-eval runs instead of recreating; measure real-workload median with persistent store
+- 2026-06-03 [#surreal-delta] Delta projection refresh: implement replace_projection_rows_delta() with row-hash diffing matching SQLite's replace_projection_with_version() pattern
+- 2026-06-03 [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
+- 2026-06-03 [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
+- 2026-06-03 [#5vp6] The lazily-rs.md session has been stuck on `Read src/lazily-rs/src/thread_safe.rs` for over an hour. Is there something wrong with tsift that is causing this issue? I restarted the opencode session so you may have to look into the session history.
+- 2026-06-03 [#surreal-sidecar] Persist BTreeMap indexes to sidecar file; skip load_indexes() on cache-hit opens (high)
+- 2026-06-03 [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)
+- 2026-06-03 [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)

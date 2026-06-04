@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -39,6 +39,11 @@ Compacted content:
 
 ### Re: #astnav-autoindex-oc auto-reindex on plugin load — glm-5.1
 
+> **Queue prompt:**
+>
+> Please benchmark surrealdb vs sqlite
+
+
 Implemented auto-reindex for OpenCode in `packages/opencode-tsift/src/index.js`:
 
 - On plugin load and `installation.updated` hook, `ensureIndexFresh()` runs `tsift status --json` to check index state
@@ -52,7 +57,7 @@ Implemented auto-reindex for OpenCode in `packages/opencode-tsift/src/index.js`:
 - `SPEC.md` — documented auto-reindex behavior
 
 **Verification:** `npm test` — 8/8 pass (3 new + 5 existing)
-<!-- agent:boundary:307fa882 -->
+<!-- agent:boundary:030323ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,9 +66,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#astnav-autoindex-oc]~
-- Please benchmark surrealdb vs sqlite
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

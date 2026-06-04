@@ -38,7 +38,25 @@ queue_active: false
 Compacted content:
 - Archived 4 response topic(s): #lazyperf35 scratch buffer elimination; #lazyperf36 parking_lot vs std::sync A/B benchmark; finish_batch O(n) algorithm; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:28511010 -->
+❯ release + publish
+
+### Re: release + publish — glm-5.1
+
+#### BENCHMARKS.md version fix
+
+BENCHMARKS.md referenced version 0.5.1 while Cargo.toml was at 0.6.0. Regenerated via update-benchmark-results.py --no-run to update both the version header and benchmark data from existing criterion results.
+
+#### Verification
+
+make check passes all 83 spec compliance tests, 13 integration tests, 12 loom model tests, 2 tokio sync tests, fmt, clippy, and benchmark-check.
+
+#### Release and publish
+
+- Committed: 6228653 chore: update BENCHMARKS.md for v0.6.0 release
+- Pushed to origin/main
+- Tag v0.6.0 moved to 6228653 and force-pushed
+- v0.6.0 was already published on crates.io
+<!-- agent:boundary:69d5c3ed -->
 <!-- /agent:exchange -->
 ###
 <!--

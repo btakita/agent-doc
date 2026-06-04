@@ -71,7 +71,8 @@ tsift uses single-threaded `Context` (not `ThreadSafeContext`) since each CLI in
 - `#lazyperf36` A/B parking_lot vs std::sync — same ThreadSafeContext focus
 
 Top of backlog: **`#lazyperf32`**
-<!-- agent:boundary:4e22f8d5 -->
+Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
+<!-- agent:boundary:03ace922 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,10 +81,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~What are #next-steps for lazily-rs help with performance?~
 - What are #next-steps to improve the sqlite graph performance + effectiveness?
 - What are #next-steps for tsift to save tokens?
+- Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
 <!-- /agent:queue -->
 
 ## Backlog

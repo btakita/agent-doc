@@ -95,7 +95,7 @@ Released **lazily v0.8.0** to crates.io.
 5. Tagged v0.8.0
 6. `cargo publish` — published to crates-io
 7. Pushed commit + tag to origin
-<!-- agent:boundary:33323ce4 -->
+<!-- agent:boundary:7c2883de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +109,9 @@ Released **lazily v0.8.0** to crates.io.
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [ ] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
+- [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 <!-- /agent:backlog -->
 
 ## Review

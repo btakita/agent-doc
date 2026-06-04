@@ -36,7 +36,14 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): sqlite graph performance next-steps; token efficiency next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:23f3ab1a -->
+
+### Re: #sqlite-doc-sync-safety — glm-5.1
+
+Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` documenting the single-active-call-per-connection invariant for temp-table methods. Updated SPEC.md with the same invariant.
+
+- Build: clean. Install: v0.1.62. Tests: 13/13 passed.
+- Commit: c5ec8d9 pushed to main.
+<!-- agent:boundary:6830c588 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +70,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#property-sampling] Add property_mode (full|sample|omit) to RankedNeighborhoodOptions for kind-redundant property maps (low)
 - [ ] [#edges-between-batch-optimization] Use IN-clause expansion or session-scoped temp table for small edges_between_nodes ID sets (low)
 - [ ] [#wal-checkpoint-tuning] Add explicit PRAGMA wal_checkpoint(TRUNCATE) after refresh; tune autocheckpoint by projection size (low)
-- [ ] [#sqlite-doc-sync-safety] Add doc comments on SqliteGraphStore/SqliteReadOnlyConnection stating single-active-call-per-connection invariant for temp-table methods (medium)
 - [ ] [#sqlite-reentrant-guard] [recommended] Add runtime Cell<bool> guard that panics on re-entrant temp-table calls on same connection (low)
 <!-- /agent:backlog -->
 

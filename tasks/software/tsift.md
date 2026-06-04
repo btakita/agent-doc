@@ -45,7 +45,21 @@ Added `edge_index_transform` — a JSON post-processing step in the ultra-terse 
 - 3 unit tests: index resolution, unresolved fallback, noop without nodes/edges
 - 356/356 unit tests pass, 34/35 conformance (1 pre-existing failure)
 - Commit: `a004004` pushed to main
-<!-- agent:boundary:2859510d -->
+
+### Re: #degree-cache — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#degree-cache]
+
+
+Replaced the O(n×E) correlated subquery in `DegreeWeighted` neighborhood scoring with a pre-computed `degree_cache` CTE. The CTE materializes per-node degree counts once before the recursive walk, then the score expression references it via index lookup instead of counting edges on every walk row.
+
+- Conditional CTE: only injected when `DegreeWeighted` scoring is selected
+- No change to `BreadthFirst` or `EdgeKindWeighted` query plans
+- 356/356 unit tests, 34/35 conformance (pre-existing)
+- Commit: `6250575` pushed to main
+<!-- agent:boundary:6a33aacc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +76,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#refresh-skip-unchanged-staging]~
 - ~do [#terse-uniform]~
 - ~do [#edge-index-references]~
-- do [#degree-cache]
+- ~do [#degree-cache]~
 - do [#community-summary-default]
 - do [#property-sampling]
 - do [#edges-between-batch-optimization]
@@ -72,7 +86,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#degree-cache] Pre-compute and cache degree counts for DegreeWeighted ranked_neighborhood scoring (medium)
 - [ ] [#community-summary-default] Community-aware truncation summary in neighborhood output when max_nodes prunes results (medium)
 - [ ] [#property-sampling] Add property_mode (full|sample|omit) to RankedNeighborhoodOptions for kind-redundant property maps (low)
 - [ ] [#edges-between-batch-optimization] Use IN-clause expansion or session-scoped temp table for small edges_between_nodes ID sets (low)

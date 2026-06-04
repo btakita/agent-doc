@@ -38,7 +38,11 @@ queue_active: true
 Compacted content:
 - Archived 3 response topic(s): release + publish; The 0.6.0 release is not on github.; What are #next-steps to implement AsyncContext?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:47805812 -->
+
+### Re: #sye8 AsyncContext design spec — glm-5.1
+
+Completed the #asyncctx1 design spec. SPEC.md now has comprehensive AsyncContext design covering type definitions, API surface, AsyncSlotNode state machine, cancellation contract, async dependency tracking, async effects, batch support, and feature flag. 12 spec compliance tests added. Committed and pushed as 3c6ad55.
+<!-- agent:boundary:4d6f06ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +51,6 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#sye8]
 - [#kp7w]
 - [#8sqb]
 - [#6z71]

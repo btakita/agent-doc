@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -80,21 +80,64 @@ It's an EFS demo/discovery walkthrough (Brian, Judith, Robert, April). I organiz
 - **EFS to provide** — TMO workflow screenshots, the two TMO app links, lender-doc list + investor questionnaire, Dropbox naming conventions, a broker test sign-up.
 
 Several of these map to existing backlog/review items (TMO sync/webhooks, messaging round-trip, OCR, broker backend, investor docs). I queued a `[recommended]` backlog item (#exb1) to triage the list into the EFS roadmap — say the word and I'll do that pass.
-<!-- agent:boundary:3a1561a1 -->
+
+### Re: #exb1 — triage call task list into EFS backlog — opus-4-8
+
+> **Queue prompt:**
+>
+> [#exb1]
+
+
+Triaged the [2026-06-03 call task list](file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md) into this backlog. Added 7 net-new items and mapped the rest onto existing ids; `#exb1` is now done.
+
+**Net-new backlog items added** (top of backlog):
+
+1. Homepage copy + loan-parameters revisions (recommended)
+2. Rate estimator LTV fixes
+3. Application lead-disappears-on-advance bug
+4. Admin loan pipeline — TMO-aligned stages/Kanban
+5. Investor portal dashboard rework (recommended)
+6. Secure wiring-instructions delivery
+7. GoHighLevel CRM messaging/notifications
+
+**Mapped onto existing ids** (no new item — these already cover the call asks):
+
+| Call area | Existing id(s) |
+|---|---|
+| TMO sync / pipeline stages, webhooks | `#dzmm`, `#k2xg` |
+| Borrower message email round-trip | `#xcvg` |
+| Broker portal (referring-broker app, onboarding, tag-to-broker) | `#37ah` |
+| Investor docs (note/signed docs, lender-doc dropdown, accreditation) | `#qakx` |
+| OCR scrub/redact, fillable forms, doc search | `#7fx4`, `#d1h2`, `#f5kq`, `#7a4d`, `#ntcr` |
+| Borrower online payments (Stripe) | `#cm3e` |
+| New-deal / lead email sending domain | `#f4rq`, `#m6ch`, `#p40t` |
+| Logo asset (JPEG → PNG/SVG) | `#x5rn` |
+| Testimonials / reviews section | `#kzt6` |
+| Online-presence cleanup | `#4vb5`/`#a3gc`/`#zhyg`/`#vd6p`/`#tfee`/`#1w4n` |
+
+**EFS-to-provide inputs** (from the call, tracked in the task-list file, not repo backlog items): TMO workflow screenshots, the two TMO app links, the lender-doc list + investor questionnaire, Dropbox naming conventions, and a broker test sign-up to surface TMO's minimum broker fields.
+
+None of this touches code yet — it's backlog organization. Point me at any of the 7 new items (or an existing id) when you want to start implementing.
+<!-- agent:boundary:20a1f73c -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" auto -->
-- [#exb1]
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#exb1] [recommended] Triage the 2026-06-03 EFS demo-call task list (/home/brian/Videos/2026-06-03 16-58-49-tasks.md) into the EFS backlog/roadmap; map items onto existing ids (#dzmm/#k2xg TMO sync, #xcvg messaging, #37ah broker backend, #qakx investor docs, OCR #7fx4/#d1h2/#f5kq) and add net-new ones (rate-tool LTV fixes, lead-disappears bug, secure wiring link, GoHighLevel integration).
+- [ ] [#knpa] [recommended] Homepage copy + loan-parameters revisions (2026-06-03 call): min $50k, terms 12-36mo, drop Points, 'Primarily California', rename products (drop tract-development; 'equity extraction' -> bridge/equity/pay-off-existing), fix 'proof' label, 'Licensed loan originator', contact-block reorder (contact/email/phone/fax/address; license+NMLS small last), 'first, second, and other junior lien positions'. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
+- [ ] [#19gv] Rate estimator LTV fixes (2026-06-03 call): show loan amount, hard-stop at 100% LTV, dynamic recalc on property value, 'Above guidelines -> contact for custom quote' in the 65-80% band, currency formatting. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
+- [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
+- [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
+- [ ] [#rpzm] [recommended] Investor portal dashboard rework (2026-06-03 call): available-deals-first on login, new-deal email + 'I'm interested' button/email package, drop Returns/Distributions/Statements, simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only), special-instructions/vestings (populate TMO; multi-vesting/multi-lender per loan), requirements/questionnaire (annual), workflow-priority items. Relates to #qakx. Source: /home/brian/Videos/2026-06-03 16-58-49-tasks.md
+- [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
+- [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

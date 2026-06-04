@@ -38,7 +38,26 @@ queue_active: true
 Compacted content:
 - Archived 11 response topic(s): Backpressure, offline peers, and state sync; Queue bookkeeping; WebRTC P2P; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:4a53c63b -->
+
+### Re: [#mvbj] #ipc1 — Design lazily-serde feature gate — opus-4-8
+
+Designed and committed (`lazily-rs` `6c71dff`, pushed to `main`). Deliverable is a new **Serialization (`lazily-serde` feature gate)** section in `SPEC.md`.
+
+##### The problem
+`Context`/`ThreadSafeContext` store cached values type-erased (`Rc<dyn Any>` / `Arc<dyn Any + Send + Sync>`). `serde::Serialize` is **not object-safe** (generic `serialize<S>`), and `T` is gone by snapshot time — so a snapshot must recover a monomorphized `Serialize`/`Deserialize` per node.
+
+##### Two approaches weighed
+- **A — trait bounds (erased-serde style):** swap `dyn Any` for a sealed serialize-aware `dyn ReactiveValue`, add `T: Serialize + DeserializeOwned` to every signal constructor. Total serialization, but the bound is **viral** (leaks onto `Context` even for never-serialized state), and it **breaks the typed cache fast-path's** unchecked `TypeId`-keyed cast. Deserialize still needs a type-tag registry, so A adds the viral bound *on top of* the registry it doesn't avoid.
+- **B — type-erased serde-vtable closures (chosen):** keep `dyn Any`; at creation capture an `Option<&'static SerdeVTable>` (`type_tag` + `serialize`/`deserialize` fn-pointers) next to the `TypeId` the typed cache already records. Thunks monomorphize per `T` at the construction site and run only at snapshot time.
+
+##### Decision: Approach B
+Composes with the existing `TypeId`-at-creation typed cache, zero overhead on the read hot path, opt-in per node (`T: !Serialize` → `Opaque` placeholder), and the field compiles out entirely when `serde` is off — preserving the zero-mandatory-dependency goal. The roadmap serializes an allowlisted `RemoteOp` set (#39c5), not arbitrary nodes, so Approach A's *totality* isn't worth its viral-bound + fast-path-rework cost.
+
+##### Feature-gate shape
+`serde = ["dep:serde"]` (+ `dep:erased-serde`, both optional); a sealed `MaybeSerialize<T>` helper resolves the vtable so existing constructor signatures are unchanged; `Context::snapshot()` / `ThreadSafeContext::snapshot()` emit `ContextSnapshot { nodes: Vec<NodeSnapshot { slot_id, type_tag, payload | Opaque }> }`. That snapshot type is the direct input to **#ipc2** (snapshot + incremental update protocol) and the value substrate for **#ipc3** (CRDT vs Raft).
+
+Design-only change — `cargo test --test spec_compliance` stays green (101 passed). The uncommitted `Cargo.toml`/`Cargo.lock` `serde`/`serde_json` groundwork in the working tree predates this cycle and was left untouched (a design task shouldn't bundle dep wiring). Next queue item: `[#4rxf] #ipc2`.
+<!-- agent:boundary:bd31f735 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +77,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#mvbj] #ipc1 Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [x] [#mvbj] #ipc1 Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [ ] [#4rxf] #ipc2 Design lazily-ipc snapshot + incremental update protocol
 - [ ] [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist

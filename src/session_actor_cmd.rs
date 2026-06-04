@@ -531,6 +531,32 @@ pub fn clear(file: &Path) -> Result<()> {
             harness_clear_command(&ctx.harness),
         )?;
     }
+    match agent_doc_orchestration::queue_continuation::write_clear_cooldown(&ctx.canonical_file) {
+        Ok(()) => {
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_clear_queue_cooldown file={} harness={}",
+                    ctx.canonical_file.display(),
+                    ctx.harness
+                ),
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "[clear] warning: failed to write queue cooldown marker for {}: {err:#}",
+                ctx.canonical_file.display()
+            );
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_clear_queue_cooldown_failed file={} error={:?}",
+                    ctx.canonical_file.display(),
+                    err.to_string()
+                ),
+            );
+        }
+    }
     // Explicit clear aborts the current turn, so reclaim any orphaned open
     // preflight cycle the cleared run left behind so the next Run Agent Doc
     // starts fresh instead of waiting on a stale open cycle.
@@ -1996,8 +2022,15 @@ fn live_pane_prompt_ready(
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(captured) {
         return true;
     }
-    harness.is_idle_chrome_only_output(captured)
+    if harness.is_idle_chrome_only_output(captured)
         || live_pane_bottom_status_is_idle(harness, captured)
+    {
+        return true;
+    }
+    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(captured, 12) {
+        return true;
+    }
+    false
 }
 
 fn live_pane_bottom_status_is_idle(
@@ -2717,6 +2750,35 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
         );
         assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_opencode_context_bar_idle_hint() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let idle = "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13\n";
+        assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_opencode_context_bar_with_scrollback() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let idle = concat!(
+            "Thought: I need to check the files\n",
+            "Click to expand\n",
+            "  ~/work/btakita/agent-loop:main                                        1.15.13\n",
+            "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13\n",
+        );
+        assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_opencode_active_turn_with_context_bar() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let busy = concat!(
+            "Working (14s - esc to interrupt)\n",
+            "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13\n",
+        );
+        assert!(!live_pane_prompt_ready(&harness, busy));
     }
 
     #[test]

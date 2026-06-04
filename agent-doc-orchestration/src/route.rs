@@ -998,27 +998,35 @@ fn reapply_harness_launch_contract_after_clear(
     {
         return Ok(pane.to_string());
     }
+    let latest_prompt_label = latest_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or("<unknown>");
 
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_harness_clear_restart_fresh file={} pane={} harness={} latest_prompt=/clear",
+            "route_harness_clear_restart_fresh file={} pane={} harness={} latest_prompt={:?}",
             file.display(),
             pane,
-            harness.binary
+            harness.binary,
+            latest_prompt_label
         ),
     );
     eprintln!(
-        "[route] latest tracked {} prompt for {} was `/clear` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
+        "[route] latest tracked {} prompt for {} was `{}` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
         harness.binary,
-        file.display()
+        file.display(),
+        latest_prompt_label
     );
 
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
         anyhow::bail!(
-            "latest tracked {} prompt for {} was `/clear`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
+            "latest tracked {} prompt for {} was `{}`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
             harness.binary,
             file.display(),
+            latest_prompt_label,
             file.display()
         );
     }
@@ -1033,9 +1041,10 @@ fn reapply_harness_launch_contract_after_clear(
         harness,
     ) {
         anyhow::bail!(
-            "latest tracked {} prompt for {} was `/clear`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
+            "latest tracked {} prompt for {} was `{}`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
             harness.binary,
             file.display(),
+            latest_prompt_label,
             dispatch_pane,
             file.display()
         );
@@ -1542,6 +1551,20 @@ pub fn run_with_tmux(
 
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+    if let Err(err) = crate::queue_continuation::clear_cooldown_marker(file) {
+        eprintln!(
+            "[route] warning: failed to clear queue cooldown marker for {}: {err:#}",
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_clear_queue_cooldown_failed file={} error={:?}",
+                file.display(),
+                err.to_string()
+            ),
+        );
     }
 
     // Debounce: wait for file mtime and editor typing indicator to settle before
@@ -3815,6 +3838,24 @@ fn wait_for_authoritative_actor_ready(
     } else {
         clear_starting_actor_timeout_record(file_path);
         crate::ops_log::log_op(file, &log_line);
+        // Diagnostic: capture the pane content at timeout so we can analyze
+        // why ready_prompt_candidate never matched.
+        if let Ok(content) = tmux.capture_pane(&initial.record.pane_id, Some(80)) {
+            let candidate = ready_prompt_candidate(&content, harness);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_wait_for_ready_timeout_diagnostic file={} pane={} harness={} candidate={:?} bottom_idle_chrome={} has_busy_cue={} lines={}",
+                    file.display(),
+                    initial.record.pane_id,
+                    harness.binary,
+                    candidate,
+                    harness.is_bottom_idle_chrome(&content, 12),
+                    harness.has_busy_cue(&content),
+                    content.lines().count()
+                ),
+            );
+        }
     }
     if override_timeout.is_some() {
         crate::ops_log::log_op(
@@ -3926,28 +3967,33 @@ fn route_via_authoritative_actor(
     } else {
         false
     };
+    let mut waited_and_timed_out = false;
     if busy_dispatch_only_should_wait_for_ready(
         dispatch_only,
         actor_state,
         prompt_context.is_some() || has_existing_inactive_queue_fallback,
-    ) && let Some(refreshed) =
-        wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
-    {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_busy_actor_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={}",
-                file.display(),
-                actor.record.pane_id,
-                refreshed.record.pane_id,
-                harness.binary,
-                actor.record.generation,
-                refreshed.record.generation
-            ),
-        );
-        actor = refreshed;
-        dispatch_pane = actor.record.pane_id.clone();
-        actor_state = actor.actor_state();
+    ) {
+        if let Some(refreshed) =
+            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_busy_actor_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={}",
+                    file.display(),
+                    actor.record.pane_id,
+                    refreshed.record.pane_id,
+                    harness.binary,
+                    actor.record.generation,
+                    refreshed.record.generation
+                ),
+            );
+            actor = refreshed;
+            dispatch_pane = actor.record.pane_id.clone();
+            actor_state = actor.actor_state();
+        } else {
+            waited_and_timed_out = true;
+        }
     }
 
     if actor_blocked_by_starting_timeout(&actor) {
@@ -4103,6 +4149,51 @@ fn route_via_authoritative_actor(
         actor_state = crate::session_actor::ActorState::Ready;
     }
 
+    // Timeout-idle recovery: the wait loop exhausted its budget without finding
+    // a dispatch-ready prompt, but the live pane also shows no active busy cue.
+    // The pane is idle by the absence-of-work test even though our prompt
+    // detection patterns did not match the actual pane output. Promote the
+    // stale Busy projection to Ready and dispatch. This handles Codex output
+    // formats where the footer does not match `is_ignorable_output_line` or
+    // `is_bottom_idle_chrome` patterns but the pane is clearly not mid-turn.
+    if waited_and_timed_out
+        && actor_dispatch_state(actor_state) == ActorDispatchState::Busy
+        && !prompt_ready
+        && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
+    {
+        if !harness.has_busy_cue(&content) {
+            eprintln!(
+                "[route] timeout-idle recovery for {}: waited full timeout but pane has no busy cue; promoting stale busy projection to ready and dispatching",
+                file.display()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_timeout_idle_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str(),
+                    content.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+                ),
+            );
+            actor_state = crate::session_actor::ActorState::Ready;
+        } else {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_timeout_idle_recovery_blocked file={} pane={} harness={} generation={} actor_state={} busy_cue=true",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str()
+                ),
+            );
+        }
+    }
+
     let reopen_mode = if dispatch_only {
         ReopenMode::DispatchOnly
     } else {
@@ -4205,6 +4296,15 @@ fn route_via_authoritative_actor(
                 actor_state.as_str(),
                 dispatch_pane
             );
+            if let Some(queued) = activate_existing_route_queue_head(file, "focus_only_inactive_queue")? {
+                eprintln!(
+                    "[route] activated existing inactive agent:queue head {:?} for {} (already_present={}, activated={}) during focus-only reopen",
+                    queued.prompt_text,
+                    file.display(),
+                    queued.already_present,
+                    queued.activated
+                );
+            }
             Ok(dispatch_pane)
         }
         AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue => {
@@ -4358,6 +4458,21 @@ fn route_via_authoritative_actor(
             );
         }
         AuthoritativeActorDispatchAction::DispatchOnlyDirectPane => {
+            let queue_prompt = if prompt_context.is_some() {
+                prompt_context.map(|context| context.prompt_text.clone())
+            } else {
+                activate_existing_route_queue_head(file, "dispatch_only_inactive_queue")?
+                    .map(|queued| {
+                        eprintln!(
+                            "[route] activated existing inactive agent:queue head {:?} for {} (already_present={}, activated={}) before dispatch-only reopen",
+                            queued.prompt_text,
+                            file.display(),
+                            queued.already_present,
+                            queued.activated
+                        );
+                        queued.prompt_text
+                    })
+            };
             let _authorization = authorize_controller_dispatch(
                 file,
                 session_id,
@@ -4379,7 +4494,7 @@ fn route_via_authoritative_actor(
                 harness,
                 DispatchOnlySendReopenOptions {
                     delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
-                    queue_prompt_text: prompt_context.map(|context| context.prompt_text.as_str()),
+                    queue_prompt_text: queue_prompt.as_deref(),
                 },
             )?;
             crate::ops_log::log_op(
@@ -8478,6 +8593,12 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     }
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
         return Some("opencode idle status chrome".to_string());
+    }
+    if matches!(harness.binary.as_str(), "codex" | "opencode")
+        && harness.is_bottom_idle_chrome(content, 12)
+    {
+        return latest_dispatch_ready_prompt
+            .or_else(|| Some("bottom idle chrome".to_string()));
     }
     latest_dispatch_ready_prompt
 }

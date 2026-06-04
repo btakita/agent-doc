@@ -16,6 +16,10 @@ import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileEvent
+import com.intellij.openapi.vfs.VirtualFileListener
+import com.intellij.psi.PsiManager
 import com.intellij.util.Alarm
 import java.awt.Color
 import java.awt.Font
@@ -35,7 +39,26 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 refreshEditor(event.editor)
             }
         }, this)
+        com.intellij.openapi.vfs.VirtualFileManager.getInstance().addVirtualFileListener(
+            object : VirtualFileListener {
+                override fun contentsChanged(event: VirtualFileEvent) {
+                    if (!event.file.name.endsWith(".md")) return
+                    reparseAndRefresh(event.file)
+                }
+            },
+            this,
+        )
         refreshAll()
+    }
+
+    private fun reparseAndRefresh(file: VirtualFile) {
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        try {
+            PsiManager.getInstance(project).dropPsiCaches()
+        } catch (_: Exception) {
+            // Best-effort PSI cache drop; the VisualHighlighterManager still refreshes via documentChanged
+        }
+        scheduleRefresh(document)
     }
 
     private fun scheduleRefresh(document: Document) {

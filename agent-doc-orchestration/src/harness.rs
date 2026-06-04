@@ -145,6 +145,10 @@ impl HarnessConfig {
         }
     }
 
+    pub fn is_tui_harness(&self) -> bool {
+        self.binary == "opencode"
+    }
+
     /// Build the full arg list for a restart iteration.
     /// On first run, returns `base_args` unchanged.
     /// On restart, applies the `restart_behavior`.
@@ -244,6 +248,7 @@ impl HarnessConfig {
             "opencode" => {
                 is_context_usage_status_line(trimmed)
                     || is_opencode_cwd_version_status_line(trimmed)
+                    || is_opencode_footer_version_line(trimmed)
             }
             _ => false,
         }
@@ -274,6 +279,112 @@ impl HarnessConfig {
             }
         }
         saw_status
+    }
+
+    /// Bottom-N counterpart of [`is_idle_chrome_only_output`] for OpenCode
+    /// post-turn idle detection. After a turn completes the pane keeps
+    /// completed-turn output (bash commands, "Thought:", "Click to expand")
+    /// in scrollback above the idle bottom chrome. The all-lines
+    /// [`is_idle_chrome_only_output`] returns `false` because those
+    /// scrollback lines are non-ignorable, but the bottom shows a genuine
+    /// idle composer. This method mirrors the bottom-N strategy used
+    /// by [`dispatch_blocker_reason`] for busy-cue detection, but instead
+    /// of requiring every bottom line to be chrome, it checks for a
+    /// contiguous idle chrome suffix of at least `min_chrome` lines
+    /// containing at least one status/footer line.
+    pub fn is_bottom_idle_chrome(&self, output: &str, bottom_n: usize) -> bool {
+        if !matches!(self.binary.as_str(), "codex" | "opencode") || self.has_busy_cue(output) {
+            return false;
+        }
+
+        let recent: Vec<String> = output
+            .lines()
+            .rev()
+            .take(bottom_n)
+            .map(crate::prompt::strip_ansi)
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+
+        if recent.is_empty() {
+            return false;
+        }
+
+        let mut chrome_count = 0usize;
+        let mut has_status = false;
+        let mut has_dispatch_ready_prompt = false;
+        for line in &recent {
+            if !self.is_ignorable_output_line(line) {
+                if self.is_dispatch_ready_prompt_line(line) {
+                    has_dispatch_ready_prompt = true;
+                    chrome_count += 1;
+                    continue;
+                }
+                break;
+            }
+            chrome_count += 1;
+            if self.is_idle_status_line(line) || is_opencode_idle_splash_anchor_line(line) {
+                has_status = true;
+            }
+        }
+
+        let min_chrome = if self.binary == "opencode" {
+            if !recent.is_empty()
+                && is_opencode_footer_version_line(&recent[0])
+            {
+                1
+            } else {
+                4
+            }
+        } else {
+            1
+        };
+        (chrome_count >= min_chrome && has_status) || has_dispatch_ready_prompt
+    }
+
+    /// Same logic as [`is_bottom_idle_chrome`] but without the `has_busy_cue()`
+    /// guard. Used by `dispatch_blocker_reason()` to detect stale busy cues:
+    /// when the very bottom of the pane shows a contiguous idle-composer chrome
+    /// suffix, any `esc to interrupt` in scrollback above is from a completed
+    /// turn and must not block dispatch. (#jb-stale-busy-idle-footer)
+    fn bottom_idle_chrome_suffix_present(&self, output: &str, bottom_n: usize) -> bool {
+        if !matches!(self.binary.as_str(), "opencode" | "claude") {
+            return false;
+        }
+
+        let recent: Vec<String> = output
+            .lines()
+            .rev()
+            .take(bottom_n)
+            .map(crate::prompt::strip_ansi)
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+
+        if recent.is_empty() {
+            return false;
+        }
+
+        let mut chrome_count = 0usize;
+        let mut has_status = false;
+        let mut has_dispatch_ready_prompt = false;
+        for line in &recent {
+            if !self.is_ignorable_output_line(line) {
+                if self.is_dispatch_ready_prompt_line(line) {
+                    has_dispatch_ready_prompt = true;
+                    chrome_count += 1;
+                    continue;
+                }
+                break;
+            }
+            chrome_count += 1;
+            if self.is_idle_status_line(line) || is_opencode_idle_splash_anchor_line(line) {
+                has_status = true;
+            }
+        }
+
+        let min_chrome = if self.binary == "opencode" { 4 } else { 2 };
+        (chrome_count >= min_chrome && has_status) || has_dispatch_ready_prompt
     }
 
     /// Return true when recent pane output indicates the harness is present but
@@ -340,6 +451,15 @@ impl HarnessConfig {
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
             if opencode_active_turn_busy(&recent) {
+                // #jb-stale-busy-idle-footer: when `esc to interrupt` appears
+                // in scrollback but the very bottom of the pane is a contiguous
+                // idle-composer chrome suffix (ctrl+p commands, context %,
+                // cwd/version status), the busy cue is stale — the turn has
+                // completed and the TUI has redrawn the idle footer below the
+                // old `Working` banner. Override the busy classification.
+                if self.bottom_idle_chrome_suffix_present(output, 12) {
+                    return None;
+                }
                 return Some("opencode active turn".to_string());
             }
             return None;
@@ -359,6 +479,14 @@ impl HarnessConfig {
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
             if claude_active_turn_busy(&recent) {
+                // #jb-stale-busy-idle-footer part 2: when a stale working spinner
+                // or interrupt hint sits in scrollback but the bottom of the pane
+                // shows idle chrome (status line + empty ❯ composer), override the
+                // busy classification — the turn completed and the TUI drew the
+                // idle composer below the old active-turn marker.
+                if self.bottom_idle_chrome_suffix_present(output, 8) {
+                    return None;
+                }
                 return Some("active claude turn".to_string());
             }
             return None;
@@ -580,11 +708,31 @@ fn is_opencode_idle_chrome_line(trimmed: &str) -> bool {
     if trimmed.contains("Build ·") || trimmed.starts_with("● Tip ") {
         return true;
     }
-    is_opencode_box_art_line(trimmed)
+    if is_opencode_idle_keybinding_hint_line(trimmed) {
+        return true;
+    }
+    is_opencode_box_art_line(trimmed) || is_opencode_context_bar_line(trimmed)
 }
 
 fn is_opencode_idle_splash_anchor_line(trimmed: &str) -> bool {
     trimmed.contains("Ask anything")
+}
+
+/// True for the combined OpenCode footer line that bundles the idle keybinding
+/// hints and version number, e.g. `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13`.
+fn is_opencode_footer_version_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.contains("esc interrupt") || lower.contains("esc to interrupt") {
+        return false;
+    }
+    lower.contains("opencode")
+        && lower.split_whitespace().next_back().map_or(false, |last| {
+            let mut parts = last.split('.');
+            parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+                && parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+                && parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+                && parts.next().is_none()
+        })
 }
 
 fn is_opencode_cwd_version_status_line(trimmed: &str) -> bool {
@@ -612,6 +760,32 @@ fn is_opencode_cwd_version_status_line(trimmed: &str) -> bool {
         && major.chars().all(|ch| ch.is_ascii_digit())
         && minor.chars().all(|ch| ch.is_ascii_digit())
         && patch.chars().all(|ch| ch.is_ascii_digit())
+}
+
+/// True for the idle keybinding hint `esc interrupt` (without "to").
+/// The active-turn busy cue is `esc to interrupt`; the idle hint lacks "to".
+/// Matches lines like `esc interrupt  ctrl+p commands  OpenCode 1.15.13`.
+fn is_opencode_idle_keybinding_hint_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("esc interrupt") && !lower.contains("esc to interrupt")
+}
+
+/// True for lines consisting solely of the context-usage bar fill character ⬝
+/// (U+2B0D) and whitespace. OpenCode renders context usage as a bar of ⬝
+/// characters at the bottom of the idle TUI.
+fn is_opencode_context_bar_line(trimmed: &str) -> bool {
+    let mut saw_bar = false;
+    for ch in trimmed.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if ch == '⬝' {
+            saw_bar = true;
+            continue;
+        }
+        return false;
+    }
+    saw_bar
 }
 
 fn is_opencode_box_art_line(trimmed: &str) -> bool {
@@ -960,6 +1134,13 @@ mod tests {
         assert!(h.env_remove.contains(&"OPENCODE_CLIENT".to_string()));
         assert_eq!(h.tmux_session_fallback, "opencode");
         assert!(h.process_names.contains(&"opencode".to_string()));
+    }
+
+    #[test]
+    fn is_tui_harness() {
+        assert!(!HarnessConfig::claude().is_tui_harness());
+        assert!(!HarnessConfig::codex().is_tui_harness());
+        assert!(HarnessConfig::opencode().is_tui_harness());
     }
 
     #[test]
@@ -1530,6 +1711,223 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 ";
 
         assert!(!h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_opencode_post_turn_with_scrollback() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+    Finished test profile
+     Running unittests src/lib.rs
+test result: ok. 2219 passed; 0 failed
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass. Here is a summary.
+src/harness.rs: added is_bottom_idle_chrome method (bottom-N idle detection)
+src/harness.rs: tests for is_bottom_idle_chrome (4 tests)
+src/start.rs: updated child_output_prompt_visible to use bottom-N for OpenCode
+src/start.rs: test for post-turn idle detection
+cargo test -p agent-doc-orchestration — 2219 passed, 0 failed
+cargo check --bin agent-doc — clean
+cargo install — installed agent-doc 0.34.0
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+                                                                                         ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "post-turn scrollback above idle bottom chrome must still pass bottom-N idle detection"
+        );
+        assert!(
+            !h.is_idle_chrome_only_output(output),
+            "same output must fail the all-lines scan (scrollback is non-ignorable)"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_opencode_active_turn_bottom() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test
+Thought: 3.1s
+Click to expand
+Working (30s - esc to interrupt)
+";
+
+        assert!(
+            !h.is_bottom_idle_chrome(output, 12),
+            "active working banner in bottom lines must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_non_opencode() {
+        let h = HarnessConfig::claude();
+        assert!(!h.is_bottom_idle_chrome("anything", 12));
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_codex_post_turn_with_scrollback() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Some turn output from Codex
+Completed running tests
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+›
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "post-turn Codex output with context status and idle prompt must pass bottom-N idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_codex_context_status_only() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Previous turn scrollback line
+Another scrollback line
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
+
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "Codex context status line at bottom must pass idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_codex_active_turn() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Some output
+Working (45s - esc to interrupt)
+";
+
+        assert!(
+            !h.is_bottom_idle_chrome(output, 12),
+            "active Codex turn must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_empty_output() {
+        let h = HarnessConfig::opencode();
+        assert!(!h.is_bottom_idle_chrome("", 12));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_stale_busy_with_idle_footer() {
+        // #jb-stale-busy-idle-footer: the `Working (Ns - esc to interrupt)`
+        // banner from a completed turn stays in scrollback within the bottom 12
+        // lines, but the actual pane bottom shows idle chrome (box art, Build
+        // status, ctrl+p footer, cwd/version line). The busy cue is stale —
+        // the turn has completed and the TUI has redrawn the idle footer below
+        // the old `Working` banner. The busy guard must NOT block.
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous turn output line 1
+previous turn output line 2
+Working (21s - esc to interrupt)
+                                                                                    ┃
+                                                                                    ┃  Ask anything... \"What is the tech stack?\"
+                                                                                    ┃
+                                                                                    ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+                                                                                         ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "stale Working banner above idle footer must not block dispatch (#jb-stale-busy-idle-footer)"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_active_turn_no_idle_footer() {
+        // Complement: when `Working (Ns - esc to interrupt)` is the actual
+        // bottom (no idle footer suffix below it), it IS a real active turn.
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous output
+Working (21s - esc to interrupt)
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn"),
+            "real active Working banner without idle footer must still block"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_stale_busy_with_context_footer() {
+        // #jb-stale-busy-idle-footer variant: stale `esc to interrupt` in
+        // scrollback, but the bottom lines are the full idle footer (box art,
+        // ctrl+p, cwd/version status, tip line).
+        let h = HarnessConfig::opencode();
+        let output = "\
+output from previous turn
+more previous turn output
+Working (15s - esc to interrupt)
+thought output
+                                                                                    ┃
+                                                                                    ┃  Ask anything...
+                                                                                    ┃
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                         ● Tip some tip text
+                                                                                                                    tab agents  ctrl+p commands
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "stale esc to interrupt with idle context footer must not block (#jb-stale-busy-idle-footer)"
+        );
+    }
+
+    #[test]
+    fn bottom_idle_chrome_suffix_present_opencode_with_stale_busy() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+                                                                                    ┃  Ask anything...
+                                                                                    ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+        assert!(
+            h.bottom_idle_chrome_suffix_present(output, 12),
+            "idle footer below stale Working banner must be detected"
+        );
+    }
+
+    #[test]
+    fn bottom_idle_chrome_suffix_present_rejects_active_turn() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous output
+Working (21s - esc to interrupt)
+";
+        assert!(
+            !h.bottom_idle_chrome_suffix_present(output, 12),
+            "active Working banner with no idle footer must not match"
+        );
     }
 
     #[test]
@@ -2217,5 +2615,44 @@ opencode debug               debugging and troubleshooting tools
         let help_output =
             "opencode [project]           start opencode tui\nopencode run\nopencode debug\n";
         assert!(!h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_context_bar_line_recognized() {
+        assert!(is_opencode_context_bar_line("⬝⬝⬝⬝⬝⬝⬝⬝"));
+        assert!(is_opencode_context_bar_line("  ⬝⬝⬝⬝  "));
+        assert!(!is_opencode_context_bar_line("⬝⬝⬝ some text"));
+        assert!(!is_opencode_context_bar_line(""));
+    }
+
+    #[test]
+    fn opencode_idle_keybinding_hint_line_recognized() {
+        assert!(is_opencode_idle_keybinding_hint_line(
+            "esc interrupt  ctrl+p commands  OpenCode 1.15.13"
+        ));
+        assert!(is_opencode_idle_keybinding_hint_line("esc interrupt"));
+        assert!(!is_opencode_idle_keybinding_hint_line("esc to interrupt"));
+        assert!(!is_opencode_idle_keybinding_hint_line("Working (14s - esc to interrupt)"));
+    }
+
+    #[test]
+    fn opencode_idle_chrome_line_with_context_bar() {
+        assert!(is_opencode_idle_chrome_line("⬝⬝⬝⬝⬝⬝⬝⬝"));
+        assert!(is_opencode_idle_chrome_line(
+            "esc interrupt  ctrl+p commands  OpenCode 1.15.13"
+        ));
+    }
+
+    #[test]
+    fn opencode_bottom_idle_chrome_with_context_bar_and_scrollback() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Thought: checking files
+Click to expand
+  ~/work/btakita/agent-loop:main                                        1.15.13
+⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13
+";
+        assert!(h.is_bottom_idle_chrome(output, 12));
+        assert!(!h.is_idle_chrome_only_output(output));
     }
 }

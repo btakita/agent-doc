@@ -120,7 +120,23 @@ I was wrong. You're right — the panes were idle.
 2. **#jb-run-activate-queue** — JB "Run Agent Doc" should flip `queue_active: true` when the document has queue items but `queue_active: false`, even if there are no other changes. Currently the route sees no diff and reports "nothing to process" without checking the queue.
 
 Both added to backlog as backlog items.
-<!-- agent:boundary:230be469 -->
+
+### Re: Backlog items + new bugs — opus-4-6
+
+Apologies — the `` marker suppressed the pending capture guard and the items were never written to backlog. Adding now via `--pending-add`.
+
+#### #opencode-idle-context-bar-false-busy + #jb-run-activate-queue
+
+Both added to backlog. The `no-pending-capture` was my error.
+
+#### JB Run Agent Doc stalled for monsterrodholders.md
+
+`queue_active: false` + queue items + JB Run Agent Doc = "nothing to process" is the `#jb-run-activate-queue` bug. Route sees no diff and bails without checking the queue. Fix: route dispatch-only should call `activate_existing_route_queue_head` before reporting no changes.
+
+#### JB plugin color highlighting loss on disk load
+
+Added as `#jb-color-highlighting-disk-load`. Likely a `VirtualFile` reload issue during `File Cache Conflict` resolution or external `agent-doc write` modifications. Gated on `img_20.png` review.
+<!-- agent:boundary:15955b59 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -161,6 +177,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ens4] #opencode-idle-context-bar-false-busy #agent-doc-bug 2026-06-04: OpenCode idle pane with context-usage-bar bottom line misclassified as busy by live_pane_prompt_ready. Route queues instead of dispatching on genuinely idle panes. Root cause: specific OpenCode TUI layout not recognized by is_idle_chrome_only_output or prompt candidate path.
+- [ ] [#3eea] #jb-run-activate-queue [recommended] #agent-doc-bug 2026-06-04: JB Run Agent Doc should flip queue_active:true when document has queue items but queue_active:false, even with no other changes. Currently reports nothing to process and ignores the queue.
+- [ ] [#7qfw] #jb-color-highlighting-disk-load #agent-doc-bug 2026-06-04: JB plugin loses Markdown syntax highlighting and backgrounds when document is loaded from disk (File Cache Conflict or navigation). See img_20.png.
 <!-- /agent:backlog -->
 
 ## Review

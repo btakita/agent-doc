@@ -36,7 +36,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #terse-edge-codes; #sqlite-chunk; #sqlite-ranked-cte
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:66beb449 -->
+
+### Re: #sqlite-conflict-par — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#sqlite-conflict-par]
+
+
+Parallelized `collect_conflict_matrix_evidence_packets` in `conflict_matrix.rs:2292`. The previous implementation iterated targets sequentially, calling `graph_db_evidence_report_from_store` (the expensive graph traversal) for each cache miss in series.
+
+**Approach:** Two-phase collection with `std::thread::scope`:
+1. Cache-first pass: check disk cache for all targets, separate into hits and misses
+2. Parallel pass: for 2+ cache misses with an existing SQLite db, spawn scoped threads where each opens its own `SqliteGraphStore::open_read_only` connection and collects evidence independently
+3. Fallback: single-target or missing db_path cases use the original sequential path
+
+Each thread owns its own read-only SQLite connection (WAL mode allows concurrent readers), so no `Sync` bound is needed on `GraphStore`. A shared helper `collect_evidence_for_target` encapsulates the per-target cache-check + traversal + cache-write logic.
+
+**Verification:** `cargo check -p tsift-cli` clean, all 6 conflict_matrix tests pass, `cargo install` succeeds. Pre-existing clippy lint in `tsift-sqlite` (unrelated `useless_format`) and surrealdb test flake are unchanged.
+<!-- agent:boundary:f634f76f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +72,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#terse-edge-codes]~
 - ~do [#sqlite-chunk]~
 - ~do [#sqlite-ranked-cte]~
-- do [#sqlite-conflict-par]
+- ~do [#sqlite-conflict-par]~
 - do [#sqlite-wal-tune]
 - do [#sqlite-frontier-temp]
 - do [#astnav-npm]
@@ -63,7 +81,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sqlite-conflict-par] Parallelize conflict_matrix evidence packet preparation — at 817ms it is the slowest hot-read; per-target traversals are read-only and independent (medium)
 - [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)
 - [ ] [#sqlite-frontier-temp] Pre-allocate temp table for multi-node frontier expansion instead of dynamic WHERE IN string per chunk — amortizes overhead for deep BFS traversals (low)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)

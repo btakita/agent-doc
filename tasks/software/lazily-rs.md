@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -55,7 +55,26 @@ A/B results (same_slot_write_read, parking_lot vs std::sync):
   16 workers: 6.7ms vs 7.2ms (similar)
 
 Conclusion: no significant difference. parking_lot remains default.
-<!-- agent:boundary:a221ae03 -->
+
+### Re: finish_batch O(n) algorithm — glm-5.1
+
+Already answered in prior exchange (see Option A/B/C analysis). The O(n log n) sort+dedup approach (Option A) was implemented as #lazyperf34 (commit e7d677c), achieving -18.4% on batch_storms/64. True O(n) is possible via HashSet (Option B, already used in context.rs) but has higher constant factor for small N. Not worth the complexity trade-off.
+
+### Re: Update BENCHMARKS.md + parking_lot regressions — glm-5.1
+
+> **Queue prompt:**
+>
+> What are the performance differences from the queue run?
+
+
+BENCHMARKS.md was updated as part of both #lazyperf35 and #lazyperf36 runs. The parking_lot A/B benchmark (#lazyperf36) showed no significant difference between parking_lot and std::sync at any contention level. The remaining regressions in the instrumentation build are from profiling overhead, not from the mutex implementation. No further parking_lot mitigation needed.
+
+Queue run performance summary:
+- #lazyperf33: fan_out/256 -14%, memo_equality -30%
+- #lazyperf34: batch_storms -18.4%
+- #lazyperf35: effect_flushing -73.5% (890ns to 235ns)
+- #lazyperf36: A/B showed no parking_lot vs std::sync difference
+<!-- agent:boundary:8c25b687 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,16 +82,7 @@ Conclusion: no significant difference. parking_lot remains default.
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~Does `let val = counter.get(ctx);` clone `ctx`?~
-- ~[#lazyperf33]~
-- ~Please create a mermaid of the performance improvements.~
-- ~[#lazyperf34]~
-- ~[#lazyperf35]~
-- ~[#lazyperf36]~
-- Is there a way to make "Fix finish_batch O(n2) dedup" an O(n) or O(1) algorithm?
-- Update BENCHMARKS.md. What are the #next-steps to mitigate the parking_lot regressions?
-- What are the performance differences from the queue run?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

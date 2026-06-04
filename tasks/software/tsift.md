@@ -41,6 +41,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [ ] [#surreal-skip-load]
+
+
+> **Queue prompt:**
+>
 > [ ] [#surreal-nodes-by-kind]
 
 
@@ -64,7 +69,7 @@ Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load
 - `surrealdb_store_sidecar_no_file_for_in_memory`
 
 **Verification:** `make check` — 687 tests pass (all suites green), `cargo install` succeeds, pushed to `main` in both tsift and agent-loop.
-<!-- agent:boundary:76ab93eb -->
+<!-- agent:boundary:59d0da91 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +80,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[ ] [#surreal-nodes-by-kind]~
-- [ ] [#surreal-skip-load]
+- ~[ ] [#surreal-skip-load]~
 - [ ] [#surreal-arc]
 - [ ] [#surreal-fixture]
 - [ ] [#surreal-dashmap]
@@ -85,6 +90,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
+- [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
+- [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
+- [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)
+- [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
+- [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
 - [ ] [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)

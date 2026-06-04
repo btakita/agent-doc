@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,11 +34,12 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 8 response topic(s): Preflight recovery; Queue [#takv] #opencode-image-support; Queue [#xrm7] #jb-init-from-claim; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c0472a5d -->
+<!-- agent:boundary:a2982547 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - [#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.
+- Add a per-agent configuration for image extraction. I will likely have a pass-through for Claude Code and Codex but that may change in the future. Opencode using GLM 5.1 needs the image description service. For the service, I want to use GPT from my current account to perform the description. Ideally this can be driven locally.
 <!-- /agent:queue -->
 ###
 <!--

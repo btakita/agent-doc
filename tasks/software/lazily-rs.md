@@ -38,7 +38,11 @@ queue_active: true
 Compacted content:
 - Archived 7 response topic(s): Does get(ctx) clone ctx?; test; Mermaid of performance improvements; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:eaea8c31 -->
+
+### Re: #lazyperf35 scratch buffer elimination — glm-5.1
+
+Committed and pushed as 9309369. Added feature-gated RootVec type alias replacing Vec allocations in scratch-buffer hot paths. effect_flushing/thread_safe_context: 889.7 ns to 235.5 ns (-73.5%%). All 97 tests pass.
+<!-- agent:boundary:e5d5606e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +55,7 @@ Compacted content:
 - ~[#lazyperf33]~
 - ~Please create a mermaid of the performance improvements.~
 - ~[#lazyperf34]~
-- [#lazyperf35]
+- ~[#lazyperf35]~
 - [#lazyperf36]
 - Is there a way to make "Fix finish_batch O(n2) dedup" an O(n) or O(1) algorithm?
 - Update BENCHMARKS.md. What are the #next-steps to mitigate the parking_lot regressions?

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -118,7 +118,21 @@ Wait for npm publish and --claude init. Current docs cover all flows.
 
 
 Added nodes_by_kind secondary index. O(1) kind lookup. 1 new test. 693 total pass.
-<!-- agent:boundary:23103e5a -->
+
+### Re: #surreal-skip-load — gated (design needed)
+
+> **Queue prompt:**
+>
+> [#surreal-skip-load]
+
+
+Requires designing a "deferred load" flag or builder pattern for `SurrealdbGraphStore::open()`. The optimization targets the bulk-refresh path where `replace_memory_indexes()` is called immediately after `open()`, making `load_indexes()` + sidecar I/O redundant. Options:
+1. `open_deferred()` constructor that skips `load_indexes()` + sidecar
+2. `open()` builder with `.skip_load()` flag
+3. Lazy load on first read (adds branch to every read method)
+
+Best deferred to a focused performance pass. Current `load_indexes()` + sidecar already makes open fast for warm caches.
+<!-- agent:boundary:314a8d50 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,16 +141,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#surreal-batch-bfs-gated]~
-- ~[#astnav-hooks]~
-- ~[#astnav-npm]~
-- ~[#astnav-commands]~
-- ~[#astnav-init-claude]~
-- ~[#astnav-autoindex-oc]~
-- ~[#astnav-harness-docs]~
-- ~[#surreal-nodes-by-kind]~
-- [#surreal-skip-load]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

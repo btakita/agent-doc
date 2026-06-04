@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -38,7 +38,7 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): #eek4 #asyncctx6 Async effects - glm-5.1; queue-drain #eek4 cleanup; #lazyperf32 get_rc/get_cell_rc; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:343ce7c0 -->
+<!-- agent:boundary:4338973d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,9 +46,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#lazyperf34]
-- [#lazyperf35]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

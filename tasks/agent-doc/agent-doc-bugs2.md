@@ -39,12 +39,12 @@ Compacted content:
 
 Already shipped. Git confirms: `e3b1af769` (submodule pointer + plan) and `cc72dbf68` (gated to review). Status line confirms "Codex stale-busy bottom-idle fix shipped." Striking from queue.
 queue fixup: struck #jb-stale-busy-idle
-<!-- agent:boundary:e2229e97 -->
+<!-- agent:boundary:1f18c8dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~#clear-stops-running-process~
-- ~#jb-stale-busy-idle~
+- #jb-stale-busy-idle
 - ~#prompt-duplicated-while-typing~
 - #adoc-queue-ipc-buffer
 - ~#lr-queue-patchback-miss~

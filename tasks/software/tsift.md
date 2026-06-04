@@ -31,31 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-042918.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-051053.md`*
 
 Compacted content:
-- Archived 4 response topic(s): lazily-rs performance next-steps; sqlite graph performance + effectiveness next-steps; lazily-rs vs tsift task ownership; 1 more
+- Archived 2 response topic(s): tokegate-seed populate token-gate-history.json with baseline samples; tokegate-seed session-check recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: tokegate-seed populate token-gate-history.json with baseline samples — glm-5.1
-
-Implemented tsift token-gate CLI subcommand with sample and evaluate actions, and seeded the fixture with 3 baseline samples per surface (15 total).
-
-Changes:
-- packages/tsift-cli/src/cli.rs: Added TokenGate command with Sample and Evaluate subcommands
-- packages/tsift-cli/src/lib.rs: Added cmd_token_gate, cmd_token_gate_sample, cmd_token_gate_evaluate and timestamp helpers
-- fixtures/token-gate-history.json: Seeded with 15 baseline entries (3 per surface x 5 surfaces)
-- SPEC.md: Documented the new CLI collection path
-
-Verification:
-- All 9 existing token_gate integration tests pass
-- Gate evaluate returns decision: pass across all 5 surfaces
-- make check (clippy) passes clean; all workspace tests pass (excluding pre-existing surrealdb flake)
-
-### Re: tokegate-seed session-check recovery — glm-5.1
-
-Recovery write to clear missing_response_body. The tokegate-seed item is complete: fixture seeded with 15 baseline samples.
-<!-- agent:boundary:f54d8e99 -->
+<!-- agent:boundary:aff03306 -->
 <!-- /agent:exchange -->
 ###
 <!--

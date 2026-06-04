@@ -31,77 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-192455.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-195054.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #sqlite-doc-sync-safety; queue reactivation; #sqlite-reentrant-guard; 2 more
+- Archived 5 response topic(s): #edge-index-references; #degree-cache; #community-summary-default; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #edge-index-references — glm-5.1
-
-Added `edge_index_transform` — a JSON post-processing step in the ultra-terse pipeline that replaces `from_id`/`to_id` string fields in edges with positional `from`/`to` integer indices into the companion `nodes` array. Unresolved IDs (not present in nodes) retain their original string fields.
-
-- Applied after `ultra_terse_transform` in the `--ultra-terse` code path
-- 3 unit tests: index resolution, unresolved fallback, noop without nodes/edges
-- 356/356 unit tests pass, 34/35 conformance (1 pre-existing failure)
-- Commit: `a004004` pushed to main
-
-### Re: #degree-cache — glm-5.1
-
-> **Queue prompt:**
->
-> do [#degree-cache]
-
-
-Replaced the O(n×E) correlated subquery in `DegreeWeighted` neighborhood scoring with a pre-computed `degree_cache` CTE. The CTE materializes per-node degree counts once before the recursive walk, then the score expression references it via index lookup instead of counting edges on every walk row.
-
-- Conditional CTE: only injected when `DegreeWeighted` scoring is selected
-- No change to `BreadthFirst` or `EdgeKindWeighted` query plans
-- 356/356 unit tests, 34/35 conformance (pre-existing)
-- Commit: `6250575` pushed to main
-
-### Re: #community-summary-default — glm-5.1
-
-> **Queue prompt:**
->
-> do [#community-summary-default]
-
-
-Added `CommunityTruncationSummary` to `GraphDbRankedNeighborhoodComparison`. When `pruned_count > 0`, runs community detection on the kept-edge subgraph and reports fully_kept/partially_pruned/fully_pruned counts, pruned node kinds, and top-5 pruned labels.
-
-- Only computed when pruning occurs (zero overhead when no pruning)
-- Community detection uses existing `detect_communities` from tsift-graph
-- 34/35 conformance tests pass (1 pre-existing), all unit tests pass
-- Commit: `5b49425` pushed to main
-
-### Re: #property-sampling — glm-5.1
-
-> **Queue prompt:**
->
-> do [#property-sampling]
-
-
-Added `PropertyMode` enum (Full/Sample/Omit) to `RankedNeighborhoodOptions`. Applied in `SqliteGraphStore::ranked_neighborhood` after result assembly.
-
-- `Full`: all properties (default, backward compatible)
-- `Sample`: keeps properties only on first node of each kind, strips rest
-- `Omit`: strips all properties from nodes and edges
-
-Commit: `a0da761` pushed to main
-
-### Re: #edges-between-batch-optimization — glm-5.1
-
-> **Queue prompt:**
->
-> do [#edges-between-batch-optimization]
-
-
-Added dual-path routing in `SqliteGraphStore::edges_between_nodes`. Small ID sets (≤20 nodes) use a direct `IN (...)` clause, bypassing temp-table creation and transaction overhead. Larger sets continue using the temp-table + EXISTS pattern.
-
-- New `edges_between_nodes_inline` private method
-- Threshold: 20 nodes (covers most evidence/dispatch queries)
-- Commit: `08e7cf3` pushed to main
-<!-- agent:boundary:2db91245 -->
+<!-- agent:boundary:5095b8ba -->
 <!-- /agent:exchange -->
 ###
 <!--

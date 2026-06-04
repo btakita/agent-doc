@@ -54,7 +54,15 @@ Parallelized `collect_conflict_matrix_evidence_packets` in `conflict_matrix.rs:2
 Each thread owns its own read-only SQLite connection (WAL mode allows concurrent readers), so no `Sync` bound is needed on `GraphStore`. A shared helper `collect_evidence_for_target` encapsulates the per-target cache-check + traversal + cache-write logic.
 
 **Verification:** `cargo check -p tsift-cli` clean, all 6 conflict_matrix tests pass, `cargo install` succeeds. Pre-existing clippy lint in `tsift-sqlite` (unrelated `useless_format`) and surrealdb test flake are unchanged.
-<!-- agent:boundary:f634f76f -->
+
+### Re: #sqlite-wal-tune — glm-5.1
+
+Tuned `SQLITE_GRAPH_WAL_AUTOCHECKPOINT_PAGES` from 256 to 4096 in `tsift-sqlite/src/lib.rs:127`.
+
+**Rationale:** The previous value of 256 pages triggered frequent auto-checkpoints during bulk projection writes (node/edge upserts). At 4096 pages (~16MB with default 4KB page size), SQLite batches more WAL writes before checkpointing, reducing fsync overhead during the write-heavy projection refresh phase. The WAL file grows larger transiently but is cleaned up after the write completes.
+
+**Verification:** `cargo check -p tsift-sqlite -p tsift-cli` clean, all 13 tsift-sqlite tests pass, all 9 tsift-cli tests pass, `cargo install` succeeds.
+<!-- agent:boundary:406b22ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +89,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sqlite-wal-tune] Tune WAL_AUTOCHECKPOINT_PAGES from 256 to 1024-4096 and measure refresh overhead reduction — current 256 triggers frequent checkpoints during bulk projection write (medium)
 - [ ] [#sqlite-frontier-temp] Pre-allocate temp table for multi-node frontier expansion instead of dynamic WHERE IN string per chunk — amortizes overhead for deep BFS traversals (low)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 <!-- /agent:backlog -->

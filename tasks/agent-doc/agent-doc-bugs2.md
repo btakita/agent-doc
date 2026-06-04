@@ -85,24 +85,49 @@ The plan is **already fully implemented and tested**. All 5 items ship:
 Test run: `cargo test -p agent-doc --bin agent-doc` — 9/9 clear/interrupt tests green.
 
 No code changes needed. Marking this plan as complete.
-<!-- agent:boundary:30883e3b -->
+
+### Re: JB Run Agent Doc stall — tsift.md + agent-doc-bugs2.md — opus-4-6
+
+
+Not a routing bug — both panes were genuinely busy with active OpenCode turns. The "no dispatch" is the expected busy-actor queue behavior.
+
+**tsift.md (pane %83):**
+- `actor: state=ready` via `dispatch_bind` at 03:56:02, but `live_pane: state=alive-busy` with an active OpenCode progress indicator.
+- Controller lease: `runtime_state=busy`, cycle state: `preflight_started` with 3 active queue heads.
+- Route correctly queued dispatch instead of injecting into a busy pane. Stall = active OpenCode turn still running.
+
+**agent-doc-bugs2.md (pane %70):**
+- 60s route readiness timeout fired, then recovery path dispatched successfully via `route_timeout_idle_recovery`.
+- The wait was the previous auto-queue turn occupying the pane.
+
+**Bug cluster #1** (`route/start replay gap`): common pattern is `proof=accepted proof_scope=accepted_only` — pane-input acceptance, not consumed/dispatch-start proof.
+
+No code changes needed. Queue drains once active OpenCode turns complete.
+<!-- agent:boundary:20bfb8a1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~JB `Run Agent Doc` on this file stalled...no routing.~
-- ~do [#54pz]~
-- ~do [#engt]~
-- ~do [#ba4b]~
-- ~do [#kz2g]~
-- ~do [#appe]~
-- ~Stall with `Queue continues with do plan-jb-clear-session-busy-pane-ux.md. Session needs compacting (accretion at block level).` message. The document does not have a compaction setting, so the stall should not have happened.~
-~~~done
-How do I initialize seo.md as an agent-doc? I tried JB `Claim for Tmux Pane`. What is the proper way to init a new agent doc?
+---
+JB `Run Agent Doc` on tsift.md and this file stalled...no dispatch.
 ```
-Claim failed (exit 1): [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill Error: pane %64 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
+[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
+[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
+resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
+[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
+[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
+resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+[route] target tmux session: 0
+[route] authoritative actor generation 113 for tasks/software/tsift.md is busy on pane %83; queued pending dispatch "Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
-~~~
-- ~do plan-jb-clear-session-busy-pane-ux.md~
+---
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md
 <!-- /agent:queue -->

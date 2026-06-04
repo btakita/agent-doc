@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -39,7 +39,7 @@ Compacted content:
 - Archived 9 response topic(s): Review evaluation; Typed cache fast-path implementation; Queue cleanup; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: Backpressure, offline peers, and state sync — glm-5.1
+### Re: Backpressure, offline peers, and state sync — glm-5.1 (HEAD)
 
 #### Backpressure handling
 
@@ -94,10 +94,65 @@ When a peer comes back online:
 
 The key insight: **lazily's existing lazy invalidation and dirty-tracking infrastructure already solves most of the backpressure and sync problem at the graph level**. The network layer just needs to map dirty sets → delta streams and vector clocks → gap detection.
 
-### Re: Queue bookkeeping — glm-5.1
+### Re: Queue bookkeeping — glm-5.1 (HEAD)
 
 Recovered from queue divergence. Backpressure response committed in prior cycle. Struck resolved items (#ipc1-#ipc3). Queue active — next item: WebRTC P2P broker question.
-<!-- agent:boundary:f63b7f73 -->
+
+### Re: WebRTC P2P — broker or brokerless? — glm-5.1 (HEAD)
+
+**Pure P2P is viable with WebRTC, no broker needed for data.** You do need a lightweight signaling server for connection establishment, but it never sees signal data.
+
+#### Why no broker for data
+
+WebRTC Data Channels establish direct peer-to-peer connections after the initial handshake. Once the DTLS session is established, data flows directly between peers — no intermediary handles the payload. This is fundamentally different from WebSocket where every message passes through the relay server.
+
+#### What you still need: signaling server
+
+WebRTC requires a signaling mechanism for the initial handshake (exchange SDP offers/answers and ICE candidates). This is not a broker — it's a one-time coordination service:
+
+1. **Signaling server** — lightweight HTTP/WebSocket server that relays SDP offers + ICE candidates between peers during connection setup. Options:
+   - Minimal WebSocket server (~100 lines) that just forwards `offer`/`answer`/`ice-candidate` messages between known peer IDs
+   - Existing infrastructure: any message bus (NATS, Redis pub/sub) works as signaling
+   - Static config for fixed topologies (2-3 known peers): just exchange SDP out-of-band
+
+2. **STUN server** — public servers (Google's `stun:stun.l.google.com:19302`) handle NAT traversal for free. Your peers discover their public IP/port.
+
+3. **TURN server** — only needed when both peers are behind symmetric NATs (rare, ~5% of connections). Can use commercial TURN providers (Twilio, Xirsys) or self-hosted coturn. This is the only potentially costly component, and it's only used as a last-resort relay.
+
+#### Peer discovery strategies
+
+For a `lazily-distributed` deployment:
+
+1. **Static peer list** — simplest. Each node is configured with known peer addresses. Fine for fixed deployments (your own devices, known servers).
+
+2. **mDNS/DNS-SD** — zero-conf discovery on local networks. No server needed. Peers broadcast their presence and find each other automatically.
+
+3. **Bootstrap node + gossip** — one well-known node introduces new peers. After initial connection, peers exchange peer lists via gossip. Scales to hundreds of peers.
+
+4. **Signaling server as directory** — the signaling server doubles as a peer registry. Peers register on connect, query for other peers. Still not a data broker — it only stores peer addresses, never signal values.
+
+#### Topology options
+
+| Topology | Broker? | Latency | Complexity | Best for |
+|----------|---------|---------|------------|----------|
+| Full mesh | No | Lowest | O(n²) connections | Small clusters (< 10 peers) |
+| Star (one peer as hub) | No | Medium | O(n) connections | Device-to-server, IoT |
+| Gossip/superpeers | No | Eventual | Self-organizing | Large dynamic clusters |
+| Federated hubs | Hub nodes | Low | Managed | Geographic distribution |
+
+#### Recommendation
+
+Start with **full mesh + signaling server** for `lazily-distributed`:
+
+- Signaling: tiny WebSocket server for SDP/ICE exchange (not a data broker)
+- STUN: use free public servers
+- TURN: optional, for edge-case NATs
+- Discovery: static peer list initially, add mDNS for LAN, gossip for WAN
+- Data path: 100% P2P after handshake
+
+The signaling server can be embedded in `lazily-distributed` as a built-in module — it's just SDP/ICE forwarding, not data processing.
+<!-- agent:boundary:383f41b1 -->
+<!-- agent:boundary:6aeef3ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,9 +165,9 @@ Recovered from queue divergence. Backpressure response committed in prior cycle.
 - Let's go with WebRTC to start. Do we need a broker server or can this be P2P?
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
 - What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do. There should be sensible presets.
-- do [#ipc1]
-- do [#ipc2]
-- do [#ipc3]
+- ~do [#ipc1]~
+- ~do [#ipc2]~
+- ~do [#ipc3]~
 <!-- /agent:queue -->
 
 ## Backlog

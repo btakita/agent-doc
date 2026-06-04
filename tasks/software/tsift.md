@@ -63,7 +63,21 @@ Commit: `e223156` pushed to main
 **#hxgp (overview tier) and #9tg6 (focus tier)** — both were already implemented as part of #cyba's `tsift graph-db map` command (commit `e223156`). The overview tier produces community count, top-N degree hubs, edge-kind histogram, and module containment tree. The focus tier adds `--focus <symbol>` with node id, kind, degree, community, neighbor breakdown. Marking both done.
 
 **tsift + agent-doc token savings:** tsift already integrates with agent-doc through `session-review --next-context`, `context-pack`, `diff-digest`, `test-digest`, `graph-db map`, and `tsift-memory` closeout hooks. Recommendation: **soft dependency, not hard** — agent-doc degrades gracefully without tsift, and most users will want it installed for the significant token savings (~60-80% on transcript replay), but it should remain an optional enhancement rather than a required dependency.
-<!-- agent:boundary:719ab19f -->
+
+### Re: hard dependency analysis — glm-5.1
+
+Making tsift a hard dependency of agent-doc would create several problems:
+
+1. **Install friction:** agent-doc runs as a standalone binary. Requiring tsift means every agent-doc install must also build or download tsift, doubling install surface. Users who only need session management (no code navigation) would carry unnecessary weight.
+
+2. **Coupling risk:** agent-doc's core loop (preflight → respond → finalize → session-check) has zero tsift imports. The only integration points are optional: tsift-memory closeout hooks, session-review, context-pack, diff-digest, and graph-db evidence. These are all CLI-level invocations, not library dependencies. Hard-wiring them would make agent-doc's test matrix depend on tsift's build state.
+
+3. **Degradation model:** agent-doc already works correctly without tsift — it skips tsift-specific hooks and falls back to raw transcript reads. This graceful degradation is a feature: operators can start with agent-doc alone and add tsift when they need code-aware token savings.
+
+4. **Alternative path:** If tighter integration is desired, the better approach is an **optional tsift plugin** for agent-doc (similar to how opencode-tsift works as a plugin for OpenCode). This keeps the core agent-doc binary dependency-free while offering tsift-enhanced workflows as an opt-in layer.
+
+Recommendation: keep the current soft-dependency model. Add a `tsift` feature flag or plugin to agent-doc that enables enhanced closeout hooks when tsift is detected on `$PATH`, but don't require it.
+<!-- agent:boundary:8f16947c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -43,7 +43,21 @@ Compacted content:
 
 Done. Commit 1fb4b5c pushed.
 Is BENCHMARK.md up to date? We should have a skill + runbook support for updating BENCHMARK.md in src/lazily-rs.
-<!-- agent:boundary:1d8eb2c9 -->
+<!-- replace:202cd076 -->
+### Re: benchmark-skill BENCHMARKS.md freshness + skill/runbook
+
+**BENCHMARKS.md is current.** `make benchmark-check` passes with exit 0.
+
+**Created skill + runbook:**
+
+- `.claude/skills/lazily-benchmark/SKILL.md` — `/lazily-benchmark [check|update|regression|profile]` skill
+- `runbooks/lazily-benchmark.md` — detailed workflow runbook covering freshness check, full update, A/B regression, instrumentation profile, budget configuration, and troubleshooting
+- Updated `src/lazily-rs/AGENTS.md` — added `benchmark-update` and `instrumentation-profile` Makefile targets plus a `## Benchmark Skill` section referencing the runbook
+
+Commits pushed:
+- `2d5c6a11f` (agent-loop) — skill + runbook + submodule ref
+- `0af921f` (lazily-rs) — AGENTS.md benchmark reference
+<!-- agent:boundary:b6b68935 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,8 +65,7 @@ Is BENCHMARK.md up to date? We should have a skill + runbook support for updatin
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Is BENCHMARK.md up to date? We should have a skill + runbook support for updating BENCHMARK.md in src/lazily-rs.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

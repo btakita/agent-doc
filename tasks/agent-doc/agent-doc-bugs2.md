@@ -72,10 +72,7 @@ queue cleanup
 <!-- agent:boundary:9920e045 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- JB `Run Agent Doc` on tsift.md and this file stalled. No routing. I had to run manually.
-- There are 3 tmux panes with 2 editor panes.
-- agent-doc deleted the contents of this queue.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--

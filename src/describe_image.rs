@@ -278,6 +278,95 @@ fn call_anthropic(
         .context("unexpected Anthropic response format")
 }
 
+pub fn describe_image_data(
+    image_path: &Path,
+    provider: &Provider,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+) -> Result<String> {
+    let mime = mime_from_path(image_path)?;
+    let image_data = std::fs::read(image_path)
+        .with_context(|| format!("failed to read {}", image_path.display()))?;
+    let b64_data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
+    let http_agent = build_agent();
+    let endpoint = resolve_endpoint(provider);
+    match provider {
+        Provider::OpenAI => call_openai(&http_agent, &endpoint, api_key, model, mime, &b64_data, prompt),
+        Provider::Anthropic => call_anthropic(&http_agent, &endpoint, api_key, model, mime, &b64_data, prompt),
+    }
+}
+
+pub fn resolve_vision_config(
+    provider: Option<&str>,
+    model: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<(Provider, String, String)> {
+    let provider = resolve_provider(provider)?;
+    let api_key = resolve_api_key(&provider, api_key)?;
+    let model = resolve_model(&provider, model);
+    Ok((provider, api_key, model))
+}
+
+pub struct ImageDescription {
+    pub reference: ImageRef,
+    pub description: String,
+}
+
+pub fn describe_images_in_text(
+    text: &str,
+    provider: &Provider,
+    api_key: &str,
+    model: &str,
+    base_dir: &Path,
+) -> Result<Vec<ImageDescription>> {
+    let refs = extract_image_references(text);
+    if refs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut descriptions = Vec::new();
+    for image_ref in &refs {
+        let image_path = match image_ref.kind {
+            ImageRefKind::Markdown | ImageRefKind::NakedPath => {
+                let path = Path::new(&image_ref.path);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    base_dir.join(path)
+                }
+            }
+            ImageRefKind::Url => {
+                eprintln!(
+                    "[describe_image] skipping URL image (not yet supported for preflight): {}",
+                    image_ref.path
+                );
+                continue;
+            }
+        };
+        if !image_path.exists() {
+            eprintln!(
+                "[describe_image] image not found, skipping: {}",
+                image_path.display()
+            );
+            continue;
+        }
+        match describe_image_data(&image_path, provider, api_key, model, DEFAULT_PROMPT) {
+            Ok(desc) => descriptions.push(ImageDescription {
+                reference: image_ref.clone(),
+                description: desc,
+            }),
+            Err(err) => {
+                eprintln!(
+                    "[describe_image] failed to describe {}: {}",
+                    image_path.display(),
+                    err
+                );
+            }
+        }
+    }
+    Ok(descriptions)
+}
+
 pub fn run(
     image: &Path,
     provider: Option<&str>,
@@ -285,40 +374,9 @@ pub fn run(
     api_key: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<()> {
-    let provider = resolve_provider(provider)?;
-    let api_key = resolve_api_key(&provider, api_key)?;
-    let model = resolve_model(&provider, model);
-    let mime = mime_from_path(image)?;
+    let (provider, api_key, model) = resolve_vision_config(provider, model, api_key)?;
     let prompt = prompt.unwrap_or(DEFAULT_PROMPT);
-
-    let image_data =
-        std::fs::read(image).with_context(|| format!("failed to read {}", image.display()))?;
-    let b64_data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
-
-    let http_agent = build_agent();
-    let endpoint = resolve_endpoint(&provider);
-
-    let description = match provider {
-        Provider::OpenAI => call_openai(
-            &http_agent,
-            &endpoint,
-            &api_key,
-            &model,
-            mime,
-            &b64_data,
-            prompt,
-        )?,
-        Provider::Anthropic => call_anthropic(
-            &http_agent,
-            &endpoint,
-            &api_key,
-            &model,
-            mime,
-            &b64_data,
-            prompt,
-        )?,
-    };
-
+    let description = describe_image_data(image, &provider, &api_key, &model, prompt)?;
     println!("{}", description);
     Ok(())
 }
@@ -491,5 +549,67 @@ mod tests {
         let refs = extract_image_references("https://cdn.com/img.jpg?w=800");
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].kind, ImageRefKind::Url);
+    }
+
+    #[test]
+    fn describe_images_empty_text() {
+        let provider = Provider::OpenAI;
+        let result = describe_images_in_text(
+            "no images here",
+            &provider,
+            "key",
+            "model",
+            Path::new("."),
+        )
+        .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn describe_images_url_skipped() {
+        let provider = Provider::OpenAI;
+        let result = describe_images_in_text(
+            "see https://example.com/img.png",
+            &provider,
+            "key",
+            "model",
+            Path::new("."),
+        )
+        .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn describe_images_missing_file_skipped() {
+        let provider = Provider::OpenAI;
+        let result = describe_images_in_text(
+            "see nonexistent_file.png",
+            &provider,
+            "key",
+            "model",
+            Path::new("/tmp"),
+        )
+        .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_vision_config_defaults() {
+        unsafe {
+            std::env::remove_var("AGENT_DOC_VISION_PROVIDER");
+            std::env::remove_var("AGENT_DOC_VISION_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let err = resolve_vision_config(None, None, None).unwrap_err();
+        assert!(err.to_string().contains("no API key found"));
+    }
+
+    #[test]
+    fn resolve_vision_config_with_key() {
+        let (provider, api_key, model) =
+            resolve_vision_config(None, None, Some("test-key")).unwrap();
+        assert!(matches!(provider, Provider::OpenAI));
+        assert_eq!(api_key, "test-key");
+        assert_eq!(model, DEFAULT_OPENAI_MODEL);
     }
 }

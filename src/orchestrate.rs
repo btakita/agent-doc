@@ -1185,6 +1185,10 @@ fn run_ordered_task_step(
         &doc,
         session_accretion.as_ref(),
     );
+    if let Some(image_block) = build_image_description_block(file, &doc, agent_name) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&image_block);
+    }
     if let Some(graph_context) = options.graph_context {
         prompt.push_str("\n\n");
         prompt.push_str(graph_context);
@@ -1534,6 +1538,52 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
             Vec::new()
         }
     }
+}
+
+fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Option<String> {
+    let project_config = crate::project_config::load_project_for_doc(file);
+    let vision = &project_config.vision;
+    let agent_mode = vision.agent_mode(agent_name).unwrap_or("passthrough");
+    if agent_mode != "describe" {
+        return None;
+    }
+    let (provider, api_key, model) = match crate::describe_image::resolve_vision_config(
+        vision.effective_provider(Some(agent_name)),
+        vision.effective_model(Some(agent_name)),
+        vision.effective_api_key(Some(agent_name)),
+    ) {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("[orchestrate] vision config resolution failed: {}", err);
+            return None;
+        }
+    };
+    let base_dir = file.parent().unwrap_or(Path::new("."));
+    let descriptions = match crate::describe_image::describe_images_in_text(
+        doc,
+        &provider,
+        &api_key,
+        &model,
+        base_dir,
+    ) {
+        Ok(descs) => descs,
+        Err(err) => {
+            eprintln!("[orchestrate] image description failed: {}", err);
+            return None;
+        }
+    };
+    if descriptions.is_empty() {
+        return None;
+    }
+    let mut block = String::from("<image-descriptions>\nThe following image references were found in the document and described using a vision model:\n\n");
+    for desc in &descriptions {
+        block.push_str(&format!(
+            "### Image: {}\n\n{}\n\n",
+            desc.reference.path, desc.description
+        ));
+    }
+    block.push_str("</image-descriptions>");
+    Some(block)
 }
 
 fn build_agent_prompt(

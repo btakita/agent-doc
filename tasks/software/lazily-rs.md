@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -399,7 +399,7 @@ Created plan file at `tasks/software/plan-lazily-rs-distributed-communication.md
 Dependency chain: Phases 1-3 are sequential. Phase 4 depends on 2. Phases 5-7 depend on 4.
 
 The plan maps existing lazily primitives to distributed extensions and proposes the file structure under `lazily/src/`.
-<!-- agent:boundary:d75aa793 -->
+<!-- agent:boundary:cd2eb776 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -407,7 +407,8 @@ The plan maps existing lazily primitives to distributed extensions and proposes 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- If a remote user adds a task to a backlog, the task should be clearly annotated.
 <!-- /agent:queue -->
 
 ## Backlog

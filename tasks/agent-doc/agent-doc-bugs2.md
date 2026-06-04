@@ -15,14 +15,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
-<!-- agent:status patch=replace -->
-Assessed 5 queue items. #ba4b fully implemented. Others need live verification or design decisions before implementation.
-<!-- /agent:status -->
+ <!-- agent:status patch=replace -->
+Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB plugin guard, already removed). Recommended eager busy-cue check in DispatchOnlyBusyQueue. GPT delegation already addressed (Option A+C). Queue drained.
+ <!-- /agent:status -->
 
 ## Exchange
 
@@ -123,29 +123,7 @@ Neither requires the opencode harness.
 <!-- agent:boundary:32dfbe0d -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
----
-JB `Run Agent Doc` stalled. The opencode session is idle. Disable the guard. It is redundant and a source of bugs. Claude Code, Codex, and OpenCode already have guards.
-```
-[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
-[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
-[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
-resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
-[sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970
-[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-[sync] recovered live pane %87 for session 25032905 via supervisor pid 176583
-[sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202
-resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
-[route] target tmux session: 0
-[route] authoritative actor generation 224 for tasks/agent-doc/agent-doc-bugs2.md is busy on pane %70; queued pending dispatch "How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
-- How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?
+ <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

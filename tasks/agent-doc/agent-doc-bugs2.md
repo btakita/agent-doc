@@ -29,47 +29,12 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-003040.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-005406.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Codex stale-busy idle pane not detected; Codex stale-busy timeout
+- Archived 2 response topic(s): tsift.md response not committed; JB Run Agent Doc stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: tsift.md response not committed — glm-5.1
-
-> **Queue prompt:**
->
-> tsift.md response was not committed
-
-
-Committed the uncommitted tsift.md response (`### Re: #surreal-batch-bfs`) and tsift.done.md updates, plus the tsift submodule code changes (new `tsift-source-read` and `tsift-search` OpenCode commands in `init.rs`, test count update 10→12, AGENTS.md/CLAUDE.md navigation section updates). All 724 tsift tests pass. Binary rebuilt and installed. Pushed to main.
-
-Commits: `3fe5ff3` (tsift submodule), `cfa9d9cd2` (superproject pointer + document response).
-
-### Re: JB Run Agent Doc stall — glm-5.1
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` on tsift.md and this file stalled. No routing. I had to run manually.
-
-**Confirmed from ops.log** — both tsift.md (pane %83) and agent-doc-bugs2.md (pane %70) hit the same root cause: `#opencode-post-turn-false-active`.
-
-**tsift.md route trace:**
-- `route_wait_for_ready_override` at 1780533718 (60s timeout)
-- `route_authoritative_actor_starting_not_ready` at 1780533778: `actor_state=busy prompt_ready=false` despite `busy_cue=false`
-- `route_timeout_idle_recovery`: pane tail `"  ┃ |  |  |  | "` — visually idle
-- Route retried dispatch after timeout, but the 60s wait blocked the JB operator
-
-**agent-doc-bugs2.md route trace:**
-- `route_dispatch_only_busy_existing_queue_deferred` at 1780533760 — queue activated because actor was "busy"
-- `route_wait_for_ready_override` at 1780533769 (60s timeout)
-- `route_authoritative_actor_starting_not_ready` at 1780533829: pane tail shows `"Build · GLM-5.1 Z.AI Coding Plan | ⬝■■■■■■⬝  esc interrupt"` — the `Build · MODEL` chrome line is classified as non-ignorable, keeping `actor_state=busy` even though the pane is actually idle
-
-**Root cause:** OpenCode post-turn chrome (`Build · GLM-5.1`, `esc interrupt`, progress bars) is detected as non-idle content. The bottom-N-lines busy-cue fix (`#opencode-post-turn-false-active`) landed in the binary but the actor state machine still reports `busy` when this chrome is present, so `route_wait_for_ready` times out at 60s.
-
-**Existing tracking:** `#opencode-post-turn-false-active`, `#opencode-jb-stall`. The fix shipped (bottom-12-lines busy-cue) but the actor state stale-busy path still causes the 60s timeout. Needs live-verification that the installed binary's busy detection treats `Build · MODEL` chrome as idle at the actor-state level, not just the dispatch-blocker level.
-queue cleanup
-<!-- agent:boundary:9920e045 -->
+<!-- agent:boundary:71882883 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

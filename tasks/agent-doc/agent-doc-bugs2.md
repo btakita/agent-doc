@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -65,12 +65,47 @@ Implemented both queue prompts:
 **Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` Phase 4 (naked image detection) and Phase 5 (per-agent config)
 
 **Committed and pushed:** agent-doc `63a9b5f3`, superproject `a0f68993e`. All 31 new/existing tests pass. 2 pre-existing route test failures remain (unrelated).
-<!-- agent:boundary:668fbfd0 -->
+
+### Re: per-agent image extraction config — opencode
+
+> **Queue prompt:**
+>
+> Add a per-agent configuration for image extraction. I will likely have a pass-through for Claude Code and Codex but that may change in the future. Opencode using GLM 5.1 needs the image description service. For the service, I want to use GPT from my current account to perform the description. Ideally this can be driven locally.
+
+
+This was implemented in the previous cycle. Here's how to configure it in `.agent-doc/config.toml`:
+
+```toml
+[vision]
+provider = "openai"
+
+[vision.agents.claude]
+mode = "passthrough"
+
+[vision.agents.codex]
+mode = "passthrough"
+
+[vision.agents.opencode]
+mode = "describe"
+provider = "openai"
+model = "gpt-4o"
+# api_key = "..."  # or use OPENAI_API_KEY env var
+```
+
+**How it works:**
+- `mode = "passthrough"`: Claude Code and Codex can handle images natively — image references pass through as-is.
+- `mode = "describe"`: OpenCode/GLM 5.1 lacks vision — `extract_image_references()` detects images in prompts, `describe_image::run()` calls GPT-4o (using your `OPENAI_API_KEY` env or explicit `api_key` in config) to generate text descriptions, which replace image references before route dispatch.
+
+**Driven locally:** GPT is called via `ureq` HTTP from the agent-doc binary itself — no external service or server needed. Just set `OPENAI_API_KEY` in your environment and the `describe_image` code uses it directly through the existing `resolve_api_key` chain.
+
+**Config resolution chain** (per `VisionConfig` helpers in `project_config.rs`):
+- Agent-specific override → top-level `[vision]` → env vars (`AGENT_DOC_VISION_*`, `OPENAI_API_KEY`) → defaults
+
+Queue drained — no remaining items.
+<!-- agent:boundary:14ed3433 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.~
-- Add a per-agent configuration for image extraction. I will likely have a pass-through for Claude Code and Codex but that may change in the future. Opencode using GLM 5.1 needs the image description service. For the service, I want to use GPT from my current account to perform the description. Ideally this can be driven locally.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

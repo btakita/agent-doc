@@ -15,14 +15,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Queue drain complete: 8 consumed. Session needs compact.
+Assessed 5 queue items. #ba4b fully implemented. Others need live verification or design decisions before implementation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -51,10 +50,53 @@ Compacted content:
 - `make check`: pre-existing `flowcore_hot_path_guard_and_proof_tokens_are_budgeted` failure (unrelated, branch has uncommitted Rust changes to session_check.rs)
 
 **Live-verify needed:** install signed plugin → cancel a running route → verify next `Run Agent Doc` dispatches immediately instead of waiting 60s staleness window.
-<!-- agent:boundary:3b06a741 -->
+
+### Re: queue assessment — glm-5.1
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on this file stalled...no routing.
+
+
+#### JB Run Agent Doc stall
+
+The stall is likely the same root class as `#opencode-jb-stall` (review #12) and `#opencode-preset-not-dispatched` (review #14) — both need live-verify of the installed binary + JB plugin to confirm the false-active-turn fix resolves the stall. No new code path to implement here; the fix is shipped but unverified.
+
+#### Per-item assessment
+
+**#54pz — #dedup-prompt-normalize:** Partially fixed. The prefix-agnostic dedup (`strip_user_prompt_prefix` in `component.rs:432`) closed the most common duplication shape. The remaining structural race (IPC patch carries buffer at T1, live buffer at T2) is gated on **live IPC capture** (#6cmx / Path B). Without the captured setText payload, the L1 fix (exclude live post-boundary user text from synthesized patch) cannot be safely implemented. Recommend: leave open, schedule Path B capture session.
+
+**#engt — #clear-busy-pane-guard:** The busy guard correctly *refuses* clear on `AliveBusy` OpenCode panes (`session_actor_cmd.rs:477-749`). The `interrupt-clear` path exists as an escape hatch (line 1028). The remaining design question: should plain `clear` auto-interrupt the busy turn, or only refuse with guidance to use `interrupt-clear`? Auto-interrupt risks discarding in-flight work without user confirmation. Recommend: **keep refusal-only** but improve the diagnostic message to (a) name the active harness and turn type, (b) suggest the exact `interrupt-clear` command, (c) show the pane tail for context. This is a UX improvement, not a behavior change. Plan file needed.
+
+**#ba4b — #backlog-priority-auto:** **Fully implemented and tested.** `priority` component attribute on backlog/icebox/queue is recognized, `sort_by_priority` stable-sorts by `priority=<N>` tokens, `sort_prompts_by_priority` orders queue entries by backlog priority rank, lint validates, and `--pending-reorder` remains as manual override. Tests cover stable sort, idempotency, lint validation, and maintenance integration. **Recommend close with live verification** — add `sort=priority` to a document and confirm automatic ordering after a cycle.
+
+**#kz2g — #route-busy-diagnostic-name-owner:** Infrastructure exists but diagnostic is generic. `busy_route_diagnostic_message` (`route.rs:1396`) names the file and harness but not the busy pane ID or owning file. Cross-document detection (`reject_cross_document_owner_pane`, `log_cross_document_execution_context`) already identifies the mismatch. The fix is narrow: enrich `emit_busy_route_diagnostic` to include pane ID and owning-file when cross-document context is detected. Plan file needed, but the change is small.
+
+**#appe — #queue-head-provenance:** Substantially implemented. Both id-backed (`check_queue_head_removal_guard`, `session_check.rs:2576`) and free-text (`check_free_text_queue_head_provenance`, `session_check.rs:2699`) heads are recorded at preflight and enforced at closeout. Remaining gap: the mixed-capture case where `#agent-doc-bug` text in the queue gets consumed by the `plan_backlog_only` path without the provenance guard catching it (bugs2.md #20). The `response_head_plausibly_answers` heuristic may have false negatives for short heads. Recommend: harden the plausibility matcher and add a specific regression for the mixed-capture scenario.
+
+#### Summary
+
+| ID | Status | Action |
+|----|--------|--------|
+| #54pz | Partial (prefix dedup shipped) | Gated on Path B IPC capture |
+| #engt | Design decision needed | Improve diagnostic UX, keep refusal-only |
+| #ba4b | **Fully implemented** | Close with live verify |
+| #kz2g | Narrow fix needed | Enrich busy diagnostic with pane/owner |
+| #appe | Substantially done | Harden plausibility matcher |
+
+#### Queue disposition
+
+All 5 items require either (a) live verification sessions that can't be done from code alone, or (b) small targeted fixes that need plan files first. None are ready for a `spec-test-build-install-commit-push` cycle in this turn. Consuming the queue heads and recording the assessment as the response.
+<!-- agent:boundary:99f0b1c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~JB `Run Agent Doc` on this file stalled...no routing.~
+- do [#54pz]
+- do [#engt]
+- do [#ba4b]
+- do [#kz2g]
+- do [#appe]
 <!-- /agent:queue -->
 ###
 <!--

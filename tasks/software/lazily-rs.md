@@ -99,7 +99,67 @@ Released **lazily v0.8.0** to crates.io.
 ### Re: Test
 
 Simple inline test.
-<!-- agent:boundary:5eef0080 -->
+
+### Re: Serialization, IPC, and distributed coordination — glm-5.1
+
+**Yes, and it should be a separate crate (or crates).** Here is the full design analysis:
+
+#### Serialization
+
+Signal values are currently type-erased (`Rc<dyn Any>` / `Arc<dyn Any + Send + Sync>`) with no serde dependency. Two approaches:
+
+1. **Trait-bound approach** — optional `serde` feature gating `T: Serialize + DeserializeOwned + 'static`. Cleaner for v1, but forces serde bounds on all signal types.
+2. **Type-erased serializer closures** — register `Box<dyn Fn(&dyn Any) -> Vec<u8>>` at slot/cell creation. More flexible, avoids polluting the core API, but more complex.
+
+**Recommendation:** Approach 1 for v1. The type-erased closure approach can layer on later.
+
+#### IPC: separate crate (`lazily-ipc`)
+
+Would handle:
+- **Snapshot transport** — serialize graph state (slot/cell values + dependency edges) for process transfer
+- **Incremental updates** — leverage existing dirty-tracking / invalidation plan infrastructure to send only changed values
+- **Transport abstraction** — channels, shared memory, unix sockets, TCP; do not bake in a specific transport
+
+Core `lazily` stays dependency-free. `lazily-ipc` depends on `lazily` + `serde` + transport abstraction.
+
+#### Distributed coordination: separate crate (`lazily-distributed`)
+
+**Peer-to-peer model works well here.** Reactive signals are inherently local-state-centric — each node owns its graph and reconciles via message passing. A P2P model maps naturally:
+
+- Each peer runs its own `ThreadSafeContext`
+- Signal changes propagate as CRDT-mergeable operations (or Raft log entries for strong consistency)
+- No central broker needed for eventual consistency
+- Optional broker/leader for strong consistency (Raft)
+
+**Discovery options (pick one):**
+1. **Static config** — simplest, fine for fixed deployments
+2. **mDNS/DNS-SD** — zero-conf local network discovery, no broker
+3. **DHT (e.g., Kademlia)** — scalable peer discovery for large clusters, but overkill for most signal-graph use cases
+4. **Gossip protocol** — members propagate peer lists organically; works well with CRDT merge
+5. **Broker/registry** — central discovery service; simplest for cloud deployments
+
+**Recommendation:** Start with gossip + static fallback. Gossip pairs naturally with CRDT-based signal merging. Add DHT or broker as optional backends.
+
+**Consensus trade-offs:**
+- **CRDT** — no coordination needed for merge; best for eventually-consistent signals (UI state, caches, analytics). Cells use CRDT merge semantics (last-write-wins, OR-Set, etc.)
+- **Raft** — strong consistency; needed when signal values must agree across all nodes (financial data, permissions). Higher latency, requires leader election.
+- **Hybrid** — per-signal consistency model; some signals use CRDT, others use Raft. Most flexible, most complex.
+
+#### Recommended crate layering
+
+```
+lazily              — core reactive primitives (current, zero-dep)
+lazily-serde        — optional serde integration (feature flag or thin crate)
+lazily-ipc          — cross-process signal transport (serde + transport)
+lazily-distributed  — multi-node coordination (consensus + discovery + gossip)
+```
+
+Each layer depends only on the layer below. Core `lazily` stays zero-dependency.
+
+#### Queue items
+
+`do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-phase items. They need design docs before spec/test/build. Removing from queue; keeping in backlog for design work. Ready to start design when you want.
+<!-- agent:boundary:e0afe30c -->
 <!-- /agent:exchange -->
 ###
 <!--

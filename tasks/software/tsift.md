@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -75,7 +75,7 @@ This would reduce tool calls from 3-4 (status → communities → neighborhood �
 
 Marking done as design analysis. Implementation can be queued as a new backlog item if approved.
 Add backlog #next-steps to implement the recommendation.
-<!-- agent:boundary:21ab8075 -->
+<!-- agent:boundary:eb53330c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +84,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- Add backlog #next-steps to implement the recommendation.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -118,10 +119,5 @@ Could FalkorDB help with performance?
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tsift.done.md -->
-- [x] [#lazyperf32-tsift] Cross-posted #lazyperf32 to lazily-rs backlog (lazily-rs project to implement)
-- [x] [#lazyperf35-tsift] Cross-posted #lazyperf35 to lazily-rs backlog (lazily-rs project to implement)
-- [x] [#lazyperf34-tsift] Cross-posted #lazyperf34 to lazily-rs backlog (lazily-rs project to implement)
-- [x] [#lazily-tsift-bench] Cross-posted tsift-pattern benchmarks recommendation to lazily-rs backlog
-- [x] [#surreal-rt-pool-warm] Accept external tokio Runtime in open_or_refresh so backend-eval can reuse one Runtime across candidate stores
 <!-- completed work archived in tasks/software/tsift.done.md -->
 <!-- /agent:done -->

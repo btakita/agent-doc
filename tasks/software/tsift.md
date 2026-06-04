@@ -59,7 +59,21 @@ Replaced the O(n×E) correlated subquery in `DegreeWeighted` neighborhood scorin
 - No change to `BreadthFirst` or `EdgeKindWeighted` query plans
 - 356/356 unit tests, 34/35 conformance (pre-existing)
 - Commit: `6250575` pushed to main
-<!-- agent:boundary:6a33aacc -->
+
+### Re: #community-summary-default — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#community-summary-default]
+
+
+Added `CommunityTruncationSummary` to `GraphDbRankedNeighborhoodComparison`. When `pruned_count > 0`, runs community detection on the kept-edge subgraph and reports fully_kept/partially_pruned/fully_pruned counts, pruned node kinds, and top-5 pruned labels.
+
+- Only computed when pruning occurs (zero overhead when no pruning)
+- Community detection uses existing `detect_communities` from tsift-graph
+- 34/35 conformance tests pass (1 pre-existing), all unit tests pass
+- Commit: `5b49425` pushed to main
+<!-- agent:boundary:6a298af7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +91,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#terse-uniform]~
 - ~do [#edge-index-references]~
 - ~do [#degree-cache]~
-- do [#community-summary-default]
+- ~do [#community-summary-default]~
 - do [#property-sampling]
 - do [#edges-between-batch-optimization]
 - do [#wal-checkpoint-tuning]
@@ -86,7 +100,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#community-summary-default] Community-aware truncation summary in neighborhood output when max_nodes prunes results (medium)
 - [ ] [#property-sampling] Add property_mode (full|sample|omit) to RankedNeighborhoodOptions for kind-redundant property maps (low)
 - [ ] [#edges-between-batch-optimization] Use IN-clause expansion or session-scoped temp table for small edges_between_nodes ID sets (low)
 - [ ] [#wal-checkpoint-tuning] Add explicit PRAGMA wal_checkpoint(TRUNCATE) after refresh; tune autocheckpoint by projection size (low)

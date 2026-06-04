@@ -87,12 +87,36 @@ The stall is likely the same root class as `#opencode-jb-stall` (review #12) and
 #### Queue disposition
 
 All 5 items require either (a) live verification sessions that can't be done from code alone, or (b) small targeted fixes that need plan files first. None are ready for a `spec-test-build-install-commit-push` cycle in this turn. Consuming the queue heads and recording the assessment as the response.
-<!-- agent:boundary:d17c4f3e -->
+
+### Re: do [#54pz] #dedup-prompt-normalize — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#54pz]
+
+
+**Status: Gated on live IPC capture (#6cmx / Path B).**
+
+Shipped work:
+- `strip_user_prompt_prefix` in `component.rs:432` — prefix-agnostic dedup for `❯ ` prompt markers
+- `normalize_user_prompts_in_exchange` in `write.rs:4279` — multi-layer prompt normalization with dedup
+- `append_patch_already_present` — substring + typing-snapshot dedup guard
+- `dedupe_adjacent_prompt_prefix_duplicates` / `dedupe_live_prompt_prefix_variants_in_tail` — adjacent duplicate collapse
+- `already_applied` IPC convergence in `write.rs:10497` — socket IPC detects already-applied and skips file fallback
+
+Remaining gap (structural race):
+- IPC patch synthesized at T1 carries live buffer content; user types more at T2; de-prefixed texts diverge so substring dedup misses it
+- Fix requires excluding live post-boundary user text from synthesized patch (L1 change in `try_ipc` boundary-aware synthesis)
+- **Cannot implement safely without captured setText payload** from a live JB debug session (Path B / #6cmx)
+- Tests: `append_patch_already_present_ignores_user_prompt_prefix`, `append_with_caret_does_not_duplicate_prefixed_prompt` pass; no regression for the structural race yet
+
+Gating as assessed-pending-live-capture. Schedule Path B session to unblock.
+<!-- agent:boundary:e16b3e0f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~JB `Run Agent Doc` on this file stalled...no routing.~
-- do [#54pz]
+- ~do [#54pz]~
 - do [#engt]
 - do [#ba4b]
 - do [#kz2g]

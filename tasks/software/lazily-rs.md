@@ -182,7 +182,8 @@ The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-ph
 ❯ Can lazily-rs support serialization, transferring content between processes, and network communication? Would we need a DHT or another distributed consensus protocol for reliable coordination? Should the IPC and network coordination be a separate crate?
 Queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are [recommended] design-phase items — no spec, no test plan, no implementation exists. The `#spec-test-build-install-commit-push` preset requires concrete spec + test changes. BLOCKER: design documents must be created before these items can enter a build queue. Response to the serialization/IPC/distributed question is above. Keeping items in backlog for future design work.
 Restored backlog items #ipc1-#ipc3. Design-phase items, ready for future work.
-<!-- agent:boundary:e024ce05 -->
+The serialization/IPC/distributed question has been fully answered above. No further action needed on that prompt.
+<!-- agent:boundary:eae214d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -195,7 +196,7 @@ Restored backlog items #ipc1-#ipc3. Design-phase items, ready for future work.
 - do [#ipc2]
 - do [#ipc3]
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
-- What about security? Remote users 
+- What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do.
 <!-- /agent:queue -->
 
 ## Backlog

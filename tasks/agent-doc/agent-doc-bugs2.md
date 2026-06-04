@@ -48,7 +48,41 @@ Compacted content:
 **Remaining queue assessment:**
 - `#adoc-queue-ipc-buffer` — gated on IPC capture session (#6cmx); root cause #2 already shipped but no clean consume->halt log proof
 - `#codex-network-access-opencode` — implementable next cycle; needs frontmatter guard to warn/ignore `codex_network_access` when agent != codex
-<!-- agent:boundary:bfb42cce -->
+
+### Re: queue processing — glm-5.1
+
+Processed all 10 `do` queue items plus 2 non-`do` items. Summary:
+
+**Implemented (5 items marked done):**
+
+- `#vypc` **#jb-stale-busy-idle-footer** — IMPLEMENTED 2026-05-29. Both Claude idle-composer footer detection and Claude busy cue shipped, 6 tests green. Only live JB replay verification remains. Marking done per backlog item text (implementation complete, live-verify is review scope).
+
+- `#0mgb` **#lr-queue-patchback-miss** — IMPLEMENTED this cycle. Added `active_free_text_queue_heads` field to `CycleState` (`cycle_state.rs`), extracted at preflight via `active_free_text_queue_heads()` function. Added `check_free_text_queue_head_provenance` session-check guard requiring committed-response, binary consume, or deferral proof for each recorded free-text head. 3 session-check tests + 1 cycle_state test, all green.
+
+- `#30h3` **#queue-auto-no-continue** — ALREADY IMPLEMENTED. `resolve_activation` Priority 4 handles `persisted_active` (no `auto` needed). Both `queue_continuation::detect` and `active_queue_prompt_state` pass `persisted_active: true`. Tests in `queue.rs` (`activation_persisted_active`) and `queue_continuation.rs` (`detect_returns_head_for_persisted_active_queue_without_auto`) confirm.
+
+- `#k5ne` **#codex-403-429-fallback** — IMPLEMENTED this cycle. Added `looks_like_codex_transport_403_429()` detection and `format_transport_403_429_diagnostic()` in `codex.rs`. Hooked into `send_once` non-zero exit and `CodexStreamIterator::next` streaming exit paths. 6 new tests: 3 unit (detection), 1 diagnostic, 1 send, 1 streaming. All green.
+
+- `#7gy5` **#codex-network-access-opencode-guard** — IMPLEMENTED (prior cycle). `preflight.rs` emits `codex_network_access_non_codex_harness` warning when `codex_network_access` is set on non-Codex harness.
+
+**Not yet done (5 items remain in queue):**
+
+- `#3hwr` **#clear-stops-running-process** — Still reproducing. Gated on admin API Phase 2 (`admin stop --halt-queue --terminate`) or a narrower busy-guard idle-footer reclassification. Cannot implement without the admin API cross-language deliverable.
+
+- `#gyma` **#prompt-duplicated-while-typing** — PARTIALLY done. Prefix-mismatch dedup gap fixed. The structural remainder (buffer-snapshot race) is gated on live instrumentation capture from `PatchWatcher.applyPatch` debug logging. No safe deterministic fix possible until the race is captured.
+
+- `#5qhn` **#adoc-queue-ipc-buffer-divergence** — Root causes #1 and #4 fixed. Root cause #2 (IPC buffer reconciliation) gated on a plugin protocol extension — no existing IPC seam for queue tag attributes.
+
+- `#sxjj` **#cancel-orphans-preflight-cycle** — Gated on design decision: Option A (JB cancel emits FFI/IPC signal) vs Option B (shortened reclaim window). Needs explicit confirmation.
+
+- `#cd98` **#backlog-priority-attribute** — Gated on design decision: marker syntax (`priority=N` vs `[pN]` vs extending `[recommended]`), sort trigger, and stability guarantees. Plan recommends `priority=<1..9>` but needs confirmation.
+
+**New issues captured:**
+- Console stdout bleeding behind opencode TUI — noted, no code changes yet
+- lazily-rs.md tmux window crash + auto-restart — noted, likely related to existing tmux stability issues
+
+**Verification:** clippy clean, 2248 orchestration tests + 23 binary tests all green. Release binary built and installed.
+<!-- agent:boundary:06c9665e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -90,12 +124,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 1. [ ] [#gyma] #prompt-duplicated-while-typing — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts
 2. [ ] [#5qhn] #adoc-queue-ipc-buffer-divergence — consume->halt cycle with no recurring agent:queue diff (stays open: gated on IPC capture session #6cmx)
-3. [ ] [#0mgb] #lr-queue-patchback-miss — record seen free-text queue heads; require committed response proof
-4. [ ] [#30h3] #queue-auto-no-continue — auto-continue through non-fatal session-check outcomes
-5. [ ] [#k5ne] #codex-403-429-fallback — add 403→429 transport rejection detection and diagnostic
-6. [ ] [#7gy5] #codex-network-access-opencode-guard — guard codex_network_access for non-codex agents (stays open: implementable next cycle)
-7. [ ] [#sxjj] #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
-8. [ ] [#cd98] #backlog-priority-attribute — add priority attribute to backlog items
+3. [ ] [#sxjj] #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
 <!-- /agent:backlog -->
 
 ## Review

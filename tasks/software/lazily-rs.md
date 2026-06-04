@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -378,7 +378,7 @@ Design incorporated into Phase 2 above. Implementation deferred until Phase 1 la
 
 
 Independent of lazily core but depends on Phase 2 wire format. Design in prior response. Gated on #ipc2.
-<!-- agent:boundary:7b4fb3c2 -->
+<!-- agent:boundary:9738e696 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -386,10 +386,7 @@ Independent of lazily core but depends on Phase 2 wire format. Design in prior r
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~Create a plan for the gated ipc tasks~
-- do [#39c5]
-- do [#yxjw]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

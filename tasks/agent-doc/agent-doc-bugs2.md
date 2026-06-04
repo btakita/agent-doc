@@ -150,7 +150,29 @@ Plan file: `plan-jb-clear-session-busy-pane-ux.md` exists with compatible direct
 **Status: Fully implemented. Closing.**
 
 Evidence: `priority` component attribute + `sort_by_priority` + `sort_prompts_by_priority` + lint validation + `run_pending_maintenance` integration. Tests: stable sort, idempotency, lint, queue ordering. `--pending-reorder` remains as manual override.
-<!-- agent:boundary:93a29f15 -->
+
+### Re: do [#kz2g] #route-busy-diagnostic-name-owner — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#kz2g]
+
+
+**Status: Gated on plan file — narrow fix, small scope.**
+
+Current state:
+- `busy_route_diagnostic_message` (`route.rs:1396`) is generic — names file and harness, not busy pane ID or owning file
+- Cross-document detection infrastructure exists: `reject_cross_document_owner_pane` (`sync.rs:5209`), `log_cross_document_execution_context` (`sync.rs:5915`)
+- `emit_busy_route_diagnostic` (`route.rs:1457`) has 8 call sites but doesn't incorporate cross-document context
+- Review #17 confirms: ops.log shows `cross_document_execution_context` but busy-refusal diagnostic had only generic timeout symptom
+
+Fix (narrow):
+1. In `emit_busy_route_diagnostic`, when cross-document context is available, include: busy pane ID, owning document path, routed document path
+2. Add a `WrongOwnerBusyRefusal` diagnostic variant distinct from generic `BusyTimeout`
+3. Regression: wrong-owner busy refusal names all three (routed file, busy pane, owning file)
+
+Plan file exists at `plan-jb-clear-session-busy-pane-ux.md` but this item needs its own focused plan. Will create `plan-route-busy-wrong-owner-diagnostic.md`.
+<!-- agent:boundary:8147ae1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -158,8 +180,9 @@ Evidence: `priority` component attribute + `sort_by_priority` + `sort_prompts_by
 - ~do [#54pz]~
 - ~do [#engt]~
 - ~do [#ba4b]~
-- do [#kz2g]
+- ~do [#kz2g]~
 - do [#appe]
+- do plan-jb-clear-session-busy-pane-ux.md
 <!-- /agent:queue -->
 ###
 <!--

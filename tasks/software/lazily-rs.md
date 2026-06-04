@@ -183,7 +183,11 @@ The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-ph
 Queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are [recommended] design-phase items — no spec, no test plan, no implementation exists. The `#spec-test-build-install-commit-push` preset requires concrete spec + test changes. BLOCKER: design documents must be created before these items can enter a build queue. Response to the serialization/IPC/distributed question is above. Keeping items in backlog for future design work.
 Restored backlog items #ipc1-#ipc3. Design-phase items, ready for future work.
 The serialization/IPC/distributed question has been fully answered above. No further action needed on that prompt.
-<!-- agent:boundary:eae214d7 -->
+
+### Re: Can lazily-rs support serialization? — glm-5.1
+
+Answered fully above in the "Serialization, IPC, and distributed coordination" and "Internet-friendly coordination" responses. Summary: yes, via separate crate layering (lazily-serde, lazily-ipc, lazily-distributed). P2P with gossip discovery recommended. WebSocket relay for internet use.
+<!-- agent:boundary:a95601e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,7 +200,7 @@ The serialization/IPC/distributed question has been fully answered above. No fur
 - do [#ipc2]
 - do [#ipc3]
 - How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
-- What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do.
+- What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do. There should be sensible presets.
 <!-- /agent:queue -->
 
 ## Backlog

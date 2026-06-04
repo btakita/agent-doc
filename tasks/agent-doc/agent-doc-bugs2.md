@@ -69,7 +69,30 @@ Snapshot resync after repair commit.
 ### Re: JB stall + queue items — glm-5.1
 
 JB stall fixed (eager busy-cue check, route.rs). Frontmatter step/run_id not yet implemented. Recommend queue: start/stop (Option B). Queue driving exchange prompts is follow-up. Review management: split actionable items + annotations.
-<!-- agent:boundary:80a23d03 -->
+
+### Re: queue semantic framework + harness parity — opus-4-8
+
+Took ownership (`agent: claude`). Evaluated the semantic framework you proposed. Recommendation: **collapse all queue activation onto a single tri-state frontmatter key `queue:`**, and retire both `auto` (marker attribute) and `queue_active` (boolean) into deprecated input aliases.
+
+**Recommended model**
+
+| frontmatter | meaning | replaces |
+|-------------|---------|----------|
+| `queue: start` (alias `queue: go`) | active — drive the queue now | `queue_active: true` + marker `auto` |
+| `queue: stop` | inactive — halt | `queue_active: false` |
+| (absent) | unmanaged / inactive | absence of both |
+
+**Why a verb tri-state, not `queue_auto: true` or `queue: auto`/`stop`:** `queue_active` is a boolean — it records *state* but loses *intent*, and lives in a different place than `auto`, so the two drift. A verb (`start`/`stop`/`go`) is an imperative that reuses agent-doc's existing directive grammar — `do #id`, `run queue`, and the `--- start` / `--- stop` control fences already in the queue body. One vocabulary, one concept. And unlike `auto`, a single key with start/stop is symmetric, so the bidirectionality you want is structural rather than a sync rule: there is exactly one field to read and write.
+
+**Bidirectional / migration (normalize-on-read):**
+- `&lt;!-- agent:queue … auto --&gt;` → normalizes to `queue: start`, strips `auto` from the marker.
+- `queue_active: true|false` → normalizes to `queue: start|stop` (kept as deprecated input so existing docs — including this one — keep working).
+- `go` ≡ `start`; drain sets `queue: stop` (today's "auto removed, queue_active cleared", one field); manual `queue: stop` never re-adds start.
+
+**Harness parity (your point 5):** the three continuation paths already gate on `queue_active`/`auto` — Claude Code `/loop`, the Codex Stop-hook (`active_auto_queue_prompt`), and the OpenCode auto-loop. This is mostly a read-path consolidation: they all read the unified `queue:` state, and preflight keeps emitting `queue_active`/`queue_trigger` derived from it. So `queue: start`/`go` starts and drains identically under Codex and Claude Code, matching OpenCode.
+
+Captured as plan `tasks/agent-doc/plan-queue-state-frontmatter-unification.md` (4 phases) and backlog `[#queue-state-unify]`. The separate "drive `agent:exchange` prompts into backlog then prepend their ids to the queue" prompt composes on top of this state model — kept as its own item, not folded in.
+<!-- agent:boundary:ed2ea5ff -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -98,6 +121,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#queue-state-unify] Unify queue activation under one tri-state `queue: start|go|stop` frontmatter key — deprecate marker `auto` + `queue_active` (normalize-on-read), drain sets `queue: stop`, harness parity Claude/Codex/OpenCode. Plan: tasks/agent-doc/plan-queue-state-frontmatter-unification.md
 <!-- /agent:backlog -->
 
 ## Review

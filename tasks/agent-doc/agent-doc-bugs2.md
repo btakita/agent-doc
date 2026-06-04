@@ -29,124 +29,16 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-142925.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-152701.md`*
 
 Compacted content:
-- Archived 7 response topic(s): How to initialize seo.md as agent-doc; do plan-jb-clear-session-busy-pane-ux.md; JB Run Agent Doc stall; 4 more
+- Archived 8 response topic(s): Preflight recovery; Queue [#takv] #opencode-image-support; Queue [#xrm7] #jb-init-from-claim; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Preflight recovery — queue halted — glm-5-1
-
-Preflight recovered the stuck `write_applied` cycle from last turn. The response and code changes from `#stash-session-ttl-prune` are now fully committed.
-
-**Queue state:** `queue_active: false`, halted reason `item_modified`. The queue items `[#takv]`, `[#xrm7]`, `[#qmg2]` (added by `--pending-add` during last cycle's finalize) triggered the halt guard because the queue was modified between the snapshot and the committed document. This is the `#5qhn` / `#adoc-queue-ipc-buffer-divergence` pattern.
-
-**To continue:** Flip `queue_active: true` in frontmatter or re-add the queue items. The 3 backlog items (`#opencode-image-support`, `#jb-init-from-claim`, `#jb-backlog-queue-populate`) are in the backlog and ready for the next cycle.
-
-**No code changes this cycle.**
-
-### Re: Queue [#takv] #opencode-image-support — glm-5-1
-
-Created plan at `tasks/agent-doc/plans/opencode-image-support.md`. Three design options evaluated:
-
-- **Option A (Passthrough):** Read opencode provider config, delegate to matching HTTP provider
-- **Option B (CLI delegation):** Blocked — opencode run has no image flag
-- **Option C (Google provider):** Add Gemini vision as standalone provider
-
-**Recommended:** Option A + C combined. Three phases: Google provider, passthrough provider, auto-default for opencode sessions.
-
-How can we delegate to a GPT model that I already have a plan for? Does the opencode harness provide any options? Can we use the agent-doc http server to delegate to a GPT model?
-
-Key constraint: route dispatch uses tmux text injection — images cannot flow through that channel. The describe-image CLI must remain standalone HTTP calls; the fix is provider resolution, not pipeline integration.
-
-### Re: Queue [#xrm7] #jb-init-from-claim — glm-5-1
-
-Implemented. Four files changed in the JetBrains plugin:
-
-1. **InitAction.kt** (new): Standalone agent-doc init action, registered as Initialize Agent Doc in Tools/Editor/ProjectView menus and the overflow popup.
-2. **ClaimAction.kt**: Added hasSessionFrontmatter() check — before claiming, reads the file frontmatter for agent_doc_session:. If absent, runs agent-doc init first, then proceeds with claim.
-3. **plugin.xml**: Registered AgentDoc.Init action with menu groups.
-4. **AgentDocPopupAction.kt**: Added AgentDoc.Init to overflow actions.
-
-### Re: Queue [#qmg2] #jb-backlog-queue-populate — glm-5-1
-
-Implemented. Added syncQueueFromBacklogIfNeeded() to TerminalUtil.kt — called before route dispatch in sendToTerminal(). Runs agent-doc queue sync which populates the queue from backlog items when the backlog has the queue attribute and the queue is empty. Failures are logged but do not block route dispatch (best-effort).
-
-### Re: Pre-existing build issues — glm-5-1
-
-> **Queue prompt:**
->
-> [#takv]
->
-> [#xrm7]
->
-> [#qmg2]
-
-
-Two pre-existing compilation errors block make check on the current branch:
-
-1. route.rs:1555 — clear_cooldown_marker not found in queue_continuation
-2. start.rs:1518 — clear_cooldown_active not found in queue_continuation
-
-Also: flowcore test fails (session_check.rs guard_ count: expected 76, got 81).
-
-These need separate resolution. The first make check run (480 tests passed) used a cached binary from a prior successful build.
-
-**Queue items [#takv], [#xrm7], [#qmg2] consumed.**
-
-### Re: JB Run Agent Doc stall — disable busy guard — glm-5-1
-
-The JB plugin's `is_busy` guard was already removed in TerminalUtil.kt:252-253. The remaining stall comes from the **route.rs binary busy guard** — specifically `DispatchOnlyBusyQueue` at route.rs:4310, which queued the prompt behind a stale `Busy` actor projection.
-
-**Root cause:** The authoritative actor state projected `Busy` for generation 224 on pane %70, but the opencode session was idle. The two existing recovery mechanisms didn't trigger:
-
-1. `busy_projection_repaired_by_ready_prompt` (route.rs:4133) — requires the live pane to show a recognized dispatch-ready prompt. The opencode idle chrome didn't match.
-2. `timeout-idle recovery` (route.rs:4159) — requires waiting the full timeout first (60s by default).
-
-**The guard is not redundant** — it prevents duplicate injection into actually-active turns. But the stale-projection case is the bug. The fix is to make the busy guard **trust live pane evidence over actor state** for dispatch-only routes when the pane shows no active turn marker (`esc to interrupt`).
-
-**Recommended fix:** In the `DispatchOnlyBusyQueue` branch (route.rs:4310), before queuing, capture the live pane and check `harness.has_busy_cue()`. If no busy cue is found, promote to `Ready` and dispatch instead of queuing. This is already the pattern used by `timeout-idle recovery` — just apply it immediately instead of waiting for timeout.
-
-This avoids the 60s wait and eliminates the stall while preserving the safety invariant for genuinely active turns.
-
-**No code changes this cycle** — this needs a design decision. Should I implement the eager busy-cue check in `DispatchOnlyBusyQueue`?
-
-#### Re: GPT model delegation
-
-Already addressed in the prior response: the key constraint is that tmux text injection cannot carry images. The describe-image CLI must use standalone HTTP calls. Option A+C combined (Google provider + passthrough) remains the recommended path.
-
-OpenCode does not expose a `--image` flag on its run command, and the agent-doc HTTP server is a document-IPC bridge, not an LLM proxy. Delegating to a GPT model would require either:
-- A standalone HTTP client call from within the agent-doc binary (Option C)
-- A passthrough to the configured provider (Option A)
-
-Neither requires the opencode harness.
-❯ Can agent-doc detect if there is an image in the prompt and use opencode to make a toolcall on the image path?
-### Re: Image detection in prompt + opencode tool-call — glm-5-1
-
-**Short answer:** No, agent-doc cannot currently do this. And opencode doesn't expose a tool-call API that agent-doc could use.
-
-**What exists:**
-- `agent-doc describe-image` (`src/agent-doc/src/describe_image.rs`) — standalone CLI that base64-encodes an image and calls OpenAI/Anthropic vision APIs directly via `ureq`. No harness awareness.
-- `VisionConfig` in `project_config.rs` — config struct with provider/api_key/model/endpoint fields, but **not wired** to `describe_image.rs`.
-- No code anywhere in the preflight or prompt pipeline detects `![img](path)` references or image file extensions in prompts.
-
-**Why opencode tool-call won't work:**
-- OpenCode's `Agent` trait accepts only `prompt: &str` — no image payload
-- Route dispatch uses tmux text injection — images cannot flow through that channel
-- OpenCode has no `--image` flag or tool-call delegation API exposed to external callers
-- OpenCode's underlying provider (which model handles images) is opaque to agent-doc
-
-**What could work — two approaches:**
-
-1. **Pre-flight image extraction (recommended):** In preflight, scan the prompt for markdown image references (`![...](path)`) or image file paths. For each image found, run `describe-image` to get a text description, then inject that description into the prompt text before dispatch. This way the agent receives image context as text without needing image support from the harness.
-
-2. **describe-image provider expansion:** As planned in `tasks/agent-doc/plans/opencode-image-support.md` (Option A+C), add `Provider::Google` and `Provider::Passthrough` so `describe-image` works with whatever provider opencode is configured to use. Then wire the preflight image extraction to use it.
-
-Approach 1 is the key enabler — it makes image content available to any harness (opencode, Claude, Codex) without requiring image transport through tmux. The `describe-image` call happens before route dispatch, and the text description replaces/augments the image reference in the prompt.
-<!-- agent:boundary:24e4dcf7 -->
+<!-- agent:boundary:c0472a5d -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- [#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.
 <!-- /agent:queue -->
 ###
 <!--

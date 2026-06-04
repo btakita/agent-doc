@@ -378,7 +378,28 @@ Design incorporated into Phase 2 above. Implementation deferred until Phase 1 la
 
 
 Independent of lazily core but depends on Phase 2 wire format. Design in prior response. Gated on #ipc2.
-<!-- agent:boundary:9738e696 -->
+
+### Re: Plan file for ipc, local network, and internet communication — glm-5.1
+
+> **Queue prompt:**
+>
+> create a plan file for ipc, local network, and internet communication
+
+
+Created plan file at `tasks/software/plan-lazily-rs-distributed-communication.md` covering 7 phases:
+
+1. **Serde feature gate** (#ipc1) — optional serialization, value-type bounds only
+2. **Wire protocol** (#ipc2) — WireMessage enum, snapshot/delta streaming
+3. **Consistency model** (#ipc3) — CRDT for data signals, authority leader for permissions
+4. **WebRTC transport** — Data Channel transport, backpressure, offline recovery
+5. **Signaling server** — embedded Rust or Cloudflare Worker, mDNS for LAN
+6. **Remote operations and security** — RemoteOp enum, capability-based RPC, 5-layer sandbox, prompt injection defense
+7. **Connectivity scenarios** — LAN, internet, own devices, other users
+
+Dependency chain: Phases 1-3 are sequential. Phase 4 depends on 2. Phases 5-7 depend on 4.
+
+The plan maps existing lazily primitives to distributed extensions and proposes the file structure under `lazily/src/`.
+<!-- agent:boundary:d75aa793 -->
 <!-- /agent:exchange -->
 ###
 <!--

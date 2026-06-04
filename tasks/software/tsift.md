@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -85,7 +85,18 @@ The single-node fast path (prepared statements with `WHERE from_id = ?1`) is rep
 
 **Verification:** `cargo check -p tsift-sqlite` clean, all 13 tsift-sqlite tests pass (including `sqlite_shortest_path_uses_bounded_frontier`), all 9 tsift-cli tests pass, `cargo install` succeeds.
 Is `_tsift_frontier` concurrency-safe?
-<!-- agent:boundary:899b4378 -->
+
+### Re: #sqlite-frontier-temp concurrency — glm-5.1
+
+**Yes, `_tsift_frontier` is concurrency-safe.**
+
+1. **Temp tables are connection-scoped** in SQLite — each `Connection` gets its own `_tsift_frontier` namespace.
+2. **`SqliteGraphStore` owns a single `Connection`** (`lib.rs:131`) with no `Mutex`/`Arc` — it does not implement `Sync`, so it cannot be shared across threads.
+3. **The parallel conflict-matrix code** (`#sqlite-conflict-par`) creates separate `SqliteGraphStore::open_read_only` connections per thread, each with their own temp table namespace — no collision.
+4. **Sequential calls** on the same connection are safe because `DELETE FROM _tsift_frontier` at `lib.rs:2671` and `lib.rs:2699` clears the table before each BFS iteration.
+
+The only theoretical risk: if `SqliteGraphStore` were wrapped in `Arc<Mutex<>>` and a caller released the mutex mid-BFS, two BFS traversals could interleave on the same connection and corrupt each other's frontier. That pattern does not exist in the current codebase, and `SqliteGraphStore`'s `!Sync` bound prevents it by default.
+<!-- agent:boundary:8bfd88e2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,8 +105,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Is `_tsift_frontier` concurrency-safe?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

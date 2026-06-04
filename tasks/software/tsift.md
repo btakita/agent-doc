@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,7 +36,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #surreal-sidecar; #surreal-arc; #surreal-fixture; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:9c66d3e5 -->
+
+### Re: #surreal-batch-bfs-gated — skipped
+
+> **Queue prompt:**
+>
+> [#surreal-batch-bfs-gated]
+
+
+Already gated. Deferring to focused design session.
+<!-- agent:boundary:88db7237 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,13 +54,21 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~[#surreal-batch-bfs-gated]~
+- [#astnav-hooks]
+- [#astnav-npm]
+- [#astnav-commands]
+- [#astnav-init-claude]
+- [#astnav-autoindex-oc]
+- [#astnav-harness-docs]
+- [#surreal-nodes-by-kind]
+- [#surreal-skip-load]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-batch-bfs-gated] Batch frontier expansion in shortest_path - gated, requires cross-crate API design (low)
 - [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)

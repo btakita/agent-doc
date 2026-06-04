@@ -38,7 +38,11 @@ queue_active: false
 Compacted content:
 - Archived 5 response topic(s): #eek4 #asyncctx6 Async effects - glm-5.1; queue-drain #eek4 cleanup; #lazyperf32 get_rc/get_cell_rc; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:4338973d -->
+
+### Re: lazyperf34 lazyperf35
+
+Done. Commit 1fb4b5c pushed.
+<!-- agent:boundary:202cd076 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,8 +56,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
-- [ ] [#lazyperf34] Fix finish_batch O(n2) dedup with sort-dedup — tsift-index batch scope guards scale with file count (medium)
 <!-- /agent:backlog -->
 
 ## Review

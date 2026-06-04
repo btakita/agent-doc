@@ -58,11 +58,33 @@ Four phases:
 4. **Reentrant `run_command()`** — check cycle state at entry and resume from last checkpoint
 
 **Backlog item added:** `#reentrant-finalize` — implement the plan.
-<!-- agent:boundary:9dec4e1d -->
+
+### Re: Frontmatter step tracker and queue items — glm-5.1
+
+> **Queue prompt:**
+>
+> The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.
+
+
+Updated the plan (`tasks/agent-doc/plans/reentrant-finalize-pipeline.md`) with **Phase 5 — Frontmatter step tracker** incorporating all requirements:
+
+- `agent_doc_pipeline.step` — current `CyclePhase` value, updated at each transition without git commit
+- `agent_doc_pipeline.turn_id` — derived from backlog ID or auto-generated
+- `agent_doc_pipeline.run_id` — maps to cycle_state ID for correlation
+- `agent_doc_pipeline.queue_task_id` — backlog task ID for cross-reference
+- Free-form queue prompts auto-convert to backlog tasks when no matching ID exists
+
+The frontmatter fields enable any `agent-doc` invocation (JB Run Agent Doc, CLI, or auto-loop) to detect and resume from the exact step without operator intervention.
+
+Adding `#reentrant-finalize` to backlog. Implementation follows in the next cycle (`do #reentrant-finalize`).
+<!-- agent:boundary:b743dc4e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.
+- ~The lazily-rs.md session crashed after the task was in the finalize step. The prompt is uncommitted and there is no response in the document. Please fix this issue in the pipline. Make the session reentrant so it can pick up from any incomplete step.~
+- Add a frontmatter field that updates with each step in the process. Each update should not commit to git, just show the current step in the reentrant pipeline. If the pipeline stalls, JB `Run Agent Doc` or `agent-doc ...` should continue from the current step. Add a run_id or turn_id in the frontmatter as well. The turn_id can include the backlog task id if one exists. We may want to consider converting free-form prompts into a task for the run. This behavior should be deterministic, reliable, and in the agent-doc binary.
+- #reentrant-finalize was not added to the backlog
+- do #reentrant-finalize
 <!-- /agent:queue -->
 ###
 <!--
@@ -77,6 +99,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kvw4] #reentrant-finalize [recommended] Make the finalize pipeline reentrant so it can resume from any incomplete step. Plan: tasks/agent-doc/plans/reentrant-finalize-pipeline.md. Phases: (1) early persistence, (2) reentrant cycle resumption, (3) queue prompt recovery, (4) reentrant run_command, (5) frontmatter step tracker.
 <!-- /agent:backlog -->
 
 ## Review

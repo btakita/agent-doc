@@ -38,7 +38,7 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): lazyperf34 lazyperf35; benchmark-skill BENCHMARKS.md freshness + skill/runbook; performance differences; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:bd5b421c -->
+<!-- agent:boundary:777b23c2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +53,12 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#61zg] #lazilyperf36 Add AsyncContext benchmark results to BENCHMARKS.md (run async_context bench, extend update script)
+- [ ] [#fk8p] #lazilyperf37 Add ThreadSafeContext-inside-Tokio Criterion benchmarks (benches/tokio_sync.rs)
+- [ ] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
+- [ ] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
+- [ ] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
+- [ ] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 <!-- /agent:backlog -->
 
 ## Review

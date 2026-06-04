@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -57,7 +57,8 @@ Implemented auto-reindex for OpenCode in `packages/opencode-tsift/src/index.js`:
 - `SPEC.md` — documented auto-reindex behavior
 
 **Verification:** `npm test` — 8/8 pass (3 new + 5 existing)
-<!-- agent:boundary:030323ae -->
+What are the results of the surrealdb vs sqlite benchmark?
+<!-- agent:boundary:49ddc727 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +67,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- What are the results of the surrealdb vs sqlite benchmark?
 <!-- /agent:queue -->
 
 ## Backlog

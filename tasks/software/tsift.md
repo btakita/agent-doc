@@ -31,96 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-234544.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-004107.md`*
 
 Compacted content:
-- Archived 8 response topic(s): #surreal-warm; #surreal-delta; #surreal-multiproc; 5 more
+- Archived 6 response topic(s): #surreal-sidecar; #surreal-arc; #surreal-fixture; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: #surreal-sidecar — glm-5.1
-
-> **Queue prompt:**
->
-> [ ] [#surreal-skip-load]
-
-
-> **Queue prompt:**
->
-> [ ] [#surreal-nodes-by-kind]
-
-
-Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load_indexes()` on cache-hit opens.
-
-**Changes:**
-- `packages/tsift-surrealdb/src/lib.rs`: Added `SidecarData` struct, `try_load_sidecar()`, `write_sidecar()`, and `sidecar_path()` helper. `open_with_runtime()` now tries the sidecar before falling back to `load_indexes()`. `open_or_refresh()` writes sidecar after refresh. `clear()` removes the sidecar. In-memory stores set `path: None` and skip sidecar I/O entirely.
-- `SPEC.md`: Added "Index sidecar" paragraph after "Delta projection refresh" documenting the sidecar validation, write, and fallback contract.
-
-**Sidecar design:**
-- File: `<store_path>.index-sidecar` (JSON, adjacent to SurrealKV directory)
-- Validation: sidecar's `stored_row_hash` must match current SurrealDB metadata hash
-- On mismatch/corruption/missing: transparent fallback to `load_indexes()` from SurrealDB
-- Edges stored as `Vec<GraphEdge>` (JSON-safe), indexes rebuilt via `SurrealEdgeIndexes::insert()` on load
-- Removed on `clear()`, skipped for in-memory stores
-
-**Tests (4 new, 18 total pass):**
-- `surrealdb_store_sidecar_skips_load_on_cache_hit`
-- `surrealdb_store_sidecar_invalidated_on_refresh`
-- `surrealdb_store_sidecar_corrupted_falls_back_to_load`
-- `surrealdb_store_sidecar_no_file_for_in_memory`
-
-**Verification:** `make check` — 687 tests pass (all suites green), `cargo install` succeeds, pushed to `main` in both tsift and agent-loop.
-
-### Re: #surreal-arc — glm-5.1
-
-> **Queue prompt:**
->
-> [ ] [#surreal-fixture]
-
-
-> **Queue prompt:**
->
-> [ ] [#surreal-arc]
-
-
-Shipped `#surreal-arc`: switch indexes to `Arc<GraphEdge>`/`Arc<GraphNode>` to eliminate clone overhead.
-
-**Changes:**
-- `packages/tsift-surrealdb/src/lib.rs`: `by_id: BTreeMap<String, Arc<GraphEdge>>`, `nodes: BTreeMap<String, Arc<GraphNode>>`. Internal index lookups clone 8-byte Arc pointers instead of deep-cloning full structs. GraphStore trait boundary clones inner data only when returning owned values. Sidecar wraps loaded data in Arc on deserialization.
-- `SPEC.md`: Added "Arc-backed indexes" section.
-
-**Verification:** All 18 surrealdb tests pass, `cargo install` succeeds, pushed to `main`.
-
-### Re: #surreal-fixture — glm-5.1
-
-Gated `#surreal-fixture`: requires running `tsift graph-db --json backend-eval --candidate surrealdb` to capture real benchmark samples, which timed out in this queue cycle. The fixture (`fixtures/graph-db-performance-history.json`) has no SurrealDB samples yet. After a successful backend-eval run, append the captured metrics to the fixture under the `surrealdb` key prefix.
-
-### Re: #surreal-dashmap — glm-5.1
-
-> **Queue prompt:**
->
-> [ ] [#surreal-batch-bfs]
-
-
-> **Queue prompt:**
->
-> [ ] [#surreal-dashmap]
-
-
-Shipped `#surreal-dashmap`: replaced `BTreeMap` with `HashMap` for the primary `by_id` edge index.
-
-**Changes:**
-- `packages/tsift-surrealdb/src/lib.rs`: `by_id: HashMap<String, Arc<GraphEdge>>` for O(1) amortized point lookups. Secondary ordered indexes remain `BTreeMap` for range-based traversal.
-- `SPEC.md`: Updated Arc-backed indexes section noting HashMap.
-
-**Verification:** All 18 surrealdb tests pass, pushed to `main`.
-
-### Re: #surreal-batch-bfs — glm-5.1
-
-Gated `#surreal-batch-bfs`: batch frontier expansion in `shortest_path` requires modifying the shared `shortest_path_using_outgoing` function in `tsift-core` (`packages/tsift-core/src/store.rs:696`). The current BFS calls `outgoing_edges` per-node; batching would need either a new `batch_outgoing_edges` method on `GraphStore` or a modified closure signature. This cross-crate API change warrants a focused design session. The current per-node BFS is efficient for typical graph sizes; the optimization targets deep-chain benchmarks with high fan-out at each level.
-
-### Re: #surreal-batch-bfs — glm-5.1 (HEAD)
-
-Gated `#surreal-batch-bfs`: batch frontier expansion requires cross-crate API change in `tsift-core`. Deferred to focused design session.
-<!-- agent:boundary:d3ac3443 -->
+<!-- agent:boundary:9c66d3e5 -->
 <!-- /agent:exchange -->
 ###
 <!--

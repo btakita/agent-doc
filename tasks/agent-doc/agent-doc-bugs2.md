@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -45,10 +45,11 @@ Compacted content:
 Committed the uncommitted tsift.md response (`### Re: #surreal-batch-bfs`) and tsift.done.md updates, plus the tsift submodule code changes (new `tsift-source-read` and `tsift-search` OpenCode commands in `init.rs`, test count update 10→12, AGENTS.md/CLAUDE.md navigation section updates). All 724 tsift tests pass. Binary rebuilt and installed. Pushed to main.
 
 Commits: `3fe5ff3` (tsift submodule), `cfa9d9cd2` (superproject pointer + document response).
-<!-- agent:boundary:7d10bd21 -->
+<!-- agent:boundary:3d1d2691 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->
+- JB `Run Agent Doc` on tsift.md stalled. No routing.
 <!-- /agent:queue -->
 ###
 <!--

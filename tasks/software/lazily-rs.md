@@ -95,7 +95,11 @@ Released **lazily v0.8.0** to crates.io.
 5. Tagged v0.8.0
 6. `cargo publish` — published to crates-io
 7. Pushed commit + tag to origin
-<!-- agent:boundary:7c2883de -->
+
+### Re: Test
+
+Simple inline test.
+<!-- agent:boundary:5eef0080 -->
 <!-- /agent:exchange -->
 ###
 <!--

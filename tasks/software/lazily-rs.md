@@ -72,7 +72,7 @@ Next queue head: `[#4cn0]` → `#yxjw` (Cloudflare Worker signaling server).
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#4rxf]~
 - ~[#jwwc]~
-- [#q5r1]
+- ~[#q5r1]~
 - [#4cn0]
 - do [#mb9b]
 <!-- /agent:queue -->

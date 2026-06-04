@@ -165,7 +165,7 @@ Deferring — session accretion at warn (83 exchange lines, 5 cycles in 30 min).
 - ~`#reentrant-finalize` did not match the generated id `[#kvw4]`. opencode did not correctly apply the format `[#reentrant-finalize]` and agent-doc should recognize `#reentrant-finalize` as a given id.~
 - ~do [#kvw4]~
 - ~do [#finalize-owned-pane-response-patchback]~
-- #next-steps should have been added from tasks/agent-doc/plans/reentrant-finalize-pipeline.md. We need visibility into what needs to be done next.
+- ~#next-steps should have been added from tasks/agent-doc/plans/reentrant-finalize-pipeline.md. We need visibility into what needs to be done next.~
 <!-- /agent:queue -->
 ###
 <!--

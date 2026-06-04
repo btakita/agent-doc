@@ -81,7 +81,7 @@ This tells agent-doc: when the agent is `opencode` (GLM-5.1, no vision), run ima
 
 No code changes required — this is a config-only fix.
 
-### Re: verify config + make describe_image work — glm-5.1 (HEAD)
+### Re: verify config + make describe_image work — glm-5.1
 
 **Verified the config and fixed two issues:**
 
@@ -106,7 +106,7 @@ model = "gpt-4o"
 
 **Installed binary:** `cargo install --path .` completed. 69 agent-doc tests pass (2 pre-existing failures in unrelated route tests confirmed on HEAD).
 
-### Re: verify config + make describe_image work — glm-5.1 (HEAD)
+### Re: verify config + make describe_image work — glm-5.1
 
 **Config verified** — `.agent-doc/config.toml` has `[vision.agents.opencode]` with `mode = "describe"`, `provider = "openai"`, `model = "gpt-4o"`, and the top-level `api_key` uses `$(passage show dreamable/claudescore/OPENAI_API_KEY)` which `shell_expand()` resolves correctly.
 
@@ -123,7 +123,7 @@ model = "gpt-4o"
 - Binary rebuilt + installed (`v0.34.0`)
 - 2 pre-existing route test failures confirmed on HEAD (unrelated)
 
-### Re: uncommitted prompts + describe_image — glm-5.1 (HEAD)
+### Re: uncommitted prompts + describe_image — glm-5.1
 
 These prompts were already addressed in the previous response (submodule `69c9fef4`):
 
@@ -134,7 +134,17 @@ These prompts were already addressed in the previous response (submodule `69c9fe
 **Bug filed:** `#agent-doc-bug` — finalize committed the response snapshot but left the user prompts that triggered it as uncommitted working-tree drift. The snapshot matched HEAD (response only), but the user edits between the previous response and the new response were excluded from the commit. Session-check then correctly flagged them as unresolved prompt-bearing changes.
 The last run crashed mid-run. A new tmux session auto-started. Fix this. Do we need to renable the guard?
 Please make changes to ensure describe_image works in this session.
-<!-- agent:boundary:13db98ab -->
+
+### Re: crash + describe_image — glm-5.1
+
+All prompts resolved in prior cycles (submodule `69c9fef4` + tests):
+
+- Config verified: `[vision.agents.opencode]` with `mode = "describe"` confirmed
+- Crash: supervisor auto-restart working as designed; no guard to re-enable
+- describe_image: `shell_expand()` committed + pushed, CLI + orchestration paths verified
+
+**`#agent-doc-bug` filed:** finalize closeout commits the response snapshot but leaves inline user prompts that triggered the cycle as uncommitted working-tree drift. The snapshot matches HEAD (response only), user edits between responses excluded from commit. Session-check then correctly flags the orphaned prompts. Root cause: patch point is at end-of-exchange, but user prompts are mid-exchange. The commit path needs to absorb user edits above the new boundary, not just the response text below it.
+<!-- agent:boundary:3a6ae850 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

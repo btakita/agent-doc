@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,7 @@ queue_active: false
 Compacted content:
 - Archived 11 response topic(s): Backpressure, offline peers, and state sync; Queue bookkeeping; WebRTC P2P; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:4872772d -->
+<!-- agent:boundary:4a53c63b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - [#mvbj]
 - [#4rxf]
 - [#jwwc]

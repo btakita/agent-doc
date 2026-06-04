@@ -45,7 +45,16 @@ Compacted content:
 
 
 Already gated. Deferring to focused design session.
-<!-- agent:boundary:88db7237 -->
+
+### Re: #astnav-hooks — shipped (commit `346a47e`)
+
+> **Queue prompt:**
+>
+> [#astnav-hooks]
+
+
+Shipped `examples/hooks/tsift-rewrite.sh` in-tree. Updated SPEC.md with Claude Code hook config snippet and Codex/OpenCode harness-equivalent docs. Updated CLAUDE.md references. No new tests needed — 692 existing tests pass.
+<!-- agent:boundary:8439d93e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,7 +65,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#surreal-batch-bfs-gated]~
-- [#astnav-hooks]
+- ~[#astnav-hooks]~
 - [#astnav-npm]
 - [#astnav-commands]
 - [#astnav-init-claude]
@@ -69,7 +78,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
 - [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)

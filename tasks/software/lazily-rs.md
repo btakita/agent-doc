@@ -38,7 +38,30 @@ queue_active: true
 Compacted content:
 - Archived 1 response topic(s): [#jwwc] #ipc3
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:9b9e4064 -->
+
+### Re: [#q5r1] Implement RemoteOp + per-peer permission allowlist (#39c5) — opus-4-8
+
+Done. Implemented the `#39c5` permission policy layer for `lazily-distributed` remote access, following the SPEC design (§ Permission boundary, lines 1008–1014, 1108).
+
+**New module `src/distributed.rs`** behind a new `distributed` feature (pure logic, zero runtime deps):
+
+- `NodeId` / `PeerId` — wire-stable identifiers, decoupled from the internal `SlotId`; `serde`-derived under the `serde` feature.
+- `OpKind` (`Read` / `Write` / `TriggerEffect`) + `RemoteOp { kind, node }` — the gated, serializable unit. The three kinds gate **independently**: a read grant never implies write or effect-trigger.
+- `PeerPermissions` — **default-deny** per-peer allowlist: `allow`, `allow_many`, `revoke` (prunes empty peer entries), `revoke_peer`, `is_allowed`, fail-closed `check` returning `Result<(), PermissionDenied>`.
+- `filter_readable(peer, nodes)` enforces the SPEC **omission** invariant — non-readable nodes are dropped from the result entirely (not redacted), input order preserved — so it can run at snapshot/delta construction before serialization.
+
+`PeerPermissions` is local server-side state and is intentionally **not** serializable; only the wire-facing `RemoteOp` family is.
+
+**Preset `#spec-test-build-install-commit-push`:**
+- **spec** — recorded `#39c5` as implemented in `SPEC.md` under the Permission boundary section.
+- **tests** — 11 unit tests in `distributed.rs` (default-deny, op-kind independence, peer isolation, revoke/prune, fail-closed `check`, omission-order `filter_readable`, serde round-trip). Added a `test-distributed` make target and a CI step.
+- **build** — `cargo build --release --features "distributed serde"` clean. `lazily` is a library crate, so there's no installable binary; the release build is the artifact.
+- **commit + push** — `c082e93` pushed to `lazily-rs` `main`.
+
+`make check` is green except `benchmark-check`, which is **pre-existing** local timing-drift staleness (fails identically on clean HEAD; `--check` compares this machine's `target/criterion` numbers against committed `BENCHMARKS.md`). It is not run by CI and is unrelated to `#39c5`; regenerating would commit machine-specific timing noise, so I left `BENCHMARKS.md` untouched.
+
+Next queue head: `[#4cn0]` → `#yxjw` (Cloudflare Worker signaling server).
+<!-- agent:boundary:7c7c1413 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,7 +80,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist
 - [ ] [#4cn0] #yxjw Build Cloudflare Worker signaling server
 - [ ] [#mb9b] #vd5v Leverage typed cache for lock-free cached reads in ThreadSafeContext
 <!-- /agent:backlog -->

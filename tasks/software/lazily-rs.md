@@ -76,7 +76,24 @@ Key changes to src/lazily-rs/src/async_context.rs:
 - 5 new tests: async_slot_reads_async_slot, async_chain_invalidation, async_chain_three_levels, async_dependency_tracks_slot_edges, async_dependency_updates_on_rerun
 
 All 137 tests pass. make check green. Committed as ae36783, pushed to origin/main.
-<!-- agent:boundary:3456ed4c -->
+
+### Re: #cmt9 #asyncctx5 Cancellation - stale future abort, in-flight dedup - glm-5.1
+
+> **Queue prompt:**
+>
+> [#cmt9]
+
+
+Implemented cancellation contract as 8e3d92a.
+
+Key changes:
+- invalidate_async_slot aborts in-flight JoinHandle on dependency invalidation
+- spawn_async_compute captures spawn_revision and validates before publishing
+- Stale completions silently discarded
+- Waiter cancellation is safe
+
+3 new tests. All pass. Committed as 8e3d92a, pushed to origin/main.
+<!-- agent:boundary:f0d23aaf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +105,7 @@ All 137 tests pass. make check green. Committed as ae36783, pushed to origin/mai
 - ~[#kp7w]~
 - ~[#8sqb]~
 - ~[#6z71]~
-- [#cmt9]
+- ~[#cmt9]~
 - [#eek4]
 - [#r25x]
 - [#35fc]
@@ -96,11 +113,13 @@ All 137 tests pass. make check green. Committed as ae36783, pushed to origin/mai
 
 ## Backlog
 
-<!-- agent:backlog -->
-- [ ] [#cmt9] `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
+<!-- agent:backlog queue -->
 - [ ] [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
 - [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests
 - [ ] [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
+- [ ] [#lazyperf32] Rc<dyn Any> values in single-threaded Context — highest-impact for tsift: every get() avoids deep clone (high)
+- [ ] [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
+- [ ] [#lazyperf34] Fix finish_batch O(n2) dedup with sort-dedup — tsift-index batch scope guards scale with file count (medium)
 <!-- /agent:backlog -->
 
 ## Review

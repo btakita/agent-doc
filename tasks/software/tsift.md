@@ -54,13 +54,18 @@ Completed `#source-body-cap`: body preview token cap for source-read/symbol-read
 
 ### Re: #diff-parse-cap — glm-5.1
 
+> **Queue prompt:**
+>
+> do [#diff-parse-cap]
+
+
 Completed `#diff-parse-cap`: default max_parsed_files to 25 in standalone diff-digest.
 
 - Added `--max-parsed-files` CLI arg (default 25) to diff-digest command
 - `--max-parsed-files 0` opts out (unlimited tree-sitter parsing)
 - Updated SPEC.md with flag documentation and behavior description
 - All 592 tests pass; built + installed + pushed: `d1a3be6`
-<!-- agent:boundary:2c4f52e1 -->
+<!-- agent:boundary:cae2bdd8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +77,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~do [#tokegate-seed]~
 - ~do [#source-body-cap]~
-- do [#diff-parse-cap]
+- ~do [#diff-parse-cap]~
 - do [#evidence-page]
 - do [#packet-cache-evict]
 - do [#terse-edge-codes]

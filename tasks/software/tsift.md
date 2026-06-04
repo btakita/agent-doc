@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,7 +36,6 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): #surreal-warm; #surreal-delta; #surreal-multiproc; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
 ### Re: #surreal-sidecar — glm-5.1
 
 > **Queue prompt:**
@@ -69,7 +68,22 @@ Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load
 - `surrealdb_store_sidecar_no_file_for_in_memory`
 
 **Verification:** `make check` — 687 tests pass (all suites green), `cargo install` succeeds, pushed to `main` in both tsift and agent-loop.
-<!-- agent:boundary:59d0da91 -->
+
+### Re: #surreal-arc — glm-5.1
+
+> **Queue prompt:**
+>
+> [ ] [#surreal-arc]
+
+
+Shipped `#surreal-arc`: switch indexes to `Arc<GraphEdge>`/`Arc<GraphNode>` to eliminate clone overhead.
+
+**Changes:**
+- `packages/tsift-surrealdb/src/lib.rs`: `by_id: BTreeMap<String, Arc<GraphEdge>>`, `nodes: BTreeMap<String, Arc<GraphNode>>`. Internal index lookups clone 8-byte Arc pointers instead of deep-cloning full structs. GraphStore trait boundary clones inner data only when returning owned values. Sidecar wraps loaded data in Arc on deserialization.
+- `SPEC.md`: Added "Arc-backed indexes" section.
+
+**Verification:** All 18 surrealdb tests pass, `cargo install` succeeds, pushed to `main`.
+<!-- agent:boundary:dddf3b3c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +95,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[ ] [#surreal-nodes-by-kind]~
 - ~[ ] [#surreal-skip-load]~
-- [ ] [#surreal-arc]
+- ~[ ] [#surreal-arc]~
 - [ ] [#surreal-fixture]
 - [ ] [#surreal-dashmap]
 - [ ] [#surreal-batch-bfs]
@@ -98,7 +112,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
-- [ ] [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)
 - [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
 - [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)

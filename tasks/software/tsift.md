@@ -36,7 +36,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #edge-index-references; #degree-cache; #community-summary-default; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5095b8ba -->
+
+### Re: #wal-checkpoint-tuning — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#wal-checkpoint-tuning]
+
+
+Added explicit `PRAGMA wal_checkpoint(TRUNCATE)` after each projection refresh and adaptive `wal_autocheckpoint` tuning based on total upserted rows (>10K: 8192 pages, >1K: 4096, else 2048). Prevents WAL growth on repeated refreshes.
+
+Commit: `9e085ae` pushed to main
+<!-- agent:boundary:fd6c910c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,14 +68,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#community-summary-default]~
 - ~do [#property-sampling]~
 - ~do [#edges-between-batch-optimization]~
-- do [#wal-checkpoint-tuning]
+- ~do [#wal-checkpoint-tuning]~
 - do [#8v37]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#wal-checkpoint-tuning] Add explicit PRAGMA wal_checkpoint(TRUNCATE) after refresh; tune autocheckpoint by projection size (low)
 - [ ] [#8v37] Can tsift provide a graph map back to the agent for the agent to visualize and analyze the graph structure of the corpus? Can the agent request focused graphs? The broad map should be token efficient yet give the agent a breadth view with some depth of the content to make a decision for a focused map. The focused map should include the full depth on a more focused query. Would this be useful for graph navigation? Would it reduce tool calls?
 <!-- /agent:backlog -->
 

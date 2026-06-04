@@ -151,7 +151,66 @@ Start with **full mesh + signaling server** for `lazily-distributed`:
 - Data path: 100% P2P after handshake
 
 The signaling server can be embedded in `lazily-distributed` as a built-in module — it's just SDP/ICE forwarding, not data processing.
-<!-- agent:boundary:39255438 -->
+
+### Re: Desktop-to-desktop (LAN), laptop-to-desktop (internet), remote user LAN, remote user internet — glm-5.1
+
+All four scenarios are the same WebRTC P2P architecture with different discovery and NAT traversal paths:
+
+#### 1. Your desktop <-> another desktop on LAN
+
+The simplest case. No internet needed.
+
+1. **Discovery**: mDNS/DNS-SD. Both desktops run `lazily-distributed` and broadcast on the local network. Zero configuration.
+2. **Signaling**: LAN signaling via mDNS service records or a tiny local UDP broadcast. No server needed.
+3. **Connection**: WebRTC Data Channel establishes directly on the LAN. Sub-millisecond latency.
+4. **Practical setup**: Both machines run `lazily-node --discovery mdns`. Done.
+
+No STUN or TURN needed — both are on the same network with no NAT between them.
+
+#### 2. Your laptop <-> your desktop over the internet
+
+1. **Discovery**: Static config. Your desktop's public IP (or hostname) is listed in your laptop's peer config.
+2. **Signaling**: Lightweight signaling server. Your desktop registers; your laptop connects to exchange SDP/ICE.
+3. **NAT traversal**: STUN server (free, e.g., Google's) for both sides. Works for ~95% of NAT configs.
+4. **Fallback**: TURN relay only if both are behind symmetric NATs (rare).
+5. **Self-access shortcut**: Tailscale/WireGuard VPN puts both devices on the same virtual LAN — mDNS works over the tunnel, no signaling server needed.
+
+#### 3. Another user connects to your desktop on LAN
+
+Same as scenario 1 technically, but with **authentication and authorization**:
+
+1. **Discovery**: mDNS works — the other user's machine sees your `lazily-node` broadcasting.
+2. **Auth**: On first connection, your desktop presents a pairing challenge:
+   - **PIN/QR code**: you show a code on your desktop, they enter it. Like Bluetooth pairing.
+   - **Pre-shared key**: `lazily-invite --permits read:signals.foo,write:signals.bar`
+3. **Authorization**: Peer connection scoped to granted permissions:
+   ```toml
+   [peers."user-alice"]
+   permissions = ["read:signals.weather", "read:signals.sensors.*", "write:signals.chat"]
+   ```
+4. **Connection**: WebRTC Data Channel after auth handshake. All data stays on LAN.
+
+#### 4. Another user connects to your desktop over the internet
+
+Combines scenarios 2 and 3 — NAT traversal + auth.
+
+1. **Discovery**: Signaling server. Your desktop registers; the other user finds you via peer ID or shareable link.
+2. **NAT traversal**: STUN for both sides. TURN fallback if needed.
+3. **Auth**: Same pairing flow (PIN, invite token) over the signaling channel before WebRTC connection.
+4. **Encryption**: WebRTC uses DTLS by default — end-to-end encrypted. Signaling server never sees signal values.
+5. **Dynamic DNS**: If no static IP, the signaling server acts as rendezvous — your desktop connects outbound, no inbound ports needed.
+
+#### Summary: same architecture, different bootstrapping
+
+| Scenario | Discovery | Signaling | NAT Traversal | Auth |
+|----------|-----------|-----------|---------------|------|
+| Desktop-Desktop (LAN) | mDNS | LAN broadcast | None | Optional (trust LAN) |
+| Laptop-Desktop (internet, own) | Static/Tailscale | Signaling server or VPN | STUN | Own devices (trust) |
+| Other user-Desktop (LAN) | mDNS | LAN broadcast | None | Required (PIN/invite) |
+| Other user-Desktop (internet) | Signaling server | Signaling server | STUN (+ TURN fallback) | Required (PIN/invite) |
+
+The code is the same in all cases — `lazily-distributed` runs the same WebRTC P2P path. Only discovery mechanism and auth requirements change per scenario.
+<!-- agent:boundary:d2ad8451 -->
 <!-- /agent:exchange -->
 ###
 <!--

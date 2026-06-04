@@ -31,82 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-051053.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-150615.md`*
 
 Compacted content:
-- Archived 2 response topic(s): tokegate-seed populate token-gate-history.json with baseline samples; tokegate-seed session-check recovery
+- Archived 4 response topic(s): #source-body-cap; #diff-parse-cap; #evidence-page; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #source-body-cap — glm-5.1
-
-> **Queue prompt:**
->
-> do [#source-body-cap]
-
-
-Completed `#source-body-cap`: body preview token cap for source-read/symbol-read envelopes.
-
-- `build_token_capped_preview` helper truncates preview lines by estimated token count
-- Per-preset body token caps: Small=500, Normal=1500, Deep=3000
-- Both source-read and symbol-read apply token cap; `expand.body` emitted when truncated
-- SPEC.md updated; 12 unit tests added; all 592 tests pass
-- Committed + pushed: `cbea35f`
-
-### Re: #diff-parse-cap — glm-5.1
-
-> **Queue prompt:**
->
-> do [#diff-parse-cap]
-
-
-Completed `#diff-parse-cap`: default max_parsed_files to 25 in standalone diff-digest.
-
-- Added `--max-parsed-files` CLI arg (default 25) to diff-digest command
-- `--max-parsed-files 0` opts out (unlimited tree-sitter parsing)
-- Updated SPEC.md with flag documentation and behavior description
-- All 592 tests pass; built + installed + pushed: `d1a3be6`
-
-### Re: #evidence-page — glm-5.1
-
-> **Queue prompt:**
->
-> do [#evidence-page]
-
-
-Completed `#evidence-page`: cursor-based evidence pagination for incremental evidence expansion.
-
-**Problem:** Single 6k-token budget cap either floods small contexts or cuts aggressively with no way to retrieve dropped items.
-
-**Solution:** `--cursor` flag on `tsift graph-db evidence` enables incremental paging through budget-ranked evidence.
-
-- `GraphDbQuery::Evidence` now accepts `--cursor <node_id>` to resume from a prior page
-- `GraphDbEvidenceReport` gains `truncated: bool` and `next_cursor: Option<String>` fields
-- New `graph_db_apply_output_budget_with_depths_and_cursor()` function handles cursor-based skip in the scored candidate list
-- Each page applies fresh per-kind quotas and token cap (reset per page)
-- Pages are disjoint: no node appears in more than one page for the same projection state
-- Invalid/stale cursor gracefully returns first page with diagnostic
-- SPEC.md updated with evidence pagination documentation and CLI example
-- 3 new unit tests: truncated pagination, within-budget no-truncation, invalid-cursor
-- All 665 tests pass (348+3 new in tsift-cli, plus all other suites)
-- Built + installed + pushed: `65bc129`
-
-### Re: #packet-cache-evict — glm-5.1
-
-> **Queue prompt:**
->
-> do [#packet-cache-evict]
-
-
-Completed `#packet-cache-evict`: TTL and size-based eviction for `.tsift/cycle-packet-cache/`.
-
-- `cycle_packet_cache_evict()` removes entries older than default 24h TTL (file mtime), then enforces 50MB max cache size by evicting oldest entries
-- `cycle_packet_cache_stats()` reports entry count and total bytes
-- `CyclePacketCacheEvictionReport` with scanned/evicted/remaining counts and bytes
-- Wired into `apply_status_fixes` — `tsift status` auto-fix now evicts stale cache entries
-- 5 new tests: stats, expired eviction, max-bytes enforcement, empty cache noop, entry counting
-- SPEC.md updated with cache eviction documentation
-- All tests pass; built + installed + pushed: `0016c08`
-<!-- agent:boundary:47020d35 -->
+<!-- agent:boundary:8f4650e8 -->
 <!-- /agent:exchange -->
 ###
 <!--

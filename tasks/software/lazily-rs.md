@@ -57,7 +57,7 @@ Composes with the existing `TypeId`-at-creation typed cache, zero overhead on th
 `serde = ["dep:serde"]` (+ `dep:erased-serde`, both optional); a sealed `MaybeSerialize<T>` helper resolves the vtable so existing constructor signatures are unchanged; `Context::snapshot()` / `ThreadSafeContext::snapshot()` emit `ContextSnapshot { nodes: Vec<NodeSnapshot { slot_id, type_tag, payload | Opaque }> }`. That snapshot type is the direct input to **#ipc2** (snapshot + incremental update protocol) and the value substrate for **#ipc3** (CRDT vs Raft).
 
 Design-only change — `cargo test --test spec_compliance` stays green (101 passed). The uncommitted `Cargo.toml`/`Cargo.lock` `serde`/`serde_json` groundwork in the working tree predates this cycle and was left untouched (a design task shouldn't bundle dep wiring). Next queue item: `[#4rxf] #ipc2`.
-<!-- agent:boundary:80c452b9 -->
+<!-- agent:boundary:fa791396 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +66,7 @@ Design-only change — `cargo test --test spec_compliance` stays green (101 pass
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- [#mvbj]
 - [#4rxf]
 - [#jwwc]
 - [#q5r1]

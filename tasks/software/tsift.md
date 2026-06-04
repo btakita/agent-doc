@@ -31,55 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-150615.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-155432.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #source-body-cap; #diff-parse-cap; #evidence-page; 1 more
+- Archived 3 response topic(s): #terse-edge-codes; #sqlite-chunk; #sqlite-ranked-cte
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #terse-edge-codes — glm-5.1
-
-> **Queue prompt:**
->
-> do [#terse-edge-codes]
-
-
-Implemented terse edge kind abbreviation in ultra-terse mode.
-
-**Changes:**
-- Added `abbreviate_edge_kind()` in `lib.rs` — maps 37 common edge kinds to short codes (calls->c, defines->d, contains->ct, imports->i, mentions->m, etc.)
-- Updated `ultra_terse_transform()` to apply edge kind compression on graph edge `k` fields + strip provenance/freshness from edges
-- Updated SPEC.md ultra-terse section with edge kind abbreviation docs and updated expected savings to ~30-50%
-
-**Files changed:** `packages/tsift-cli/src/lib.rs`, `SPEC.md`
-
-**Verification:** 9/9 ultra-terse tests pass (including 3 new: `ultra_terse_abbreviates_edge_kinds`, `ultra_terse_strips_provenance_freshness_from_edges`, updated `ultra_terse_strips_properties_from_graph_edges`). Build + install succeeded. Committed + pushed as `c376242`.
-
-### Re: #sqlite-chunk — glm-5.1
-
-> **Queue prompt:**
->
-> do [#sqlite-chunk]
-
-
-Increased `SQLITE_GRAPH_STAGING_CHUNK_ROWS` from 50 to 500 in `packages/tsift-sqlite/src/lib.rs`.
-
-**Rationale:** 500 rows × 9 edge params = 4500 SQLite variables, well under the 32766 limit in SQLite 3.53.1. This reduces INSERT statement count ~10x (from ~19k to ~1.9k for 952k rows), cutting per-statement overhead significantly.
-
-**Verification:** 13/13 tsift-sqlite tests pass. Updated the `sqlite_projection_refresh_handles_bulk_row_replacement` test assertion to match the new chunk size. Build + install succeeded. Committed + pushed as `2cc5177`.
-
-### Re: #sqlite-ranked-cte — glm-5.1
-
-Implemented recursive CTE-based `ranked_neighborhood` for `SqliteGraphStore`, eliminating the N+1 `outgoing_edges`/`node` query loop.
-
-**Changes:** `packages/tsift-sqlite/src/lib.rs` — added `ranked_neighborhood` override using a single recursive CTE that:
-- Walks from center_id up to configurable depth
-- Computes scores inline via SQL CASE expressions for all 3 strategies (BreadthFirst, EdgeKindWeighted, DegreeWeighted)
-- Orders by score desc, limits to max_nodes
-- Collects edges between retained nodes in the same query
-
-**Verification:** 13/13 tsift-sqlite tests pass. 6/6 ranked_neighborhood conformance tests pass (missing center, BFS max_nodes, edge kind weighted, center inclusion, edge kind filter, degree weighted). Committed + pushed as `ebdb441`.
-<!-- agent:boundary:98d6af16 -->
+<!-- agent:boundary:66beb449 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +53,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#packet-cache-evict]~
 - ~do [#terse-edge-codes]~
 - ~do [#sqlite-chunk]~
-- do [#sqlite-ranked-cte]
+- ~do [#sqlite-ranked-cte]~
 - do [#sqlite-conflict-par]
 - do [#sqlite-wal-tune]
 - do [#sqlite-frontier-temp]

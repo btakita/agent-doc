@@ -34,7 +34,37 @@ Assessed 5 queue items. #ba4b fully implemented. Others need live verification o
 Compacted content:
 - Archived 8 response topic(s): do [#08mg] cancel-orphans-preflight-cycle; queue assessment; do [#54pz] #dedup-prompt-normalize; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:847674f7 -->
+
+### Re: How to initialize seo.md as agent-doc — opus-4-6
+
+> **Queue prompt:**
+>
+> How do I initialize seo.md as an agent-doc? I tried JB `Claim for Tmux Pane`. What is the proper way to init a new agent doc?
+> ```
+> Claim failed (exit 1): [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill Error: pane %64 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
+> ```
+
+
+Two-step flow:
+
+1. **Scaffold the document** with frontmatter:
+   ```
+   agent-doc init tasks/software/seo.md
+   ```
+   This creates the file with the required `agent_doc_session`, `agent`, `agent_doc_format`, and `agent_doc_write` frontmatter.
+
+2. **Claim it for a tmux pane:**
+   ```
+   agent-doc claim tasks/software/seo.md
+   ```
+
+The claim error you hit (`pane %64 is in tmux session '1' but project session is '0'`) is a tmux session mismatch — the JB "Claim for Tmux Pane" action was invoked from a pane in session `1`, but agent-doc is configured to use session `0`. Either switch to a pane in the project tmux session (session `0`) before claiming, or pass `--force`:
+```
+agent-doc claim tasks/software/seo.md --force
+```
+
+After claim succeeds, run the first turn via `agent-doc route tasks/software/seo.md` or JB `Run Agent Doc`.
+<!-- agent:boundary:762a55d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -45,12 +75,12 @@ Compacted content:
 - ~do [#kz2g]~
 - ~do [#appe]~
 - ~Stall with `Queue continues with do plan-jb-clear-session-busy-pane-ux.md. Session needs compacting (accretion at block level).` message. The document does not have a compaction setting, so the stall should not have happened.~
----
+~~~done
 How do I initialize seo.md as an agent-doc? I tried JB `Claim for Tmux Pane`. What is the proper way to init a new agent doc?
 ```
 Claim failed (exit 1): [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill [sync] recovered live pane %87 for session 25032905 via supervisor pid 176583 [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213 [sync] recovered live pane %89 for session 3d9ff8e4 via supervisor pid 716970 [sync] recovered live pane %86 for session 62fe1f41 via supervisor pid 174202 [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207 [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956 resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill Error: pane %64 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
 ```
----
+~~~
 - do plan-jb-clear-session-busy-pane-ux.md
 - Search logs for [#54pz]. Add logging to prove/disprove [#54pz] completion if needed
 - do plan-lazily-rs-queued-prompt-patchback-miss.md

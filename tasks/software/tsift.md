@@ -57,7 +57,13 @@ tsift graph-db --path . --scope tsift map --focus detect_communities
 ```
 
 Commit: `e223156` pushed to main
-<!-- agent:boundary:81b2a781 -->
+
+### Re: #hxgp, #9tg6, tsift+agent-doc design — glm-5.1
+
+**#hxgp (overview tier) and #9tg6 (focus tier)** — both were already implemented as part of #cyba's `tsift graph-db map` command (commit `e223156`). The overview tier produces community count, top-N degree hubs, edge-kind histogram, and module containment tree. The focus tier adds `--focus <symbol>` with node id, kind, degree, community, neighbor breakdown. Marking both done.
+
+**tsift + agent-doc token savings:** tsift already integrates with agent-doc through `session-review --next-context`, `context-pack`, `diff-digest`, `test-digest`, `graph-db map`, and `tsift-memory` closeout hooks. Recommendation: **soft dependency, not hard** — agent-doc degrades gracefully without tsift, and most users will want it installed for the significant token savings (~60-80% on transcript replay), but it should remain an optional enhancement rather than a required dependency.
+<!-- agent:boundary:719ab19f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,8 +78,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#hxgp] #graphdb-map-overview-tier Overview tier: community count, top-10 degree hubs, edge-kind histogram, module containment tree, target <500 tokens ultra-terse (medium)
-- [ ] [#9tg6] #graphdb-map-focus-tier Focus tier: --focus <symbol> flag reusing explain envelope for single-symbol deep-dive (medium)
 <!-- /agent:backlog -->
 
 ## Review

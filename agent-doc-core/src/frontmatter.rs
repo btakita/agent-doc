@@ -924,6 +924,10 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                 }
             }
             "required_ssh_profile" => fm.required_ssh_profile = val_str(),
+            "queue" => {
+                fm.queue = val_str();
+                normalize_queue_control(&mut fm);
+            }
             "queue_active" => {
                 fm.queue_active = value.as_bool();
             }
@@ -942,6 +946,18 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
         }
     }
 
+    write(&fm, body)
+}
+
+/// Persist the canonical `queue:` activation control (`#queue-state-unify`
+/// phase 4), clearing the deprecated `queue_active:` line so `queue:` is the
+/// single written source of truth. `active` → `queue: start`, else `queue: stop`.
+/// Reads still resolve correctly because [`normalize_queue_control`] folds
+/// `queue:` back onto `queue_active` on parse.
+pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.queue = Some(if active { "start" } else { "stop" }.to_string());
+    fm.queue_active = None;
     write(&fm, body)
 }
 
@@ -1203,6 +1219,26 @@ mod tests {
         assert_eq!(fm.queue_active, Some(true));
         let (fm, _) = parse("---\nqueue: bogus\n---\n\n").unwrap();
         assert_eq!(fm.queue_active, None);
+    }
+
+    #[test]
+    fn merge_queue_state_writes_canonical_and_drops_legacy() {
+        // #queue-state-unify phase 4: writer emits `queue: start|stop` and
+        // removes any legacy `queue_active:` line so `queue:` is the sole field.
+        let legacy = "---\nagent_doc_format: template\nqueue_active: true\n---\n\nbody\n";
+        let active = merge_queue_state(legacy, true).unwrap();
+        assert!(active.contains("queue: start"), "{active}");
+        assert!(!active.contains("queue_active:"), "{active}");
+
+        let stopped = merge_queue_state(legacy, false).unwrap();
+        assert!(stopped.contains("queue: stop"), "{stopped}");
+        assert!(!stopped.contains("queue_active:"), "{stopped}");
+
+        // Round-trips back to the internal queue_active for readers.
+        let (fm, _) = parse(&active).unwrap();
+        assert_eq!(fm.queue_active, Some(true));
+        let (fm, _) = parse(&stopped).unwrap();
+        assert_eq!(fm.queue_active, Some(false));
     }
 
     #[test]

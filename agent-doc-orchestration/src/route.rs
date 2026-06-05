@@ -1859,7 +1859,7 @@ fn enqueue_route_dispatch_prompt(
     let _lock = acquire_route_queue_lock(file)?;
     let original = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut content = frontmatter::merge_fields(&original, "queue_active: true")?;
+    let mut content = frontmatter::merge_queue_state(&original, true)?;
     let components = crate::component::parse(&content)?;
     let mut component_created = false;
     let mut already_present = false;
@@ -2034,7 +2034,7 @@ fn activate_existing_route_queue_head(
     let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
         return Ok(None);
     };
-    let mut content = frontmatter::merge_fields(&original, "queue_active: true")?;
+    let mut content = frontmatter::merge_queue_state(&original, true)?;
     content = ensure_queue_component_auto_attr(&content)?;
     let activated = content != original;
     if activated {

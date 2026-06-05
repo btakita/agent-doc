@@ -2111,7 +2111,7 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
         "queue head should drain from the queue when the response topic targets its preset id:\n{content}"
     );
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "drained queue should clear active state:\n{content}"
     );
     assert!(
@@ -2162,7 +2162,7 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
     let content = fs::read_to_string(&doc).unwrap();
     // The free-text head drains from the queue once answered.
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "drained free-text queue should clear active state:\n{content}"
     );
     // The consumed prompt is embedded into THIS cycle's response block, after
@@ -2376,7 +2376,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
         "drained queue should not retain completed items"
     );
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "queue_active should be false when drained"
     );
     assert!(
@@ -2430,7 +2430,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
         "drained queue should not retain a struck-through last item"
     );
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "queue_active should be false when drained"
     );
 }
@@ -2477,7 +2477,7 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "queue_active should clear after all done-backed queue items are consumed:\n{content}"
     );
     assert!(

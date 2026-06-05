@@ -1625,7 +1625,13 @@ fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
 fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
     let mut result = content
         .lines()
-        .filter(|line| !line.trim_start().starts_with("queue_active:"))
+        .filter(|line| {
+            let t = line.trim_start();
+            // Both the canonical `queue:` control and the deprecated
+            // `queue_active:` line are transient queue-maintenance state
+            // (#queue-state-unify); normalize them away together.
+            !t.starts_with("queue_active:") && !t.starts_with("queue:")
+        })
         .collect::<Vec<_>>()
         .join("\n");
     if content.ends_with('\n') {
@@ -3618,7 +3624,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             }
             if persisted_active {
                 current_content =
-                    frontmatter::merge_fields(&current_content, "queue_active: false")?;
+                    frontmatter::merge_queue_state(&current_content, false)?;
             }
             // Persist to file + snapshot
             std::fs::write(file, &current_content)
@@ -3645,7 +3651,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                         }
                     }
                     if persisted_active
-                        && let Ok(m) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+                        && let Ok(m) = frontmatter::merge_queue_state(&new_snap, false)
                     {
                         new_snap = m;
                     }
@@ -3735,7 +3741,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 }
                 if persisted_active {
                     current_content =
-                        frontmatter::merge_fields(&current_content, "queue_active: false")?;
+                        frontmatter::merge_queue_state(&current_content, false)?;
                 }
                 std::fs::write(file, &current_content)
                     .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
@@ -3758,7 +3764,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                         }
                     }
                     if persisted_active
-                        && let Ok(m) = frontmatter::merge_fields(&ns, "queue_active: false")
+                        && let Ok(m) = frontmatter::merge_queue_state(&ns, false)
                     {
                         ns = m;
                     }
@@ -3860,15 +3866,16 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
     }
 
-    // Persist queue_active state to frontmatter
+    // Persist canonical queue activation state to frontmatter (#queue-state-unify
+    // phase 4: emit `queue: start`/`queue: stop`, migrating off `queue_active:`).
     if need_set_active {
-        current_content = frontmatter::merge_fields(&current_content, "queue_active: true")?;
+        current_content = frontmatter::merge_queue_state(&current_content, true)?;
         mutated = true;
-        eprintln!("[preflight] queue: set queue_active: true");
+        eprintln!("[preflight] queue: set queue: start");
     } else if need_clear_active {
-        current_content = frontmatter::merge_fields(&current_content, "queue_active: false")?;
+        current_content = frontmatter::merge_queue_state(&current_content, false)?;
         mutated = true;
-        eprintln!("[preflight] queue: cleared queue_active");
+        eprintln!("[preflight] queue: set queue: stop");
     }
 
     // Persist file mutations.
@@ -3935,20 +3942,20 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 
         // Apply frontmatter change to snapshot
         if need_set_active
-            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
+            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, true)
         {
             new_snap = merged;
         } else if need_sync_newly_activated_queue_snapshot
-            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
+            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, true)
         {
             new_snap = merged;
         } else if need_clear_active
-            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, false)
         {
             new_snap = merged;
         }
         if need_clear_drained_body
-            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, false)
         {
             new_snap = merged;
         }
@@ -5685,7 +5692,7 @@ mod tests {
             assert_eq!(state.queue_trigger, Some(crate::queue::QueueTrigger::Auto));
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert!(
-                updated.contains("queue_active: true"),
+                updated.contains("queue: start"),
                 "marker `{token}` must persist queue_active:\n{updated}"
             );
         }
@@ -5715,7 +5722,7 @@ mod tests {
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("queue_active: false"),
+            updated.contains("queue: stop"),
             "marker `stop` must clear queue_active:\n{updated}"
         );
         assert!(
@@ -5950,14 +5957,14 @@ mod tests {
         );
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue_active: true"));
+        assert!(updated.contains("queue: start"));
         assert!(updated.contains("<!-- agent:queue auto -->"));
         assert!(updated.contains("- do [#newhead]"));
         assert!(!updated.contains("- do [#oldhead]"));
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("queue_active: true")
+            snap.contains("queue: start")
                 && snap.contains("<!-- agent:queue auto -->")
                 && snap.contains("- do [#newhead]")
                 && !snap.contains("- do [#oldhead]"),
@@ -6025,7 +6032,7 @@ mod tests {
         assert!(state.queue_prompts.is_empty());
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue_active: false"), "file: {updated}");
+        assert!(updated.contains("queue: stop"), "file: {updated}");
         assert!(
             !updated.contains("agent:queue auto"),
             "auto must be stripped on drain: {updated}"
@@ -6038,7 +6045,7 @@ mod tests {
         // Snapshot matches the drained file so the closeout commit boundary
         // does not strand the maintenance mutation.
         let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(snap.contains("queue_active: false"));
+        assert!(snap.contains("queue: stop"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
     }
@@ -6156,7 +6163,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("<!-- agent:queue -->"));
         assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("queue: stop"));
 
         // Listener received exactly one queue convergence message carrying the
         // queue-tag + frontmatter shape that a content-only patch cannot deliver.
@@ -6233,7 +6240,7 @@ mod tests {
         assert!(state.queue_prompts.is_empty());
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("queue: stop"));
         assert!(updated.contains("<!-- agent:queue -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("- do [#newhead]"));
@@ -6532,7 +6539,7 @@ mod tests {
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
         assert!(!snap.contains("dispatch #spec-test-build-install-commit-push"));
         assert!(!snap.contains("[#cspe]"));
-        assert!(snap.contains("queue_active: false"));
+        assert!(snap.contains("queue: stop"));
     }
 
     #[test]

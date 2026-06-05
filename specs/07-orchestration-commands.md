@@ -255,20 +255,30 @@ frontmatter control:
 
 - `<!-- agent:queue go -->` / `<!-- agent:queue start -->` fresh-activates the
   queue, identical to the legacy `auto` attribute (routed through the Auto
-  trigger, persisting `queue_active`). `go` is an alias for `start`.
-- `<!-- agent:queue stop -->` forces the queue inactive this cycle and clears
-  `queue_active`.
+  trigger). `go` is an alias for `start`.
+- `<!-- agent:queue stop -->` forces the queue inactive this cycle.
 - The control token is stripped from the opening tag once the queue drains or a
   `stop` halts it, so it never re-triggers on the next cycle.
 
 These marker tokens are recognized queue-only attributes (no
 `misplaced_component_attr` typo warning).
 
-- **Remaining (`#queue-state-unify` follow-ups):** queue-maintenance write paths
-  still emit/clear `queue_active:` rather than the canonical `queue: start` /
-  `queue: stop`; migrating the writer to emit `queue:`, normalizing existing
-  `auto` markers to `queue: start`, and the harness-parity doc rewrites are
-  tracked as later phases.
+#### Writer emits canonical `queue:` (phase 4)
+
+Queue-maintenance write paths persist the canonical control directly:
+`frontmatter::merge_queue_state` writes `queue: start` on activation and
+`queue: stop` on drain/halt, clearing any deprecated `queue_active:` line in the
+same write. Both fields are normalized away together by the replay-hash /
+boundary-compare paths (`strip_queue_active_frontmatter`,
+`strip_route_queue_state_for_boundary_compare`), so a legacy `queue_active:` and
+a migrated `queue: start|stop` compare equal and do not regenerate the
+snapshot/HEAD drift loop. Reads continue to resolve through
+`normalize_queue_control` (`queue:` → internal `queue_active`), so the deprecated
+field remains accepted as input for backward compatibility.
+
+- **Remaining (`#queue-state-unify` follow-ups):** harness-parity doc rewrites
+  (Claude `/loop`, Codex Stop-hook, OpenCode auto-loop instruction surfaces) are
+  tracked separately.
 
 ### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`)
 

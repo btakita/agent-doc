@@ -578,13 +578,20 @@ fn neutralize_queue_component(content: &str) -> String {
     out
 }
 
-/// Drop the `queue_active:` frontmatter line, which queue maintenance toggles
-/// in lockstep with the `agent:queue` component and is likewise independent of
-/// the response body. Only used for replay-hash normalization, never persisted.
+/// Drop the transient queue activation frontmatter — the canonical `queue:`
+/// control (`#queue-state-unify`) and the deprecated `queue_active:` line — which
+/// queue maintenance toggles in lockstep with the `agent:queue` component and is
+/// likewise independent of the response body. Both are normalized away together
+/// so a legacy `queue_active:` and a migrated `queue: start|stop` compare equal,
+/// avoiding the snapshot/HEAD drift loop. Only used for replay-hash
+/// normalization, never persisted.
 fn strip_queue_active_frontmatter(content: &str) -> String {
     content
         .lines()
-        .filter(|line| !line.trim_start().starts_with("queue_active:"))
+        .filter(|line| {
+            let t = line.trim_start();
+            !t.starts_with("queue_active:") && !t.starts_with("queue:")
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

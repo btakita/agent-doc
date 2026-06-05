@@ -589,7 +589,7 @@ fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
         "do [#qipc]. #spec-test-build-install-commit-push"
     );
     let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("queue: start"));
     assert!(updated.contains("<!-- agent:queue auto -->"));
     assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
     let queue_pos = updated.find("<!-- agent:queue auto -->").unwrap();
@@ -697,7 +697,7 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
     assert!(!outcome.component_created);
     assert!(outcome.activated);
     let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("queue: start"));
     assert!(updated.contains("<!-- agent:queue auto -->"));
     assert_eq!(
         updated
@@ -750,7 +750,7 @@ fn route_activates_existing_inactive_auto_queue_head_for_busy_deferral() {
     assert!(outcome.activated);
 
     let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("queue: start"));
     assert!(updated.contains("<!-- agent:queue auto -->"));
     assert_eq!(
         updated

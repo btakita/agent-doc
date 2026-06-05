@@ -3338,7 +3338,7 @@ fn plan_queue_prompt_consumption(
                 }
             }
         }
-        current = frontmatter::merge_fields(&current, "queue_active: false")?;
+        current = frontmatter::merge_queue_state(&current, false)?;
     }
 
     // Update snapshot in sync. Required closeouts must be able to prove the
@@ -3404,7 +3404,7 @@ fn plan_queue_prompt_consumption(
                 new_snap = rebuilt;
             }
         }
-        new_snap = frontmatter::merge_fields(&new_snap, "queue_active: false")?;
+        new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
     }
 
     // #queue-prompt-echo-in-response: an auto/synthetic queue head is never typed

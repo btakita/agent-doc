@@ -368,7 +368,7 @@ fn run_auto_queue_continues_until_drained() {
         "third queue response should be written"
     );
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "queue should clear active state after all prompts are consumed"
     );
     assert!(!content.contains("agent:queue auto"));
@@ -447,7 +447,7 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
         "third queue response should be written"
     );
     assert!(
-        content.contains("queue_active: false"),
+        content.contains("queue: stop"),
         "queue should clear active state after all prompts are consumed"
     );
     let queue_section = queue_section_of(&content);

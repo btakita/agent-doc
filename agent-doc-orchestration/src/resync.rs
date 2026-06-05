@@ -2352,7 +2352,56 @@ fn apply_fixes_to_registry(
 /// `relocate_session`: when `Some(target)`, `WrongSession` panes are relocated via
 /// `join-pane` instead of being killed. Pass the target tmux session name (e.g. `"10"`).
 pub fn run_fix(target_file: Option<&Path>, relocate_session: Option<&str>) -> Result<()> {
+    // #jb-fix-document-finish-turn: when fixing a specific document, first finish
+    // any unfinished agent-doc turn (the deterministic repair path) so `agent-doc
+    // fix <FILE>` — and the JB `Fix Document` action that wraps it — recovers a
+    // stranded response / reap before reconciling tmux routing.
+    if let Some(file) = target_file {
+        finish_unfinished_turn(file)?;
+    }
     run(true, relocate_session, target_file)
+}
+
+/// Finish any unfinished agent-doc turn on `file` before routing reconciliation
+/// (`#jb-fix-document-finish-turn`). Runs the deterministic repair path until
+/// `session-check` is clean or no further progress is made — recovery can need a
+/// second pass (commit the orphaned response, then persist the reap). Best-effort:
+/// a document that stays interrupted falls through to the routing fix with a
+/// warning rather than aborting the whole `fix`.
+fn finish_unfinished_turn(file: &Path) -> Result<()> {
+    use crate::session_check::SessionCheckStatus;
+    if !file.exists() {
+        return Ok(());
+    }
+    for _ in 0..4 {
+        let before = std::fs::read_to_string(file)
+            .ok()
+            .map(|c| crate::ops_log::content_hash(&c));
+        // Always attempt repair: it is a no-op on a clean document, and a stranded
+        // pending response does not necessarily register as a session-check
+        // interruption (no open cycle yet). `repair` bails on an interruption that
+        // the *next* pass resolves (response commit → reap), so log and keep going
+        // rather than aborting `fix` — never swallow the diagnostic.
+        if let Err(e) = crate::repair::repair(file) {
+            eprintln!("[fix] finish-turn pass interrupted (continuing): {e}");
+        }
+        if matches!(
+            crate::session_check::inspect(file)?,
+            SessionCheckStatus::Ok(_)
+        ) {
+            return Ok(());
+        }
+        let after = std::fs::read_to_string(file)
+            .ok()
+            .map(|c| crate::ops_log::content_hash(&c));
+        if before == after {
+            break; // no progress this pass and still not clean — stop looping
+        }
+    }
+    if let SessionCheckStatus::Interrupted(msg) = crate::session_check::inspect(file)? {
+        eprintln!("[fix] document still has an unfinished turn after finish-turn passes: {msg}");
+    }
+    Ok(())
 }
 
 /// `target_file`: when `Some(file)`, scope detection and mutations to that single
@@ -4511,5 +4560,80 @@ mod tests {
             after.is_empty(),
             "submodule registry should be empty after prune"
         );
+    }
+
+    #[test]
+    fn finish_unfinished_turn_commits_orphaned_response() {
+        // #jb-fix-document-finish-turn: `agent-doc fix <FILE>` (and the JB Fix
+        // Document action) must commit a stranded response before routing fixes.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "t@t.com"],
+            vec!["config", "user.name", "T"],
+        ] {
+            std::process::Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .ok();
+        }
+        let doc = root.join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "-A"])
+            .output()
+            .ok();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "init", "--no-verify"])
+            .output()
+            .ok();
+
+        // Strand a response (the "unfinished turn").
+        crate::repair::save_pending(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: unfinished — gpt-5\n\nRecovered.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        finish_unfinished_turn(&doc).unwrap();
+
+        // The response is now committed to HEAD.
+        let head = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:doc.md"])
+            .output()
+            .unwrap();
+        let head_str = String::from_utf8_lossy(&head.stdout);
+        assert!(
+            head_str.contains("Re: unfinished"),
+            "stranded response must be committed by finish_unfinished_turn:\n{head_str}"
+        );
+    }
+
+    #[test]
+    fn finish_unfinished_turn_is_noop_on_clean_document() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = "---\nagent_doc_session: test\n---\n\nplain body\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+
+        // No pending/cycle state → no-op, no error, content unchanged.
+        finish_unfinished_turn(&doc).unwrap();
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 }

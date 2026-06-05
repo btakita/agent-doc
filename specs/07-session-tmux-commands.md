@@ -175,6 +175,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 `agent-doc fix [FILE] [--session <name>]`
 
 - Canonical repair surface; document-scoped form shares the `resync --fix` implementation but limits mutations to the target document.
+- When a `FILE` is given, `fix` first finishes any unfinished agent-doc turn on that document (`#jb-fix-document-finish-turn`): it runs the deterministic repair path until `session-check` is clean or no further progress is made — recovery can need a second pass (commit a stranded response, then persist the reap) — and only then reconciles tmux routing. Best-effort: a document that stays interrupted falls through to the routing fix with a warning rather than aborting. The JB `Fix Document` action wraps this command, so it finishes the turn without leaving the editor.
 
 ## sync
 

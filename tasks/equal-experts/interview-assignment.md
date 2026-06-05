@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -515,12 +515,12 @@ Done — added **`AGENT_SESSION.md`** to the submodule (`solution` `ahead 10`, *
 One option to consider: the raw copy includes agent-doc tooling bits (the `agent_doc_*` frontmatter, `prompt_presets`, and the empty `Queue`/`Backlog`/`Review` markers). If you'd rather the submission carry a **clean narrative** — just the Status + Exchange, no tooling markers — say **"trim the session doc"** and I'll produce that version instead.
 
 Full suite still green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
-<!-- agent:boundary:0aed961f -->
+<!-- agent:boundary:0821cc8a -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
-- Add a copy of this agent doc into the repo. Update the README to refer to the agent doc copy explaining what agent-doc is and what this session document is. Explain how I used the agent-doc including using agent:queue, the agent:exchange. commit.
+<!-- agent:queue auto go -->
+- Add a copy of this agent doc into the repo. Update the README to refer to the agent doc copy explaining what agent-doc is and what this session document is. Explain how I used the agent-doc including using agent:queue, the agent:exchange, agent:backlog, and agent:review. Explain I'm using a private superrepo to keep the assignment simple...that I would normally have a per project or per client superrepo for full tracability. commit.
 <!-- /agent:queue -->
 
 ## Backlog

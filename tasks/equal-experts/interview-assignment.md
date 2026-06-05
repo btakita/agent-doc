@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -272,12 +272,39 @@ Consolidating this queue item with the full answer in **Re: Fake API vs mocks** 
 **TL;DR:** a small fake *fixture* — yes; a fake *service* — no. Keep `httpx.MockTransport`, consolidate `test_price_client.py` behind one shared `product -> payload` fake-endpoint fixture so the API shape is expressed once instead of five times. A standalone Fake API class/server is over-engineering for a single GET endpoint.
 
 This needs your call — say **"refactor to the shared fake"** and I'll apply it (committed local, no push), or leave the mocks as-is. Either way `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:2968b065 -->
+
+### Re: Does the brief expect a client for the Cart? — opus-4-8
+
+> **Queue prompt:**
+>
+> I notice that `PriceClient` is a client to the API. Does the README expect a client for the `Cart`?
+
+
+No — there's no separate "Cart client" expected, and adding one would be an unnecessary layer.
+
+#### Reading the brief's wording
+The DO line is *"Test both any client and logic."* In a layered design that splits into:
+- **client** = the code that talks to an external system → our `PriceClient` (the Price API client). The README devotes a whole section to the Price API, which anchors this reading.
+- **logic** = the domain → our `Cart`.
+
+So "test both client and logic" maps cleanly onto the two pieces we already have. The only "client" in the system is the one to the Price API.
+
+#### Is the `Cart` supposed to have its own client?
+No. The `Cart` *is* the library's public API — the thing a caller uses directly (`cart.add(...)`, `cart.subtotal`). Its "client" is simply the **calling code**, and in a library-only deliverable that caller is the test suite, which drives `Cart` end-to-end. Wrapping `Cart` in a dedicated client class would be exactly the *"unnecessary layer of abstraction"* the brief tells us to avoid (❌).
+
+#### So is the requirement met?
+Yes, on both readings:
+- Strict reading (client = API client): `test_price_client.py` covers the client, `test_cart.py` covers the logic.
+- Loose reading (client = consumer of your public API): `test_cart.py` already exercises `Cart` from a caller's perspective, asserting the worked example through its public surface.
+
+If you wanted to make the "consumer" angle explicit, the lightest touch would be a tiny usage example in the README (already present in the Usage block) rather than a new class. I'd not add a `Cart` client type.
+
+*(Aside: exchange is now 252 lines / 11 sections — happy to `agent-doc compact` once you're done reviewing.)*
+<!-- agent:boundary:d618ff4e -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- I notice that `PriceClient` is a client to the API. Does the README expect a client for the `Cart`?
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

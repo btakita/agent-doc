@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -104,15 +104,15 @@ Shipped the phase-4 **EFS-local half** (the larger un-gated piece). Spec + tests
 - **Phase 6's un-gated half** (workflow-priority dashboard) is captured as `#zwws-phase6-dashboard` `[recommended]` — shippable next without any external gate.
 
 `#zwws-local-first` is marked done (its phase-4-local deliverable). Queue `#zwws-phase6-dashboard` when you want the workflow-priority dashboard next.
-<!-- agent:boundary:babff0d0 -->
+<!-- agent:boundary:03076f94 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- Can we ungate the items with the TMO cache? See `Remaining #zwws phases (4 and 6) are externally gated — queue one once its gate clears (TMO writeback for phase 4 / EFS Resend sending domain #f4rq for phase 6).`
+<!-- agent:queue preset="#spec-test-commit-push" start -->
+- [#67v2]: Use corky to get the attached images from https://mail.google.com/mail/u/0/#inbox/FMfcgzQgMLxHCrjZbfGFBpkwSTTgxGbd. This is the TMO board. Can we create the logic for this workflow?
 <!-- /agent:queue -->
 
 ## Backlog

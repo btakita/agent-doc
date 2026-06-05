@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -534,11 +534,12 @@ Done and committed in the submodule (`solution` `ahead 11`, **not pushed**). No 
 Full suite green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
 
 Note: `AGENT_SESSION.md` is a point-in-time snapshot (it can't contain the reply describing its own latest refresh). When you're ready to **submit**, I'd refresh it one last time as part of that push so it's current.
-<!-- agent:boundary:25f93823 -->
+<!-- agent:boundary:e589681e -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- Add a link to the agent-doc github page. Note that I used agent-doc realtime feature...editing the document while a turn was running...which is expected for release in the coming days. I also used tsift for code + markdown ast navigation using the graphs + semantic neighborhoods & to save tokens.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1437,6 +1437,27 @@ enum ReviewAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// List gated review items in a token-efficient form (id, gate-type, tags,
+    /// NEXT-step annotation) so a long review list can be triaged at a glance.
+    List {
+        /// Path to the session document
+        file: PathBuf,
+        /// Only items with this typed gate (e.g. `release`)
+        #[arg(long)]
+        gate_type: Option<String>,
+        /// Only items carrying this hashtag (with or without leading `#`)
+        #[arg(long)]
+        tag: Option<String>,
+        /// Only items that have a `NEXT:` annotation (actionable)
+        #[arg(long, conflicts_with = "no_next")]
+        has_next: bool,
+        /// Only items WITHOUT a `NEXT:` annotation (the stale set to triage)
+        #[arg(long, conflicts_with = "has_next")]
+        no_next: bool,
+        /// Emit JSON instead of the compact text form
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2599,6 +2620,52 @@ fn main() -> anyhow::Result<()> {
                 println!("  scanned review: {} gated item(s)", report.scanned);
                 println!("  added {} backlog ungate task(s)", report.added.len());
                 println!("  (skipped {} already-tracked)", report.skipped.len());
+                Ok(())
+            }
+            ReviewAction::List {
+                file,
+                gate_type,
+                tag,
+                has_next,
+                no_next,
+                json,
+            } => {
+                let filter = agent_doc_orchestration::pending_cmd::ReviewListFilter {
+                    gate_type,
+                    tag,
+                    has_next: if has_next {
+                        Some(true)
+                    } else if no_next {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                };
+                let items =
+                    agent_doc_orchestration::pending_cmd::list_review_items(&file, &filter)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&items)?);
+                } else if items.is_empty() {
+                    println!("(no gated review items match)");
+                } else {
+                    for v in &items {
+                        let gate = v
+                            .gate_type
+                            .as_deref()
+                            .map(|g| format!(" [{g}]"))
+                            .unwrap_or_default();
+                        let tags = if v.tags.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", v.tags.join(" "))
+                        };
+                        println!("#{}{}  {}{}", v.id, gate, v.summary, tags);
+                        if let Some(next) = &v.next {
+                            println!("    → NEXT: {next}");
+                        }
+                    }
+                    println!("\n{} gated review item(s)", items.len());
+                }
                 Ok(())
             }
         },

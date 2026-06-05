@@ -32,102 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-054757.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-062900.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #knpa; #19gv; queue reprioritization
+- Archived 5 response topic(s): #rpzm; #zwws; dashboard as the composite landing; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: #rpzm — investor portal dashboard rework (phase 1) — opus-4-8
-
-> **Queue prompt:**
->
-> [#rpzm]
-
-
-`#rpzm` is a 6-part epic, so I decomposed it into a phase plan and shipped phase 1 (EFS `30037e3`, pushed).
-
-**Phase 1 — nav rework (done):**
-- **Dropped the Returns group** (Distributions/Statements) from the investor portal nav — EFS doesn't service loans, so those don't apply.
-- **Available Deals now leads** the Portfolio group (deals-first), ahead of Dashboard and My Positions.
-- `lib/ui--browser--efs/portal/investor/layout.tsx`; nav test in `tests/investor-portal-e2e.test.ts` (10 pass); PRD bullet added; full suite + builds green (the 2 reds remain the teammate's pre-existing `apply4-P1` + `borrower-message-notify`).
-
-**Remaining phases (plan: `prds/rpzm-investor-dashboard-rework.md`):**
-- **P2** available-deals-first *landing* + "I'm interested" email package; remove the now-dead distributions/statements routes/types.
-- **P3** simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only).
-- **P4** special-instructions/vestings (TMO populate; multi-vesting/multi-lender) — gated on the TMO writeback key map.
-- **P5** Accreditation → Requirements workflow + annual questionnaire.
-- **P6** new-deal email (gated on `#f4rq` sending domain) + workflow-priority dashboard.
-
-I closed the parent `#rpzm` (decomposed + P1 shipped) and queued a tracking item for P2–P6. Queue them one at a time. `#vtx8`/`#67v2` stay held until the teammate's leads/admin restructure lands.
-
-### Re: #zwws — investor dashboard rework, phase 2 — opus-4-8
-
-> **Queue prompt:**
->
-> [#zwws]
-
-
-Shipped phase 2 (EFS `2f2ef47`, pushed): **available-deals-first landing**.
-
-- The investor portal root (`/portal-investor`) now redirects to **Available Deals** instead of the dashboard, so investors see open deals first on login — the call's "that's what they see when they log in."
-- `app/equityfundingsource/lib/portal/investor/routes.ts`; test added (`tests/investor-portal-e2e.test.ts`, 11 pass); plan updated. Full suite + builds green (the 2 reds remain the teammate's `apply4-P1` + `borrower-message-notify`).
-
-**Scoping note:** I kept this phase to the low-risk, user-facing redirect. The other Phase-2 parts — the **"I'm interested" email package** (gated on the `#f4rq` Resend sending domain) and **removing the dead distributions/statements routes/types** (ripples across the section union, API routes, and the QA coverage map) — are split into **Phase 2b** in the plan to avoid a risky multi-file deletion at the tail of a long run.
-
-`#zwws` stays open with its progress updated (P1 + P2 done; 2b, 3, 4, 5, 6 remain). Queue it again for the next phase — Phase 3 (simplified portfolio) is the natural next self-contained one. `#vtx8`/`#67v2` still held on the teammate's restructure.
-
-### Re: dashboard as the composite landing — opus-4-8
-
-> **Queue prompt:**
->
-> The `/portal-investor` root should redirect to the dashboard. The dashboard needs modules including, available deals and any existing deal pipelines. The existing deal pipeline should have the deal details, a pipeline map including what step of the pipeline the deal is at, and the next actionable step.
-
-
-Corrected the landing per your refinement (EFS `3e06907`, pushed):
-
-- **Landing reverted to the dashboard** — `/portal-investor` now redirects to the dashboard again (not straight to Available Deals).
-- **Dashboard is now a composite** with two new modules above My Positions:
-  - **Available Deals** preview — a few open deals with a "View all" link to the full page.
-  - **Deal Pipeline** — for each active deal: **deal details** (+ a "Deal details" link), a **stage map** highlighting the current step (`Reviewing → Committed → Documents → Funding → Active`), and the **next actionable step** (e.g. "Review & sign loan docs", "Wire funds to escrow").
-
-**Data:** pipeline uses dummy data for now (`INVESTOR_PIPELINE` + `INVESTOR_PIPELINE_STAGES` in `data.ts`); the real stages will sync from TMO (single source of truth) in a later phase, matching the call's "line it up exactly with TMO."
-
-**Files:** `routes.ts` (landing), `dashboard.tsx` (+ `DealPipeline`/`AvailableDealsPreview`), `data.ts` (pipeline model). 4 new tests (14 pass in the investor suite); plan updated; builds green. The 2 reds remain the teammate's `apply4-P1` + `borrower-message-notify`.
-
-`#zwws` still tracks the remaining phases (2b I'm-interested + dead-code cleanup, 3 simplified portfolio, 4 vestings, 5 questionnaire, 6 new-deal email — the workflow-priority piece is now partly realized by this pipeline module). Re-queue it for the next one.
-
-### Re: #zwws — investor dashboard phase 3 (simplified portfolio) — opus-4-8
-
-Shipped phase 3 (EFS `8d40c66`, pushed): **simplified portfolio**, since EFS doesn't service loans.
-
-- **Metrics dropped:** Avg. yield, YTD distributions, Next distribution. **Now showing:** **Total funded** + **Loans with EFS** (count).
-- Subtitle drops the "next distribution" line → "{n} active loans with EFS".
-- Position cards already carry **address, amount, rate, maturity, upcoming payment**, sourced from accepted EFS funding records (new-system only).
-- `dashboard.tsx`; test added (15 pass in the investor suite); plan updated; builds green.
-
-**Progress:** P1 nav · P2 dashboard-composite landing · P3 simplified portfolio — all shipped. `#zwws` now tracks 2b (I'm-interested + dead-code), 4 (vestings, TMO-gated), 5 (questionnaire), 6 (new-deal email).
-
-Continuing to `#pt5w` next — fixing the teammate's 2 red tests as you queued.
-
-### Re: #pt5w — fix the teammate's red tests — opus-4-8
-
-> **Queue prompt:**
->
-> [#pt5w]
-
-
-Done (EFS `bc809e1`, pushed). Both reds were **stale test paths** left behind by the teammate's "Redefine folder structure" — no logic regressions, just references to moved files:
-
-- **`borrower-message-notify.test.ts`** — `notify.ts`/`routes.ts` moved to `lib/borrower/messages/`; repointed the import + `ROUTES` const.
-- **`apply4-P1`** — the lead→full-application handoff route moved to `lib/public/application_leads/index.ts`; repointed `file_text_(...)`.
-
-**Full suite is green again: 279 pass, 0 fail.** (Builds were already green; these were test-only path fixes.)
-
-**This unblocks `#vtx8` and `#67v2`** — the `application_leads`/admin area is no longer red on `origin/main`. They're still in the backlog (held); re-queue them whenever you want me to pick up the lead-disappears bug and the TMO-aligned admin pipeline.
-
-Queue is now drained. Investor dashboard rework P1–P3 shipped; `#zwws` tracks P2b/4/5/6.
-<!-- agent:boundary:54d1e83d -->
+<!-- agent:boundary:9cb66aa3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#zwws]
 <!-- /agent:queue -->
 
 ## Backlog

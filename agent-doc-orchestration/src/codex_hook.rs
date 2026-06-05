@@ -308,13 +308,20 @@ fn auto_queue_continuation_response(
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
+    // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
+    // continuation to an IN-PANE answer + persist instead of instructing Codex to
+    // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
+    // re-enters the pane it runs in and trips the recursive-direct-invocation
+    // deadlock guard; answering the next prompt in this same turn and persisting
+    // with `agent-doc finalize <FILE>` (a non-dispatch command) continues the
+    // queue without any nested self-invocation. This matches the run-path guard's
+    // own OwnedPaneSelfInvocation guidance so both sources agree.
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook kept an active `agent:queue auto` moving for {}. The next queue prompt is {:?}. Continue this turn by running `agent-doc {}` and do not send the final answer yet.",
-            file.display(),
-            prompt,
-            file.display()
+            "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            disp = file.display(),
+            prompt = prompt,
         ),
     }))
 }
@@ -361,13 +368,14 @@ fn marker_fallback_continuation_response(
     }
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
+    // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
+    // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {} with no tracked session state. The next queue prompt is {:?}. Continue this turn by running `agent-doc {}` and do not send the final answer yet.",
-            file.display(),
-            continuation.head_prompt,
-            file.display()
+            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            disp = file.display(),
+            prompt = continuation.head_prompt,
         ),
     }))
 }
@@ -2010,6 +2018,15 @@ agent-doc {}\n",
                 assert!(reason.contains("agent:queue auto"), "{reason}");
                 assert!(reason.contains("do #fix1"), "{reason}");
                 assert!(reason.contains("do not send the final answer"), "{reason}");
+                // #codex-self-reinvoke-prevent (Option B): the continuation must
+                // drive an in-pane answer + `finalize`, NOT instruct a recursive
+                // `agent-doc <FILE>` re-run from the owner pane.
+                assert!(reason.contains("in-pane"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
+                assert!(
+                    reason.contains("Do NOT run `agent-doc"),
+                    "continuation must warn against the recursive self-invocation: {reason}"
+                );
             }
             other => panic!("expected auto-queue continuation block, got {other:?}"),
         }

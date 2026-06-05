@@ -1,0 +1,19 @@
+# cargo-nextest configuration.
+#
+# #ci-per-test-timeout-guard: bound every individual test so a lock/IPC deadlock
+# (e.g. the run_stream `doc_lock` self-deadlock that once hung `make check` ~15
+# minutes at 0% CPU) fails fast with the offending test named, instead of hanging
+# the whole suite. The Makefile `test` target uses `cargo nextest run` whenever
+# cargo-nextest is installed, so this applies to every local/CI run on that path.
+#
+# A test running past `period` is logged as slow; after `terminate-after` periods
+# nextest kills it and reports a timeout failure (so the suite still terminates
+# and names the hung test). 60s × 3 = 180s ceiling — comfortably above the
+# slowest legitimate IPC-replay integration test (~20s) yet far below a hang.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+# CI mirrors the default ceiling; kept explicit so a future `--profile ci` run
+# inherits the same deadlock guard.
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 3 }

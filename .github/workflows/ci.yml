@@ -9,6 +9,13 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # #ci-per-test-timeout-guard backstop: CI runs `make check` via the plain
+    # `cargo test` fallback (cargo-nextest is not installed here), which has no
+    # per-test timeout, so a lock/IPC deadlock would otherwise hang until
+    # GitHub's 6-hour default. Cap the job well above a legitimate cold run
+    # (~25-40 min incl. compile + tmux-ci) but far below that ceiling. Precise
+    # per-test termination lives in .config/nextest.toml for the nextest path.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

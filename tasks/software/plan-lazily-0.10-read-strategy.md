@@ -39,7 +39,33 @@ uncontended). Two user directives:
 - Tests: existing suite under default (Low) + a HighConcurrency variant test;
   loom model unchanged (same algorithm). SPEC: revise *Lock strategy evaluation*.
 
-## Phase 2 — inline small-`Copy` seqlock (c) (`#rdstrat2`)
+## Phase 2 — inline small-`Copy` seqlock (c) (`#rdstrat2`) — IMPLEMENTED
+
+**Status (2026-06-05):** implemented in `src/thread_safe.rs`; loom-gated; opt-in
+via new `slot_copy` / `computed_copy` / `memo_copy` constructors. See SPEC →
+*Inline small-`Copy` seqlock (#rdstrat2)*.
+
+**Design deviation (forced by stable Rust):** selection is **not** automatic on
+the generic `slot`/`computed`/`memo`. Stable Rust cannot branch on `T: Copy`
+inside a generic fn lacking the `Copy` bound — method resolution is
+pre-monomorphization, so a `Copy`-gated impl is never *applicable* where the
+bound is unprovable (an inherent-vs-trait specialization probe silently resolves
+to the non-`Copy` fallback; verified). Automatic detection would need nightly
+`specialization`. Resolution: opt-in `Copy`-bounded `*_copy` constructors that
+compute the `InlineSpec` and route to `slot_with_equals_inline`, falling back
+transparently to the strategy path when the value exceeds `INLINE_CAP` (24
+bytes) or alignment 16.
+
+**Soundness deviation:** the buffer is `[AtomicU8; INLINE_CAP]` read/written with
+relaxed per-byte atomics, **not** a non-atomic `memcpy` (a non-atomic seqlock
+buffer racing the writer is a formally-UB data race). Per-byte atomics make the
+race well-defined and loom-modelable; `seq` Release/Acquire + an Acquire fence
+give the consistency envelope (crossbeam-style). Loom models:
+`inline_seqlock_reader_never_observes_torn_value`,
+`inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish`,
+`inline_seqlock_read_after_completed_invalidation_is_rejected`.
+
+Original plan (for reference):
 
 - Add `Inline` variant: fixed inline byte buffer + even/odd seqlock; chosen at
   creation when `size_of::<T>() <= INLINE_CAP && T: Copy`.

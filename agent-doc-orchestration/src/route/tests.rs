@@ -10969,3 +10969,20 @@ fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
         "the pane is busy on an active claude turn (active claude turn), not cold-starting"
     );
 }
+
+#[test]
+fn busy_route_queued_diagnostic_names_turn_in_progress_and_no_rerun() {
+    // #claude-busy-status-during-active-turn: the dispatch-only queued path
+    // surfaces a turn-in-progress + queued status (not the generic "rerun" busy
+    // message), so the operator sees why Run Agent Doc did not start now and that
+    // it will run on its own when the current turn finishes.
+    let claude = crate::harness::HarnessConfig::claude();
+    let msg = busy_route_queued_diagnostic_message(std::path::Path::new("plan.md"), &claude);
+    assert!(msg.contains("turn in progress"), "{msg}");
+    assert!(msg.contains("queued"), "{msg}");
+    assert!(msg.contains("plan.md"), "{msg}");
+    assert!(msg.contains("claude"), "{msg}");
+    assert!(msg.contains("No need to rerun"), "{msg}");
+    // Must NOT carry the generic busy diagnostic's rerun instruction.
+    assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");
+}

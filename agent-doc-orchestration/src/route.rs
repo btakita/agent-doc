@@ -1475,6 +1475,48 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
     }
 }
 
+/// `#claude-busy-status-during-active-turn` (decision: status-surfacing only):
+/// message for the dispatch-only path where the routed Run Agent Doc landed on a
+/// pane that is busy on an active turn and was *queued* rather than refused. The
+/// queued path previously returned `Ok` silently, so the operator saw nothing and
+/// the session looked idle/unresponsive while a turn was in flight. This makes the
+/// turn-in-progress state and the auto-queue outcome visible. Unlike the generic
+/// busy diagnostic it does NOT tell the operator to rerun — the prompt will run on
+/// its own when the current turn finishes.
+fn busy_route_queued_diagnostic_message(file: &Path, harness: &HarnessConfig) -> String {
+    format!(
+        "[agent-doc] turn in progress — the live {} session is busy, so Run Agent Doc for {} was queued and will run when the current turn finishes. No need to rerun.",
+        harness.binary,
+        file.display()
+    )
+}
+
+fn emit_busy_route_queued_diagnostic(
+    tmux: &Tmux,
+    pane_id: &str,
+    file: &Path,
+    harness: &HarnessConfig,
+) {
+    let msg = busy_route_queued_diagnostic_message(file, harness);
+    if let Err(e) = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-d",
+            BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS,
+            &msg,
+        ])
+        .status()
+    {
+        eprintln!(
+            "[route] warning: failed to emit busy-route queued diagnostic to pane {}: {}",
+            pane_id, e
+        );
+    }
+}
+
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -2564,6 +2606,12 @@ fn dispatch_only_send_reopen(
                 queued.already_present,
                 queued.superseded
             );
+            // #claude-busy-status-during-active-turn: this queued path previously
+            // returned Ok silently, so the operator saw nothing and the session
+            // looked idle while a turn was in flight. Surface the turn-in-progress
+            // + queued status on the pane (status-only; no hard block — the prompt
+            // already auto-queued above and runs when the current turn finishes).
+            emit_busy_route_queued_diagnostic(tmux, &dispatch_pane, file, harness);
             return Ok(dispatch_pane);
         }
         let recovery = dispatch_blocker_recovery_hint(harness, &reason, file);

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue_active: true
 ---
 
 ## Status
@@ -76,7 +76,27 @@ Shipped phase 2 (EFS `2f2ef47`, pushed): **available-deals-first landing**.
 **Scoping note:** I kept this phase to the low-risk, user-facing redirect. The other Phase-2 parts — the **"I'm interested" email package** (gated on the `#f4rq` Resend sending domain) and **removing the dead distributions/statements routes/types** (ripples across the section union, API routes, and the QA coverage map) — are split into **Phase 2b** in the plan to avoid a risky multi-file deletion at the tail of a long run.
 
 `#zwws` stays open with its progress updated (P1 + P2 done; 2b, 3, 4, 5, 6 remain). Queue it again for the next phase — Phase 3 (simplified portfolio) is the natural next self-contained one. `#vtx8`/`#67v2` still held on the teammate's restructure.
-<!-- agent:boundary:0009152d -->
+
+### Re: dashboard as the composite landing — opus-4-8
+
+> **Queue prompt:**
+>
+> The `/portal-investor` root should redirect to the dashboard. The dashboard needs modules including, available deals and any existing deal pipelines. The existing deal pipeline should have the deal details, a pipeline map including what step of the pipeline the deal is at, and the next actionable step.
+
+
+Corrected the landing per your refinement (EFS `3e06907`, pushed):
+
+- **Landing reverted to the dashboard** — `/portal-investor` now redirects to the dashboard again (not straight to Available Deals).
+- **Dashboard is now a composite** with two new modules above My Positions:
+  - **Available Deals** preview — a few open deals with a "View all" link to the full page.
+  - **Deal Pipeline** — for each active deal: **deal details** (+ a "Deal details" link), a **stage map** highlighting the current step (`Reviewing → Committed → Documents → Funding → Active`), and the **next actionable step** (e.g. "Review & sign loan docs", "Wire funds to escrow").
+
+**Data:** pipeline uses dummy data for now (`INVESTOR_PIPELINE` + `INVESTOR_PIPELINE_STAGES` in `data.ts`); the real stages will sync from TMO (single source of truth) in a later phase, matching the call's "line it up exactly with TMO."
+
+**Files:** `routes.ts` (landing), `dashboard.tsx` (+ `DealPipeline`/`AvailableDealsPreview`), `data.ts` (pipeline model). 4 new tests (14 pass in the investor suite); plan updated; builds green. The 2 reds remain the teammate's `apply4-P1` + `borrower-message-notify`.
+
+`#zwws` still tracks the remaining phases (2b I'm-interested + dead-code cleanup, 3 simplified portfolio, 4 vestings, 5 questionnaire, 6 new-deal email — the workflow-priority piece is now partly realized by this pipeline module). Re-queue it for the next one.
+<!-- agent:boundary:26ea9241 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,6 +104,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~The `/portal-investor` root should redirect to the dashboard. The dashboard needs modules including, available deals and any existing deal pipelines. The existing deal pipeline should have the deal details, a pipeline map including what step of the pipeline the deal is at, and the next actionable step.~
+- [#zwws]
+- [#pt5w]
 <!-- /agent:queue -->
 
 ## Backlog

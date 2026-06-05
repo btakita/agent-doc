@@ -58,7 +58,36 @@ The token at `passage btak/NPM_TOKEN` is a **classic/automation token**; your np
 3. **CI path.** Set GitHub repo secret `NPM_TOKEN` (granular) + variable `TSIFT_ENABLE_NPM_PUBLISH=true`, then re-push tag `v0.1.62` — the `publish OpenCode npm plugin` job in `release.yml` will publish. (Currently neither the secret nor the var exists in GitHub; only the crates.io pair is set.)
 
 Gating `#0y9e` until a publish-capable token or OTP is available. The agent-doc `release + publish` item remains separately gated under the stopped queue.
-<!-- agent:boundary:02926f00 -->
+
+### Re: NPM_TOKEN secret + CI publish attempt — opus-4-8
+
+> **Queue prompt:**
+>
+> NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions
+
+
+You added `NPM_TOKEN` to GitHub secrets ✓ — so I wired the rest of the CI path and triggered it. It ran, but **npm still rejected the publish with the same E403**. The blocker is the **token type**, not the path.
+
+#### What I did
+- Set the missing repo variable `TSIFT_ENABLE_NPM_PUBLISH=true` (the publish job's `if` requires it; only the crates pair existed).
+- Triggered `release.yml` on tag `v0.1.62` (run [27000451050](https://github.com/btakita/tsift/actions/runs/27000451050)).
+- Result: `verify` ✅, `build` (3 targets) ✅, `publish crates.io` ✅ (skipped — 0.1.62 already on crates.io, idempotent), `publish GitHub release` ✅, **`publish OpenCode npm plugin` ❌**.
+
+#### Same blocker, now confirmed on CI too
+```
+npm error 403 Forbidden - PUT https://registry.npmjs.org/opencode-tsift
+Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.
+```
+The `NPM_TOKEN` you stored as a GitHub secret is a **classic/automation token**. npm's 2FA-on-publish policy rejects classic tokens whether the publish runs locally or in CI.
+
+#### The one fix
+Replace the GitHub secret with a **Granular Access Token**: npmjs.com → *Access Tokens → Generate New Token → Granular* → Permissions **Packages and scopes = Read and write** (all packages, or scoped to `opencode-tsift`). Granular tokens are accepted for automated publish under 2FA. Update the `NPM_TOKEN` repo secret with it, then tell me — I'll re-trigger `release.yml` on `v0.1.62` (everything else is wired: var set, job enabled, all other jobs green).
+
+#### Heads-up (not blocking)
+The `v0.1.62` tag predates recent `commands/*.md` additions on `main`, so CI packs the tag's snapshot — **12 files vs 20 on current `main`**. If you want the newer commands shipped, we should cut a new version + tag; otherwise `0.1.62` ships its 12-file snapshot.
+
+`#0y9e` stays gated until the granular token is in place. Halting the queue (everything left is blocked on this one token).
+<!-- agent:boundary:b77bec3f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +98,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~complete the wip~
-- NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions
+- ~NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions~
 - release + publish
 - ~do [#0y9e]~
 <!-- /agent:queue -->

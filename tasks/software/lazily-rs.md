@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -62,7 +62,26 @@ Implemented, loom-gated, committed + pushed (`lazily-rs` `6adae49`, superproject
 `make check`'s `benchmark-check` reports stale, but that is **pre-existing** leftover `target/criterion/` cache unrelated to this change (a clean HEAD worktree passes; my edits touch no benchmarks/scripts/instrumentation). An inline-vs-strategy A/B benchmark belongs with the 0.10.0 release work (#9mhz).
 
 Next queue item **#9mhz** (release 0.10.0) is user-gated on the irreversible crates.io publish — I'll prepare the bump/VERSIONS/changelog when the loop reaches it and stop for your confirmation before publishing.
-<!-- agent:boundary:34eefb57 -->
+
+### Re: [#9mhz] Phase 3 (#rdstrat3) — release lazily 0.10.0 — opus-4-8
+
+> **Queue prompt:**
+>
+> [#9mhz]
+
+
+**Released.** You approved the full publish; lazily `0.10.0` is live.
+
+- **crates.io:** `lazily 0.10.0` published.
+- **git:** `release v0.10.0` (`36b7567`), tag `v0.10.0` pushed; submodule pointer bumped in the superproject (`963925256`).
+- **GitHub release:** https://github.com/btakita/lazily-rs/releases/tag/v0.10.0
+
+Ships #rdstrat1 (runtime-selectable read strategy, **default flipped 0.9.0 arc-swap → 0.10.0 LowConcurrency**) + #rdstrat2 (inline small-`Copy` seqlock, opt-in `slot_copy`/`computed_copy`/`memo_copy`). `cargo publish --dry-run` clean (34 files); full test suite + Loom 15/15 green at 0.10.0.
+
+**BENCHMARKS.md** was regenerated for 0.10.0 reflecting the new default + inline path (the version-tracking spec test now passes). I regenerated via `--no-run` from the fresh non-async Criterion data because `make benchmark-update`'s `cargo bench --features instrumentation,async,tokio` hits a **pre-existing async-feature concurrency race** (`async_context.rs:765` unreachable + `:774` notifier-dropped under the `async_concurrent_contention/4` bench) — last touched by `5cc4ac5`, unrelated to this thread_safe work. The required BENCHMARKS.md families are all core + thread_safe (no async family), so the release data is complete and current. Filed the async race as a backlog item.
+
+Queue drained.
+<!-- agent:boundary:0341e29b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,14 +90,12 @@ Next queue item **#9mhz** (release 0.10.0) is user-gated on the irreversible cra
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~[#vbyc]~
-- [#9mhz]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#9mhz] Phase 3 (#rdstrat3): release lazily 0.10.0 (runtime-selectable read strategy + inline seqlock; default flips to LowConcurrency) — gate on user confirm for crates.io publish. Plan: tasks/software/plan-lazily-0.10-read-strategy.md [recommended]
+- [ ] [#k03k] [recommended] Fix pre-existing async_context.rs concurrency race surfaced by the async_concurrent_contention benchmark: 'get() already checked Resolved' unreachable (src/async_context.rs:765) + 'get_async: notifier dropped unexpectedly' (:774) under 4-worker contention. Blocks make benchmark-update (cargo bench --features instrumentation,async,tokio); 0.10.0 BENCHMARKS.md was regenerated via --no-run from non-async criterion data. Not a thread_safe/#rdstrat regression.
 <!-- /agent:backlog -->
 
 ## Review

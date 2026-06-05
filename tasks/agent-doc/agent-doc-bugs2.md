@@ -86,7 +86,7 @@ First unblocked the concurrent orchestration WIP per your instruction, then impl
 The mid-cycle frontmatter **writes** (mirror at each transition + clear) are genuinely blocked on a design decision: the plan says the block is *committed at finalize* while this backlog item said *clear at terminal* — opposite lifecycles. Resolving that, adding diff/session-check managed-state handling, and live-verifying on the hot path is its own unit of work. The read-side already delivers the resume-detection / observability value with zero per-cycle document mutation. Tracked as a `[blocked: design decision]` review item with token-efficient NEXT steps.
 
 Reaped `#fmrunid-wire` (read-side done); gated the write-side for a lifecycle decision.
-<!-- agent:boundary:6f34973e -->
+<!-- agent:boundary:16b0335c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -111,7 +111,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [x] [#fmrunid-wire] Phase 5b read-side — CycleState::to_pipeline() + preflight pipeline output field + resolve_pipeline_state (cycle-state authoritative; frontmatter fallback). DONE (agent-doc dc4065c5, installed + release-built; make check 708+2269 tests, 0 failed).
 <!-- /agent:backlog -->
 
 ## Review

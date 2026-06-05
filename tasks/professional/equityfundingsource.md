@@ -32,70 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-052334.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-054757.md`*
 
 Compacted content:
-- Archived 5 response topic(s): transcribe + diarize 2026-06-03 16-58-49-compressed.mp4; speaker names; task list from call transcript; 2 more
+- Archived 3 response topic(s): #knpa; #19gv; queue reprioritization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: #knpa — homepage copy + loan-parameters revisions — opus-4-8
-
-> **Queue prompt:**
->
-> [#knpa]
-
-
-Done and pushed (`9c589ae`, EFS `origin/main`). Applied every item in `#knpa` to `lib/ui--server--efs/home/index.ts`:
-
-- **Loan parameters:** min `$50K`, terms `12 to 36 months`, **dropped the Points row**, `Properties: Primarily CA`, `Lien position: 1st, 2nd, other junior` (grid `cols-7 → cols-6`).
-- **Products:** dropped `Tract development`; `Equity extraction · Payoff existing hard money` → `Equity loans · Payoff existing`.
-- **Recent transactions** eyebrow `Proof` → `Track record`.
-- **Trust copy:** `California-licensed loan arranger` → `loan originator`; `1st, 2nd, and other junior lien positions`.
-- **Contact block reordered:** Contact heading first, then email → phone → fax → address; License + NMLS collapsed to one small line at the bottom (was two standalone 24px rows).
-
-**Spec + tests:** updated `docs/efs_homepage_layout_copy.md`; added `tests/home-copy.test.ts` (5 tests, all green). `bun run build` + `build:worker` both pass.
-
-**Heads-up — pre-existing red on EFS `origin/main`:** a teammate pushed 7 commits (folder restructure + payments) while I worked; I rebased cleanly on top. Their changes leave **2 tests failing independently of my work** (confirmed by running them on `origin/main` without my commits): `borrower-message-notify.test.ts` (stale import — `notify.ts` moved to `lib/borrower/messages/`) and the apply4 P1 prequal-handoff test. My `#knpa` change is isolated and green; I filed a `[blocked-external]` backlog item rather than fix their in-flight restructure inside a copy cycle.
-
-Queue continues with `#19gv` (rate estimator LTV fixes) next.
-
-### Re: #19gv — rate estimator LTV fixes — opus-4-8
-
-> **Queue prompt:**
->
-> [#19gv]
-
-
-Done and pushed (EFS `1ab3fd9`). Reworked the homepage rate estimator (`lib/ui--browser--efs/index.ts` + result panel in `home/index.ts`):
-
-- **Show loan amount** — added a "Loan amount" line at the top of the results panel (`efs-loan-amount-out`), currency-formatted.
-- **Hard-stop at 100% LTV** — loan amount clamps to property value; the clamp now writes back to both the number and range inputs so the UI can't display an LTV over 100%.
-- **Dynamic recalc** — the loan-amount controls' `max` recalibrates to the current property value on every change.
-- **65%+ "above guidelines" band** — replaces the rate range and monthly payment with **"Contact for custom quote"** (and `—`) instead of quoting a number, driving the inquiry as the call asked.
-- **Currency formatting** — `$`/comma via `Intl.NumberFormat` on loan-amount and monthly outputs.
-
-**Design:** extracted a pure `rate_estimate_(pv, la, pt, purpose)` so the math is unit-testable; `recompute()` is now a thin DOM wrapper.
-
-**Spec + tests:** PRD bullet added for the new estimator behavior (and corrected a stale "loan arranger" → "loan originator" there); `tests/rate-estimator.test.ts` (6 tests). Full suite 268 pass, `build` + `build:worker` green. The 2 reds remain the teammate's pre-existing `apply4 P1` + `borrower-message-notify` import (flagged last cycle).
-
-Queue continues with `#vtx8` (application lead-disappears bug) next. Note: `#vtx8`/`#67v2` are in the admin/application-leads area the teammate is actively restructuring, so I'll check for conflicts there.
-
-### Re: queue reprioritization — skip to safe items — opus-4-8
-
-> **Queue prompt:**
->
-> [#ty2v]: Use the bank style. Allow the admin to set wire info. Use dummy data for now.
-
-
-Per your call, reordered the queue to the self-contained items and held the churn-zone ones:
-
-- **Now queued:** `#ty2v` (secure wiring — bank-style click-to-reveal, admin-set, dummy data) → `#rpzm` (investor portal dashboard rework).
-- **Held in backlog:** `#vtx8` (lead-disappears bug) and `#67v2` (admin pipeline) — both live in `application_leads`/admin, which your teammate is mid-restructure (they moved `routes.ts`; `apply4-P1` + a leads test are red on `origin/main`). I'll re-queue these once their folder-restructure lands and main is green.
-
-**Done so far this run:** `#knpa` (homepage copy, `9c589ae`) and `#19gv` (rate estimator, `1ab3fd9`) — both pushed, tested, builds green.
-
-`#ty2v` is a full vertical slice (investor-portal view + admin-set store + reveal UX + tests), so I'm checkpointing here to give it a clean, focused turn rather than rush it at the tail of this long run. Re-invoke `/agent-doc` (or set `queue: go`) and I'll build `#ty2v` next with the bank-style / admin-set / dummy-data scoping you specified.
-<!-- agent:boundary:3cf66ba5 -->
+<!-- agent:boundary:eb29dbe8 -->
 <!-- /agent:exchange -->
 ###
 <!--

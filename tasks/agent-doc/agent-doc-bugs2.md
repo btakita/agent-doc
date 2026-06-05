@@ -131,7 +131,7 @@ So "auto-recognize a bare `#x` as the id" is a real **design tradeoff**, not jus
 **My recommendation:** the durable fix is the one I've already adopted — I always write the id explicitly as `[#descriptive-name]`, so you get readable ids without the binary having to guess. If you'd rather I *also* implement the bare-`#x` → `[#x]` auto-correction (accepting that a leading bare tag becomes the id), say so and I'll build it with tests. Otherwise I'll leave the parser as-is.
 
 Backlog now reads cleanly: `[#codex-self-reinvoke-prevent]`, `[#optional-do-re]`, `[#22a8]`.
-<!-- agent:boundary:e1a77deb -->
+<!-- agent:boundary:d766a25d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -156,7 +156,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#csrp] [superseded] retired duplicate id — renamed to [#codex-self-reinvoke-prevent] (same work, descriptive id)
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 - [ ] [#22a8] [blocked: design decision] Phase 5b write-side — mirror agent_doc_pipeline into doc frontmatter at each cycle phase transition + clear at terminal. NEXT: (1) resolve block lifecycle (plan says commit-at-finalize, backlog says clear-at-terminal — pick one); (2) add agent_doc_pipeline to preflight + session_check managed-state diff-ignore so mirror writes never read as user prompts; (3) live-verify on hot path with IDE buffer settled. Foundation: read-side dc4065c5; plan tasks/agent-doc/plans/reentrant-finalize-pipeline.md.

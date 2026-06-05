@@ -15,7 +15,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: stop
-queue_active: true
 ---
 
 ## Status
@@ -152,7 +151,7 @@ They share `route.rs`, so they are **not cleanly separable per file**. Running `
 
 Once the concurrent session commits its WIP, the clean sequence is: `make check` → push `20260422/codex-agent-backend` → `cargo install --path . && cargo build --release` → re-open this session and confirm `queue: stop` collapses `queue_active`. If you want the live fix sooner without waiting, I can build+install **from a detached worktree at HEAD `40859a62`** (phases 1-3, no foreign WIP) — say the word.
 
-### Re: complete the wip + release prep — opus-4-8
+### Re: complete the wip + release prep — opus-4-8 (HEAD)
 
 > **Queue prompt:**
 >
@@ -184,7 +183,7 @@ The uncommitted WIP I flagged last turn (`pending_cmd.rs`, `src/main.rs`, `runbo
 #### To proceed after you've manually tested
 
 Flip the queue marker from `stop` back to `go` (or just say "publish"). I've left `- release + publish` queued under a **stopped** queue so nothing auto-publishes in the meantime. When you green-light it, I'll finalize VERSIONS.md, merge to main, tag, and publish all targets.
-<!-- agent:boundary:3b2960fe -->
+<!-- agent:boundary:19208013 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,7 +192,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" stop -->
 - ~complete the wip~
 - release + publish
 <!-- /agent:queue -->

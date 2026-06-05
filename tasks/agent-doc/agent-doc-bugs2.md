@@ -29,109 +29,15 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-073609.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-082224.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#route-ready-wait-fast-fail]; why does agent-doc recursively shell out the same command; do Option B + add an Option A plan
+- Archived 4 response topic(s): do [#queue-no-stall-on-head-edit]; do [#codex-mcp-server]; Fix the equityfundingsource.md finalize race condition; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#queue-no-stall-on-head-edit] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
-
-
-Done. The queue auto-loop no longer stalls when you edit the **head** prompt between cycles on a settled buffer — it adopts the edit and keeps looping. It only pauses while you're actively mid-edit.
-
-**What changed** (`preflight.rs`, `run_queue_maintenance` `item_modified` branch):
-
-- Before: any head-prompt change between cycles → hard halt (`queue_halted=item_modified`): stripped `auto`, forced `queue_active:false`. That stalled the loop on *every* settled head edit and required a manual restart.
-- After: the halt is gated on a live typing indicator. If the buffer is **settled** (`is_typing_via_file` false — no editor tracking, or the indicator has gone idle), the loop **adopts the edited head as the new prompt** and stays armed (`auto` + `queue_active:true` preserved). Only when you're **actively mid-edit** does it keep the old pause, so it never grabs a half-typed head.
-- New helper `adopt_edited_queue_head_into_snapshot` copies the live file's queue region into the snapshot, so closeout queue-consume proves the same head and the next cycle sees no spurious `item_modified` edit (idempotent — verified by a second maintenance pass in the test).
-
-Tail/non-head edits already didn't stall, and that path is unchanged — so "proceed to the next item while the operator types in a later item" already held.
-
-**Tests** (`preflight.rs`):
-- `preflight_adopts_edited_queue_head_when_buffer_settled` — settled head edit adopts + continues (`queue_halted=None`, active, `queue_prompts=[newhead, nexthead]`), snapshot absorbs the new head, follow-up pass doesn't re-halt.
-- `preflight_pauses_when_active_queue_head_changes_mid_edit` — repurposed the old halt test; now marks active typing so the mid-edit pause still halts.
-- Updated `queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt` to mark active typing so it still exercises the halt + live-buffer convergence path.
-
-**Verification:** orchestration crate `2279 passed, 0 failed`; `agent-doc` lib `23 passed`; `make check` exit 0. Built `--release` + `cargo install` (both binaries refreshed). Submodule committed `0d84ec15` + pushed (`20260422/codex-agent-backend`); superproject pointer bump `fdc2e826d`.
-
-Next queue item is `do [#codex-mcp-server]` — that's the deferred Option A MCP-server epic (its own draft plan), not a one-cycle `--done`; I'll handle its closeout appropriately when the loop reaches it.
-
-### Re: do [#codex-mcp-server] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#codex-mcp-server]
-
-
-Gating this one rather than forcing it done. `#codex-mcp-server` (Option A — drive Codex via an MCP server) is a multi-phase architectural epic, not a one-cycle auto-loop task, and its own plan (`tasks/agent-doc/plans/codex-mcp-server-option-a.md`) is explicitly **Draft / deferred** with open design questions I shouldn't answer unilaterally in an unattended drain:
-
-- **session lifetime + concurrency** — one server per project vs per document, and how it maps to tmux panes / the live IDE IPC visible-buffer guard / CRDT merge;
-- **streaming protocol** — the CLI `--stream` writes incrementally; the MCP path needs a streaming tool-result or checkpoint design;
-- **migration** — keep the CLI harnesses (Claude/OpenCode/direct-exec) green while only Codex moves to MCP;
-- **headless/auth** — interactively-authenticated MCP servers may be absent in cron/headless Codex runs.
-
-Standing up a new MCP server surface (protocol dependency, tool schema, serve loop) and committing it unattended would lock in answers to those questions before review — and the recursion it removes is already contained in the interim by **Option B** (`#codex-self-reinvoke-prevent`, shipped). So this is **gated pending a dedicated, reviewed session**: decide the session/concurrency + streaming model first, then implement in phases per the plan's design sketch (serve skeleton + read-only `preflight`/`plan`/`read` tools → `finalize`/`write` tools → Codex Stop-hook tool-call continuation → streaming + concurrency).
-
-Gated, not dropped — the plan file holds the full roadmap. The auto-loop continues to the queued bug fixes next.
-
-### Re: Fix the equityfundingsource.md finalize race condition — opus-4-8
-
-> **Queue prompt:**
->
-> The agent-doc turn on equityfundingsource.md stalled on the finalize step with the message `My response can't commit because IntelliJ and the agent are racing on the doc, and I'm independently blocked on the images. I'm halting rather than fighting the buffer.`. Fix this race condition.
-
-
-Traced it, but I'm not blind-patching it in the unattended loop — it's a fail-closed, data-loss-sensitive guard that needs live-IntelliJ reproduction first. Captured the analysis as a plan + gated review item instead.
-
-**Where it stalls** (`write.rs`): `finalize --stream` writes IPC-first. When IntelliJ has the doc open and doesn't ACK the patch within the 2s IPC window, the code enters the IPC-timeout fallback. There, before the disk write, `guard_visible_write_idle_and_current` (write.rs:7629 → 5838) compares the IDE's live-buffer digest sidecar against `expected_current`. If they diverge it `bail!`s, and the fallback then does `std::process::exit(75)` **without writing or committing** (write.rs:7633-7639) — that non-persisting exit is your "halting rather than fighting the buffer" stall. The response is lost for the cycle.
-
-**Race window:** IPC ACK times out (IDE busy/slow) **and** the live-buffer digest no longer matches expected.
-
-**Why it's deliberately fail-closed:** the guard stops the agent's disk write from clobbering genuine unsaved IDE edits. Loosening it wrongly is a data-loss risk, so this isn't a safe unattended guess.
-
-**Hypotheses to test with a live repro** (need the `ops.log` `visible_write_deferred_live_buffer_changed` hash/len triple): (1) stale-digest false positive — the IDE applied the patch just after the timeout so divergence is measured against the wrong baseline; (2) pure ACK latency, no real edit — an adaptive window / post-timeout ACK re-poll would let IPC finish; (3) genuine divergence — should CRDT-merge, not bail.
-
-**Lowest-risk first step:** never `exit(75)` with the response unpersisted — always capture it (the capture ledger already exists) so the next preflight replays it, removing the data-loss edge without loosening the clobber guard.
-
-Full mechanism, fix options, and exit criteria: `tasks/agent-doc/plan-finalize-visible-buffer-ipc-timeout-race.md`. Tracked as gated review item `#finalize-visible-buffer-ipc-timeout-race`. (The "blocked on the images" half of the original report is a separate content blocker, not part of this race — left out of scope here.)
-
-### Re: response wrote outside agent:exchange (denied File Cache Conflict, base-level duplicate corruption) — opus-4-8
-
-> **Queue prompt:**
->
-> A equityfundingsource.md queue task response wrote outside of the agent:exchange area into the base document level and the document was corrupted with duplicate content. I did deny a JB `File Cache Conflict` by accident. I manually fixed the document. 
-
-
-Found a concrete gap, but I'm not blind-patching it unattended — captured a focused plan + gated review item instead, because I don't have the corrupted artifact (you already fixed the doc) and the corruption likely originates plugin-side where the binary guard never runs.
-
-**This is the Cancel/deny branch of the File Cache Conflict** (you "Keep memory changes"), and your signature — response **outside** `agent:exchange` at base-document level **with duplicate content** — is *not* one of the cases already covered. The runbook + SimWorld cover (1) Cancel→clean auto-recovery and (2) late-*accept*→duplicate `### Re:` *inside* exchange. Yours is structural corruption outside the component — a new, higher-severity class.
-
-**Concrete code finding** — the out-of-exchange write guard has a hole that exactly fits a denied-cancel divergence:
-- `guard_no_conversation_tail_outside_exchange` (core `template.rs:614`) **no-ops when no clean `exchange` component parses** (lines 616-618 `return Ok(())`). A denied cache conflict leaves the IDE's stale memory buffer diverged from disk with malformed/duplicate `agent:exchange` markers → guard silently passes → content lands at base level.
-- It also only inspects content **after** the close tag, so duplicate-opener / above-opener content isn't seen.
-- `repair_conversation_tail_outside_exchange` bails as "ambiguous" on genuinely corrupted shapes — which is why you had to fix it by hand.
-
-**Plugin-side angle:** Cancel leaves the file-IPC patch files in place; a later deferred apply against the stale buffer is the suspected vehicle, and that path bypasses the binary's pre-write guard entirely.
-
-**Fix directions (need the artifact to pick):** tighten the guard to fail closed when template-mode expects exactly one clean `exchange` but can't find it (vs a legitimately exchange-less inline doc); detect base-level `### Re:`/prompt content above/between markers, not just after the close tag; and have the plugin revalidate a deferred patch against HEAD before applying (shared with `#jbccacceptdup`).
-
-Full mechanism, hypotheses, fix options, and exit criteria: `tasks/agent-doc/plan-jb-cache-cancel-response-outside-exchange-corruption.md`. Tracked as gated review item `#jb-cache-cancel-response-outside-exchange`.
-
-To move this from analysis to fix, the most useful next input is the **corrupted document** (a `git stash`/copy from before your manual fix, or the `.agent-doc/logs/ops.log` lines around that cycle) so I can pin which of the three hypotheses actually bit.
-<!-- agent:boundary:fe15f287 -->
+<!-- agent:boundary:5e96ce5a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.~
-- ~do [#codex-mcp-vs-cli-reinvoke]~
-- ~do [#codex-mcp-server]~
-- ~The agent-doc turn on equityfundingsource.md stalled on the finalize step with the message `My response can't commit because IntelliJ and the agent are racing on the doc, and I'm independently blocked on the images. I'm halting rather than fighting the buffer.`. Fix this race condition.~
-- ~A equityfundingsource.md queue task response wrote outside of the agent:exchange area into the base document level and the document was corrupted with duplicate content. I did deny a JB `File Cache Conflict` by accident. I manually fixed the document. ~
 - JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.
 <!-- /agent:queue -->
 ###

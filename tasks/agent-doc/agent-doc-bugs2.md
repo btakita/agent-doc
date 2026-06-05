@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -176,21 +176,15 @@ There's **no token-efficient query** of `agent:review` — to triage you must re
 Ship Stage 1 (`review list`) first — smallest high-value piece. Do you want the Stage 2 stale-review **lint** (warn-only), or skip it for now?
 
 Net: feed-back already exists (`review ungate-tasks`); the missing query (`#review-list-query`) is the unlock for triaging the 62 items, now planned + backlogged.
-<!-- agent:boundary:922307db -->
+<!-- agent:boundary:eaeae7db -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~do [#tagpath-lint-queue-control]~
-- ~do [#fm-run-id-step]~
-- ~do [#fmrunid-wire]~
-- ~`do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.~
-- ~Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.~
-- ~When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.~
-- We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
+- do [#repair-strike-consumed-head]
 - do [#optional-do-re]
 - monsterrodholders.md had an unfinished turn. The response was not committed. 
 - JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
-- do [#repair-strike-consumed-head]
+- do [#review-list-query]
 <!-- /agent:queue -->
 ###
 <!--

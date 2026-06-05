@@ -58,7 +58,28 @@ Done and pushed (`9c589ae`, EFS `origin/main`). Applied every item in `#knpa` to
 **Heads-up — pre-existing red on EFS `origin/main`:** a teammate pushed 7 commits (folder restructure + payments) while I worked; I rebased cleanly on top. Their changes leave **2 tests failing independently of my work** (confirmed by running them on `origin/main` without my commits): `borrower-message-notify.test.ts` (stale import — `notify.ts` moved to `lib/borrower/messages/`) and the apply4 P1 prequal-handoff test. My `#knpa` change is isolated and green; I filed a `[blocked-external]` backlog item rather than fix their in-flight restructure inside a copy cycle.
 
 Queue continues with `#19gv` (rate estimator LTV fixes) next.
-<!-- agent:boundary:c3a69919 -->
+
+### Re: #19gv — rate estimator LTV fixes — opus-4-8
+
+> **Queue prompt:**
+>
+> [#19gv]
+
+
+Done and pushed (EFS `1ab3fd9`). Reworked the homepage rate estimator (`lib/ui--browser--efs/index.ts` + result panel in `home/index.ts`):
+
+- **Show loan amount** — added a "Loan amount" line at the top of the results panel (`efs-loan-amount-out`), currency-formatted.
+- **Hard-stop at 100% LTV** — loan amount clamps to property value; the clamp now writes back to both the number and range inputs so the UI can't display an LTV over 100%.
+- **Dynamic recalc** — the loan-amount controls' `max` recalibrates to the current property value on every change.
+- **65%+ "above guidelines" band** — replaces the rate range and monthly payment with **"Contact for custom quote"** (and `—`) instead of quoting a number, driving the inquiry as the call asked.
+- **Currency formatting** — `$`/comma via `Intl.NumberFormat` on loan-amount and monthly outputs.
+
+**Design:** extracted a pure `rate_estimate_(pv, la, pt, purpose)` so the math is unit-testable; `recompute()` is now a thin DOM wrapper.
+
+**Spec + tests:** PRD bullet added for the new estimator behavior (and corrected a stale "loan arranger" → "loan originator" there); `tests/rate-estimator.test.ts` (6 tests). Full suite 268 pass, `build` + `build:worker` green. The 2 reds remain the teammate's pre-existing `apply4 P1` + `borrower-message-notify` import (flagged last cycle).
+
+Queue continues with `#vtx8` (application lead-disappears bug) next. Note: `#vtx8`/`#67v2` are in the admin/application-leads area the teammate is actively restructuring, so I'll check for conflicts there.
+<!-- agent:boundary:d297bbcf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,17 +88,17 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~[#knpa]~
-- [#19gv]
+- ~[#19gv]~
 - [#vtx8]
 - [#67v2]
 - [#rpzm]
+- [#ty2v]: Use the bank style. Allow the admin to set wire info. Use dummy data for now.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
-- [ ] [#19gv] Rate estimator LTV fixes (2026-06-03 call): show loan amount, hard-stop at 100% LTV, dynamic recalc on property value, 'Above guidelines -> contact for custom quote' in the 65-80% band, currency formatting. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#rpzm] [recommended] Investor portal dashboard rework (2026-06-03 call): available-deals-first on login, new-deal email + 'I'm interested' button/email package, drop Returns/Distributions/Statements, simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only), special-instructions/vestings (populate TMO; multi-vesting/multi-lender per loan), requirements/questionnaire (annual), workflow-priority items. Relates to #qakx. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md

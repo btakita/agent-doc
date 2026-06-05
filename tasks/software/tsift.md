@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: start
 ---
 
 ## Status
@@ -58,7 +58,7 @@ The token at `passage btak/NPM_TOKEN` is a **classic/automation token**; your np
 3. **CI path.** Set GitHub repo secret `NPM_TOKEN` (granular) + variable `TSIFT_ENABLE_NPM_PUBLISH=true`, then re-push tag `v0.1.62` — the `publish OpenCode npm plugin` job in `release.yml` will publish. (Currently neither the secret nor the var exists in GitHub; only the crates.io pair is set.)
 
 Gating `#0y9e` until a publish-capable token or OTP is available. The agent-doc `release + publish` item remains separately gated under the stopped queue.
-<!-- agent:boundary:b78c3b38 -->
+<!-- agent:boundary:02926f00 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,10 +67,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~complete the wip~
+- NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions
 - release + publish
-- do [#0y9e]
+- ~do [#0y9e]~
 <!-- /agent:queue -->
 
 ## Backlog

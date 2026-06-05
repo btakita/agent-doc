@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -229,11 +229,13 @@ Run with `RUN_INTEGRATION=1 pytest`. It proves the real end-to-end wiring withou
 
 ---
 *Housekeeping: the exchange is now ~175 lines / 7 sections and agent-doc is flagging it as large. Whenever you're done reviewing, I can run `agent-doc compact` to condense it — just say so; I won't compact mid-review.*
-<!-- agent:boundary:5946d725 -->
+<!-- agent:boundary:c2db4547 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- I would like a smoke test for the real API calls. This should include all products hitting the real api.
+- Should we also consider a Fake API for testing instead of mocks? Mocks are simple but brittle and repeat testing assumptions. A Fake would consolidate the assumptions. This is not as simple as it could possibly be but is more maintainable than mocks.
 <!-- /agent:queue -->
 
 ## Backlog

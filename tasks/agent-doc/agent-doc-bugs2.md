@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,7 +34,20 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 9 response topic(s): JB Run Agent Doc stall + #finalize-owned-pane-response-patchback; snapshot resync; JB stall + queue items; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9d110fc2 -->
+
+### Re: do [#tagpath-lint-queue-control] — opus-4-8
+
+Already implemented in `src/tagpath` (commit `9289827`, pushed to `origin/main`) — but the prior "installed" claim was stale: the live `~/.cargo/bin/tagpath` binary mtime was 2026-05-30, predating the 2026-06-04 fix. Completed the `#spec-test-build-install-commit-push` preset's missing **build + install** leg this cycle.
+
+**What the fix does:** the tagpath agent-doc lint dialect now accepts bare `start` / `go` / `stop` control tokens on the `agent:queue` marker (added to the malformed-attr bare-token allowlist for both first- and later-token paths, plus the `agent:queue` known-attrs set). A queue marker carrying a bare `go` no longer trips `agent-doc/malformed-attr`. Part of `#queue-state-unify`.
+
+**Verification this cycle:**
+- `cargo install --path src/tagpath` → replaced `tagpath v0.12.0` with `v0.12.1` (binary refreshed).
+- `cargo test --lib` → 114 passed; `agent_doc` lint subset → 40 passed.
+- Commit `9289827` confirmed in `origin/main` history (0 ahead / 0 behind, tree clean).
+
+Marking `#tagpath-lint-queue-control` done and striking the consumed queue head.
+<!-- agent:boundary:fe5f3a8f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -58,7 +71,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [ ] [#tagpath-lint-queue-control] DONE (src/tagpath 9289827, installed): the tagpath agent-doc lint dialect now accepts bare `start`/`go`/`stop` markers on agent:queue, so a bare `go` marker no longer trips agent-doc/malformed-attr. Part of #queue-state-unify.
+1. [x] [#tagpath-lint-queue-control] DONE (src/tagpath 9289827, installed): the tagpath agent-doc lint dialect now accepts bare `start`/`go`/`stop` markers on agent:queue, so a bare `go` marker no longer trips agent-doc/malformed-attr. Part of #queue-state-unify.
 2. [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 <!-- /agent:backlog -->
 

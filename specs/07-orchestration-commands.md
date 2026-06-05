@@ -212,6 +212,11 @@ The `agent:queue` component batches prompts inside the document.
 
 - Single-line prompts use flush-left `- ` list items.
 - Completed single-line prompts render as `- ~prompt text~` and are skipped by dispatch.
+- Optional-`do` grammar (Stage 1, queue lines): the `do` verb is optional for id-backed kick-off, and a `re` verb references a task without running it.
+  - `do [#id]` / `do #id` — execute, id-backed (back-compat).
+  - bare `[#id]` / `#id` at the line head — execute, id-backed (`do` optional). A trailing `:` (`[#id]: note`) keeps the line inert prose, not a directive.
+  - `re [#id]` / `re #id` — *reference only*: never executed, synced, or reaped (parsed as `Freeform`, preserved verbatim). The literal `re ` verb is required, so prose like `rebuild` / `re-run` / `reference …` is unaffected.
+  - free text — execute as a prose prompt (unchanged).
 - Batch-level preset directives may use `preset <name>` lines in the queue body. The queue parser also accepts `dispatch <name>` as a preserved batch directive so older queued batches can close out without parse failure.
 - Multi-line prompts use `~~~prompt ... ~~~` or bare `--- ... ---` fences.
 - Control fences:

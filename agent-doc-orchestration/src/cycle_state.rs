@@ -202,8 +202,43 @@ pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
 }
 
 fn is_do_directive(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.starts_with("do [#") || lower.starts_with("do #")
+    let lower = text.trim().to_ascii_lowercase();
+    lower.starts_with("do [#") || lower.starts_with("do #") || leads_with_bare_id_directive(&lower)
+}
+
+/// Optional-`do` grammar (Stage 1): a queue head that leads with a bare id token
+/// (`[#id]` or `#id`) is id-backed — the `do` verb is optional. A trailing `:`
+/// (`[#id]: note`) keeps the line inert as prose annotation rather than a
+/// directive, matching the existing bracket-id prompt-guard convention. `text`
+/// is expected to be lowercased and already stripped of list/checkbox markers
+/// (queue prompt texts arrive that way).
+fn leads_with_bare_id_directive(lower: &str) -> bool {
+    let (rest, bracketed) = if let Some(r) = lower.strip_prefix("[#") {
+        (r, true)
+    } else if let Some(r) = lower.strip_prefix('#') {
+        (r, false)
+    } else {
+        return false;
+    };
+    let id_len = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .count();
+    if id_len == 0 {
+        return false;
+    }
+    let after = &rest[id_len..];
+    if bracketed {
+        // Require a closing `]`; a trailing `:` marks prose, not a directive.
+        match after.strip_prefix(']') {
+            Some(tail) => !tail.starts_with(':'),
+            None => false,
+        }
+    } else {
+        // Bare `#id` must be a standalone leading token: end-of-line or a
+        // whitespace / `.` separator (excludes `#id:` prose and `# heading`).
+        after.is_empty() || after.starts_with([' ', '\t', '.'])
+    }
 }
 
 impl CycleState {
@@ -1009,6 +1044,26 @@ fn now_millis() -> u128 {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn is_do_directive_accepts_do_and_bare_id_forms() {
+        // Back-compat: explicit `do` forms.
+        assert!(is_do_directive("do [#opt]"));
+        assert!(is_do_directive("do #opt"));
+        assert!(is_do_directive("DO [#opt]. trailing note"));
+        // Optional-`do` Stage 1: bare id token is id-backed.
+        assert!(is_do_directive("[#opt]"));
+        assert!(is_do_directive("[#opt]. do the small fix"));
+        assert!(is_do_directive("#opt"));
+        assert!(is_do_directive("#opt do the thing"));
+        // Inert: prose annotation (`[#id]:`), references, plain prose, headings.
+        assert!(!is_do_directive("[#opt]: just a note"));
+        assert!(!is_do_directive("#opt: just a note"));
+        assert!(!is_do_directive("re [#opt]"));
+        assert!(!is_do_directive("see [#opt] for context"));
+        assert!(!is_do_directive("# heading"));
+        assert!(!is_do_directive("just a free-text prompt"));
+    }
 
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();

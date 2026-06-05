@@ -184,6 +184,11 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
                     text: completed.to_string(),
                     multiline: false,
                 }));
+            } else if is_reference_directive(rest) {
+                // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
+                // *references* a tracked id without executing it. Preserve it
+                // verbatim as `Freeform` so it is never run, synced, or reaped.
+                entries.push(QueueEntry::Freeform(line.to_string()));
             } else {
                 entries.push(QueueEntry::Prompt(QueuePrompt {
                     text: rest.to_string(),
@@ -377,6 +382,19 @@ impl BacklogQueueSyncMode {
             _ => None,
         }
     }
+}
+
+/// Optional-`do` grammar (Stage 1): true when a queue line is a `re [#id]` /
+/// `re #id` *reference* — it names a tracked id without executing it. Requires
+/// the literal leading verb `re ` (so prose like `rebuild`, `re-run`, or
+/// `reference …` is unaffected) immediately followed by a `#`/`[#` id token.
+fn is_reference_directive(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("re ") else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    rest.starts_with("[#") || rest.starts_with('#')
 }
 
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
@@ -735,6 +753,38 @@ mod tests {
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn reference_directive_excluded_from_prompts() {
+        // Optional-`do` Stage 1: `re [#id]` / `re #id` references a tracked id
+        // without executing it — never a runnable prompt, preserved verbatim.
+        let entries = parse("- re [#opt]\n- re #opt2\n- do [#run]\n- [#bare]\n").unwrap();
+        let prompt_texts: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
+        assert!(
+            !prompt_texts.iter().any(|t| t.starts_with("re ")),
+            "re-references must not be runnable prompts: {prompt_texts:?}"
+        );
+        // `do [#id]` and bare `[#id]` still execute.
+        assert!(prompt_texts.contains(&"do [#run]"));
+        assert!(prompt_texts.contains(&"[#bare]"));
+        // The references round-trip verbatim as Freeform.
+        let rendered = render(&entries);
+        assert!(rendered.contains("- re [#opt]"));
+        assert!(rendered.contains("- re #opt2"));
+    }
+
+    #[test]
+    fn reference_directive_does_not_match_prose() {
+        assert!(is_reference_directive("re [#opt]"));
+        assert!(is_reference_directive("re #opt"));
+        assert!(is_reference_directive("  re   [#opt] some note"));
+        // Real words beginning with "re" are not references.
+        assert!(!is_reference_directive("rebuild the index"));
+        assert!(!is_reference_directive("re-run the tests"));
+        assert!(!is_reference_directive("reference [#opt] in passing"));
+        assert!(!is_reference_directive("re the meeting"));
+        assert!(!is_reference_directive("do [#opt]"));
     }
 
     #[test]

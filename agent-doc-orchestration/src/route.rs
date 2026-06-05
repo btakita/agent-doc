@@ -8537,6 +8537,21 @@ fn wait_for_agent_ready_outcome(
     let mut last_blocker: Option<String> = None;
 
     while start.elapsed() < timeout {
+        // #route-ready-wait-fast-fail: a starting pane's tmux pane stays alive
+        // while its agent boots, so `!pane_alive` means the pane is actually
+        // closed/dead — it will never become ready. Stop waiting immediately so
+        // the caller's recovery ladder (same-pane retry / handoff / fresh
+        // reroute) runs now instead of burning the full ready-timeout on a pane
+        // that is already gone.
+        if !tmux.pane_alive(pane_id) {
+            eprintln!(
+                "[route] {} pane {} is dead — fast-failing ready wait after {:.1}s (recovery will reroute)",
+                harness.binary,
+                pane_id,
+                start.elapsed().as_secs_f64()
+            );
+            return AgentReadyWaitOutcome::TimedOut;
+        }
         if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
             if let Some(reason) = harness.dispatch_blocker_reason(&content) {
                 ready_streak = 0;

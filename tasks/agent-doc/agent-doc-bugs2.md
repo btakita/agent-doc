@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue_active: true
 ---
 
 ## Status
@@ -284,15 +284,40 @@ I meant: manually open a doc in the IDE and watch the block appear during the tu
 Marking **#22a8 done**.
 
 Next: you also said *"for fail-open-after-wait, do the highest value work"* — that's `#route-ready-wait-fast-fail` items (1) fast-fail provably-dead panes + (2) per-harness adaptive timeout. I'll take that as the next focused cycle.
-<!-- agent:boundary:aa21f98d -->
+
+### Re: do [#optional-do-re-stage2] — Stage 2 shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#optional-do-re-stage2]
+
+
+Done (submodule `0b55e1a9`, pushed, installed, `make check` green). This was the higher-blast-radius half — the **closeout guards** — so it landed with dedicated tests.
+
+#### What changed
+The directive guards now match the queue-side grammar from Stage 1:
+- A bare leading **`[#id]` / `#id`** is recognized as an id-backed directive target — the closeout reaps it just like `do [#id]` (the `do` verb is fully optional now, end to end).
+- A **`re [#id]` / `re #id`** reference is **skipped** — never a target, so the guards don't expect a reference to be resolved.
+- `[#id]:` prose stays inert; explicit `do ` keeps its exact original behavior (extract every id named after the verb).
+
+So all three directive-keyed guards (`expect_done_or_gate` / `pending_done_guard` / queue-head provenance) honor the optional-`do` + `re` forms now, not just the queue execution path.
+
+#### Verification
+- New test `do_directive_target_ids_optional_do_stage2_bare_and_reference_forms` (bare bracketed, bare hash, `re`-skip, `[#id]:`-inert, non-leading-inert, explicit-`do` still works); the existing directive test stays green.
+- `make check`: 2272+ orchestration, 0 failed, clippy clean; both binaries installed.
+
+Marking `#optional-do-re-stage2` done. The optional-`do` feature is now complete across both the queue and the closeout guards.
+
+Remaining queue: `do [#queue-no-stall-on-head-edit]`, `do [#route-ready-wait-fast-fail]` (your fail-open highest-value work).
+<!-- agent:boundary:c477e95c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Can we improve the performance of fail-open-after-wait?~
 - ~What does "When you want the writes live, it's a focused session: route every doc-baseline hash through the strip (the invariance sweep) + the live-verify pass." mean? I want this implemented already. Do whatever you need to do to implement this. I'm not sure what live verification you need.~
-- do [#optional-do-re-stage2]
-- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
+- ~do [#optional-do-re-stage2]~
 - do [#route-ready-wait-fast-fail]
+- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 <!-- /agent:queue -->
 ###
 <!--
@@ -308,7 +333,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#route-ready-wait-fast-fail] [recommended] Improve fail-open-after-wait worst case (follow-up to #jb-monsterrod-route-ready-wait-stall). The ready-wait already early-exits when the pane is dispatch-ready (logs: route_starting_actor_ready elapsed_ms~100), so the full timeout only bites a pane that NEVER becomes ready. Levers: (1) fail-fast on a PROVEN-DEAD/closed pane — detect dead PID / closed pane / no session-log heartbeat and reroute to a fresh pane immediately instead of waiting the full dispatch_only_starting_pane_ready_timeout (route.rs:2245); keep waiting only for a still-booting pane (overlaps #route-starting-timeout-poll-recovery, #snrun). (2) per-harness adaptive timeout — Codex cold-start (auth+boot) is slow, Claude fast; tune to observed p99 instead of one flat 60s (timeout is already binary-scoped via _for_binary). (3) warm-pane pool so routing rarely waits for cold start (bigger). (4) push readiness signal vs 250ms poll (minor). Highest value: (1)+(2).
-- [ ] [#optional-do-re-stage2] [recommended] optional-do grammar Stage 2 (exchange directives + closeout guards). Stage 1 shipped (submodule 730a96fb): queue-line re-reference + bare-[#id] is_do_directive recognition. Stage 2 = teach do_directive_target_ids_in_line / pending_done_guard / queue-head-provenance / expect_done_or_gate to accept the bare [#id] form and skip the re form, with dedicated per-guard tests (higher blast radius). Plan: tasks/agent-doc/plans/optional-do-directive-and-re-reference.md.
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
 <!-- /agent:backlog -->

@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -582,13 +582,27 @@ Added **`.github/workflows/ci.yml`** — on push/PR, installs the package and ru
 The "Running the tests" section now has a clear table: dev (`pytest` → unit), full (`RUN_INTEGRATION=1 pytest`), integration-only, and a CI note pointing at the workflow.
 
 Still **not pushed / not submitted**. When you've reviewed this, push the updated `solution` to EqualExperts yourself (or say the word) before any submit.
-<!-- agent:boundary:bd47c365 -->
+### Re: AGENT_SESSION.md refreshed; submodule committed + pushed to EE — opus-4-8
+
+> **Queue prompt:**
+>
+> Update AGENT_SESSION.md. commit + push
+
+
+Done.
+
+- **`AGENT_SESSION.md` refreshed** to the latest session snapshot (608 lines).
+- **Committed and pushed** the `solution` branch to the EqualExperts remote: `fe9de5f..efa43ef`. Verified local == remote. The EE repo now has the full current state — opt-in integration tests, the GitHub Actions CI workflow, and the refreshed session doc.
+- Full suite green before push: **40 passed** with `RUN_INTEGRATION=1`.
+
+**Important — this is a code push, not a submission.** I did **not** click the SnapCode "completed" link, so your access is intact and nothing is final. Marking complete remains gated behind an explicit, separate **"submit"** from you.
+
+(Next I'll commit the submodule-pointer bump in the agent-loop superrepo so it references this pushed commit.)
+<!-- agent:boundary:782c3d68 -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue go -->
-- ~Dev tests should run without the integration tests. Create gh actions to run the full suite (with integration tests).~
-- Update AGENT_SESSION.md. commit + push
 <!-- /agent:queue -->
 
 ## Backlog

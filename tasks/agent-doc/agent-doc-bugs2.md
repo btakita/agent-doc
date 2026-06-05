@@ -56,12 +56,38 @@ This one was already done: the timeouts are per-binary (`_for_binary`) — ready
 Marking `#route-ready-wait-fast-fail` done.
 
 Next: you asked *"Why is agent-doc recursively shelling out…"* — I'll take that (the root-cause of the Codex self-reinvoke) as the next prompt.
-<!-- agent:boundary:d269f251 -->
+
+### Re: why does agent-doc recursively shell out the same command — MCP vs CLI fix? — opus-4-8
+
+> **Queue prompt:**
+>
+> Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?
+
+
+#### Why it happens (Codex only)
+agent-doc is a CLI, and the two harnesses drive it differently:
+- **Claude Code** runs the workflow **in-process** — the `/agent-doc` skill executes *inside* the Claude turn. No new process, so recursion is impossible.
+- **Codex** has no in-process skill execution. It drives agent-doc by **running the CLI as a shell command** (`agent-doc <FILE>`). So "continue the turn / drain the next queue item" literally means **running the CLI again** — and the Codex auto-loop does exactly that via the **Stop hook** (`.codex/hooks.json`). When that re-run lands inside the pane that already owns the document (the pane that *is* the agent-doc actor), the new process tries to dispatch a fresh turn back into the pane it's running in. That's the recursion; the `recursive_direct_invocation_blocked` guard catches it to avoid a deadlock.
+
+So the recursion is **structural to using a CLI to drive Codex** — the CLI re-invokes itself to continue, and the owner pane is where it runs.
+
+#### Your two options
+**A — Move to an MCP server (the root-cause fix).** Expose the hot path (preflight / respond / finalize / queue-drain) as **MCP tools** backed by a session-holding server. Codex then drives agent-doc by **tool calls against a persistent session**, not by spawning a fresh CLI in the owner pane — so the self-reinvoke **can't happen**. Cost: a real build (port the commands to a tool surface + server, migrate the Codex integration off the CLI/Stop-hook loop).
+
+**B — Fix the CLI to not call itself (`#codex-self-reinvoke-prevent`, the tactical fix).** Keep the CLI, but make owner-pane re-invocation **continue in place** instead of spawning a nested dispatch. The deadlock guard already does the *detect-and-refuse* half; this adds the *redirect-to-in-pane-continuation* half. Cost: smaller — but it **guards** the structural recursion rather than removing it (the CLI still starts a new process).
+
+#### My recommendation
+If Codex is a **first-class, long-term** harness, **A (MCP) is the right fix** — it removes the recursive-shell-out at the root and matches how Codex is meant to consume tools. Do **B as the interim** so the deadlock stops biting you *now* while the MCP surface is built. If Codex is secondary, B alone is enough.
+
+I'd lean **MCP for durable, B for now**. Captured as decision item `[#codex-mcp-vs-cli-reinvoke]` — it needs your call on A vs B before I build either (A especially is a big lift I shouldn't start unilaterally).
+
+Which way do you want to go?
+<!-- agent:boundary:51c036bb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#route-ready-wait-fast-fail]~
-- Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?
+- ~Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?~
 - do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 <!-- /agent:queue -->
 ###
@@ -77,6 +103,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#codex-mcp-vs-cli-reinvoke] [recommended] DECISION: fix the Codex recursive self-shell-out at the root. Cause: Codex has no in-process skill execution, so it drives agent-doc by running the CLI (agent-doc <FILE>); continuing a turn = re-running the CLI, and the Stop-hook auto-loop does so inside the owner pane → the new process re-enters the pane it runs in → recursion (recursive_direct_invocation_blocked guard catches it). Option A (MCP server): expose the hot-path workflow as MCP tools + a session-holding server so Codex drives agent-doc via tool calls against a persistent session, never spawning a nested CLI in the owner pane — removes the recursion structurally; bigger build. Option B (#codex-self-reinvoke-prevent): keep the CLI, make owner-pane re-invocation continue-in-place instead of nested-dispatch (the deadlock guard is the detect half; this adds the redirect half) — smaller, tactical, guards rather than removes the recursion. RECOMMEND: A (MCP) as the durable fix if Codex is first-class, with B as the interim so the deadlock stops biting now. Needs user direction on A vs B before implementation.
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
 <!-- /agent:backlog -->

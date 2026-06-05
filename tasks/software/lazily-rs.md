@@ -64,7 +64,30 @@ My earlier "−2.2% improved" was against a stale Criterion baseline (not a clea
 Note: `463ca71`'s commit message still reads "no regression / improved" (immutable pushed history); the SPEC at HEAD is now the accurate record.
 
 Next queue head: `do [#s0fc]` — make the Cloudflare signaling endpoint consumable as a dependency (for agent-doc's distributed plans).
-<!-- agent:boundary:59dc4364 -->
+
+### Re: do [#s0fc] Make the signaling endpoint consumable as a dependency — opus-4-8
+
+Done (Both: Rust crate + TS package, per your scope choice). Committed + pushed to `lazily-rs` `main` (`cbdb4b8`). Two clients now consume the #yxjw endpoint over one shared, normative wire protocol.
+
+**Rust client** — `signaling-client` feature, `src/signaling_client.rs`:
+- `lazily::SignalingClient::connect(base_url, session, peer)` opens a `tokio-tungstenite` WebSocket to `{base_url}/session/{session}`, joins, and exposes `offer`/`answer`/`ice`/`relay`/`leave` + `recv()` for `ServerMessage`s.
+- `ClientMessage`/`ServerMessage` are `serde`-tagged (`kebab-case`) and reuse the `#39c5` `PeerId`; rustls/tokio-tungstenite are pulled in **only** when the feature is enabled, default build untouched.
+- Conformance tests assert the exact JSON frame shapes. agent-doc can now `lazily = { features = ["signaling-client"] }`.
+
+**TypeScript client** — `@lazily/signaling` package, `signaling/src/client.ts`:
+- `SignalingClient.connect(baseUrl, session, peer)` (or `attach(socket, peer)` for a pre-opened socket) over any `WebSocket`-like transport (browser / Node ≥ 22 / injected), with `onMessage` + the same send helpers.
+- Package is now publishable (`@lazily/signaling`), exporting `./client` and `./protocol`.
+
+**Wire protocol** is the single source of truth (new SPEC *Consumable clients* section): `PeerId` is a bare JSON number (Rust `u64` ⇄ TS `number`); both client impls conform byte-for-byte.
+
+**Preset `#spec-test-build-install-commit-push`:**
+- **spec** — SPEC.md *Consumable clients (#s0fc)* section (normative protocol + both clients).
+- **test** — Rust: 3 conformance tests (`cargo test --features signaling-client`); TS: now **31 tests** (added 6 client unit + 1 end-to-end client↔Worker↔DO in `workerd`). `make check` green except the pre-existing `benchmark-check` timing-drift staleness.
+- **build/install** — `cargo build --features signaling-client` clean (rustls behind the feature); `npm run check` clean. Both are libraries/deps, no binary install.
+- **commit + push** — `cbdb4b8`; CI wired for both (`test-signaling-client` step + the Worker job's `npm run check`).
+
+Queue drained — `#xtwf` and `#s0fc` both consumed.
+<!-- agent:boundary:3bd97897 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,7 +103,6 @@ Next queue head: `do [#s0fc]` — make the Cloudflare signaling endpoint consuma
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#s0fc] The Cloudflare endpoint should be usable as a dependency for projects that want to leverage lazily-rs for distributed systems...such as is the plan for agent-doc.
 <!-- /agent:backlog -->
 
 ## Review

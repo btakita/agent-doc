@@ -38,7 +38,7 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): [#4cn0] Build Cloudflare Worker signaling server (#yxjw); do [#mb9b] Lock-free cached reads in ThreadSafeContext (#vd5v)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:d28de282 -->
+<!-- agent:boundary:dd172051 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +53,7 @@ Compacted content:
 
 <!-- agent:backlog queue go -->
 - [ ] [#xtwf] Run rigorous isolated-worktree Criterion A/B for #vd5v lock-free cached reads (cached_reads/thread_safe_context per SPEC benchmarking procedure) [recommended]
+- [ ] [#s0fc] The Cloudflare endpoint should be usable as a dependency for projects that want to leverage lazily-rs for distributed systems...such as is the plan for agent-doc.
 <!-- /agent:backlog -->
 
 ## Review

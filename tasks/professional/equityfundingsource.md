@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -32,127 +32,19 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-064822.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-081737.md`*
 
 Compacted content:
-- Archived 1 response topic(s): [#zwws] Investor dashboard #rpzm phase 2b
+- Archived 5 response topic(s): [#zwws] Investor dashboard #rpzm phase 5; Can we ungate phases 4 & 6 with the TMO cache?; [#zwws-local-first] Phase 4 EFS-local; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: [#zwws] Investor dashboard #rpzm phase 5 — opus-4-8
-
-> **Queue prompt:**
->
-> [#zwws]
-
-
-Shipped phase 5 — the next un-gated phase. Spec + tests updated, committed + pushed (EFS `1957f64`, superproject pointer `cb2a12d28`).
-
-#### Accreditation reframed as **Requirements**
-- The nav item and page now read **Requirements**. The page leads with the **annual investor questionnaire** (status card shows an explicit "Annual" cadence and "Renews" date), and the requirements checklist notes the **accredited-investor certification is collected as part of your lender onboarding documents**.
-- Kept the section id, `/portal-investor/accreditation` route, and `/api/investor/accreditation` API stable — this is a presentation/workflow reframe, not a plumbing rename, so no links or callers break.
-
-#### Annual cadence enforced server-side
-- Added `ACCREDITATION_ANNUAL_TTL_SECONDS` (365 days) and made the admin accreditation-decision route default a verified decision's TTL to it when the reviewer doesn't set one. So `expires_at` and the renewal window (expires − 60 days) now open on a yearly cadence by default instead of never expiring.
-
-#### Verification
-- `bun test`: **285 pass / 0 fail** (added annual-cadence + Requirements-framing coverage in the e2e and admin suites).
-- `bun run build` + `bun run build:worker`: clean. (Pre-existing project-wide `fetch().then(data: T)` and the unrelated `blog_post_status_T` tsc notes are unchanged — the project gates on `bun run check`, not strict `tsc`.)
-- PRD `rpzm-...` updated: phase 5 marked shipped.
-
-**Remaining `#zwws` phases are externally gated:** 4 (vestings/special-instructions — TMO-writeback-gated `#dzmm`/`#k2xg`/`#7a4d`) and 6 (new-deal email + workflow-priority dashboard — `#f4rq`-gated). No un-gated phase remains, so I'm not continuing the loop — queue phase 4 or 6 once its gate clears.
-
-### Re: Can we ungate phases 4 & 6 with the TMO cache? — opus-4-8
-
-Short answer: the TMO **cache** by itself doesn't ungate either phase — but the gates are narrower than "all-or-nothing," and a meaningful chunk of both phases is shippable now without waiting on the external conditions.
-
-#### Why the cache alone doesn't do it
-The system runs an explicit `tmo_wins_for_reads_outbox_for_writes` strategy:
-- **TMO cache = the read side.** `tmo_cache` (via `tmo-cache.ts`) is a read-through mirror of TMO data in D1. Reading it never writes anything back into TMO.
-- **`tmo_cache_outbox` = the write side.** Local mutations are written to EFS D1 optimistically, then an outbox row is enqueued for deferred replay into TMO. Today it's used in exactly one place — `add_loan_funding` (the investor fund-commit in `deal_marketplace`).
-
-So phase 4's gate isn't "we lack a cache" — it's "we haven't confirmed TMO's vesting **write** endpoint + field map" (`#7a4d`), plus the sync-direction decision (webhooks vs polling, `#dzmm`/`#k2xg`).
-
-#### Phase 4 — vestings / special instructions: partially un-gate-able
-- **Ship now (EFS-local half):** capture and display vestings + special instructions in EFS D1 and the investor/EFS UI — including multiple vestings per lender and multiple lenders per loan — using the same optimistic-write + `tmo_cache_outbox` pattern that `add_loan_funding` already uses. No TMO confirmation needed for the EFS-owned experience.
-- **Still gated:** the actual **push into TMO**. The outbox gives us the transport, but a vesting outbox row needs a real TMO operation + field mapping to replay against (`#7a4d`), and we should settle push-vs-poll first (`#dzmm`/`#k2xg`). Until then the writeback leg stays parked.
-
-#### Phase 6 — new-deal email + workflow-priority dashboard: un-gate-able, but not via TMO
-This phase has nothing to do with TMO — its gate is `#f4rq` (the EFS Resend sending domain).
-- **Ship now:** the **workflow-priority dashboard** half (urgent action items — wire funds, missing docs — bubbling to the top) has no email dependency at all.
-- **Ship now in testing mode:** the new-deal email can be built exactly like P2b's "I'm interested" — wired through Resend, delivering to the account-allowed recipient until `#f4rq` verifies the production domain, at which point real-investor delivery turns on with no code change.
-
-#### Recommendation
-Decompose `#zwws` into "local-first" sub-work that ships now (phase 4 EFS-local capture/display; phase 6 dashboard + testing-mode email) and keep only the true TMO-push and production-email legs gated. I've captured this as `#zwws-local-first` `[recommended]`. Want me to queue the phase-4 EFS-local half next (it's the larger, higher-value piece)?
-
-### Re: [#zwws-local-first] Phase 4 EFS-local — vestings + special instructions — opus-4-8
-
-Shipped the phase-4 **EFS-local half** (the larger un-gated piece). Spec + tests updated, committed + pushed (EFS `eb549a8`, superproject `f86c1bee8`).
-
-#### What shipped
-- **New "Vestings" portal section** where investors manage **vestings** (legal holding entities — individual / joint / trust / LLC / entity / IRA / other; multiple per investor) and **special instructions / preferences**. EFS is the source of truth, no TMO dependency.
-- **D1 schema** (migration `0041`): `investor_vestings` + `investor_special_instructions`.
-- **API**: `GET/POST/PATCH/DELETE /api/investor/vestings` and `PUT /api/investor/special-instructions` — investor-auth-guarded, validated, investor-scoped (soft-archive on remove).
-- **UI**: nav + page with add/edit/remove and an instructions editor (`vestings.tsx`).
-
-#### Verification
-- `bun test`: **292 pass / 0 fail** (new `investor-vestings.test.ts` covers repo/migration/routes/UI; QA fixtures + runbook + smoke script add the vestings step).
-- `bun run build` + `build:worker`: clean; new files `tsc`-clean; migration `0041` SQL + upsert validated in sqlite.
-- **Migration note:** `0041` is committed but **not yet applied to remote D1** — preset was commit+push, not deploy. It applies on the next `deploy:worker` / `cf:d1:migrate:remote` (same deferred-deploy posture as `#zr5z`).
-
-#### Boundaries (deliberately deferred)
-- **TMO push** (writing vestings into TMO) + **multiple-lenders-per-loan** per-lender portion/steps/status stay gated on the TMO writeback field map (`#7a4d`) + sync direction (`#dzmm`/`#k2xg`) — wire via the `tmo_cache_outbox` pattern once confirmed.
-- **Phase 6's un-gated half** (workflow-priority dashboard) is captured as `#zwws-phase6-dashboard` `[recommended]` — shippable next without any external gate.
-
-`#zwws-local-first` is marked done (its phase-4-local deliverable). Queue `#zwws-phase6-dashboard` when you want the workflow-priority dashboard next.
-
-### Re: [#67v2] TMO board → admin pipeline workflow — opus-4-8
-
-I can't retrieve the TMO board images through corky, so I'm **not** designing the workflow yet — building the pipeline logic off a guessed board would be wrong. Here's exactly what I hit and what I need.
-
-#### What I tried
-- `corky sync refetch "<the Gmail URL>"` → **`Gmail URL target FMfcgzQgMLxHCrjZbfGFBpkwSTTgxGbd not found in any Gmail API account`**. The `#inbox/FMfcg…` id in a Gmail web URL is the **web-client** thread id, not the Gmail **API** id, so refetch can't resolve it.
-- `corky sync account brian.takita` (full inbox) → didn't surface the thread, and more importantly:
-- corky's thread→Markdown sync renders images as **remote `![](https://…)` links** and does **not** download attachment binaries to disk. User-attached screenshots (which the TMO board is) come through as MIME attachment parts that the sync drops — so even once the thread syncs, there's no viewable image file for me to read.
-
-Net: with the current corky tooling I have no way to actually *see* the board, and I won't fabricate the TMO stages/columns/requirements.
-
-#### What unblocks it (any one)
-1. **Save the board images to a path** I can read (e.g. `tasks/professional/assets/tmo-board-*.png`) — simplest + most reliable.
-2. Give me the **Gmail API thread id** (or the email **subject + sender/date**) so `corky sync refetch <raw-id>` can pull it.
-3. Say the word and I'll use **chromium-bridge** to open the Gmail URL in your authenticated browser and capture the images (heads-up: that surfaces your inbox on-screen — livestream caution).
-
-#### Ready to go the moment I can see it
-`#67v2` is a known feature: admin loan pipeline with **TMO-aligned stages + Kanban** (drag cards, auto-advance when stage requirements are met) synced to the dashboard, mirroring TMO stages as the single source of truth. There's prior art to build on — the investor pipeline already defines `Reviewing → Committed → Documents → Funding → Active` and admin loan status exists — but the board screenshots tell me the **real** TMO column names, ordering, and per-stage requirements, which I need to model it correctly.
-
-I've **gated `#67v2`** as blocked-on-input. Drop the board images (or the resolvable thread id) and re-queue it, and I'll produce the workflow design + first implementation slice.
-
-### Re: [#67v2] TMO board retrieved via chromium-bridge → admin Kanban design — opus-4-8
-
-Got the board (chromium-bridge, since corky couldn't resolve the Gmail web-thread-id and doesn't extract attachment binaries). Opened the "Workflow for loans" thread (April Armas / Judith Krug, Jun 4) in your authenticated session and read all three PDF attachments via the projector.
-
-#### What the TMO board is
-A Kanban titled **"All Loans"** grouping loans into **status columns** (header = name + count): an **active/processing** column (4 loans), **Funded**, **Closed**, **On Hold**, **Unassigned**, and **Application Denied** (Judith couldn't capture that last one). Loan cards carry: **title** (`{property} - {vesting}`, e.g. "202 N California St - Laws Trust"), **loan number**, **loan amount**, **property street**, **by-last-name** (borrower/entity), **escrow number**, **note rate**.
-
-#### Design captured (PRD)
-`src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md` (EFS `bb98441`, superproject `dcfc68efe`) — column/card model + phased plan: **A** read-only Pipeline Kanban (queued as `#67v2a`) → **B** drag-to-change-status (EFS-local + `tmo_cache_outbox`, gated on `#7a4d`/`#dzmm`/`#k2xg`) → **C** stage requirements + auto-advance → **D** admin-dashboard summary. Builds on the investor stage-map, `admin_loans_R_`, `tmo_loan_status`, and the `tmo_cache` read + outbox write pattern.
-
-#### Confirm before exact column modeling
-1. The **first (active/processing) column's exact label** — cut off at the left edge of every screenshot.
-2. The **full ordered column list** (between the captured columns and Application Denied).
-3. Columns as a **workflow sequence** vs. status buckets, and **per-stage requirements** (drives Phase C auto-advance).
-
-`#67v2` (epic) stays gated pending those; `#67v2a` (Phase A read-only Kanban) can start now. Want me to build Phase A next?
-
-#### Privacy note
-The board screenshot has a real borrower's PII + your Gmail chrome, and you livestream — kept it **local-only** (`tasks/professional/assets/tmo-board-all-loans.png`, not committed); the PRD captures the structure in text.
-<!-- agent:boundary:08d742c8 -->
+<!-- agent:boundary:44c8d73b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" start -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

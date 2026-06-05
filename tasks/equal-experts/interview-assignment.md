@@ -102,13 +102,40 @@ README.md
 Neither a JS client nor a separate Python *service*. **One Python library**: `PriceClient` (httpx) + `Cart`, with `pytest` + `respx`. That is the simplest thing that satisfies "test both client and logic" while staying inside the ❌ no-app rule.
 
 If you'd still like FastAPI in the picture for your own learning, we could keep it as a throwaay *outside* the submission, but I wouldn't include it in what we push. Want me to update `#next-steps-2` to pin this Python/httpx/pytest decision and scaffold the package?
-<!-- agent:boundary:d3178923 -->
+
+### Re: Plan written into the repo — Python library, commits stay in agent-loop — opus-4-8
+
+Done. Plan document written to **`src/equal-experts-neat-exhilarating-friendly-inspiration/PLAN.md`**.
+
+#### Stack decision (recap)
+Single **Python** package — `PriceClient` (httpx) + `Cart` (Decimal/ROUND_UP) + `pytest`/`respx`. **No FastAPI, no "service", no JS client.** The Price API is external and already hosted; we only consume it, and a web API is the one deliverable the brief forbids. "Another Python client" or "a JS client" would both be unnecessary layers — keep client + logic in one language.
+
+#### Commit handling (your "commits in agent-loop" note)
+The submodule is its own git repo whose remote is the EqualExperts assignment. A file under `src/equal-experts.../` belongs to *that* repo, not agent-loop — git can't commit it into agent-loop while it lives there. So:
+
+- **`PLAN.md` is written but left UNCOMMITTED inside the submodule.** No EqualExperts-repo commit is created.
+- **The only commits this session makes are in agent-loop** (this session-doc cycle) — matching your instruction and the README (push to EqualExperts only when the assignment is *complete*; access is revoked right after, so we don't push prematurely).
+- When you're ready to submit, you (or I, on your go) `cd` into the submodule, commit `PLAN.md` + the implementation, and push to EqualExperts — then click the completion link.
+
+If you actually wanted `PLAN.md` committed into the submodule now, say so and I'll make that submodule commit instead. Likewise, when you move this session doc into the submodule later, that physically removes it from agent-loop's tree — happy to help sequence that so history stays clean.
+
+#### Next
+`#next-steps-2` proceeds on this plan. Want me to scaffold the package (`shopping_cart/`, `tests/`, `pyproject.toml`) with the `PriceClient` + `Cart` skeleton and the first failing tests?
+
+### Re: SPEC.md created + committed (no push) — opus-4-8
+
+Done both parts of your queue item.
+
+- **`SPEC.md` written** to `src/equal-experts-neat-exhilarating-friendly-inspiration/SPEC.md`, derived from `PLAN.md` — public API (`PriceClient`, `Cart`), error table, the 12.5%/ROUND_UP calculation rules, the worked-example acceptance criteria (15.02 / 1.88 / 16.90), and the per-file test plan.
+- **Committed, not pushed.** Given your "commit. DO NOT PUSH", I committed `PLAN.md` + `SPEC.md` **inside the submodule** (branch `solution`) as a local commit — nothing pushed to the EqualExperts remote. (Updates my earlier "left uncommitted" note: they're committed now, just local.)
+- **Session commits stay in agent-loop.** This session-doc cycle commits to agent-loop, and I'll record the submodule pointer bump here too. No `git push` anywhere.
+
+This honours both rules: the deliverable history lives in the submodule (local only), while the agent-doc session machinery stays in agent-loop. Say "scaffold" when you want the `shopping_cart/` package + first failing tests, same commit-local-no-push handling.
+<!-- agent:boundary:d5f0b9bf -->
 <!-- /agent:exchange -->
 
 ## Queue
-
 <!-- agent:queue -->
-- Let's plan on a Python stack for the api + client. Keep it simple per the instructions. Use FastAPI for the service. Should we use a JS client or another Python client to keep it simple?
 <!-- /agent:queue -->
 
 ## Backlog

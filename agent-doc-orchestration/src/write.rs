@@ -1389,13 +1389,6 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
-    let mut queue_consumption_allowed = should_consume_queue_prompt_for_write(
-        file,
-        baseline.as_deref(),
-        &current_content,
-        &options.pending_done,
-    )?;
-
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
     } else if options.is_stream {
@@ -1486,80 +1479,28 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         crate::lint_gate::run(file, options.lint_override)?;
     }
 
-    // A `### Re:` heading that merely names the active queue head is NOT a
-    // completion signal (#queue-strike-on-halt): a halt/refusal response names
-    // the head to explain why it is *not* being done. Queue-head consumption
-    // requires an explicit closeout flag — `--done`, `--pending-gate`, or
-    // `--pending-edit "<id>=…"` — that names the head id.
-    // `should_consume_queue_prompt_for_write` already covers `--done` and genuine
-    // operator prompt-target / `do queue` triggers; this adds the gate/edit
-    // completion signals so a gated or edited head still advances the auto-queue,
-    // replacing the old heading-match heuristic that silently struck halts.
-    if write_result.is_ok() && !queue_consumption_allowed {
-        queue_consumption_allowed = queue_head_has_explicit_completion_signal(
+    // Phase 3c: consume queue prompt after all other strict closeout gates
+    // have passed so a rejected closeout cannot advance the queue early. The
+    // layered completion signals — explicit `do queue`/prompt-target/`--done`
+    // triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of
+    // an id-backed head, a synthetic/preset heading-id match, and a free-text head
+    // answered by this cycle's response — all resolve through
+    // `queue_consumption_allowed_for_response` so every closeout, including the
+    // stream IPC-timeout `exit(75)` path, uses an identical decision
+    // (#queue-consume-on-stream-ipc-timeout).
+    if write_result.is_ok() {
+        let response_body = crate::capture::load_active(file)?
+            .map(|capture| capture.response_body)
+            .unwrap_or_default();
+        let queue_consumption_allowed = queue_consumption_allowed_for_response(
+            file,
+            baseline.as_deref(),
             &current_content,
+            &response_body,
             &options.pending_done,
             &options.pending_gate,
             &options.pending_edit,
         )?;
-    }
-
-    // #queue-head-consume-on-topic-id-regression: a *synthetic/preset* queue head
-    // (a preset expansion or a natural-language prompt carrying a trailing
-    // `#preset` id, not a bare `do [#id]` directive) is completed by the response
-    // itself, so a finalize response heading that resolves to EXACTLY the head id
-    // — for example `### Re: #spec-test-build-install-commit-push` — is a genuine
-    // completion signal and advances the auto-queue. Bare `do [#id]` directives
-    // still require an explicit closeout flag (handled above) so halt/refusal
-    // responses cannot silently strike them (#queue-strike-on-halt), and a heading
-    // topic carrying trailing modifiers (`#id halt`, `#id deferred`) never counts
-    // for either head shape.
-    if write_result.is_ok()
-        && !queue_consumption_allowed
-        && let Some(capture) = crate::capture::load_active(file)?
-    {
-        queue_consumption_allowed =
-            response_targets_synthetic_queue_head_id(file, &capture.response_body)?;
-    }
-
-    // #free-text-queue-head-consume: a free-text queue head (no `#id`, e.g. a
-    // plain question the user typed into `agent:queue`) has no `#id`, so none of
-    // the explicit-flag / heading-id completion paths above can ever strike it —
-    // it would block the auto-queue forever. Its only completion mechanism is
-    // being answered.
-    //
-    // #queue-head-struck-on-foreign-exchange-answer: but "answered" means THIS
-    // cycle's response actually TARGETS the head — a `### Re:` heading whose
-    // topic matches the head text — not merely that *some* response body exists.
-    // Previously any non-empty captured response struck the free-text head, so a
-    // cycle that answered an unrelated NEW `agent:exchange` prompt silently
-    // consumed a free-text head whose work was never done (live repro: a
-    // `lazily-rs plan-update` head struck in HEAD with the file never edited).
-    // A response that does not target the head leaves it queued for a later
-    // cycle. Bare `do [#id]` directives and `#preset` heads keep an `#id` and so
-    // are unaffected (they still require an explicit completion signal,
-    // preserving #queue-strike-on-halt).
-    if write_result.is_ok()
-        && !queue_consumption_allowed
-        && let Some(capture) = crate::capture::load_active(file)?
-        && !capture.response_body.trim().is_empty()
-        && queue_head_is_free_text_prompt(&current_content)?
-        && let Some(head_text) = active_queue_head_text(&current_content)?
-    {
-        // The free-text head is answered by this cycle's response UNLESS this
-        // cycle introduced a NEW `agent:exchange` prompt that the response
-        // answered instead — that is foreign work, and striking the unrelated
-        // free-text head would consume it without doing its work.
-        queue_consumption_allowed = !cycle_answered_foreign_exchange_prompt(
-            baseline.as_deref(),
-            &current_content,
-            &head_text,
-        );
-    }
-
-    // Phase 3c: consume queue prompt after all other strict closeout gates
-    // have passed so a rejected closeout cannot advance the queue early.
-    if write_result.is_ok() {
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
@@ -3030,6 +2971,55 @@ fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
         return Ok(false);
     }
     Ok(true)
+}
+
+/// Resolve whether this cycle's committed response should consume (strike) the
+/// active queue head. Single source of truth for the strict-closeout decision so
+/// alternate closeouts — notably the `run_stream` IPC-timeout `exit(75)` path,
+/// which never returns to the `write_with_options` Phase 3c consume — advance the
+/// queue identically and never leave an answered head queued to treadmill the
+/// auto-loop on the next preflight (#queue-consume-on-stream-ipc-timeout).
+///
+/// Mirrors the layered signals: explicit `do queue` / prompt-target / `--done`
+/// triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of an
+/// id-backed head, a response heading that resolves to a synthetic/preset head
+/// id, and a free-text head answered by this cycle's response (unless the cycle
+/// answered a foreign `agent:exchange` prompt instead).
+pub(crate) fn queue_consumption_allowed_for_response(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response_body: &str,
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_edit: &[String],
+) -> Result<bool> {
+    if should_consume_queue_prompt_for_write(file, baseline, current_content, pending_done)? {
+        return Ok(true);
+    }
+    if queue_head_has_explicit_completion_signal(
+        current_content,
+        pending_done,
+        pending_gate,
+        pending_edit,
+    )? {
+        return Ok(true);
+    }
+    let has_response = !response_body.trim().is_empty();
+    if has_response && response_targets_synthetic_queue_head_id(file, response_body)? {
+        return Ok(true);
+    }
+    if has_response
+        && queue_head_is_free_text_prompt(current_content)?
+        && let Some(head_text) = active_queue_head_text(current_content)?
+    {
+        return Ok(!cycle_answered_foreign_exchange_prompt(
+            baseline,
+            current_content,
+            &head_text,
+        ));
+    }
+    Ok(false)
 }
 
 /// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
@@ -7659,6 +7649,15 @@ pub fn run_stream(
                     false
                 }
             };
+            // The snapshot + disk write above are the only work that needs the
+            // pre-response doc lock; release it now so the queue-consume below
+            // (and any other re-entrant `acquire_doc_lock` caller) does not
+            // flock-deadlock against our own still-held guard. `acquire_doc_lock`
+            // uses an exclusive flock that conflicts across separate opens within
+            // the same process, so holding `doc_lock` across
+            // `consume_queue_prompts_with_outcome` self-deadlocks
+            // (#queue-consume-on-stream-ipc-timeout-deadlock).
+            drop(doc_lock);
             if local_write_applied {
                 log_exchange_write_diagnostic(
                     file,
@@ -7672,6 +7671,44 @@ pub fn run_stream(
                     &unmatched,
                 );
                 write_claimed_patch_sentinel(&project_root, &ipc_result.patch_id);
+                // #queue-consume-on-stream-ipc-timeout: this closeout commits the
+                // response and `exit(75)`s WITHOUT returning to the Phase 3c queue
+                // consume in `write_with_options`. Consume the answered head here
+                // (force-disk — the IPC/editor that just timed out is dead, so the
+                // visible-write guard would only stall again) before committing, so
+                // the struck head lands in the same commit. Otherwise a finalized
+                // response leaves an unstruck head that re-serves the
+                // already-answered prompt and treadmills the auto-loop on the next
+                // preflight. The decision matches the strict closeout exactly.
+                match queue_consumption_allowed_for_response(
+                    file,
+                    baseline,
+                    &content_current,
+                    &response,
+                    &flags.pending_done_ids,
+                    &flags.pending_kept_open_ids,
+                    &[],
+                ) {
+                    Ok(true) => {
+                        if let Err(e) =
+                            consume_queue_prompts_with_outcome(file, &flags.pending_done_ids, true)
+                        {
+                            eprintln!(
+                                "[queue] warning: consume on stream IPC-timeout failed: {}",
+                                e
+                            );
+                        }
+                    }
+                    Ok(false) => {
+                        if let Ok(diag) = queue_skip_diagnostic_for_file(file) {
+                            eprintln!("{}", diag);
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "[queue] warning: queue consume decision on stream IPC-timeout failed: {}",
+                        e
+                    ),
+                }
             }
             if crate::git::is_in_git_repo(file) {
                 match crate::git::commit(file) {
@@ -12701,6 +12738,109 @@ mod tests {
         assert!(
             queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
             "a prose head mentioning a single #id is still free text"
+        );
+    }
+
+    // #queue-consume-on-stream-ipc-timeout: the shared decision used by both the
+    // strict closeout and the stream IPC-timeout `exit(75)` closeout. Mirrors the
+    // exact scenario that treadmilled the auto-loop: a free-text head answered by
+    // a finalize response whose write fell back to direct disk on IPC timeout.
+    #[test]
+    fn consume_decision_strikes_answered_free_text_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: JB Run Agent Doc should start the queue\n\nFixed in route.rs.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- JB `Run Agent Doc` on a `queue: stop` + `agent:queue go` doc should start the queue.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // baseline == current (no new exchange prompt this cycle), non-empty
+        // response → the free-text head is answered and must be consumed.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: JB Run Agent Doc should start the queue\n\nFixed.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "an answered free-text head must be consumed even on the IPC-timeout closeout"
+        );
+    }
+
+    #[test]
+    fn consume_decision_strikes_synthetic_preset_head_on_heading_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #spec-test-build-install-commit-push\n\nDone.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "a preset head answered by a matching heading id must be consumed"
+        );
+    }
+
+    #[test]
+    fn consume_decision_keeps_bare_do_id_head_without_explicit_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // A bare do[#id] head is halt-safe: a response that does not record an
+        // explicit --done/--gate/--edit outcome must NOT strike it.
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: not doing this, here is why",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "a bare do[#id] head must stay queued without an explicit completion flag"
+        );
+        // The same head WITH --done foo is consumed.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: do [#foo]\n\nDone.",
+                &["foo".to_string()],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "--done naming the head id must consume it"
         );
     }
 

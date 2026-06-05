@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue_active: false
 ---
 
 ## Status
@@ -395,12 +395,38 @@ The price list had drifted into three copies (`conftest`, `test_cart`, `test_int
 Verified: offline **27 passed, 7 skipped**; `RUN_INTEGRATION=1` **7 passed** against the real API. Committed in the submodule (`solution`, `ahead 7`, **not pushed**).
 
 `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:9c50a263 -->
+
+### Re: total rounding semantics — correct, and now pinned by tests — opus-4-8
+
+Great question. Let me be precise about what the code does, then the subtle reason it's correct, then the new tests.
+
+#### What the code actually does
+```python
+subtotal = _round_up(raw_sum)              # raw_sum of price*qty
+tax      = _round_up(subtotal * 0.125)     # tax on the (rounded) subtotal
+total    = _round_up(subtotal + tax)       # subtotal & tax are already 2dp
+```
+So `total` is built from the **already-rounded** `subtotal` and `tax`. The outer `_round_up` on total is a **no-op** (2dp + 2dp is already 2dp), so effectively `total == subtotal + tax`. This matches the brief's worked example arithmetic literally: `15.02 + 1.88 = 16.90`.
+
+#### Is that the "double rounding" you were worried about?
+It's the `subtotal_rounded + tax_rounded` form — but here that's **provably identical** to "sum then round once", for this domain:
+
+- Prices are 2dp and quantities are integers, so `raw_sum` is **always exactly 2dp** → `_round_up(subtotal)` is a no-op → tax-on-rounded-subtotal == tax-on-raw-subtotal.
+- For an exact-2dp `subtotal`, `ROUND_UP(subtotal + tax_raw) == subtotal + ROUND_UP(tax_raw)`. Adding an exact-2dp number can't change the rounding of the fractional tail.
+
+I verified it: `round-each = 16.90`, `round-once = 16.90` — equal. The only operation that ever actually rounds is the 12.5% tax (which can exceed 2dp). So there's **no divergence and no bug**; `total = subtotal + tax` holds exactly. (The one way to make them differ would be sub-cent unit prices — not possible from this API's 2dp data.)
+
+#### "Do we have a test?" — we did not isolate it; now we do
+You were right that the worked-example test alone didn't pin the *semantics* (every case happened to agree). Added two explicit tests (committed in the submodule, `solution` `ahead 8`, **not pushed**):
+- `test_total_equals_subtotal_plus_tax` — asserts `total == subtotal + tax` across four carts, pinning that total is the sum of the two reported figures.
+- `test_tax_is_twelve_point_five_percent_of_subtotal_rounded_up` — asserts `tax == ROUND_UP(subtotal * 0.125)` and that `8.43 → 1.06` (round-**up**, not half-up which would give 1.05).
+
+Suite: **32 passed, 7 skipped**. `#next-steps-2` stays gated for your review.
+<!-- agent:boundary:2816c037 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- Does `cart.total` correctly calculate `cart.subtotal + cart.tax` then apply rounding? Not `_round_up(cart.subtotal) + _round_up(cart.tax)`. Do we have a test to verify the correct calculation behavior?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

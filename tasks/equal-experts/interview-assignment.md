@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -162,12 +162,44 @@ python -m pytest    # 22 passed
 - AI-usage disclosure estimates ~95% AI-generated — adjust to your comfort before submitting.
 
 Tell me what to change, or say "submit" when you're ready and I'll push to the EqualExperts remote + (only on your explicit go) mark complete.
-<!-- agent:boundary:0be74f3b -->
+
+### Re: venv + manual testing — opus-4-8
+
+> **Queue prompt:**
+>
+> Where is the venv? Does the README stipulate that I should manually test the app or are the tests sufficient?
+
+
+#### Where is the venv?
+There isn't one. I ran the suite against your **system Python 3.12**, which already had `httpx` and `pytest` installed, so `python -m pytest` worked without an isolated environment. I deliberately didn't create one (and `.gitignore` excludes `.venv/`, so none would be committed).
+
+That's fine for *my* run, but a reviewer cloning fresh would need the deps. Two options:
+
+- **Minimal / stdlib:** `python -m venv .venv && source .venv/bin/activate && pip install -e ".[test]" && pytest`
+- **uv (you have it):** `uv venv && uv pip install -e ".[test]" && uv run pytest`
+
+Either way the only runtime dep is `httpx`; tests add `pytest`. Say the word and I'll add a short **"Development setup"** block to the README with those commands (committed local, no push) so the suite is reproducible on a clean checkout.
+
+#### Manual testing — required?
+**No.** The brief does not ask for manual testing, and there is nothing to manually run:
+
+- The DO list is *"Include unit tests"* and *"Test both any client and logic"* — that's the 22-test suite (client mocked, cart logic, worked example).
+- The DO-NOT list explicitly forbids submitting *"any form of app… web APIs, browser, desktop, or command-line."* There is no executable/app to exercise by hand — by design it's a library.
+
+So the automated tests are the intended and sufficient verification. If you personally want a sanity check, you can drop into a REPL and hit the live API:
+
+```python
+from shopping_cart import Cart, PriceClient
+c = Cart(PriceClient()); c.add("cornflakes"); c.add("cornflakes"); c.add("weetabix")
+(c.subtotal, c.tax, c.total)   # (Decimal('15.02'), Decimal('1.88'), Decimal('16.90'))
+```
+
+That's optional — purely for your confidence, not a submission requirement.
+<!-- agent:boundary:51824954 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- Where is the venv? Does the README stipulate that I should manually test the app or are the tests sufficient?
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

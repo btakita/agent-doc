@@ -29,91 +29,18 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-065701.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-073609.md`*
 
 Compacted content:
-- Archived 12 response topic(s): do [#review-list-query]; explain the 3 decisions + #next-steps; why does Codex refuse "recursive submit because this pane already owns the document"?; 9 more
+- Archived 3 response topic(s): do [#route-ready-wait-fast-fail]; why does agent-doc recursively shell out the same command; do Option B + add an Option A plan
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#route-ready-wait-fast-fail] — fail-open worst case fixed — opus-4-8
-
-> **Queue prompt:**
->
-> do [#route-ready-wait-fast-fail]
-
-
-Done (submodule `7e6071bd`, pushed, installed, `make check` green). Your "highest value (1)+(2)":
-
-#### (1) Fast-fail provably-dead panes — implemented
-The worst case was: a pane that will *never* become ready still got polled for the full ready-timeout before recovery kicked in. A starting pane's tmux pane stays alive while its agent boots, so **`!pane_alive` means the pane is actually gone** (closed/dead), not just slow. I added a short-circuit to the ready-wait poll loop: a dead pane returns immediately (with a diagnostic) so the recovery ladder (same-pane retry → handoff → fresh reroute) runs *now* instead of burning the timeout. Slow-but-booting panes still wait normally — exactly the distinction you'd want.
-
-#### (2) Per-harness adaptive timeout — already in place
-This one was already done: the timeouts are per-binary (`_for_binary`) — ready-wait is 2 s for codex/claude, 15 s for opencode; recovery is 8 s/10 s/15 s. So the flat-60s impression came from a separate `route_wait_for_ready_override`, not these. The genuine gap was (1), which is now fixed.
-
-#### Verification
-`make check` green (0 failed, clippy clean); both binaries installed. The dead-pane short-circuit is a tmux-behavior path, so its live exercise is the `make tmux-ci` leg — a low-risk additive guard that passes the full unit suite.
-
-Marking `#route-ready-wait-fast-fail` done.
-
-Next: you asked *"Why is agent-doc recursively shelling out…"* — I'll take that (the root-cause of the Codex self-reinvoke) as the next prompt.
-
-### Re: why does agent-doc recursively shell out the same command — MCP vs CLI fix? — opus-4-8
-
-> **Queue prompt:**
->
-> Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?
-
-
-#### Why it happens (Codex only)
-agent-doc is a CLI, and the two harnesses drive it differently:
-- **Claude Code** runs the workflow **in-process** — the `/agent-doc` skill executes *inside* the Claude turn. No new process, so recursion is impossible.
-- **Codex** has no in-process skill execution. It drives agent-doc by **running the CLI as a shell command** (`agent-doc <FILE>`). So "continue the turn / drain the next queue item" literally means **running the CLI again** — and the Codex auto-loop does exactly that via the **Stop hook** (`.codex/hooks.json`). When that re-run lands inside the pane that already owns the document (the pane that *is* the agent-doc actor), the new process tries to dispatch a fresh turn back into the pane it's running in. That's the recursion; the `recursive_direct_invocation_blocked` guard catches it to avoid a deadlock.
-
-So the recursion is **structural to using a CLI to drive Codex** — the CLI re-invokes itself to continue, and the owner pane is where it runs.
-
-#### Your two options
-**A — Move to an MCP server (the root-cause fix).** Expose the hot path (preflight / respond / finalize / queue-drain) as **MCP tools** backed by a session-holding server. Codex then drives agent-doc by **tool calls against a persistent session**, not by spawning a fresh CLI in the owner pane — so the self-reinvoke **can't happen**. Cost: a real build (port the commands to a tool surface + server, migrate the Codex integration off the CLI/Stop-hook loop).
-
-**B — Fix the CLI to not call itself (`#codex-self-reinvoke-prevent`, the tactical fix).** Keep the CLI, but make owner-pane re-invocation **continue in place** instead of spawning a nested dispatch. The deadlock guard already does the *detect-and-refuse* half; this adds the *redirect-to-in-pane-continuation* half. Cost: smaller — but it **guards** the structural recursion rather than removing it (the CLI still starts a new process).
-
-#### My recommendation
-If Codex is a **first-class, long-term** harness, **A (MCP) is the right fix** — it removes the recursive-shell-out at the root and matches how Codex is meant to consume tools. Do **B as the interim** so the deadlock stops biting you *now* while the MCP surface is built. If Codex is secondary, B alone is enough.
-
-I'd lean **MCP for durable, B for now**. Captured as decision item `[#codex-mcp-vs-cli-reinvoke]` — it needs your call on A vs B before I build either (A especially is a big lift I shouldn't start unilaterally).
-
-Which way do you want to go?
-
-### Re: do Option B + add an Option A plan — opus-4-8
-
-> **Queue prompt:**
->
-> do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
-
-
-Both done.
-
-#### Option B — shipped (`#codex-self-reinvoke-prevent`)
-Submodule `101b20d2`, superproject `b6624513e`, pushed, installed, `make check` green.
-
-I traced the recursive self-shell-out to its source: the **Codex Stop-hook auto-loop** was literally instructing Codex *"Continue this turn by running `agent-doc <FILE>`"* for the next queue head. Re-running the entrypoint from the owner pane re-enters the pane it runs in → the deadlock guard fires. The fix redirects both continuation paths (tracked-state + durable-marker) to an **in-pane** answer + `agent-doc finalize <FILE>` — a non-dispatch command — and explicitly tells Codex **not** to run `agent-doc <FILE>` from the owner pane. This now matches the run-path guard's own in-pane guidance, so the recursion is never instructed in the first place.
-
-- `codex_hook.rs`: both `auto_queue_continuation_response` + the marker fallback rewritten to in-pane finalize.
-- `runbooks/harness-invocation.md`: Stop-hook continuation description updated to match; skill mirrors refreshed.
-- Test extended to assert the in-pane `finalize` redirect + the anti-recursion warning.
-
-#### Option A — planned (`#codex-mcp-server`)
-Created `tasks/agent-doc/plans/codex-mcp-server-option-a.md`: drive Codex via an **MCP server** (tool calls against a persistent session, no CLI re-spawn in the owner pane) — the structural root-cause fix that removes the CLI-drives-Codex model entirely. The plan reuses the `agent_doc_orchestration` functions so the CLI and MCP surfaces share one implementation, and it supersedes Option B for Codex once built. Added to the backlog as `[#codex-mcp-server]`.
-
-Decision item `#codex-mcp-vs-cli-reinvoke` resolved (B now, A planned) and marked done.
-
-So: the deadlock churn should stop biting Codex now (B is live), and the durable MCP fix is queued behind it.
-<!-- agent:boundary:f7c939c9 -->
+<!-- agent:boundary:1d13d954 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#route-ready-wait-fast-fail]~
 - ~Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?~
-- ~do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.~
+- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 - ~do [#codex-self-reinvoke-prevent]~
 - do [#codex-mcp-vs-cli-reinvoke]
 <!-- /agent:queue -->

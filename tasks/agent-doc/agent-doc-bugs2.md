@@ -86,13 +86,35 @@ First unblocked the concurrent orchestration WIP per your instruction, then impl
 The mid-cycle frontmatter **writes** (mirror at each transition + clear) are genuinely blocked on a design decision: the plan says the block is *committed at finalize* while this backlog item said *clear at terminal* — opposite lifecycles. Resolving that, adding diff/session-check managed-state handling, and live-verifying on the hot path is its own unit of work. The read-side already delivers the resume-detection / observability value with zero per-cycle document mutation. Tracked as a `[blocked: design decision]` review item with token-efficient NEXT steps.
 
 Reaped `#fmrunid-wire` (read-side done); gated the write-side for a lifecycle decision.
-<!-- agent:boundary:16b0335c -->
+
+### Re: `do [task-id]` optional + `re [task-id]` reference — opus-4-8
+
+Investigated the parsing surface and wrote a plan rather than blind-editing hot-path directive detection.
+
+#### What's already true
+Free-text queue items **already execute without `do`** — any non-preset, non-completed `agent:queue` line becomes an executable prompt (`queue::prompts`). The other items in this very queue ("Fix test suite", etc.) ran without a `do` prefix.
+
+#### The real gap
+`do [#id]` is special only because it's **id-backed**: it targets a tracked `agent:backlog` item and closeout reaps/gates that `#id`. So the actual request is:
+- a **bare `[#id]` / `#id`** in directive position should be an id-backed execute (the `do` verb becomes optional);
+- a **`re [#id]` / `re #id`** form should *reference* the task — never execute, never reap, never trip a closeout guard.
+
+#### Why a plan, not an immediate edit
+Directive detection (`do_directive_target_ids_in_line`, `is_do_directive`, `is_queue_directive_prompt`) and **every closeout guard** (`pending_done_guard`, queue-head provenance, `expect_done_or_gate`, `#do-id-closeout-open-backlog`) key off the literal `do ` prefix. Making `do` optional means a bare `[#id]` in prose must **not** accidentally execute — the disambiguation (leading-token-only + trailing-separator, cf. the existing bracket-id prompt-guard false-positive class) and the guard updates are the risky part.
+
+Plan: **`tasks/agent-doc/plans/optional-do-directive-and-re-reference.md`** — grammar table, disambiguation rule, two-stage scope, per-guard risk, test plan.
+
+#### Open decision (in the plan)
+Stage 1 = queue-only (bare `[#id]` execute + `re [#id]` reference) — smallest guard surface, recommended first. Stage 2 = exchange directives + the closeout guards. Confirm whether to ship Stage 2 now or land Stage 1 first and gate Stage 2 behind live use.
+
+Queued implementation as `#optional-do-re` (plan-backed).
+<!-- agent:boundary:45284ffc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#tagpath-lint-queue-control]~
 - ~do [#fm-run-id-step]~
-- do [#fmrunid-wire]
+- ~do [#fmrunid-wire]~
 - `do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.
 - Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
 - When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
@@ -111,6 +133,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 
 ## Review

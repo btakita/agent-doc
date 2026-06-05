@@ -82,13 +82,40 @@ If Codex is a **first-class, long-term** harness, **A (MCP) is the right fix** �
 I'd lean **MCP for durable, B for now**. Captured as decision item `[#codex-mcp-vs-cli-reinvoke]` — it needs your call on A vs B before I build either (A especially is a big lift I shouldn't start unilaterally).
 
 Which way do you want to go?
-<!-- agent:boundary:51c036bb -->
+
+### Re: do Option B + add an Option A plan — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
+
+
+Both done.
+
+#### Option B — shipped (`#codex-self-reinvoke-prevent`)
+Submodule `101b20d2`, superproject `b6624513e`, pushed, installed, `make check` green.
+
+I traced the recursive self-shell-out to its source: the **Codex Stop-hook auto-loop** was literally instructing Codex *"Continue this turn by running `agent-doc <FILE>`"* for the next queue head. Re-running the entrypoint from the owner pane re-enters the pane it runs in → the deadlock guard fires. The fix redirects both continuation paths (tracked-state + durable-marker) to an **in-pane** answer + `agent-doc finalize <FILE>` — a non-dispatch command — and explicitly tells Codex **not** to run `agent-doc <FILE>` from the owner pane. This now matches the run-path guard's own in-pane guidance, so the recursion is never instructed in the first place.
+
+- `codex_hook.rs`: both `auto_queue_continuation_response` + the marker fallback rewritten to in-pane finalize.
+- `runbooks/harness-invocation.md`: Stop-hook continuation description updated to match; skill mirrors refreshed.
+- Test extended to assert the in-pane `finalize` redirect + the anti-recursion warning.
+
+#### Option A — planned (`#codex-mcp-server`)
+Created `tasks/agent-doc/plans/codex-mcp-server-option-a.md`: drive Codex via an **MCP server** (tool calls against a persistent session, no CLI re-spawn in the owner pane) — the structural root-cause fix that removes the CLI-drives-Codex model entirely. The plan reuses the `agent_doc_orchestration` functions so the CLI and MCP surfaces share one implementation, and it supersedes Option B for Codex once built. Added to the backlog as `[#codex-mcp-server]`.
+
+Decision item `#codex-mcp-vs-cli-reinvoke` resolved (B now, A planned) and marked done.
+
+So: the deadlock churn should stop biting Codex now (B is live), and the durable MCP fix is queued behind it.
+<!-- agent:boundary:f7c939c9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#route-ready-wait-fast-fail]~
 - ~Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?~
-- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
+- ~do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.~
+- ~do [#codex-self-reinvoke-prevent]~
+- do [#codex-mcp-vs-cli-reinvoke]
 <!-- /agent:queue -->
 ###
 <!--
@@ -103,9 +130,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#codex-mcp-vs-cli-reinvoke] [recommended] DECISION: fix the Codex recursive self-shell-out at the root. Cause: Codex has no in-process skill execution, so it drives agent-doc by running the CLI (agent-doc <FILE>); continuing a turn = re-running the CLI, and the Stop-hook auto-loop does so inside the owner pane → the new process re-enters the pane it runs in → recursion (recursive_direct_invocation_blocked guard catches it). Option A (MCP server): expose the hot-path workflow as MCP tools + a session-holding server so Codex drives agent-doc via tool calls against a persistent session, never spawning a nested CLI in the owner pane — removes the recursion structurally; bigger build. Option B (#codex-self-reinvoke-prevent): keep the CLI, make owner-pane re-invocation continue-in-place instead of nested-dispatch (the deadlock guard is the detect half; this adds the redirect half) — smaller, tactical, guards rather than removes the recursion. RECOMMEND: A (MCP) as the durable fix if Codex is first-class, with B as the interim so the deadlock stops biting now. Needs user direction on A vs B before implementation.
+- [ ] [#codex-mcp-server] [recommended] Option A (deferred, root-cause fix for the Codex recursive self-shell-out): drive Codex agent-doc via an MCP server so Codex calls tools against a persistent session instead of spawning a fresh CLI in the owner pane — removes the recursion structurally. Supersedes the Option B interim (#codex-self-reinvoke-prevent, shipped) for Codex once the MCP surface exists. Plan: tasks/agent-doc/plans/codex-mcp-server-option-a.md.
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
-- [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
 <!-- /agent:backlog -->
 
 ## Review

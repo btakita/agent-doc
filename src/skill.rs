@@ -695,37 +695,116 @@ const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 /// best-effort work (clear a pane title) — unlike the consequential Codex closeout
 /// Stop hook — so a missed Stop can only leave a stale cosmetic title, and the
 /// SessionStart clear self-heals it at the next session start.
-pub fn install_turn_status_hooks(settings: Option<&Path>, user: bool) -> Result<()> {
-    let path = resolve_turn_status_settings_path(settings, user)?;
+/// OpenCode plugin that drives the monitor: `chat.message` (a new user message =
+/// turn start) → `turn-status active`; the `session.idle` bus event (turn end) →
+/// `turn-status idle`. Best-effort — `agent-doc turn-status` no-ops outside tmux.
+const OPENCODE_TURN_STATUS_PLUGIN: &str = r#"// agent-doc turn-in-progress pane monitor (#claude-busy-status-during-active-turn).
+// Auto-installed by `agent-doc turn-status install`. Sets the agent's own tmux
+// pane border title on turn start (chat.message) and clears it on turn end
+// (session.idle). Best-effort: agent-doc turn-status no-ops outside tmux.
+export const AgentDocTurnStatus = async ({ $ }) => ({
+  "chat.message": async () => {
+    try { await $`agent-doc turn-status active` } catch {}
+  },
+  event: async ({ event }) => {
+    if (event.type === "session.idle") {
+      try { await $`agent-doc turn-status idle` } catch {}
+    }
+  },
+})
+"#;
+
+/// Install the turn-in-progress pane monitor for all three harnesses
+/// (#claude-busy-status-during-active-turn). Idempotent + additive per harness.
+/// `base`, when set, roots every harness path under it (project-relative; used by
+/// tests and `--dir`). Otherwise `user` selects each harness's user config dir,
+/// else the project-local (cwd) paths.
+pub fn install_turn_status_hooks(base: Option<&Path>, user: bool) -> Result<()> {
+    // Claude — settings.json: UserPromptSubmit/Stop/SessionStart.
+    let claude = turn_status_path(base, user, ".claude/settings.json", ".claude/settings.json");
+    ensure_parent_dir(&claude)?;
+    merge_claude_turn_status_hooks(&claude)?;
+    println!("[turn-status] claude   -> {}", claude.display());
+
+    // Codex — hooks.json: UserPromptSubmit/Stop (Codex has no SessionStart event).
+    let codex = turn_status_path(base, user, ".codex/hooks.json", ".codex/hooks.json");
+    ensure_parent_dir(&codex)?;
+    merge_codex_turn_status_hooks(&codex)?;
+    println!("[turn-status] codex    -> {}", codex.display());
+
+    // OpenCode — plugin file: chat.message + session.idle (no JSON hook events).
+    let opencode = turn_status_path(
+        base,
+        user,
+        ".opencode/plugin/agent-doc-turn-status.js",
+        ".config/opencode/plugin/agent-doc-turn-status.js",
+    );
+    ensure_parent_dir(&opencode)?;
+    std::fs::write(&opencode, OPENCODE_TURN_STATUS_PLUGIN)
+        .with_context(|| format!("write {}", opencode.display()))?;
+    println!("[turn-status] opencode -> {}", opencode.display());
+
+    println!("  start (UserPromptSubmit / chat.message)   -> {TURN_STATUS_ACTIVE_COMMAND}");
+    println!("  end   (Stop / SessionStart / session.idle) -> {TURN_STATUS_IDLE_COMMAND}");
+    println!("  enable visibility: tmux set -g pane-border-status top");
+    Ok(())
+}
+
+fn turn_status_path(
+    base: Option<&Path>,
+    user: bool,
+    project_rel: &str,
+    user_rel: &str,
+) -> std::path::PathBuf {
+    if let Some(b) = base {
+        return b.join(project_rel);
+    }
+    if user && let Ok(home) = std::env::var("HOME") {
+        return std::path::PathBuf::from(home).join(user_rel);
+    }
+    std::path::PathBuf::from(project_rel)
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create {}", parent.display()))?;
     }
-    merge_claude_turn_status_hooks(&path)?;
-    println!(
-        "[turn-status] installed Claude hooks into {}",
-        path.display()
-    );
-    println!("  UserPromptSubmit -> {TURN_STATUS_ACTIVE_COMMAND}");
-    println!("  Stop, SessionStart -> {TURN_STATUS_IDLE_COMMAND}");
-    println!("  enable visibility: tmux set -g pane-border-status top");
     Ok(())
 }
 
-fn resolve_turn_status_settings_path(
-    settings: Option<&Path>,
-    user: bool,
-) -> Result<std::path::PathBuf> {
-    if let Some(p) = settings {
-        return Ok(p.to_path_buf());
-    }
-    if user {
-        let home = std::env::var("HOME").context("HOME not set for --user install")?;
-        return Ok(std::path::PathBuf::from(home).join(".claude/settings.json"));
-    }
-    Ok(std::path::PathBuf::from(".claude/settings.json"))
+/// Merge the turn-status hooks into a Codex `hooks.json`. Same shape as the
+/// Claude settings.json; Codex has no `SessionStart` event so only the start/end
+/// pair is wired (a missed Stop self-heals when the next `UserPromptSubmit`
+/// re-asserts the active title).
+fn merge_codex_turn_status_hooks(path: &Path) -> Result<()> {
+    let mut root = if path.exists() {
+        let content =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .with_context(|| format!("parse {}", path.display()))?
+        }
+    } else {
+        serde_json::json!({})
+    };
+    let hooks = root
+        .as_object_mut()
+        .context("hooks.json root must be an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks_map = hooks
+        .as_object_mut()
+        .context("hooks.json `hooks` must be an object")?;
+    ensure_codex_hook_command(hooks_map, "UserPromptSubmit", TURN_STATUS_ACTIVE_COMMAND, None);
+    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
+    let rendered = serde_json::to_string_pretty(&root)?;
+    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
 }
 
 /// Merge the turn-status hooks into a Claude `settings.json`. Claude's hook shape
@@ -1542,23 +1621,21 @@ mod tests {
     }
 
     #[test]
-    fn install_turn_status_hooks_merges_idempotently_and_preserves_existing() {
+    fn install_turn_status_hooks_all_harnesses_idempotent_and_preserves_existing() {
         let dir = tempfile::tempdir().unwrap();
-        let settings = dir.path().join(".claude/settings.json");
-        // A pre-existing unrelated hook (the autoclaim SessionStart hook) must survive.
-        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        // A pre-existing unrelated Claude hook (autoclaim SessionStart) must survive.
+        let claude_settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(claude_settings.parent().unwrap()).unwrap();
         std::fs::write(
-            &settings,
+            &claude_settings,
             r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"agent-doc autoclaim"}]}]}}"#,
         )
         .unwrap();
 
-        super::install_turn_status_hooks(Some(&settings), false).unwrap();
-        super::install_turn_status_hooks(Some(&settings), false).unwrap(); // idempotent re-run
+        super::install_turn_status_hooks(Some(dir.path()), false).unwrap();
+        super::install_turn_status_hooks(Some(dir.path()), false).unwrap(); // idempotent re-run
 
-        let v: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-        let cmds = |event: &str| -> Vec<String> {
+        let cmds = |v: &serde_json::Value, event: &str| -> Vec<String> {
             v["hooks"][event]
                 .as_array()
                 .map(|entries| {
@@ -1571,22 +1648,39 @@ mod tests {
                 .unwrap_or_default()
         };
 
-        assert!(cmds("UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string()));
-        assert!(cmds("Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
-        let session_start = cmds("SessionStart");
+        // Claude: start + (Stop, SessionStart) end hooks; autoclaim preserved; idempotent.
+        let claude: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&claude_settings).unwrap()).unwrap();
+        assert!(cmds(&claude, "UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string()));
+        assert!(cmds(&claude, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
+        let ss = cmds(&claude, "SessionStart");
         assert!(
-            session_start.contains(&"agent-doc autoclaim".to_string()),
-            "existing autoclaim hook must be preserved: {session_start:?}"
+            ss.contains(&"agent-doc autoclaim".to_string()),
+            "autoclaim preserved: {ss:?}"
         );
-        assert!(session_start.contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
+        assert!(ss.contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
         assert_eq!(
-            session_start
-                .iter()
-                .filter(|c| c.as_str() == TURN_STATUS_IDLE_COMMAND)
-                .count(),
+            ss.iter().filter(|c| c.as_str() == TURN_STATUS_IDLE_COMMAND).count(),
             1,
-            "idempotent re-install must not duplicate the turn-status hook: {session_start:?}"
+            "idempotent: {ss:?}"
         );
+
+        // Codex: start + Stop end (no SessionStart event for Codex).
+        let codex: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(cmds(&codex, "UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string()));
+        assert!(cmds(&codex, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
+
+        // OpenCode: plugin file wired to both turn-status commands via chat.message + session.idle.
+        let oc = std::fs::read_to_string(
+            dir.path().join(".opencode/plugin/agent-doc-turn-status.js"),
+        )
+        .unwrap();
+        assert!(oc.contains("turn-status active"), "{oc}");
+        assert!(oc.contains("session.idle"), "{oc}");
+        assert!(oc.contains("turn-status idle"), "{oc}");
     }
 
     #[test]

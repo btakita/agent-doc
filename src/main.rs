@@ -123,12 +123,12 @@ pub enum TurnStatusAction {
     Active,
     /// The turn just ended (Stop hook): clear the status.
     Idle,
-    /// Install the Claude Code hooks that drive the monitor into settings.json.
+    /// Install the monitor's hooks for Claude, Codex, and OpenCode.
     Install {
-        /// Settings file to merge into (default: ./.claude/settings.json).
+        /// Install root for all harnesses (default: cwd). Mainly for testing.
         #[arg(long)]
-        settings: Option<PathBuf>,
-        /// Install into ~/.claude/settings.json instead of the project file.
+        dir: Option<PathBuf>,
+        /// Install into each harness's user config dir instead of the project.
         #[arg(long)]
         user: bool,
     },
@@ -2475,8 +2475,8 @@ fn main() -> anyhow::Result<()> {
         Commands::TurnStatus { action } => match action {
             TurnStatusAction::Active => agent_doc_orchestration::turn_status::run(true),
             TurnStatusAction::Idle => agent_doc_orchestration::turn_status::run(false),
-            TurnStatusAction::Install { settings, user } => {
-                skill::install_turn_status_hooks(settings.as_deref(), user)
+            TurnStatusAction::Install { dir, user } => {
+                skill::install_turn_status_hooks(dir.as_deref(), user)
             }
         },
         Commands::Upgrade => upgrade::run(),

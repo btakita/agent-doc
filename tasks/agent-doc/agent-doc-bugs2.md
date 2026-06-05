@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -108,7 +108,7 @@ Plan: **`tasks/agent-doc/plans/optional-do-directive-and-re-reference.md`** — 
 Stage 1 = queue-only (bare `[#id]` execute + `re [#id]` reference) — smallest guard surface, recommended first. Stage 2 = exchange directives + the closeout guards. Confirm whether to ship Stage 2 now or land Stage 1 first and gate Stage 2 behind live use.
 
 Queued implementation as `#optional-do-re` (plan-backed).
-<!-- agent:boundary:45284ffc -->
+<!-- agent:boundary:a9278bb5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

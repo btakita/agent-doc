@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -133,7 +133,30 @@ I've honored it every cycle this session — `make check` ran green before each 
 The contract is agent-enforced today. If you'd rather have it **code-enforced** — e.g. a `session-check` closeout guard that runs (or freshness-checks a recent green result of) the suite and fails closed if red — say so and I'll plan + backlog `#closeout-test-gate`. Left out deliberately: it's heavier (full suite per closeout) and the agent-contract already covers it, so there is no actionable follow-up to capture this cycle.
 
 Nothing to fix — suite green, policy already contractual.
-<!-- agent:boundary:8b9e181c -->
+
+### Re: queue items should get a strikethrough on complete — opus-4-8
+
+Strikethroughs **do** work on the normal path — and I root-caused the one remaining gap from a live repro this session.
+
+#### Working now (evidence)
+Every completed item in this queue is struck on the normal `finalize` path:
+```
+- ~do [#tagpath-lint-queue-control]~
+- ~do [#fm-run-id-step]~
+- ~do [#fmrunid-wire]~
+- ~`do [task-id]` should not be necessary...~
+- ~Fix test suite...~
+```
+`do [#id]` items strike on `--done`/consume; free-text items strike on consume (`[queue] consumed: "Fix test suite..."` in this turn's finalize log). So the symptom you flagged ("this queue run did not update the state of the queue items") isn't reproducing on the normal path.
+
+#### The remaining gap (live repro this session)
+When `finalize` **fails** — e.g. the IntelliJ visible-buffer guard fired repeatedly this session — recovery goes through `agent-doc repair`, which replays the response and commits it **but does not strike the consumed queue head**. `write.rs` owns queue consumption (`should_consume_queue_prompt_for_write`, `#queue-strike-on-halt`); `repair.rs` has no equivalent. Result: an answered free-text head stays unstruck and preflight re-presents it. I hit this exactly with item 3 — it needed a manual strike to advance the queue.
+
+#### Fix (backlogged with the repro)
+`#repair-strike-consumed-head`: after `repair` applies an orphaned response, strike the head(s) it consumed using `cycle_state.active_queue_heads` + the same consume predicate `write.rs` uses. Focused, recovery-path-only; the normal path is unchanged. Queued it for implementation.
+
+Net: normal-path strikethrough is solid; the recovery-path strike is the real remaining bug, now tracked with its root cause.
+<!-- agent:boundary:285fc3d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -161,6 +184,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#repair-strike-consumed-head] [plan] repair-based recovery does not strike/consume the queue head its recovered response answered. write.rs owns queue consumption (should_consume_queue_prompt_for_write, #queue-strike-on-halt); repair.rs has none — so when finalize fails (e.g. IDE visible-buffer guard) and recovery goes through repair, the consumed free-text head stays unstruck and preflight re-presents it. FIX: after repair applies an orphaned response, strike the head(s) it consumed using cycle_state.active_queue_heads + the same consume predicate. Live repro: item 3 (optional-do/re) this session needed a manual strike.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 

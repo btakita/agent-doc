@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,30 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): [#zwws] Investor dashboard #rpzm phase 2b
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:2618c829 -->
+
+### Re: [#zwws] Investor dashboard #rpzm phase 5 — opus-4-8
+
+> **Queue prompt:**
+>
+> [#zwws]
+
+
+Shipped phase 5 — the next un-gated phase. Spec + tests updated, committed + pushed (EFS `1957f64`, superproject pointer `cb2a12d28`).
+
+#### Accreditation reframed as **Requirements**
+- The nav item and page now read **Requirements**. The page leads with the **annual investor questionnaire** (status card shows an explicit "Annual" cadence and "Renews" date), and the requirements checklist notes the **accredited-investor certification is collected as part of your lender onboarding documents**.
+- Kept the section id, `/portal-investor/accreditation` route, and `/api/investor/accreditation` API stable — this is a presentation/workflow reframe, not a plumbing rename, so no links or callers break.
+
+#### Annual cadence enforced server-side
+- Added `ACCREDITATION_ANNUAL_TTL_SECONDS` (365 days) and made the admin accreditation-decision route default a verified decision's TTL to it when the reviewer doesn't set one. So `expires_at` and the renewal window (expires − 60 days) now open on a yearly cadence by default instead of never expiring.
+
+#### Verification
+- `bun test`: **285 pass / 0 fail** (added annual-cadence + Requirements-framing coverage in the e2e and admin suites).
+- `bun run build` + `bun run build:worker`: clean. (Pre-existing project-wide `fetch().then(data: T)` and the unrelated `blog_post_status_T` tsc notes are unchanged — the project gates on `bun run check`, not strict `tsc`.)
+- PRD `rpzm-...` updated: phase 5 marked shipped.
+
+**Remaining `#zwws` phases are externally gated:** 4 (vestings/special-instructions — TMO-writeback-gated `#dzmm`/`#k2xg`/`#7a4d`) and 6 (new-deal email + workflow-priority dashboard — `#f4rq`-gated). No un-gated phase remains, so I'm not continuing the loop — queue phase 4 or 6 once its gate clears.
+<!-- agent:boundary:3b46bab2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,13 +68,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#zwws]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
+- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

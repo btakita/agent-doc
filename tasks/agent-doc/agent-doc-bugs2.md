@@ -34,14 +34,53 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 1 response topic(s): JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ec7bcb9e -->
+
+### Re: JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.
+
+
+Shipped. Two related queue-start/stall fixes landed and are live (`cargo install` + `cargo build --release` done, both binaries refreshed; pushed to `origin/20260422/codex-agent-backend`).
+
+**Item 1 — `queue: stop` + `agent:queue go` start parity** (`6e3ce39d`, `route.rs`)
+`inactive_route_queue_head_in_content` computed `has_auto` only from the legacy `auto` attribute, so a `queue: stop` document carrying the canonical marker-side `&lt;!-- agent:queue go --&gt;` control was never recognized as activatable — JB `Run Agent Doc` (backed by `agent-doc route`) refused to start it. It now mirrors preflight's resolution: marker `go`/`start` fresh-activate (`marker_control` maps both → `QueueControl::Start`), marker `stop` forces inert and wins. Covered by `route::tests` + `marker_control_detects_start_go_stop`.
+
+**Item 2 — queue-stall treadmill** (`761e0f43`, `write.rs` — this turn)
+Root cause: the stream/CRDT IPC-timeout disk fallback in `run_stream` commits the response and `exit(75)`s **without** returning to the `write_with_options` Phase 3c queue-consume, so the answered head stayed queued and every auto-loop re-served it → `I'm stopping the loop rather than continuing it…`. Fix consolidates every closeout's consume decision into one `queue_consumption_allowed_for_response` helper and calls it (force-disk) on the IPC-timeout path so the struck head lands in the same commit.
+
+While verifying, the new consume call **deadlocked** the IPC-timeout closeout: that branch holds the pre-response `doc_lock` through its whole exit path (unlike the others, which drop it before commit), and `consume_queue_prompts_with_outcome` re-enters `acquire_doc_lock` — an exclusive `flock` that conflicts across separate opens in the same process → self-deadlock (caught by `equityfundingsource_stale_patch_replay_is_claimed_before_late_editor_pickup` hanging 15 min at 0% CPU in `locks_lock_inode_wait`). Fixed by dropping `doc_lock` after the snapshot+disk write and before the consume. Full `make check` green (3741 tests, 0 failed).
+
+Build ran **inline in this session, streamed to a watchable log** — not a subagent (your item 4 below). The earlier opacity was the harness auto-detaching `make check` plus a `| tail` that buffered to EOF; redirecting straight to a log file streams fine.
+
+Remaining queue items 3–6 (sync-pipeline hotpath, main-agent-not-subagent build behavior, backlog/preset id-collision, memory-workaround cleanup) are each substantial and unstarted — I'm holding the auto-loop there rather than blasting through while you're live-editing. Note item 3 (sync pipeline) has a **stray leading backtick** that kept it out of `queue_prompts`.
+
+Top of backlog: `#queue-consume-ipc-timeout-live-verify`.
+<!-- agent:boundary:75de3c77 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- ~JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.~
+- The last session had a queue stall and an error `I'm stopping the loop rather than continuing it — re-running would treadmill on an already-completed prompt.`. Please fix this issue.
+`- There is significant blocking with the main sync pipeline. We need to keep the main sync pipeline fast, so syncing is responsive when I switch files in the editor. Can we have a hotpath to identify if a tmux pane claims a document and show it quickly or create a new tmux pane if these is no claiming pane? The other stuff can be deferred. We just need sync to always be responsive and to show the tmux pane. If the tmux pane needs time to load and has slower sync tasks, that should not block the main sync pipeline.
+- Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.
+- I asked to create `backlog #next-steps` in interview.md. `#next-steps` is defined in `prompt_presets`. The agent added the backlog item with the id `[#next-steps]`, which collides with the prompt preset. I manually changed the id to `[#next-steps-2]`. agent-doc should ensure the added backlog item is not in conflict with `prompt_presets` or any other id in the document. I also had to fight agent-doc with my id change. agent-doc kept on setting the id back to `[#next-steps]` even though I changed it to `[#next-steps-2]`...This happened at least 2 times. Update, I did not have #next-steps in the prompt preset, so I added it later. But the rule of no-conflict between a backlog id and prompt preset or other id in the document still stands. Please ensure the rule is in place.
+- My agents are creating memory entries to get around various agent-doc churn issues. Please evaluate the memories and treat those workaround as bugs. Please clear out any agent-doc workarounds from memory so I can dogfood any agent-doc issues. These issues should be fixed on the non-memory harness or binary level.
 <!-- /agent:queue -->
 ###
 <!--
+A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.
+---
+agent-doc reentrant run on equityfundingsource.md had recovery churn.
+```
+● The recovery is complete and fully consistent. The binary converged the now-drained queue (empty block, queue_active:
+  false), no_changes: true, both responses are committed in the session doc, and both code deliverables are on
+  origin/main. The auto-loop terminated naturally.
+
+  Let me record the specific recovery path for this failure mode, since it's a recurring dogfooding pattern
+```
+---
 - This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 ---
 The last run had a code fence stripped away by agent-doc.
@@ -52,8 +91,10 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
- 
+<!-- agent:backlog priority queue --> 
+- [ ] [#queue-consume-ipc-timeout-live-verify] [recommended] live-verify the shipped #queue-consume-on-stream-ipc-timeout fix end-to-end: drive a live IPC-timeout finalize (exit 75) on a queued free-text head and confirm the head is struck in the same commit and the auto-loop does not re-serve it. Shipped 761e0f43 incl. doc_lock deadlock fix; needs a live IntelliJ IPC-timeout repro.
+- [ ] [#ci-per-test-timeout-guard] [recommended] #agent-doc-bug: the doc_lock self-deadlock hung `make check` ~15 min at 0% CPU with no per-test timeout, so a deadlock-class regression hangs CI indefinitely instead of failing fast. Add a per-test/integration timeout (cargo-nextest slow-timeout or a watchdog) so lock/IPC deadlocks fail the suite quickly with a backtrace.
+- [ ] [#queue-line-leading-backtick-drop] #agent-doc-bug: a queue line with a stray leading backtick is silently dropped from preflight queue_prompts (observed on the sync-pipeline item in agent-doc-bugs2.md); agent:queue parsing should strip/normalize a leading backtick or warn so a mistyped queue line is not silently skipped.
 <!-- /agent:backlog -->
 
 ## Review

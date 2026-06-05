@@ -74,14 +74,27 @@ A latent `doc_lock` self-deadlock in that new path was caught and fixed in the s
 This very cycle exercised it: item 1 consumed cleanly through the live IPC path. End-to-end live-verify of the IPC-*timeout* branch specifically is tracked as `#queue-consume-ipc-timeout-live-verify` (needs a forced IPC timeout to repro).
 
 No new follow-ups — already captured.
-<!-- agent:boundary:80af294f -->
+
+### Re: Build on the main agent, not a subagent / no idle session while the previous turn runs — opus-4-8
+
+> **Queue prompt:**
+>
+> Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.
+
+
+Two parts.
+
+**(a) Build on the main agent — corrected.** No `Agent` subagent was ever spawned; the Claude Code harness *auto-backgrounded* the long `make check` Bash call and a `| tail` buffered output to EOF, so the session looked idle with opaque "subagent" work. Fixed in-session: builds now run on the main agent, stream to a watchable log file, and I scan that file with cheap greps for progress/errors/warnings. That conduct rule is going into the skill/runbooks.
+
+**(b) Session must not present as idle while a turn is in flight — design-gated.** This is a harness-scheduling property agent-doc cannot directly enforce (Claude Code owns tool scheduling and the between-tool "idle" presentation). Plan: `tasks/agent-doc/plan-claude-idle-session-during-active-build.md`. Recommended path: a visible *turn-in-progress* busy status on the owned pane + the conduct rule now (achievable, directly addresses "looks idle"); a hard supervisor busy-lease / Stop-hook gate is the durable fix but is gated on the `#subagent-blocks-session` scope decision (which layer blocks, what counts as "the work", how the lease releases). Captured as `#claude-busy-status-during-active-turn`.
+<!-- agent:boundary:2d539a8e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.~
 - ~The last session had a queue stall and an error `I'm stopping the loop rather than continuing it — re-running would treadmill on an already-completed prompt.`. Please fix this issue.~
 `- There is significant blocking with the main sync pipeline. We need to keep the main sync pipeline fast, so syncing is responsive when I switch files in the editor. Can we have a hotpath to identify if a tmux pane claims a document and show it quickly or create a new tmux pane if these is no claiming pane? The other stuff can be deferred. We just need sync to always be responsive and to show the tmux pane. If the tmux pane needs time to load and has slower sync tasks, that should not block the main sync pipeline.
-- Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.
+- ~Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.~
 - I asked to create `backlog #next-steps` in interview.md. `#next-steps` is defined in `prompt_presets`. The agent added the backlog item with the id `[#next-steps]`, which collides with the prompt preset. I manually changed the id to `[#next-steps-2]`. agent-doc should ensure the added backlog item is not in conflict with `prompt_presets` or any other id in the document. I also had to fight agent-doc with my id change. agent-doc kept on setting the id back to `[#next-steps]` even though I changed it to `[#next-steps-2]`...This happened at least 2 times. Update, I did not have #next-steps in the prompt preset, so I added it later. But the rule of no-conflict between a backlog id and prompt preset or other id in the document still stands. Please ensure the rule is in place.
 - My agents are creating memory entries to get around various agent-doc churn issues. Please evaluate the memories and treat those workaround as bugs. Please clear out any agent-doc workarounds from memory so I can dogfood any agent-doc issues. These issues should be fixed on the non-memory harness or binary level.
 - do [#queue-consume-ipc-timeout-live-verify]
@@ -112,6 +125,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#claude-busy-status-during-active-turn] #agent-doc-bug: while the main agent runs a long turn (e.g. a multi-minute build), the agent-doc/Claude session must not present as idle/available. agent-doc cannot control Claude Code tool scheduling, so: (opt 3, now) surface a visible turn-in-progress busy status on the owned pane + a skill conduct rule (long build/test on main agent, stream to a watchable file, never report idle while in flight); (opt 1/2, durable) supervisor busy-lease / Stop-hook gate so a second Run Agent Doc fails closed, gated on the #subagent-blocks-session design decision. Plan: tasks/agent-doc/plan-claude-idle-session-during-active-build.md
 - [ ] [#queue-consume-ipc-timeout-live-verify] [recommended] live-verify the shipped #queue-consume-on-stream-ipc-timeout fix end-to-end: drive a live IPC-timeout finalize (exit 75) on a queued free-text head and confirm the head is struck in the same commit and the auto-loop does not re-serve it. Shipped 761e0f43 incl. doc_lock deadlock fix; needs a live IntelliJ IPC-timeout repro.
 - [ ] [#ci-per-test-timeout-guard] [recommended] #agent-doc-bug: the doc_lock self-deadlock hung `make check` ~15 min at 0% CPU with no per-test timeout, so a deadlock-class regression hangs CI indefinitely instead of failing fast. Add a per-test/integration timeout (cargo-nextest slow-timeout or a watchdog) so lock/IPC deadlocks fail the suite quickly with a backtrace.
 - [ ] [#queue-line-leading-backtick-drop] #agent-doc-bug: a queue line with a stray leading backtick is silently dropped from preflight queue_prompts (observed on the sync-pipeline item in agent-doc-bugs2.md); agent:queue parsing should strip/normalize a leading backtick or warn so a mistyped queue line is not silently skipped.

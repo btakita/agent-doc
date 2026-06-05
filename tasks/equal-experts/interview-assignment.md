@@ -229,12 +229,42 @@ Run with `RUN_INTEGRATION=1 pytest`. It proves the real end-to-end wiring withou
 
 ---
 *Housekeeping: the exchange is now ~175 lines / 7 sections and agent-doc is flagging it as large. Whenever you're done reviewing, I can run `agent-doc compact` to condense it — just say so; I won't compact mid-review.*
-<!-- agent:boundary:c2db4547 -->
+
+### Re: Real-API smoke suite added — opus-4-8
+
+Done. `tests/test_integration.py` added, committed in the submodule (`solution`, `ahead 3`, **not pushed**).
+
+- Skipped by default; runs with `RUN_INTEGRATION=1 python -m pytest tests/test_integration.py`.
+- Covers **all five products** (`cheerios, cornflakes, frosties, shreddies, weetabix`) against the live API, plus an end-to-end cart that builds totals from real prices.
+- Verified just now: default suite **22 passed, 6 skipped**; live suite **6 passed** (real API responded for every product). README updated with how to run it.
+
+### Re: Fake API vs mocks — opus-4-8
+
+> **Queue prompt:**
+>
+> I would like a smoke test for the real API calls. This should include all products hitting the real api.
+
+
+Good instinct, and you've named the real tradeoff. My recommendation: **a lightweight Fake at the transport seam — yes; a full Fake API service — no.**
+
+#### Where I agree
+A Fake (one in-memory implementation of a contract) beats scattered mocks when there are *many* call sites or response shapes: it consolidates the "what the API looks like" assumption in one place, so a contract change is a one-line edit, not a shotgun surgery across tests. Repeated inline mocks are where brittleness creeps in.
+
+#### Where it applies here (and where it doesn't)
+- The surface is tiny: **one** operation (`get_price`), one response shape, a few error cases. The assumptions are already small.
+- You actually already have a Fake on one seam: `test_cart.py`'s `StubClient` *is* an in-memory fake of the `PriceClient` contract. That's the right tool there.
+- The brittleness you're pointing at is on the **client** seam: `test_price_client.py` repeats the `{"title":…, "price":…}` shape in several inline handlers.
+
+#### Concrete recommendation
+Keep `httpx.MockTransport` (no new dependency), but **consolidate the client tests behind one shared fake-endpoint handler** — a single `product -> payload` dict + handler (returns 404 for unknown, the payload otherwise), exposed as a pytest fixture. That captures the API's shape **once**, kills the repetition, and stays well within the brief's simplicity bar. A standalone Fake API *class* or a spun-up local server would be over-engineering for a single GET endpoint — more moving parts than the thing under test.
+
+Net: a small fake *fixture*, not a fake *service*. Want me to refactor `test_price_client.py` to that shared fixture now (committed local, no push)? It's ~15 lines net and makes the client tests express one contract instead of five.
+<!-- agent:boundary:af8c935d -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue auto go -->
-- I would like a smoke test for the real API calls. This should include all products hitting the real api.
+- ~I would like a smoke test for the real API calls. This should include all products hitting the real api.~
 - Should we also consider a Fake API for testing instead of mocks? Mocks are simple but brittle and repeat testing assumptions. A Fake would consolidate the assumptions. This is not as simple as it could possibly be but is more maintainable than mocks.
 <!-- /agent:queue -->
 

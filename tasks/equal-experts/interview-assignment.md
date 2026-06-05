@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -195,11 +195,12 @@ c = Cart(PriceClient()); c.add("cornflakes"); c.add("cornflakes"); c.add("weetab
 ```
 
 That's optional — purely for your confidence, not a submission requirement.
-<!-- agent:boundary:51824954 -->
+<!-- agent:boundary:0ffecaf7 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- Are there any integration tests that test the full stack including the real API calls?
 <!-- /agent:queue -->
 
 ## Backlog

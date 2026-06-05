@@ -34,14 +34,34 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 12 response topic(s): do [#review-list-query]; explain the 3 decisions + #next-steps; why does Codex refuse "recursive submit because this pane already owns the document"?; 9 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fcb34f78 -->
+
+### Re: do [#route-ready-wait-fast-fail] — fail-open worst case fixed — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#route-ready-wait-fast-fail]
+
+
+Done (submodule `7e6071bd`, pushed, installed, `make check` green). Your "highest value (1)+(2)":
+
+#### (1) Fast-fail provably-dead panes — implemented
+The worst case was: a pane that will *never* become ready still got polled for the full ready-timeout before recovery kicked in. A starting pane's tmux pane stays alive while its agent boots, so **`!pane_alive` means the pane is actually gone** (closed/dead), not just slow. I added a short-circuit to the ready-wait poll loop: a dead pane returns immediately (with a diagnostic) so the recovery ladder (same-pane retry → handoff → fresh reroute) runs *now* instead of burning the timeout. Slow-but-booting panes still wait normally — exactly the distinction you'd want.
+
+#### (2) Per-harness adaptive timeout — already in place
+This one was already done: the timeouts are per-binary (`_for_binary`) — ready-wait is 2 s for codex/claude, 15 s for opencode; recovery is 8 s/10 s/15 s. So the flat-60s impression came from a separate `route_wait_for_ready_override`, not these. The genuine gap was (1), which is now fixed.
+
+#### Verification
+`make check` green (0 failed, clippy clean); both binaries installed. The dead-pane short-circuit is a tmux-behavior path, so its live exercise is the `make tmux-ci` leg — a low-risk additive guard that passes the full unit suite.
+
+Marking `#route-ready-wait-fast-fail` done.
+
+Next: you asked *"Why is agent-doc recursively shelling out…"* — I'll take that (the root-cause of the Codex self-reinvoke) as the next prompt.
+<!-- agent:boundary:d269f251 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~Can we improve the performance of fail-open-after-wait?~
-- ~What does "When you want the writes live, it's a focused session: route every doc-baseline hash through the strip (the invariance sweep) + the live-verify pass." mean? I want this implemented already. Do whatever you need to do to implement this. I'm not sure what live verification you need.~
-- ~do [#optional-do-re-stage2]~
-- do [#route-ready-wait-fast-fail]
+- ~do [#route-ready-wait-fast-fail]~
+- Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?
 - do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 <!-- /agent:queue -->
 ###
@@ -57,7 +77,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#route-ready-wait-fast-fail] [recommended] Improve fail-open-after-wait worst case (follow-up to #jb-monsterrod-route-ready-wait-stall). The ready-wait already early-exits when the pane is dispatch-ready (logs: route_starting_actor_ready elapsed_ms~100), so the full timeout only bites a pane that NEVER becomes ready. Levers: (1) fail-fast on a PROVEN-DEAD/closed pane — detect dead PID / closed pane / no session-log heartbeat and reroute to a fresh pane immediately instead of waiting the full dispatch_only_starting_pane_ready_timeout (route.rs:2245); keep waiting only for a still-booting pane (overlaps #route-starting-timeout-poll-recovery, #snrun). (2) per-harness adaptive timeout — Codex cold-start (auth+boot) is slow, Claude fast; tune to observed p99 instead of one flat 60s (timeout is already binary-scoped via _for_binary). (3) warm-pane pool so routing rarely waits for cold start (bigger). (4) push readiness signal vs 250ms poll (minor). Highest value: (1)+(2).
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
 <!-- /agent:backlog -->

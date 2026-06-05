@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -492,11 +492,12 @@ Done (same commit, submodule `solution` `ahead 9`, **not pushed**).
 - **Standing practice:** I'll run the full suite — integration included — every turn from now on and report the result, per your instruction.
 
 README updated (the test section now documents default-on integration + the `SKIP_INTEGRATION` opt-out). `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:d14f9ca5 -->
+<!-- agent:boundary:c21df08a -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- [#next-steps-2]
 <!-- /agent:queue -->
 
 ## Backlog

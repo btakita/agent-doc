@@ -115,7 +115,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- I updated the GH NPM_TOKEN. release + publish
+- ~I updated the GH NPM_TOKEN. release + publish~
 <!-- /agent:queue -->
 
 ## Backlog

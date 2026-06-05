@@ -83,7 +83,28 @@ This phase has nothing to do with TMO — its gate is `#f4rq` (the EFS Resend se
 
 #### Recommendation
 Decompose `#zwws` into "local-first" sub-work that ships now (phase 4 EFS-local capture/display; phase 6 dashboard + testing-mode email) and keep only the true TMO-push and production-email legs gated. I've captured this as `#zwws-local-first` `[recommended]`. Want me to queue the phase-4 EFS-local half next (it's the larger, higher-value piece)?
-<!-- agent:boundary:2a624f59 -->
+
+### Re: [#zwws-local-first] Phase 4 EFS-local — vestings + special instructions — opus-4-8
+
+Shipped the phase-4 **EFS-local half** (the larger un-gated piece). Spec + tests updated, committed + pushed (EFS `eb549a8`, superproject `f86c1bee8`).
+
+#### What shipped
+- **New "Vestings" portal section** where investors manage **vestings** (legal holding entities — individual / joint / trust / LLC / entity / IRA / other; multiple per investor) and **special instructions / preferences**. EFS is the source of truth, no TMO dependency.
+- **D1 schema** (migration `0041`): `investor_vestings` + `investor_special_instructions`.
+- **API**: `GET/POST/PATCH/DELETE /api/investor/vestings` and `PUT /api/investor/special-instructions` — investor-auth-guarded, validated, investor-scoped (soft-archive on remove).
+- **UI**: nav + page with add/edit/remove and an instructions editor (`vestings.tsx`).
+
+#### Verification
+- `bun test`: **292 pass / 0 fail** (new `investor-vestings.test.ts` covers repo/migration/routes/UI; QA fixtures + runbook + smoke script add the vestings step).
+- `bun run build` + `build:worker`: clean; new files `tsc`-clean; migration `0041` SQL + upsert validated in sqlite.
+- **Migration note:** `0041` is committed but **not yet applied to remote D1** — preset was commit+push, not deploy. It applies on the next `deploy:worker` / `cf:d1:migrate:remote` (same deferred-deploy posture as `#zr5z`).
+
+#### Boundaries (deliberately deferred)
+- **TMO push** (writing vestings into TMO) + **multiple-lenders-per-loan** per-lender portion/steps/status stay gated on the TMO writeback field map (`#7a4d`) + sync direction (`#dzmm`/`#k2xg`) — wire via the `tmo_cache_outbox` pattern once confirmed.
+- **Phase 6's un-gated half** (workflow-priority dashboard) is captured as `#zwws-phase6-dashboard` `[recommended]` — shippable next without any external gate.
+
+`#zwws-local-first` is marked done (its phase-4-local deliverable). Queue `#zwws-phase6-dashboard` when you want the workflow-priority dashboard next.
+<!-- agent:boundary:babff0d0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,9 +118,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws-local-first] [recommended] #zwws un-gate-now decomposition. Phase 4: ship the EFS-local half — capture + display vestings & special instructions in EFS D1 and the investor/EFS UI (multiple vestings per lender, multiple lenders per loan) via the optimistic-write + tmo_cache_outbox pattern (precedent: add_loan_funding in deal_marketplace). The TMO vesting PUSH stays gated on the writeback field-map (#7a4d) + sync direction (#dzmm/#k2xg). Phase 6: the workflow-priority dashboard half (urgent action items bubble to top) has no email gate — shippable now; the new-deal email builds in Resend testing mode like P2b, production delivery gated on #f4rq. TMO cache (read) alone does not ungate either.
-- [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
+- [ ] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
+- [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

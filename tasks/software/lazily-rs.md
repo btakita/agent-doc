@@ -85,7 +85,7 @@ Done. Implemented the deferred lock-free cached read (`#lazilyperf38`), committe
 - **commit + push** — `463ca71` on `lazily-rs` `main`.
 
 Queue drained — this was the last item (`#4rxf`, `#jwwc`, `#q5r1`/#39c5, `#4cn0`/#yxjw, `#mb9b`/#vd5v all consumed).
-<!-- agent:boundary:a2f635aa -->
+<!-- agent:boundary:bbb9d521 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,6 +99,7 @@ Queue drained — this was the last item (`#4rxf`, `#jwwc`, `#q5r1`/#39c5, `#4cn
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#xtwf] Run rigorous isolated-worktree Criterion A/B for #vd5v lock-free cached reads (cached_reads/thread_safe_context per SPEC benchmarking procedure) [recommended]
 <!-- /agent:backlog -->
 
 ## Review

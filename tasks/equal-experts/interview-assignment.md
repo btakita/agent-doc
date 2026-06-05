@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -372,12 +372,34 @@ Yes, the *tests* use mock data (by design, for offline determinism). The problem
 3. **Fixed the misleading docstring example** to be product-aware so copying it no longer yields 2.52 for everything.
 
 Offline suite: **27 passed, 7 skipped**. `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:e5c5bd72 -->
+
+### Re: MockTransport now provides per-product price variation — opus-4-8
+
+> **Queue prompt:**
+>
+> I see what happened, I used the MockTransport in the tests, which always returns 2.52 for every product. Can we have the MockTransport provide some variation in prices to ensure our tests are robust against product price differences?
+
+
+Yes — and it's done. Exactly that fix landed in the previous commit, and I've now consolidated it so the variation lives in one place.
+
+#### The fake already varies by product
+`tests/conftest.py` exposes `fake_price_api`, a `MockTransport`-backed fake that reads the requested product from the URL and returns **its own** price (cheerios 8.43, cornflakes 2.52, frosties 4.99, shreddies 4.68, weetabix 9.98), and 404s unknown products. No more blanket 2.52.
+
+Two tests enforce the variation so a fixed-value regression can't sneak back:
+- `test_get_price_returns_per_product_decimal` — parametrized over every product, asserts each distinct price.
+- `test_prices_are_not_all_identical` — asserts the set of returned prices has more than one value.
+
+#### New this cycle: one catalogue, not three
+The price list had drifted into three copies (`conftest`, `test_cart`, `test_integration`). I made **`conftest.CATALOG` / `PRICES` the single source of truth**; the cart and integration tests now import from it. So the variation is defined once and the files can't disagree.
+
+Verified: offline **27 passed, 7 skipped**; `RUN_INTEGRATION=1` **7 passed** against the real API. Committed in the submodule (`solution`, `ahead 7`, **not pushed**).
+
+`#next-steps-2` stays gated for your review.
+<!-- agent:boundary:e8595e7d -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- I see what happened, I used the MockTransport in the tests, which always returns 2.52 for every product. Can we have the MockTransport provide some variation in prices to ensure our tests are robust against product price differences?
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

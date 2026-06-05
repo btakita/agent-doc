@@ -68,7 +68,7 @@ Implemented **Phase 5a** (the foundational core slice) of `tasks/agent-doc/plans
 The orchestration crate currently carries **concurrent uncommitted WIP** (`route.rs`, `session_check.rs`). Phase 5b (phase-transition writes in `cycle_state.rs`/`write.rs` + preflight resume-detection) touches that crate, so I deferred it to new backlog item `#fmrunid-wire` rather than committing over in-flight work. The Phase 5a code is dormant (struct + helpers, not yet called) so nothing changes at runtime until the wiring lands — for that reason I also did **not** `cargo install`: installing now would bundle another session's uncommitted route/session_check WIP into the shared live binary for zero testable gain. Install happens with Phase 5b.
 
 Reaped `#fm-run-id-step` (Phase 5a done); queued `#fmrunid-wire` (Phase 5b).
-<!-- agent:boundary:a12fddb0 -->
+<!-- agent:boundary:5f160121 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -93,7 +93,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 1. [ ] [#fmrunid-wire] Phase 5b — wire agent_doc_pipeline phase-transition writes (cycle_state.rs/write.rs call set_pipeline_state at each CyclePhase transition; clear_pipeline_state at terminal phase) + preflight resume-detection (read agent_doc_pipeline.step, trust cycle_state on conflict). Phase 5b of tasks/agent-doc/plans/reentrant-finalize-pipeline.md. Foundation: #fm-run-id-step (agent-doc commit f09aa9a6). Deferred to avoid colliding with concurrent route/session_check WIP in agent-doc-orchestration.
-2. [x] [#fm-run-id-step] Phase 5a — agent_doc_pipeline frontmatter step tracker (run_id/step/turn_id/queue_task_id) + set/clear_pipeline_state helpers + has_agent_doc_marker + specs. DONE (agent-doc commit f09aa9a6, pushed; make check 708 core + 2265 orch tests, 0 failed; clippy clean). Core slice of tasks/agent-doc/plans/reentrant-finalize-pipeline.md Phase 5; dormant until wiring lands.
 <!-- /agent:backlog -->
 
 ## Review

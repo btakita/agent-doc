@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -284,7 +284,7 @@ I meant: manually open a doc in the IDE and watch the block appear during the tu
 Marking **#22a8 done**.
 
 Next: you also said *"for fail-open-after-wait, do the highest value work"* — that's `#route-ready-wait-fast-fail` items (1) fast-fail provably-dead panes + (2) per-harness adaptive timeout. I'll take that as the next focused cycle.
-<!-- agent:boundary:ed14dc26 -->
+<!-- agent:boundary:e8acba88 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

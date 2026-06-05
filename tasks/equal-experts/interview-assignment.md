@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -546,12 +546,25 @@ Added to the README's "Development process" section:
 Full suite green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
 
 (Left `AGENT_SESSION.md` as-is this turn; I'll do a final refresh of it when you give the submit go.)
-<!-- agent:boundary:55af57a5 -->
+### Re: Pushing agent-loop superproject (NOT the EqualExperts submodule) — opus-4-8
+
+> **Queue prompt:**
+>
+> push commits
+
+
+Scoping this carefully, because the two remotes mean very different things:
+- **agent-loop** → `github.com:btakita/agent-loop` — your private superrepo (58+ commits). Pushing this is routine backup.
+- **submodule** → `github.com:EqualExperts-Assignments/…` — the assignment repo. Pushing *that* is the actual submission, which you've gated behind an explicit **"submit"**.
+
+You said "push commits" (not "submit"), so I'm pushing **agent-loop only**, with `--no-recurse-submodules` so the EqualExperts submodule is **not** touched. The `solution` branch stays local (`ahead 12`), unpushed, `#next-steps-2` still gated.
+
+Pushing now (this response commit included); I'll confirm the result. If you actually want the assignment submitted, say **"submit"** and I'll push `solution` to the EqualExperts remote (and mark complete only on a separate explicit go).
+<!-- agent:boundary:42e291d4 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- push commits
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

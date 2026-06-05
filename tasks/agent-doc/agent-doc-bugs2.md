@@ -99,7 +99,7 @@ Traced it, but I'm not blind-patching it in the unattended loop — it's a fail-
 **Lowest-risk first step:** never `exit(75)` with the response unpersisted — always capture it (the capture ledger already exists) so the next preflight replays it, removing the data-loss edge without loosening the clobber guard.
 
 Full mechanism, fix options, and exit criteria: `tasks/agent-doc/plan-finalize-visible-buffer-ipc-timeout-race.md`. Tracked as gated review item `#finalize-visible-buffer-ipc-timeout-race`. (The "blocked on the images" half of the original report is a separate content blocker, not part of this race — left out of scope here.)
-<!-- agent:boundary:a8c95e60 -->
+<!-- agent:boundary:43d6a904 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -107,7 +107,7 @@ Full mechanism, fix options, and exit criteria: `tasks/agent-doc/plan-finalize-v
 - ~do [#codex-mcp-vs-cli-reinvoke]~
 - ~do [#codex-mcp-server]~
 - ~The agent-doc turn on equityfundingsource.md stalled on the finalize step with the message `My response can't commit because IntelliJ and the agent are racing on the doc, and I'm independently blocked on the images. I'm halting rather than fighting the buffer.`. Fix this race condition.~
-- equityfundingsource.md 
+- A equityfundingsource.md queue task response wrote outside of the agent:exchange area into the base document level and the document was corrupted with duplicate content. I did deny a JB `File Cache Conflict` by accident. I manually fixed the document. 
 - JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.
 <!-- /agent:queue -->
 ###

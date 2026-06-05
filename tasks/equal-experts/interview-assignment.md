@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue_active: true
 ---
 
 ## Status
@@ -560,11 +560,35 @@ Scoping this carefully, because the two remotes mean very different things:
 You said "push commits" (not "submit"), so I'm pushing **agent-loop only**, with `--no-recurse-submodules` so the EqualExperts submodule is **not** touched. The `solution` branch stays local (`ahead 12`), unpushed, `#next-steps-2` still gated.
 
 Pushing now (this response commit included); I'll confirm the result. If you actually want the assignment submitted, say **"submit"** and I'll push `solution` to the EqualExperts remote (and mark complete only on a separate explicit go).
-<!-- agent:boundary:42e291d4 -->
+### Re: Integration tests opt-in (dev unit-only) + GitHub Actions for full suite — opus-4-8
+
+> **Queue prompt:**
+>
+> Dev tests should run without the integration tests. Create gh actions to run the full suite (with integration tests).
+
+
+Done exactly as you framed it — committed in the submodule (`solution` `ahead 1`, **not pushed**).
+
+#### Dev runs are now unit-only
+`tests/test_integration.py` is **opt-in**: skipped unless `RUN_INTEGRATION=1`. So the everyday dev run is offline and deterministic:
+
+- `python -m pytest` → **33 passed** (unit only, no network)
+- `RUN_INTEGRATION=1 python -m pytest` → **40 passed** (full suite, live API)
+
+#### GitHub Actions runs the full suite
+Added **`.github/workflows/ci.yml`** — on push/PR, installs the package and runs `python -m pytest` with `RUN_INTEGRATION=1` on **Python 3.11 and 3.12**, so the live-API integration tests are always exercised in CI even though dev skips them.
+
+#### README
+The "Running the tests" section now has a clear table: dev (`pytest` → unit), full (`RUN_INTEGRATION=1 pytest`), integration-only, and a CI note pointing at the workflow.
+
+Still **not pushed / not submitted**. When you've reviewed this, push the updated `solution` to EqualExperts yourself (or say the word) before any submit.
+<!-- agent:boundary:bd47c365 -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue go -->
+- ~Dev tests should run without the integration tests. Create gh actions to run the full suite (with integration tests).~
+- Update AGENT_SESSION.md. commit + push
 <!-- /agent:queue -->
 
 ## Backlog

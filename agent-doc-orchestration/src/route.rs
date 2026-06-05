@@ -4194,6 +4194,42 @@ fn route_via_authoritative_actor(
         }
     }
 
+    // Eager busy-cue check for dispatch-only queue fallback: when
+    // `busy_dispatch_only_should_wait_for_ready` skipped the wait because
+    // a queue fallback existed (prompt_context or inactive queue head), the
+    // timeout-idle recovery above never ran. The actor may be projected Busy
+    // while the live pane is actually idle. Check the pane eagerly and promote
+    // to Ready so the dispatch proceeds instead of queuing behind a stale
+    // projection. This is the #opencode-jb-stall root cause: JB Run Agent Doc
+    // sends a prompt, the wait is skipped, and the stale Busy projection queues
+    // the prompt into agent:queue auto, which never drains because the
+    // auto-loop requires the actor to become ready.
+    if dispatch_only
+        && actor_dispatch_state(actor_state) == ActorDispatchState::Busy
+        && !waited_and_timed_out
+        && prompt_context.is_some()
+        && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
+        && !harness.has_busy_cue(&content)
+    {
+        eprintln!(
+            "[route] eager busy-cue check for {}: actor projected busy but pane has no busy cue (queue fallback skipped the wait); promoting stale busy projection to ready and dispatching",
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_eager_busy_cue_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation,
+                actor_state.as_str(),
+                content.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+            ),
+        );
+        actor_state = crate::session_actor::ActorState::Ready;
+    }
+
     let reopen_mode = if dispatch_only {
         ReopenMode::DispatchOnly
     } else {

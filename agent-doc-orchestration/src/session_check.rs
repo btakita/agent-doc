@@ -164,22 +164,44 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             // bypasses `agent-doc write` / `finalize`. Block the final answer
             // so the operator must pipe the response through binary-owned
             // closeout.
-            if codex_final_gate {
-                if let Some(cycle) = crate::cycle_state::load(file).ok().flatten() {
-                    if matches!(cycle.phase, crate::cycle_state::CyclePhase::Abandoned)
-                        && cycle
-                            .last_event
-                            .starts_with("recursive_direct_invocation_blocked")
-                        && cycle.capture_id.is_none()
-                        && cycle.response_sha256.is_none()
-                    {
-                        eprintln!(
-                            "[session-check] codex-final-gate: recursive direct invocation was blocked for {} with no captured response body — pipe the response through `agent-doc write --commit {}` before sending any final answer.",
+            //
+            // Recovery adoption: if the response was already patched into
+            // agent:exchange (no unresolved prompt), the abandoned cycle is
+            // recoverable — adopt the visible response idempotently instead of
+            // blocking.
+            if codex_final_gate
+                && let Some(cycle) = crate::cycle_state::load(file).ok().flatten()
+                && matches!(cycle.phase, crate::cycle_state::CyclePhase::Abandoned)
+                && cycle
+                    .last_event
+                    .starts_with("recursive_direct_invocation_blocked")
+                && cycle.capture_id.is_none()
+                && cycle.response_sha256.is_none()
+            {
+                let has_visible_response =
+                    unresolved_exchange_prompt(file)?.is_none()
+                        && exchange_tail_has_response_heading(file);
+                if has_visible_response {
+                    eprintln!(
+                        "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
+                        file.display()
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "codex_final_gate_manual_patchback_adopted file={} cycle_id={} last_event={}",
                             file.display(),
-                            file.display()
-                        );
-                        std::process::exit(2);
-                    }
+                            cycle.cycle_id,
+                            cycle.last_event
+                        ),
+                    );
+                } else {
+                    eprintln!(
+                        "[session-check] codex-final-gate: recursive direct invocation was blocked for {} with no captured response body — pipe the response through `agent-doc write --commit {}` before sending any final answer.",
+                        file.display(),
+                        file.display()
+                    );
+                    std::process::exit(2);
                 }
             }
             Ok(())
@@ -4014,6 +4036,28 @@ fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
         return None;
     }
     Some(prompt_lines.join("\n"))
+}
+
+fn exchange_tail_has_response_heading(file: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let Ok(components) = crate::component::parse(&content) else {
+        return false;
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return false;
+    };
+    let body = exchange.content(&content);
+    let lines: Vec<&str> = body.lines().collect();
+    let tail_start = lines
+        .iter()
+        .rposition(|line| line.trim().starts_with("<!-- agent:boundary:"))
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    lines[tail_start..]
+        .iter()
+        .any(|line| is_exchange_response_heading(line.trim()))
 }
 
 /// `#queue-continuation-buries-prompt`: a queue-continuation response heading
@@ -8402,6 +8446,75 @@ Body\n\
                 );
             }
             other => panic!("expected missed-prompt interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_final_gate_adopts_manual_patchback_when_response_is_visible() {
+        // #finalize-owned-pane-response-patchback: when a recursive same-pane
+        // invocation was blocked (abandoned cycle, no capture), but the
+        // response was already patched into agent:exchange manually, the
+        // codex_final_gate must NOT block — adopt the visible response
+        // idempotently.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        // The response was manually patched into exchange after the boundary,
+        // so the prompt IS answered (no unresolved exchange prompt).
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "Please assist in placing GA4 Analytics credentials.\n",
+            "### Re: GA4 — codex\n\nDone. Credentials placed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        // The response is visible in exchange (no unresolved prompt), so
+        // codex_final_gate should adopt it instead of blocking.
+        match run_with_options(&doc, true) {
+            Ok(()) => {}
+            other => panic!(
+                "expected codex_final_gate to adopt manual patchback, got {other:?}"
+            ),
         }
     }
 

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue: go
 ---
 
 ## Status
@@ -37,20 +37,46 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 5 response topic(s): transcribe + diarize 2026-06-03 16-58-49-compressed.mp4; speaker names; task list from call transcript; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:560fe9a6 -->
+
+### Re: #knpa — homepage copy + loan-parameters revisions — opus-4-8
+
+> **Queue prompt:**
+>
+> [#knpa]
+
+
+Done and pushed (`9c589ae`, EFS `origin/main`). Applied every item in `#knpa` to `lib/ui--server--efs/home/index.ts`:
+
+- **Loan parameters:** min `$50K`, terms `12 to 36 months`, **dropped the Points row**, `Properties: Primarily CA`, `Lien position: 1st, 2nd, other junior` (grid `cols-7 → cols-6`).
+- **Products:** dropped `Tract development`; `Equity extraction · Payoff existing hard money` → `Equity loans · Payoff existing`.
+- **Recent transactions** eyebrow `Proof` → `Track record`.
+- **Trust copy:** `California-licensed loan arranger` → `loan originator`; `1st, 2nd, and other junior lien positions`.
+- **Contact block reordered:** Contact heading first, then email → phone → fax → address; License + NMLS collapsed to one small line at the bottom (was two standalone 24px rows).
+
+**Spec + tests:** updated `docs/efs_homepage_layout_copy.md`; added `tests/home-copy.test.ts` (5 tests, all green). `bun run build` + `build:worker` both pass.
+
+**Heads-up — pre-existing red on EFS `origin/main`:** a teammate pushed 7 commits (folder restructure + payments) while I worked; I rebased cleanly on top. Their changes leave **2 tests failing independently of my work** (confirmed by running them on `origin/main` without my commits): `borrower-message-notify.test.ts` (stale import — `notify.ts` moved to `lib/borrower/messages/`) and the apply4 P1 prequal-handoff test. My `#knpa` change is isolated and green; I filed a `[blocked-external]` backlog item rather than fix their in-flight restructure inside a copy cycle.
+
+Queue continues with `#19gv` (rate estimator LTV fixes) next.
+<!-- agent:boundary:c3a69919 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~[#knpa]~
+- [#19gv]
+- [#vtx8]
+- [#67v2]
+- [#rpzm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#knpa] [recommended] Homepage copy + loan-parameters revisions (2026-06-03 call): min $50k, terms 12-36mo, drop Points, 'Primarily California', rename products (drop tract-development; 'equity extraction' -> bridge/equity/pay-off-existing), fix 'proof' label, 'Licensed loan originator', contact-block reorder (contact/email/phone/fax/address; license+NMLS small last), 'first, second, and other junior lien positions'. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
+- [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
 - [ ] [#19gv] Rate estimator LTV fixes (2026-06-03 call): show loan amount, hard-stop at 100% LTV, dynamic recalc on property value, 'Above guidelines -> contact for custom quote' in the 65-80% band, currency formatting. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.

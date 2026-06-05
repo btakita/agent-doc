@@ -6904,6 +6904,11 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     ) {
         eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
     }
+    // #22a8: mirror the live pipeline phase into the document frontmatter now the
+    // response is fully on disk (doc lock still held, so no writer races).
+    if let Ok(Some(st)) = crate::cycle_state::load(file) {
+        crate::cycle_state::mirror_pipeline_frontmatter(file, &st);
+    }
 
     drop(doc_lock);
 
@@ -7143,6 +7148,11 @@ pub fn run_template(
         Some(&final_content),
     ) {
         eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
+    }
+    // #22a8: mirror the live pipeline phase into the document frontmatter now the
+    // response is fully on disk (doc lock still held, so no writer races).
+    if let Ok(Some(st)) = crate::cycle_state::load(file) {
+        crate::cycle_state::mirror_pipeline_frontmatter(file, &st);
     }
 
     drop(doc_lock);

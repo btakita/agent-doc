@@ -551,7 +551,15 @@ fn strip_boundary_markers(content: &str) -> String {
 }
 
 pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
-    strip_guard_markers(&strip_head_markers(&strip_boundary_markers(content)))
+    // #22a8: also drop the managed `agent_doc_pipeline:` frontmatter block. It is
+    // mirrored onto the document mid-cycle (after response capture, cleared at a
+    // terminal phase), so a comparison that kept it would read the managed write
+    // as a direct response patchback / closeout drift. Stripping it here keeps
+    // every doc-vs-snapshot/HEAD comparison routed through this normalizer
+    // invariant to the pipeline mirror.
+    crate::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(&strip_head_markers(
+        &strip_boundary_markers(content),
+    )))
 }
 
 /// Replace the `agent:queue` component (opening-tag attributes + body) with a

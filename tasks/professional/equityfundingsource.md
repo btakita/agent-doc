@@ -36,7 +36,34 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:d1734d02 -->
+
+### Re: [#zwws] Investor dashboard #rpzm phase 2b — opus-4-8
+
+> **Queue prompt:**
+>
+> [#zwws]
+
+
+Shipped phase 2b of the investor dashboard rework (one phase, per the "queue one phase at a time" note). Spec + tests updated, committed + pushed (EFS `cd4253a`, superproject pointer `3c183f21e`).
+
+#### "I'm interested" on each offer
+- Every available-deal card now has an **I'm interested** button → `POST /api/investor/deals/:id/interested`.
+- The endpoint emails EFS staff a lead and sends the investor a confirmation package via Resend (`lib/investor/interest/notify.ts`, mirroring the application-lead sender). The action always succeeds and reports per-leg email status — a missing/failed email never blocks the click.
+- **Gated, but live-safe:** until an EFS-owned sending domain is verified in Resend (`#f4rq`), testing mode delivers only to the account-allowed `INVESTOR_INTEREST_NOTIFICATION_TO` (added to `wrangler.toml`, defaults to the application-lead sender). The investor-confirmation leg is wired and starts delivering to real investors the moment `#f4rq` lands — no further code change needed.
+
+#### Distributions / statements dead-code removal
+EFS doesn't service loans, so the distribution/statement surfaces are gone:
+- Deleted `distributions.tsx` + `statements.tsx`; removed the `distributions`/`statements` members from `investor_section_T` (UI layout + portal routes), the `SECTION_URLS`/`SECTION_ICONS`/`URLS` entries, and the `GET /api/investor/distributions` route + handler.
+- Dropped the dead distribution metrics from the dashboard endpoint/client and the `INVESTOR_DISTRIBUTIONS` fixture + interface.
+- Kept the pure `gformula` distribution calc helpers — they're general formulas with dedicated tests and no longer wired to any route.
+
+#### Verification
+- `bun test`: **282 pass / 0 fail** (added phase-2b e2e coverage for the interest button, endpoint, Resend notify, and the removed surfaces).
+- `bun run build` + `bun run build:worker`: clean. (Pre-existing project-wide `fetch().then(data: T)` tsc notes are unchanged — the project gates on `bun run check`, not strict `tsc`.)
+- Updated the QA runbook (`docs/qa-investor-portal.md`), seed fixtures, smoke script, and the PRD (`rpzm-...`, phase 2b marked shipped).
+
+**Remaining `#zwws` phases:** 4 (vestings/special-instructions — TMO-writeback-gated), 5 (requirements/questionnaire — next un-gated phase), 6 (new-deal email — `#f4rq`-gated). Queue the next phase when ready.
+<!-- agent:boundary:1aeabcac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,13 +71,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#zwws]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 2b 'I'm interested' email + dead-code cleanup (distributions/statements routes/types); 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P3 simplified portfolio (8d40c66). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
+- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

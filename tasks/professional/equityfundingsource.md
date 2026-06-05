@@ -78,7 +78,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
+- [x] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

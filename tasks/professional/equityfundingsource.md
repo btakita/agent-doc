@@ -60,7 +60,23 @@ Compacted content:
 - **P6** new-deal email (gated on `#f4rq` sending domain) + workflow-priority dashboard.
 
 I closed the parent `#rpzm` (decomposed + P1 shipped) and queued a tracking item for P2–P6. Queue them one at a time. `#vtx8`/`#67v2` stay held until the teammate's leads/admin restructure lands.
-<!-- agent:boundary:8d289ac6 -->
+
+### Re: #zwws — investor dashboard rework, phase 2 — opus-4-8
+
+> **Queue prompt:**
+>
+> [#zwws]
+
+
+Shipped phase 2 (EFS `2f2ef47`, pushed): **available-deals-first landing**.
+
+- The investor portal root (`/portal-investor`) now redirects to **Available Deals** instead of the dashboard, so investors see open deals first on login — the call's "that's what they see when they log in."
+- `app/equityfundingsource/lib/portal/investor/routes.ts`; test added (`tests/investor-portal-e2e.test.ts`, 11 pass); plan updated. Full suite + builds green (the 2 reds remain the teammate's `apply4-P1` + `borrower-message-notify`).
+
+**Scoping note:** I kept this phase to the low-risk, user-facing redirect. The other Phase-2 parts — the **"I'm interested" email package** (gated on the `#f4rq` Resend sending domain) and **removing the dead distributions/statements routes/types** (ripples across the section union, API routes, and the QA coverage map) — are split into **Phase 2b** in the plan to avoid a risky multi-file deletion at the tail of a long run.
+
+`#zwws` stays open with its progress updated (P1 + P2 done; 2b, 3, 4, 5, 6 remain). Queue it again for the next phase — Phase 3 (simplified portfolio) is the natural next self-contained one. `#vtx8`/`#67v2` still held on the teammate's restructure.
+<!-- agent:boundary:0009152d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +89,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws] [recommended] Investor dashboard rework phases 2-6 (available-deals-first landing + 'I'm interested' email package; simplified portfolio; vestings/special-instructions; requirements/questionnaire; new-deal email + workflow-priority) — decomposed in src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time; phase 4 (vestings) gated on the TMO writeback key map (#dzmm/#k2xg/#7a4d).
+- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 2b 'I'm interested' email package + dead-code cleanup (distributions/statements routes/types); 3 simplified portfolio; 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email (#f4rq) + workflow-priority. Shipped: P1 nav (30037e3), P2 available-deals-first landing (2f2ef47). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.

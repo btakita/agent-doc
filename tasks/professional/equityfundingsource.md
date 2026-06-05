@@ -104,7 +104,28 @@ Shipped the phase-4 **EFS-local half** (the larger un-gated piece). Spec + tests
 - **Phase 6's un-gated half** (workflow-priority dashboard) is captured as `#zwws-phase6-dashboard` `[recommended]` — shippable next without any external gate.
 
 `#zwws-local-first` is marked done (its phase-4-local deliverable). Queue `#zwws-phase6-dashboard` when you want the workflow-priority dashboard next.
-<!-- agent:boundary:03076f94 -->
+
+### Re: [#67v2] TMO board → admin pipeline workflow — opus-4-8
+
+I can't retrieve the TMO board images through corky, so I'm **not** designing the workflow yet — building the pipeline logic off a guessed board would be wrong. Here's exactly what I hit and what I need.
+
+#### What I tried
+- `corky sync refetch "<the Gmail URL>"` → **`Gmail URL target FMfcgzQgMLxHCrjZbfGFBpkwSTTgxGbd not found in any Gmail API account`**. The `#inbox/FMfcg…` id in a Gmail web URL is the **web-client** thread id, not the Gmail **API** id, so refetch can't resolve it.
+- `corky sync account brian.takita` (full inbox) → didn't surface the thread, and more importantly:
+- corky's thread→Markdown sync renders images as **remote `![](https://…)` links** and does **not** download attachment binaries to disk. User-attached screenshots (which the TMO board is) come through as MIME attachment parts that the sync drops — so even once the thread syncs, there's no viewable image file for me to read.
+
+Net: with the current corky tooling I have no way to actually *see* the board, and I won't fabricate the TMO stages/columns/requirements.
+
+#### What unblocks it (any one)
+1. **Save the board images to a path** I can read (e.g. `tasks/professional/assets/tmo-board-*.png`) — simplest + most reliable.
+2. Give me the **Gmail API thread id** (or the email **subject + sender/date**) so `corky sync refetch <raw-id>` can pull it.
+3. Say the word and I'll use **chromium-bridge** to open the Gmail URL in your authenticated browser and capture the images (heads-up: that surfaces your inbox on-screen — livestream caution).
+
+#### Ready to go the moment I can see it
+`#67v2` is a known feature: admin loan pipeline with **TMO-aligned stages + Kanban** (drag cards, auto-advance when stage requirements are met) synced to the dashboard, mirroring TMO stages as the single source of truth. There's prior art to build on — the investor pipeline already defines `Reviewing → Committed → Documents → Funding → Active` and admin loan status exists — but the board screenshots tell me the **real** TMO column names, ordering, and per-stage requirements, which I need to model it correctly.
+
+I've **gated `#67v2`** as blocked-on-input. Drop the board images (or the resolvable thread id) and re-queue it, and I'll produce the workflow design + first implementation slice.
+<!-- agent:boundary:8f105b98 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +140,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:backlog -->
 - [ ] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
-- [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
@@ -155,6 +175,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [/] [#zr5z] Re-deploy equityfundingsource full apply4 wizard to production. P1–P6 implemented, 24 apply4 tests green, build-plan spec updated, all committed+pushed (efs 071d8fe). Remaining: cf:d1:migrate:remote + deploy:worker + smoke-test against prod — held pending explicit deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
 - [/] [#cm3e] [recommended] Borrower online payment collection (Stripe) + TMO sync: add ACH/card payment in the borrower portal make-payment section; on Stripe payment_intent.succeeded webhook, verify signature, record the receipt in a new EFS D1 loan_payment_transactions table, reconcile the matching loan_payments schedule row, and push the payment to TMO. GATE: confirm ABS/TMO exposes a borrower-payment/receipt WRITE endpoint (current docs/TMO cover loan/application writes, investor AddLoanFunding, and schedule/funding reads only) — ties into the TMO-writeback gate (dzmm/k2xg). Deferred non-MVP collection path from e245; handle KYC, partial payments, NSF reversals, fees.

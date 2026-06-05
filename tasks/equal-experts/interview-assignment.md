@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -395,11 +395,12 @@ The price list had drifted into three copies (`conftest`, `test_cart`, `test_int
 Verified: offline **27 passed, 7 skipped**; `RUN_INTEGRATION=1` **7 passed** against the real API. Committed in the submodule (`solution`, `ahead 7`, **not pushed**).
 
 `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:e8595e7d -->
+<!-- agent:boundary:9c50a263 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- Does `cart.total` correctly calculate `cart.subtotal + cart.tax` then apply rounding? Not `_round_up(cart.subtotal) + _round_up(cart.tax)`. Do we have a test to verify the correct calculation behavior?
 <!-- /agent:queue -->
 
 ## Backlog

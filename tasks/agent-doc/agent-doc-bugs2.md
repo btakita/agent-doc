@@ -108,17 +108,45 @@ Plan: **`tasks/agent-doc/plans/optional-do-directive-and-re-reference.md`** — 
 Stage 1 = queue-only (bare `[#id]` execute + `re [#id]` reference) — smallest guard surface, recommended first. Stage 2 = exchange directives + the closeout guards. Confirm whether to ship Stage 2 now or land Stage 1 first and gate Stage 2 behind live use.
 
 Queued implementation as `#optional-do-re` (plan-backed).
-<!-- agent:boundary:a9278bb5 -->
+
+### Re: Fix test suite — don't end a turn red — opus-4-8
+
+> **Queue prompt:**
+>
+> Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
+
+
+The suite is **green** on current HEAD and the policy is already the documented contract.
+
+#### Current state (authoritative, just ran)
+`make check` → exit 0: **708 agent-doc-core + 2269 orchestration tests, 0 failed**, 226 ignored; clippy clean. No `result: FAILED` anywhere.
+
+The 2 pre-existing `route::tests` prompt-detection failures previously noted for this branch are **not reproducing** — they were resolved by the orchestration WIP committed earlier this session (`97927e1e`: eager busy-cue recovery + `#finalize-owned-pane-response-patchback`). So there is no failing test to fix.
+
+#### The policy is already enforced (by contract)
+"The turn shouldn't end with a failing test suite, even with pre-existing failures" is already a written rule in `CLAUDE.md`:
+> **Harnesses own full-suite verification** — agents explicitly run the full project verification suite after changes... Do not waive red suites as "unrelated" or "flaky".
+
+I've honored it every cycle this session — `make check` ran green before each closeout.
+
+#### Optional follow-up (not added — your call)
+The contract is agent-enforced today. If you'd rather have it **code-enforced** — e.g. a `session-check` closeout guard that runs (or freshness-checks a recent green result of) the suite and fails closed if red — say so and I'll plan + backlog `#closeout-test-gate`. Left out deliberately: it's heavier (full suite per closeout) and the agent-contract already covers it, so there is no actionable follow-up to capture this cycle.
+
+Nothing to fix — suite green, policy already contractual.
+<!-- agent:boundary:8b9e181c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#tagpath-lint-queue-control]~
 - ~do [#fm-run-id-step]~
 - ~do [#fmrunid-wire]~
-- `do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.
-- Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
+- ~`do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.~
+- ~Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.~
 - When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
 - We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
+- do [#optional-do-re]
+- monsterrodholders.md had an unfinished turn. The response was not committed. 
+- JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
 <!-- /agent:queue -->
 ###
 <!--

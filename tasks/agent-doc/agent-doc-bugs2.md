@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -88,7 +88,7 @@ Two parts.
 
 **(b) Session must not present as idle while a turn is in flight — design-gated.** This is a harness-scheduling property agent-doc cannot directly enforce (Claude Code owns tool scheduling and the between-tool "idle" presentation). Plan: `tasks/agent-doc/plan-claude-idle-session-during-active-build.md`. Recommended path: a visible *turn-in-progress* busy status on the owned pane + the conduct rule now (achievable, directly addresses "looks idle"); a hard supervisor busy-lease / Stop-hook gate is the durable fix but is gated on the `#subagent-blocks-session` scope decision (which layer blocks, what counts as "the work", how the lease releases). Captured as `#claude-busy-status-during-active-turn`.
 
-### Re: Backlog id must not collide with `prompt_presets` / stop reverting my manual id rename — opus-4-8
+### Re: Backlog id must not collide with `prompt_presets` / stop reverting my manual id rename — opus-4-8 (HEAD)
 
 Split into the rule (done) and the fighting (real bug, scoped).
 
@@ -105,9 +105,12 @@ Split into the rule (done) and the fighting (real bug, scoped).
 - ~Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.~
 - I asked to create `backlog #next-steps` in interview.md. `#next-steps` is defined in `prompt_presets`. The agent added the backlog item with the id `[#next-steps]`, which collides with the prompt preset. I manually changed the id to `[#next-steps-2]`. agent-doc should ensure the added backlog item is not in conflict with `prompt_presets` or any other id in the document. I also had to fight agent-doc with my id change. agent-doc kept on setting the id back to `[#next-steps]` even though I changed it to `[#next-steps-2]`...This happened at least 2 times. Update, I did not have #next-steps in the prompt preset, so I added it later. But the rule of no-conflict between a backlog id and prompt preset or other id in the document still stands. Please ensure the rule is in place.
 - My agents are creating memory entries to get around various agent-doc churn issues. Please evaluate the memories and treat those workaround as bugs. Please clear out any agent-doc workarounds from memory so I can dogfood any agent-doc issues. These issues should be fixed on the non-memory harness or binary level.
+- The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`. 
 - do [#queue-consume-ipc-timeout-live-verify]
 - do [#ci-per-test-timeout-guard]
 - do [#queue-line-leading-backtick-drop]
+- do [#claude-busy-status-during-active-turn]
+- do [#backlog-id-user-rename-revert]
 <!-- /agent:queue -->
 ###
 <!--

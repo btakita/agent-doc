@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -109,7 +109,25 @@ Shipped phase 3 (EFS `8d40c66`, pushed): **simplified portfolio**, since EFS doe
 **Progress:** P1 nav · P2 dashboard-composite landing · P3 simplified portfolio — all shipped. `#zwws` now tracks 2b (I'm-interested + dead-code), 4 (vestings, TMO-gated), 5 (questionnaire), 6 (new-deal email).
 
 Continuing to `#pt5w` next — fixing the teammate's 2 red tests as you queued.
-<!-- agent:boundary:0419eab6 -->
+
+### Re: #pt5w — fix the teammate's red tests — opus-4-8
+
+> **Queue prompt:**
+>
+> [#pt5w]
+
+
+Done (EFS `bc809e1`, pushed). Both reds were **stale test paths** left behind by the teammate's "Redefine folder structure" — no logic regressions, just references to moved files:
+
+- **`borrower-message-notify.test.ts`** — `notify.ts`/`routes.ts` moved to `lib/borrower/messages/`; repointed the import + `ROUTES` const.
+- **`apply4-P1`** — the lead→full-application handoff route moved to `lib/public/application_leads/index.ts`; repointed `file_text_(...)`.
+
+**Full suite is green again: 279 pass, 0 fail.** (Builds were already green; these were test-only path fixes.)
+
+**This unblocks `#vtx8` and `#67v2`** — the `application_leads`/admin area is no longer red on `origin/main`. They're still in the backlog (held); re-queue them whenever you want me to pick up the lead-disappears bug and the TMO-aligned admin pipeline.
+
+Queue is now drained. Investor dashboard rework P1–P3 shipped; `#zwws` tracks P2b/4/5/6.
+<!-- agent:boundary:54d1e83d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,16 +135,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~The `/portal-investor` root should redirect to the dashboard. The dashboard needs modules including, available deals and any existing deal pipelines. The existing deal pipeline should have the deal details, a pipeline map including what step of the pipeline the deal is at, and the next actionable step.~
-- ~[#zwws]~
-- [#pt5w]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 2b 'I'm interested' email + dead-code cleanup (distributions/statements routes/types); 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P3 simplified portfolio (8d40c66). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
-- [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

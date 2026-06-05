@@ -2011,7 +2011,24 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     else {
         return Ok(None);
     };
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    // A marker-side queue control (`start`/`go`/`stop`, #queue-state-unify) is
+    // the marker spelling of the canonical `queue:` frontmatter control:
+    // `start`/`go` are a fresh-activation gesture equivalent to the legacy `auto`
+    // attribute, and `stop` forces the queue inactive. Mirror preflight's
+    // `has_auto` resolution so JB `Run Agent Doc` activates a `queue: stop` +
+    // `<!-- agent:queue go -->` document instead of treating `go` as inert.
+    let marker_control = crate::queue::marker_control(&queue_component.attrs);
+    if matches!(
+        marker_control,
+        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+    ) {
+        return Ok(None);
+    }
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs)
+        || matches!(
+            marker_control,
+            Some(agent_doc_core::frontmatter::QueueControl::Start)
+        );
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = crate::queue::parse(body)?;
     let activation = crate::queue::resolve_activation(&entries, has_auto, false, false);

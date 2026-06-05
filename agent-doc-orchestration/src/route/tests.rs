@@ -798,6 +798,94 @@ fn route_does_not_activate_plain_inactive_queue_head() {
 }
 
 #[test]
+fn route_activates_queue_stop_with_marker_go_head() {
+    // #queue-state-unify: a `queue: stop` document carrying the marker-side
+    // `<!-- agent:queue go -->` control must be recognized as activatable by the
+    // route path so JB `Run Agent Doc` starts the queue. `go` is the marker
+    // spelling of the canonical start gesture and overrides the stale stop.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue: stop\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue go -->\n",
+        "- do [#shipstationaudit]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#shipstationaudit] Audit ShipStation settings.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap().as_deref(),
+        Some("do [#shipstationaudit]. #spec-test-commit-push"),
+        "marker-side `go` must be recognized as an activatable head despite `queue: stop`"
+    );
+
+    let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        .unwrap()
+        .expect("startable inactive `go` queue head should activate");
+
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#shipstationaudit]. #spec-test-commit-push"
+    );
+    assert!(outcome.activated);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("queue: start"),
+        "activation must flip the canonical control to start:\n{updated}"
+    );
+    assert_eq!(
+        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+        Some("shipstationaudit"),
+        "activated queue should become drainable by the idle-queue watch"
+    );
+}
+
+#[test]
+fn route_does_not_activate_queue_with_marker_stop() {
+    // A marker-side `stop` is an explicit halt gesture and must keep the queue
+    // inert even when it would otherwise activate via the legacy `auto`
+    // attribute (#queue-state-unify). `stop` wins over `auto`/`go`/`start`.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto stop -->\n",
+        "- do [#manual]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap(),
+        None,
+        "marker-side `stop` must keep the queue inert"
+    );
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "marker-side `stop` must not be activated by the route path"
+    );
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
     // Repro for #adoc-queue-ipc-drift: a halted/inactive-then-reactivated queue
     // that still carries struck `Completed` residue plus a single live prompt.

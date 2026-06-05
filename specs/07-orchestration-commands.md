@@ -268,6 +268,13 @@ frontmatter control:
 These marker tokens are recognized queue-only attributes (no
 `misplaced_component_attr` typo warning).
 
+The route/dispatch path honors marker-side control identically to preflight: an
+inactive document (no `queue: start` / `queue_active: true`) whose `agent:queue`
+opening tag carries `go`/`start` is recognized as an activatable head, so
+`agent-doc route` (and the JetBrains `Run Agent Doc` action it backs) starts the
+queue even when the frontmatter still reads `queue: stop`. A marker-side `stop`
+keeps the queue inert on that path and wins over `auto`/`go`/`start`.
+
 #### Writer emits canonical `queue:` (phase 4)
 
 Queue-maintenance write paths persist the canonical control directly:

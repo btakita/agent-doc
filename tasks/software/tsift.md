@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #cyba; #hxgp, #9tg6, tsift+agent-doc design; hard dependency analysis; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:103fabf8 -->
+<!-- agent:boundary:51014d54 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,7 +53,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue go -->
-- I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
+- [ ] [#0y9e] I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
 <!-- /agent:backlog -->
 
 ## Review

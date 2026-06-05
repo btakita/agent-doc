@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,30 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 3 response topic(s): #knpa; #19gv; queue reprioritization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:eb29dbe8 -->
+
+### Re: #rpzm — investor portal dashboard rework (phase 1) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#rpzm]
+
+
+`#rpzm` is a 6-part epic, so I decomposed it into a phase plan and shipped phase 1 (EFS `30037e3`, pushed).
+
+**Phase 1 — nav rework (done):**
+- **Dropped the Returns group** (Distributions/Statements) from the investor portal nav — EFS doesn't service loans, so those don't apply.
+- **Available Deals now leads** the Portfolio group (deals-first), ahead of Dashboard and My Positions.
+- `lib/ui--browser--efs/portal/investor/layout.tsx`; nav test in `tests/investor-portal-e2e.test.ts` (10 pass); PRD bullet added; full suite + builds green (the 2 reds remain the teammate's pre-existing `apply4-P1` + `borrower-message-notify`).
+
+**Remaining phases (plan: `prds/rpzm-investor-dashboard-rework.md`):**
+- **P2** available-deals-first *landing* + "I'm interested" email package; remove the now-dead distributions/statements routes/types.
+- **P3** simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only).
+- **P4** special-instructions/vestings (TMO populate; multi-vesting/multi-lender) — gated on the TMO writeback key map.
+- **P5** Accreditation → Requirements workflow + annual questionnaire.
+- **P6** new-deal email (gated on `#f4rq` sending domain) + workflow-priority dashboard.
+
+I closed the parent `#rpzm` (decomposed + P1 shipped) and queued a tracking item for P2–P6. Queue them one at a time. `#vtx8`/`#67v2` stay held until the teammate's leads/admin restructure lands.
+<!-- agent:boundary:8d289ac6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,19 +68,15 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~[#knpa]~
-- ~[#19gv]~
-- ~[#ty2v]: Use the bank style. Allow the admin to set wire info. Use dummy data for now.~
-- [#rpzm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#zwws] [recommended] Investor dashboard rework phases 2-6 (available-deals-first landing + 'I'm interested' email package; simplified portfolio; vestings/special-instructions; requirements/questionnaire; new-deal email + workflow-priority) — decomposed in src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time; phase 4 (vestings) gated on the TMO writeback key map (#dzmm/#k2xg/#7a4d).
 - [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
-- [ ] [#rpzm] [recommended] Investor portal dashboard rework (2026-06-03 call): available-deals-first on login, new-deal email + 'I'm interested' button/email package, drop Returns/Distributions/Statements, simplified portfolio (loan count + total funded; addr/amount/rate/payment; new-system only), special-instructions/vestings (populate TMO; multi-vesting/multi-lender per loan), requirements/questionnaire (annual), workflow-priority items. Relates to #qakx. Source: src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

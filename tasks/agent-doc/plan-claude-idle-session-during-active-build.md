@@ -21,7 +21,15 @@ Design options (need a scope decision before implementation):
 2. **Stop/PreToolUse hook gate.** A hook that marks the session busy for the duration of background/long work and clears on completion, so a second dispatch is rejected. Mirrors the Codex `Stop`-hook backstop. Claude Code hook surface needed.
 3. **Status surfacing only.** Cheaper: surface a `turn in progress` status (tmux `display-message` / footer) so the session visibly is not idle, without hard-blocking. Lowest risk.
 
-**Recommendation:** start with option 3 (visible busy status) + the (a) conduct rule, since they're achievable now and directly address "looks idle"; treat option 1/2 (hard busy-lease) as the durable fix, gated on the `#subagent-blocks-session` design decision (which layer blocks, what counts as "the work", how the lease releases).
+**DECISION (operator-chosen 2026-06-05): option 3 — status surfacing only, on the supervisor layer**, plus the (a) conduct rule. No hard busy-lease yet (option 1/2 stays gated on the `#subagent-blocks-session` scope decision — which layer blocks, what counts as "the work", how the lease releases). Status-only is the low-risk, no-wedge choice; promote to a hard lease only if it proves insufficient.
+
+### Implementation spec (focused route-layer follow-up)
+This is a feature in the sensitive, known-buggy route/supervisor busy-detection (`#opencode-post-turn-false-active`), so it ships as its own cycle, not folded into an unrelated change:
+
+1. **Status surfacing (`route.rs` / supervisor).** When the owned pane's busy-cue detection reports an in-flight turn (the same signal `#opencode-post-turn-false-active` hardens), surface a `turn in progress` status on the pane via tmux `display-message` (the existing managed-status channel — must NOT write to the child pane stdout/stderr where it perturbs prompt detection). Clear it when the pane returns to a dispatch-ready/idle prompt. No hard block — a second Run Agent Doc still routes per existing rules.
+2. **Conduct rule (skill + runbooks).** Add to the agent-doc skill source + installed Claude/Codex/OpenCode mirrors (keep `audit-docs` green): "Long build/test/install commands run on the **main agent** and stream to a **watchable file** scanned with cheap greps; never present them as detached/opaque work, and never report an idle/available session while that work is in flight." Requires the standard SKILL-source → mirror regeneration, so it lands with the skill-surface change set rather than ad hoc.
+
+**Verification:** a long main-agent command shows the non-idle status on the owned pane and clears on return to idle; `audit-docs` green after the skill/runbook edit.
 
 ## Verification
 - Conduct rule: present in installed Claude/Codex/OpenCode skill surfaces; `audit-docs` green.

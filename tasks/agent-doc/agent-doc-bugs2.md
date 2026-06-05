@@ -156,7 +156,27 @@ When `finalize` **fails** — e.g. the IntelliJ visible-buffer guard fired repea
 `#repair-strike-consumed-head`: after `repair` applies an orphaned response, strike the head(s) it consumed using `cycle_state.active_queue_heads` + the same consume predicate `write.rs` uses. Focused, recovery-path-only; the normal path is unchanged. Queued it for implementation.
 
 Net: normal-path strikethrough is solid; the recovery-path strike is the real remaining bug, now tracked with its root cause.
-<!-- agent:boundary:a5907381 -->
+
+### Re: reduce / manage review-gated items — opus-4-8
+
+Multi-part ask — decomposed it into a plan rather than a one-shot edit, and surfaced a primitive you may not know exists.
+
+#### Already shipped (you may not be using it)
+`agent-doc review ungate-tasks <FILE>` adds a backlog follow-up per gated review item, driving each ungate → done (idempotent). That **is** the "feed review items back into the backlog pipeline" primitive — but it's bulk (would add 62 backlog tasks at once). Typed gates (`--pending-set-gate-type`, `--pending-resolve-gate [/release]`) and `--pending-ungate` also exist.
+
+#### The real gap
+There's **no token-efficient query** of `agent:review` — to triage you must read the whole 62-item component. That's the core pain ("review lists too long / unmanageable"). The NEXT-step annotation convention I dogfooded this session (`[blocked: …] summary. NEXT: (1)… (2)…`) is just a convention — not parsed or queryable.
+
+#### Plan: `tasks/agent-doc/plans/review-gated-item-management.md`
+- **Stage 1 (recommended, backlogged as `#review-list-query`)**: `agent-doc review list` — compact, filterable (`--gate-type`, `--tag`, `--has-next`, `--json`) query so you see at a glance which gated items have actionable NEXT steps vs. stale ones. Read-only, low-risk.
+- **Stage 2**: warn-only lint flagging gated items with no NEXT + no recent activity (the stale set to split/drop). `review list --no-next` surfaces them.
+- **Stage 3**: selective `review ungate-tasks --ids/--tag/--has-next` — split the *actionable subset* into backlog instead of bulk.
+
+#### Open decision
+Ship Stage 1 (`review list`) first — smallest high-value piece. Do you want the Stage 2 stale-review **lint** (warn-only), or skip it for now?
+
+Net: feed-back already exists (`review ungate-tasks`); the missing query (`#review-list-query`) is the unlock for triaging the 62 items, now planned + backlogged.
+<!-- agent:boundary:82a194a9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -185,6 +205,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
 - [ ] [#repair-strike-consumed-head] [plan] repair-based recovery does not strike/consume the queue head its recovered response answered. write.rs owns queue consumption (should_consume_queue_prompt_for_write, #queue-strike-on-halt); repair.rs has none — so when finalize fails (e.g. IDE visible-buffer guard) and recovery goes through repair, the consumed free-text head stays unstruck and preflight re-presents it. FIX: after repair applies an orphaned response, strike the head(s) it consumed using cycle_state.active_queue_heads + the same consume predicate. Live repro: item 3 (optional-do/re) this session needed a manual strike.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->

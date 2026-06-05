@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -79,7 +79,7 @@ Done and pushed (EFS `1ab3fd9`). Reworked the homepage rate estimator (`lib/ui--
 **Spec + tests:** PRD bullet added for the new estimator behavior (and corrected a stale "loan arranger" → "loan originator" there); `tests/rate-estimator.test.ts` (6 tests). Full suite 268 pass, `build` + `build:worker` green. The 2 reds remain the teammate's pre-existing `apply4 P1` + `borrower-message-notify` import (flagged last cycle).
 
 Queue continues with `#vtx8` (application lead-disappears bug) next. Note: `#vtx8`/`#67v2` are in the admin/application-leads area the teammate is actively restructuring, so I'll check for conflicts there.
-<!-- agent:boundary:d297bbcf -->
+<!-- agent:boundary:e12afa5e -->
 <!-- /agent:exchange -->
 ###
 <!--

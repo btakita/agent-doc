@@ -131,7 +131,7 @@ Done both parts of your queue item.
 - **Session commits stay in agent-loop.** This session-doc cycle commits to agent-loop, and I'll record the submodule pointer bump here too. No `git push` anywhere.
 
 This honours both rules: the deliverable history lives in the submodule (local only), while the agent-doc session machinery stays in agent-loop. Say "scaffold" when you want the `shopping_cart/` package + first failing tests, same commit-local-no-push handling.
-<!-- agent:boundary:d5f0b9bf -->
+<!-- agent:boundary:4040babf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +141,7 @@ This honours both rules: the deliverable history lives in the submodule (local o
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#next-steps-2] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure, (6) push + mark complete at https://app.snapcode.review/submission_links/9c362eaf-9ef0-45f3-8467-0660e3a68754
+- [ ] [#next-steps-2] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure
 <!-- /agent:backlog -->
 
 ## Icebox

@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -195,12 +195,45 @@ c = Cart(PriceClient()); c.add("cornflakes"); c.add("cornflakes"); c.add("weetab
 ```
 
 That's optional — purely for your confidence, not a submission requirement.
-<!-- agent:boundary:0ffecaf7 -->
+
+### Re: integration tests with real API calls — opus-4-8
+
+> **Queue prompt:**
+>
+> Are there any integration tests that test the full stack including the real API calls?
+
+
+**No — there are no tests that hit the real Price API.** Every test mocks the HTTP boundary:
+- `test_price_client.py` uses `httpx.MockTransport` (in-process fake responses).
+- `test_cart.py` injects a stub client, so no HTTP at all.
+
+#### Why I left them out
+- **Determinism.** The brief asks for simple, well-tested solutions and forbids unnecessary complexity. Tests that call `https://equalexperts.github.io/...` are non-deterministic: they fail on no network, on a slow/blocked CI runner, or if EE changes the hosted data — none of which reflect a bug in this code.
+- **The contract is what we test.** Mocking lets the client tests assert the exact URL, parsing, and error handling. A live call mostly re-tests EE's hosting, not our logic.
+
+#### If you'd like one anyway (recommended pattern)
+A single **opt-in smoke test**, skipped by default so the normal suite stays offline and green, run only on demand:
+
+```python
+# tests/test_integration.py
+import os, pytest
+from decimal import Decimal
+from shopping_cart import PriceClient
+
+@pytest.mark.skipif(not os.getenv("RUN_INTEGRATION"), reason="hits the live Price API")
+def test_real_api_returns_a_price():
+    assert PriceClient().get_price("cornflakes") > Decimal("0")
+```
+
+Run with `RUN_INTEGRATION=1 pytest`. It proves the real end-to-end wiring without making the default suite flaky. Say the word and I'll add it (committed local, no push).
+
+---
+*Housekeeping: the exchange is now ~175 lines / 7 sections and agent-doc is flagging it as large. Whenever you're done reviewing, I can run `agent-doc compact` to condense it — just say so; I won't compact mid-review.*
+<!-- agent:boundary:5946d725 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- Are there any integration tests that test the full stack including the real API calls?
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -130,3 +130,6 @@
 [submodule "src/tsift"]
 	path = src/tsift
 	url = git@github.com:btakita/tsift.git
+[submodule "src/equal-experts-neat-exhilarating-friendly-inspiration"]
+	path = src/equal-experts-neat-exhilarating-friendly-inspiration
+	url = git@github.com:EqualExperts-Assignments/equal-experts-neat-exhilarating-friendly-inspiration-72a3934e990b.git

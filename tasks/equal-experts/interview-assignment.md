@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -477,13 +477,26 @@ Documented it as a **deliberate, sourced deviation from the brief**: the brief s
 
 #### Heads-up on the tradeoff
 This is the one place we now diverge from the brief's literal wording. It's defensible (correct, documented, sourced, worked-example-preserving), but if you'd rather follow the brief to the letter for grading, say the word and I'll flip `_round_money` back to `ROUND_UP` (and revert the test expectations). `#next-steps-2` stays gated.
-<!-- agent:boundary:475d1663 -->
+
+### Re: Integration tests now run by default each turn — opus-4-8
+
+> **Queue prompt:**
+>
+> I notice the integration tests are skipped. Each agent turn should run the integration tests. Please enable these tests and make them pass if they fail.
+
+
+Done (same commit, submodule `solution` `ahead 9`, **not pushed**).
+
+- **Flipped the gate:** `tests/test_integration.py` no longer skips by default. Plain `python -m pytest` now runs the live smoke suite too. The escape hatch is inverted — `SKIP_INTEGRATION=1` opts out for a genuinely offline run.
+- **They pass:** full suite is **40 passed** (33 unit + 7 live-API), including exact per-product price assertions and the end-to-end cart (recompute aligned to round-half-up).
+- **Standing practice:** I'll run the full suite — integration included — every turn from now on and report the result, per your instruction.
+
+README updated (the test section now documents default-on integration + the `SKIP_INTEGRATION` opt-out). `#next-steps-2` stays gated for your review.
+<!-- agent:boundary:d14f9ca5 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- ~Yes add the note to README and use test first TDD to implement the corrected rounding procedure. The test should fail first then implement to fix the test. ~
-- I notice the integration tests are skipped. Each agent turn should run the integration tests. Please enable these tests and make them pass if they fail.
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

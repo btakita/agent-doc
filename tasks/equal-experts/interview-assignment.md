@@ -455,12 +455,34 @@ VAT rules leave rounding to member states: traders may round **per line or per i
 - [Ohio Dept. of Taxation — ST 2005-05 (calculation & rounding)](https://tax.ohio.gov/business/ohio-business-taxes/sales-and-use/information-releases/st200505)
 - [TaxJar — Rounding in sales tax reporting](https://www.taxjar.com/blog/file/rounding-issues-sales-tax-returns)
 - [Microsoft Dynamics 365 — Tax calculation rounding rules (line vs total)](https://learn.microsoft.com/en-us/dynamics365/finance/localizations/global/tax-calculation-rounding-rules)
-<!-- agent:boundary:b6c82444 -->
+
+### Re: Round-half-up implemented via TDD + README note — opus-4-8
+
+> **Queue prompt:**
+>
+> Yes add the note to README and use test first TDD to implement the corrected rounding procedure. The test should fail first then implement to fix the test. 
+
+
+Done, TDD-style (committed in the submodule, `solution` `ahead 9`, **not pushed**).
+
+#### Red → Green
+1. **Red:** rewrote the cart rounding tests to expect nearest-cent (half-up) and ran them — 3 failed against the old ceiling code, exactly as expected:
+   - `8.43 → tax 1.05` (1.05375, 3rd decimal `3 < 5` rounds **down**; ceiling gave 1.06)
+   - `2.52 → tax 0.32` (0.315, 3rd decimal `5 ≥ 5` rounds **up**)
+   - multi-item `21.85 → tax 2.73 / total 24.58`
+2. **Green:** changed the one helper `cart._round_money` from `ROUND_UP` to `ROUND_HALF_UP`. All 40 tests pass.
+
+#### The note (README + SPEC + PLAN)
+Documented it as a **deliberate, sourced deviation from the brief**: the brief says "rounded up", but real-world sales-tax/VAT (SSUTA §324, EU/UK VAT) rounds tax to the **nearest cent**. The brief's worked example still passes (`15.02 / 1.88 / 16.90`). The mode is isolated to one helper, so reverting to strict ceiling is a one-line change.
+
+#### Heads-up on the tradeoff
+This is the one place we now diverge from the brief's literal wording. It's defensible (correct, documented, sourced, worked-example-preserving), but if you'd rather follow the brief to the letter for grading, say the word and I'll flip `_round_money` back to `ROUND_UP` (and revert the test expectations). `#next-steps-2` stays gated.
+<!-- agent:boundary:475d1663 -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue auto go -->
-- Yes add the note and use test first TDD to implement the corrected rounding procedure. 
+- ~Yes add the note to README and use test first TDD to implement the corrected rounding procedure. The test should fail first then implement to fix the test. ~
 - I notice the integration tests are skipped. Each agent turn should run the integration tests. Please enable these tests and make them pass if they fail.
 <!-- /agent:queue -->
 

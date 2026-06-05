@@ -176,15 +176,32 @@ There's **no token-efficient query** of `agent:review` — to triage you must re
 Ship Stage 1 (`review list`) first — smallest high-value piece. Do you want the Stage 2 stale-review **lint** (warn-only), or skip it for now?
 
 Net: feed-back already exists (`review ungate-tasks`); the missing query (`#review-list-query`) is the unlock for triaging the 62 items, now planned + backlogged.
-<!-- agent:boundary:eaeae7db -->
+
+### Re: do [#repair-strike-consumed-head] — opus-4-8
+
+Implemented, tested, installed, pushed (`52617ed5`).
+
+#### Root cause
+`finalize` strikes the consumed queue head; `repair` didn't. `do [#id]` heads still get struck by preflight's reap path (once the backlog id resolves), but a **free-text head has no id to reap**, so when `finalize` failed the IDE visible-buffer guard and recovery fell to `repair`, the answered free-text head stayed live and preflight re-presented it — I hit this 3× this session, striking each by hand.
+
+#### Fix
+- `write.rs`: `consume_queue_prompt_force_disk` — strikes the head **skipping the visible-write idle guard**, because `repair` already writes the recovered response straight to disk (bypassing IPC/IDE); the matching strike must bypass it too, or a live IDE buffer re-blocks the very recovery path. Refactored `consume_queue_prompts_with_outcome` to take `skip_visible_guard`; existing callers unchanged (pass `false`).
+- `repair.rs`: after replaying an orphaned response, strike the head **only when it's free-text** (`first_queue_head_is_free_text`). `do [#id]` heads are deliberately left to the reap path so the head never desyncs from a still-open backlog id. Best-effort — never fails the recovery.
+
+#### Verification
+- Tests: free-text head struck in place (next item stays live); `do [#id]` head left for reap.
+- `make check`: 708 core + **2271** orchestration, 0 failed; clippy clean. Installed + release-built.
+
+This is the fix for the friction that forced manual strikes on items 3, 5, and 6 today — the live binary now self-heals the free-text head on repair.
+<!-- agent:boundary:3cb2c258 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#repair-strike-consumed-head]
-- do [#optional-do-re]
-- monsterrodholders.md had an unfinished turn. The response was not committed. 
-- JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
 - do [#review-list-query]
+- monsterrodholders.md had an unfinished turn. The response was not committed. 
+- do [#optional-do-re]
+- JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
 <!-- /agent:queue -->
 ###
 <!--
@@ -200,7 +217,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
-- [ ] [#repair-strike-consumed-head] [plan] repair-based recovery does not strike/consume the queue head its recovered response answered. write.rs owns queue consumption (should_consume_queue_prompt_for_write, #queue-strike-on-halt); repair.rs has none — so when finalize fails (e.g. IDE visible-buffer guard) and recovery goes through repair, the consumed free-text head stays unstruck and preflight re-presents it. FIX: after repair applies an orphaned response, strike the head(s) it consumed using cycle_state.active_queue_heads + the same consume predicate. Live repro: item 3 (optional-do/re) this session needed a manual strike.
+- [x] [#repair-strike-consumed-head] [plan] repair-based recovery does not strike/consume the queue head its recovered response answered. write.rs owns queue consumption (should_consume_queue_prompt_for_write, #queue-strike-on-halt); repair.rs has none — so when finalize fails (e.g. IDE visible-buffer guard) and recovery goes through repair, the consumed free-text head stays unstruck and preflight re-presents it. FIX: after repair applies an orphaned response, strike the head(s) it consumed using cycle_state.active_queue_heads + the same consume predicate. Live repro: item 3 (optional-do/re) this session needed a manual strike.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 

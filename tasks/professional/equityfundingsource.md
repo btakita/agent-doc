@@ -63,7 +63,20 @@ Shipped Phase A of the TMO **All Loans** Kanban as a read-only admin **Pipeline*
 **Still open** (PRD Qs 1–2, needs Robert/April): the exact TMO label for the leftmost active column and the full ordered column list. The current set is a faithful model of the captured screenshots but not yet confirmed. Phase B (#67v2b drag-to-change + outbox writeback) stays gated on the TMO write field map (#7a4d) and sync direction (#dzmm/#k2xg).
 
 Next in the queue: `#zwws-phase6-dashboard`.
-<!-- agent:boundary:5b2dd72a -->
+
+### Re: [#zwws-phase6-dashboard] Workflow-priority investor dashboard — opus-4-8
+
+Shipped the **un-gated half** of #zwws phase 6, then `update spec + tests` and `commit + push` per `#spec-test-commit-push`. Committed to `equityfundingsource-dev` `main` (`1ee9619..31a9db5`). The new-deal *email* stays the gated half (#f4rq) and was out of scope for this item.
+
+**What landed**
+- **Pure derivation** in `lib/ui--browser--efs/portal/investor/data.ts`: `investor_action_items_(pipeline)` maps action-required pipeline stages → prioritized items (`Funding → wire` "Wire funds" rank 0; `Documents → docs` "Missing docs" rank 1; Reviewing/Committed/Active surface nothing), sorted most-urgent-first; `investor_has_urgent_()`. Unit-tested, no D1.
+- **Dashboard reorder** (`dashboard.tsx`): new `DashboardModules` — when any item is urgent it renders an **Action required** panel (red count badge, per-item urgency chip + concrete next step + Resolve link) above the deal pipeline and available deals; when calm, **Available Deals lead** with the pipeline following. In-app indicator only.
+- Derives from the same `INVESTOR_PIPELINE` the stage map uses, so it tracks the TMO single source of truth once the pipeline syncs from TMO in a later phase.
+
+**Verification** — full suite green: `bun test` 310 pass / 0 fail (+4 new in `tests/investor-portal-e2e.test.ts`); `bun run build` + `build:worker` both bundle clean.
+
+**Queue drained.** Both queued items are done: #67v2a (admin pipeline Kanban Phase A) and #zwws-phase6-dashboard. Remaining Phase 6 work is only the new-deal email, gated on the EFS Resend sending domain (#f4rq).
+<!-- agent:boundary:fa5ef972 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +91,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

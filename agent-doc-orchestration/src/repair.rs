@@ -1520,6 +1520,17 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     // Remove the pending file after successful write
     clear_pending(&canonical)?;
 
+    // #repair-strike-consumed-head: finalize strikes the consumed queue head, but
+    // repair's recovery path historically left it live. `do [#id]` heads are
+    // struck by preflight's reap path once their backlog item is done; a
+    // free-text head has no backlog id to reap, so a recovered free-text-head
+    // response leaves the head unstruck and preflight re-presents it. Strike it
+    // here via a guard-skipping consume — repair already wrote the response
+    // straight to disk, so the matching strike must bypass the visible-write
+    // guard a live IDE buffer would otherwise trip. Best-effort: never fail the
+    // recovery on the strike.
+    strike_recovered_free_text_queue_head(file);
+
     eprintln!(
         "[repair] Response repaired and written to {}",
         file.display()
@@ -1540,6 +1551,58 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
     }
     Ok(RepairOutcome::ReplayedResponse)
+}
+
+/// Strike the active queue head after a repaired response IF it is a free-text
+/// head (`#repair-strike-consumed-head`). Scoped to free-text heads only: `do
+/// [#id]` heads are struck by preflight's reap path once their backlog item is
+/// resolved, and striking one here without resolving its id would desync the
+/// head from its still-open backlog item. Best-effort — logs but never fails the
+/// recovery.
+fn strike_recovered_free_text_queue_head(file: &Path) {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let Ok((fm, _)) = frontmatter::parse(&content) else {
+        return;
+    };
+    if fm.queue_active != Some(true) {
+        return;
+    }
+    if !first_queue_head_is_free_text(&content) {
+        return;
+    }
+    match crate::write::consume_queue_prompt_force_disk(file) {
+        Ok(Some(outcome)) => eprintln!(
+            "[repair] struck consumed free-text queue head (remaining: {})",
+            outcome.remaining
+        ),
+        Ok(None) => {}
+        Err(e) => eprintln!(
+            "[repair] queue-head strike after replay failed: {e} (non-fatal)"
+        ),
+    }
+}
+
+/// True when the first prompt in the document's `agent:queue` is a free-text
+/// head (not a `do [#id]` / `do #id` directive).
+fn first_queue_head_is_free_text(content: &str) -> bool {
+    let Ok(components) = crate::component::parse(content) else {
+        return false;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return false;
+    };
+    let Ok(entries) = crate::queue::parse(queue.content(content)) else {
+        return false;
+    };
+    match crate::queue::prompts(&entries).first() {
+        Some(prompt) => {
+            let t = prompt.text.trim().to_ascii_lowercase();
+            !(t.starts_with("do [#") || t.starts_with("do #"))
+        }
+        None => false,
+    }
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
@@ -2185,6 +2248,81 @@ mod tests {
         // Pending file should be cleaned up
         let pending = snapshot::pending_path_for(&doc).unwrap();
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn repair_strikes_consumed_free_text_queue_head() {
+        // #repair-strike-consumed-head: a recovered free-text-head response must
+        // strike its queue head (finalize does; repair historically left it live,
+        // so preflight re-presented the answered head).
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- improve the docs please\n",
+            "- a second queued item\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: improve the docs — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        // The answered head is struck in place; the next item stays live.
+        assert!(
+            result.contains("~improve the docs please~"),
+            "free-text queue head must be struck after repair replay:\n{result}"
+        );
+        assert!(
+            result.contains("- a second queued item"),
+            "the next queue item must remain live:\n{result}"
+        );
+    }
+
+    #[test]
+    fn repair_leaves_do_id_queue_head_for_reap_path() {
+        // do[#id] heads are struck by preflight's reap path once their backlog
+        // item resolves; the repair strike must NOT touch them, or the head
+        // desyncs from its still-open backlog id.
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#widget]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: do [#widget] — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        run(&doc).unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- do [#widget]") && !result.contains("~do [#widget]~"),
+            "do[#id] head must remain for the reap path:\n{result}"
+        );
     }
 
     #[test]

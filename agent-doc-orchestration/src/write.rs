@@ -2607,19 +2607,31 @@ pub fn consume_queue_prompt(file: &Path) -> Result<bool> {
 }
 
 pub fn consume_queue_prompt_with_outcome(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, &[])
+    consume_queue_prompts_with_outcome(file, &[], false)
 }
 
 pub fn consume_queue_prompts_for_done_ids_with_outcome(
     file: &Path,
     done_ids: &[String],
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, done_ids)
+    consume_queue_prompts_with_outcome(file, done_ids, false)
+}
+
+/// Strike the active queue head, **skipping the visible-write idle guard**, for
+/// the repair recovery path (`#repair-strike-consumed-head`). Repair already
+/// writes the recovered response straight to disk (bypassing IPC/IDE), so the
+/// matching head strike must also bypass the guard — otherwise a live IDE buffer
+/// would block the strike and leave the answered free-text head live for
+/// preflight to re-present. Callers must scope this to heads the recovered
+/// response actually answered.
+pub fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, &[], true)
 }
 
 fn consume_queue_prompts_with_outcome(
     file: &Path,
     done_ids: &[String],
+    skip_visible_guard: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
@@ -2630,7 +2642,9 @@ fn consume_queue_prompts_with_outcome(
         return Ok(None);
     };
 
-    guard_visible_write_idle(file, "queue_consume")?;
+    if !skip_visible_guard {
+        guard_visible_write_idle(file, "queue_consume")?;
+    }
     atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
     if plan.save_snapshot {
         snapshot::save(file, &plan.new_snapshot)?;

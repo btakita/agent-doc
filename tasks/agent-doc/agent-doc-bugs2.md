@@ -238,7 +238,28 @@ So the behavior you're asking for is in the binary. What's **not proven** is the
 If you saw Fix Document *not* finish a turn, it's one of two things: a stale installed plugin/binary, or a recovery class the 4-pass loop doesn't cover — and the live repro (with the specific interrupted-cycle shape) tells us which.
 
 Aside: this very session exercised the *manual* equivalent repeatedly — `agent-doc write --commit` recovered stranded responses each time `finalize` tripped the live-IDE buffer guard. Same recovery primitive, invoked by hand instead of by Fix Document.
-<!-- agent:boundary:2ce2ec1f -->
+
+### Re: Can we improve the performance of fail-open-after-wait? — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we improve the performance of fail-open-after-wait?
+
+
+Yes — but the lever isn't where it might seem. The wait **already returns the instant the pane is ready** (the logs show `route_starting_actor_ready elapsed_ms≈100`). The full timeout only bites a pane that *never* becomes ready. So "make it faster" = handle the **bad case** faster, not the happy path:
+
+#### 1. Fail fast on a provably-dead pane (biggest win)
+Today a pane that will never come up still gets waited on up to the full `dispatch_only_starting_pane_ready_timeout` (`route.rs:2245`). If the pane is **provably dead** — PID gone, tmux pane closed, no session-log heartbeat — there's no point waiting: detect that and **reroute to a fresh pane immediately**. Keep the patient wait only for a pane that's genuinely still booting. (Overlaps `#route-starting-timeout-poll-recovery`, `#snrun`.)
+
+#### 2. Per-harness adaptive timeout
+A flat 60 s is conservative for everything. **Codex** cold-start (auth + boot) is genuinely slow; **Claude** is fast. The timeout is already binary-scoped (`_for_binary`) — tune each to its observed p99 startup instead of one number, so a fast harness fails over quicker.
+
+#### 3 & 4 (bigger / smaller)
+- **Warm-pane pool**: keep a ready pane around so routing rarely waits for a cold start at all. Architectural, biggest latency win, most work.
+- **Push readiness vs 250 ms poll**: have the pane announce "ready" instead of polling — shaves up to one poll interval. Minor.
+
+**Highest value: (1) + (2)** — fast-fail dead panes + adaptive per-harness timeout. Both are bounded changes to the existing wait, no architecture churn. Captured as `[#route-ready-wait-fast-fail]`.
+<!-- agent:boundary:e4facb50 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -247,6 +268,8 @@ Aside: this very session exercised the *manual* equivalent repeatedly — `agent
 - ~do [#codex-self-reinvoke-prevent]~
 - ~JB `Run Agent Doc` on monsterrodholders.md stalled for ~1 minute. It eventually started.~
 - ~JB `Fix Document` + related agent-doc task should finish any unfinished turn.~
+- ~Can we improve the performance of fail-open-after-wait?~
+- What does "When you want the writes live, it's a focused session: route every doc-baseline hash through the strip (the invariance sweep) + the live-verify pass." mean? I want this implemented already. Do whatever you need to do to implement this. I'm not sure what live verification you need.
 - do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 - do [#optional-do-re-stage2]
 <!-- /agent:queue -->
@@ -263,6 +286,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#route-ready-wait-fast-fail] [recommended] Improve fail-open-after-wait worst case (follow-up to #jb-monsterrod-route-ready-wait-stall). The ready-wait already early-exits when the pane is dispatch-ready (logs: route_starting_actor_ready elapsed_ms~100), so the full timeout only bites a pane that NEVER becomes ready. Levers: (1) fail-fast on a PROVEN-DEAD/closed pane — detect dead PID / closed pane / no session-log heartbeat and reroute to a fresh pane immediately instead of waiting the full dispatch_only_starting_pane_ready_timeout (route.rs:2245); keep waiting only for a still-booting pane (overlaps #route-starting-timeout-poll-recovery, #snrun). (2) per-harness adaptive timeout — Codex cold-start (auth+boot) is slow, Claude fast; tune to observed p99 instead of one flat 60s (timeout is already binary-scoped via _for_binary). (3) warm-pane pool so routing rarely waits for cold start (bigger). (4) push readiness signal vs 250ms poll (minor). Highest value: (1)+(2).
 - [ ] [#optional-do-re-stage2] [recommended] optional-do grammar Stage 2 (exchange directives + closeout guards). Stage 1 shipped (submodule 730a96fb): queue-line re-reference + bare-[#id] is_do_directive recognition. Stage 2 = teach do_directive_target_ids_in_line / pending_done_guard / queue-head-provenance / expect_done_or_gate to accept the bare [#id] form and skip the re form, with dedicated per-guard tests (higher blast radius). Plan: tasks/agent-doc/plans/optional-do-directive-and-re-reference.md.
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.

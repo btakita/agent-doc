@@ -125,7 +125,7 @@ Net: with the current corky tooling I have no way to actually *see* the board, a
 `#67v2` is a known feature: admin loan pipeline with **TMO-aligned stages + Kanban** (drag cards, auto-advance when stage requirements are met) synced to the dashboard, mirroring TMO stages as the single source of truth. There's prior art to build on — the investor pipeline already defines `Reviewing → Committed → Documents → Funding → Active` and admin loan status exists — but the board screenshots tell me the **real** TMO column names, ordering, and per-stage requirements, which I need to model it correctly.
 
 I've **gated `#67v2`** as blocked-on-input. Drop the board images (or the resolvable thread id) and re-queue it, and I'll produce the workflow design + first implementation slice.
-<!-- agent:boundary:8f105b98 -->
+<!-- agent:boundary:efe6a2b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +133,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" start -->
-- [#67v2]: Use corky to get the attached images from https://mail.google.com/mail/u/0/#inbox/FMfcgzQgMLxHCrjZbfGFBpkwSTTgxGbd. This is the TMO board. Can we create the logic for this workflow?
 <!-- /agent:queue -->
 
 ## Backlog

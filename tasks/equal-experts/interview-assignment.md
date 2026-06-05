@@ -300,12 +300,31 @@ Yes, on both readings:
 If you wanted to make the "consumer" angle explicit, the lightest touch would be a tiny usage example in the README (already present in the Usage block) rather than a new class. I'd not add a `Cart` client type.
 
 *(Aside: exchange is now 252 lines / 11 sections — happy to `agent-doc compact` once you're done reviewing.)*
-<!-- agent:boundary:86f42824 -->
+
+### Re: Cart docstring — interface + example added — opus-4-8
+
+> **Queue prompt:**
+>
+> The Cart pydoc should include the interface and example usage.
+
+
+Done. Added a full class docstring to `Cart` (committed in the submodule, `solution` `ahead 4`, **not pushed**).
+
+It now documents:
+- **Interface** — every method/property with signature and contract: `add(product, quantity=1)`, `items`, `subtotal`, `tax`, `total`, plus the Decimal/ROUND_UP/2dp rule.
+- **Example** — the brief's worked example as a runnable-style block (`cornflakes ×2 + weetabix` → `15.02 / 1.88 / 16.90`).
+- A note that any object with `get_price(product) -> Decimal` can be injected (e.g. a test stub), keeping the cart network-independent.
+
+`help(Cart)` / IDE hovers now show the interface and usage. Verified the suite stays green (**22 passed, 6 skipped**); the `>>>` block is documentation only — doctests aren't collected (no `--doctest-modules`), so it won't make the suite hit the network.
+
+`#next-steps-2` stays gated for your review.
+<!-- agent:boundary:78a633c3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue auto go -->
-- The Cart pydoc should include the interface and example usage.
+- ~The Cart pydoc should include the interface and example usage.~
+- The PriceClient pydoc should include the interface and example usage.
 <!-- /agent:queue -->
 
 ## Backlog

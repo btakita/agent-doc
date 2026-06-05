@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -300,11 +300,12 @@ Yes, on both readings:
 If you wanted to make the "consumer" angle explicit, the lightest touch would be a tiny usage example in the README (already present in the Usage block) rather than a new class. I'd not add a `Cart` client type.
 
 *(Aside: exchange is now 252 lines / 11 sections — happy to `agent-doc compact` once you're done reviewing.)*
-<!-- agent:boundary:d618ff4e -->
+<!-- agent:boundary:86f42824 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- The Cart pydoc should include the interface and example usage.
 <!-- /agent:queue -->
 
 ## Backlog

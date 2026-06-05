@@ -32,105 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260604-033714.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-052334.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #zr5z
+- Archived 5 response topic(s): transcribe + diarize 2026-06-03 16-58-49-compressed.mp4; speaker names; task list from call transcript; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Use corky GPU to transcribe + diarize [2026-06-03 16-58-49-compressed.mp4](../../../../../Videos/2026-06-03%2016-58-49-compressed.mp4)
-
-### Re: transcribe + diarize 2026-06-03 16-58-49-compressed.mp4 — opus-4-8
-
-Done — `corky transcribe --diarize` (GPU auto) on the 228.6M video. Exit 0.
-
-- **Output:** [file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md](file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md) (94.8K)
-- **Duration:** 95:38 · **Speakers:** 6 diarized
-- Frontmatter typed it `phone-call`, dated 2026-06-03. Content is EFS-relevant — Judith joins late, talk of borrower sign-up, loan amount, and "more aggressive" rate scenarios.
-
-**Labels are generic** (`Speaker 1`–`Speaker 6`). corky's interactive "Who is Speaker N?" prompts can't be answered in a background run, so it skipped naming. To get named turns, re-run with `--speakers "Judith,Robert,Brian,…"` (order maps to first-appearance) — say the word and I'll relabel.
-❯ The speakers are brian-takita, judith-krug, robert-waldman, april-armas.
-
-### Re: speaker names — relabel transcript — opus-4-8
-
-Relabeled. Re-ran `corky transcribe --diarize --speakers "Brian Takita,Judith Krug,Robert Waldman,April Armas"` (GPU/CUDA0). The 6 raw diarization clusters resolved down to the 4 named people via LLM attribution. Exit 0.
-
-- **Output (overwritten):** [file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md](file:///home/brian/Videos/2026-06-03%2016-58-49-compressed.transcript.md)
-- **Turn tally:** Judith Krug 156 · Robert Waldman 102 · April Armas 71 · Brian Takita 67
-- Frontmatter `participants` now lists all four; also re-transcribed 3 low-confidence blocks (avg +0.39).
-
-**Accuracy caveat:** attribution in the noisy opening minute is approximate — e.g. the `[00:00:25]` "Judith will be late, let me give her a call" turn is tagged Judith but is almost certainly someone else announcing her. The bulk of the call attributes cleanly. If you spot specific mis-tags, point me at the timestamps and I'll correct them.
-❯ Please create a markdown document with a list of tasks that were identified in the call transcript.
-
-### Re: task list from call transcript — opus-4-8
-
-Done. Read the full 95:38 transcript and pulled the action items into a markdown doc co-located with the recording:
-
-- **Output:** [file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md](file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md)
-
-It's an EFS demo/discovery walkthrough (Brian, Judith, Robert, April). I organized by topic rather than by speaker, since the diarization attribution is too noisy to trust for who-said-what:
-
-- **Homepage / public site** — logo touch-up, revise loan-parameters box (drop "Points", "Primarily California"), rename product categories (drop "extraction"/"tract development"), fix the "proof" label, make recent-transactions admin-editable, "Licensed loan **originator**", contact-block reorder, lien wording.
-- **Rate estimate tool** — show loan amount, hard-stop at 100% LTV, dynamic recalc, "Above guidelines → contact for custom quote" in the 65–80% band, currency formatting.
-- **Apply flow** — finish multi-step borrower app, **fix the lead-disappears-on-advance bug**, true quick-app for borrowers.
-- **Admin pipeline** — stage/Kanban view aligned to TMO stages, TMO sync, funded-deals photo upload, editable About page, cache hookups.
-- **Investor portal** — available-deals-first, new-deal email, "I'm interested" button, drop Returns/Distributions/Statements, simplified portfolio (no servicing data), special-instructions/vestings, documents + lender-doc dropdown, requirements/questionnaire, multi-lender funding status, workflow-priority dashboard, **secure wiring-instructions link**.
-- **Broker portal** — referring-broker app lives here, code-based onboarding, tag every loan to a broker source.
-- **Messaging/CRM** — plan of record is Robert's GoHighLevel, integrated with the site.
-- **Security/OCR (later phase)** — vault + OCR redaction, document request forms.
-- **EFS to provide** — TMO workflow screenshots, the two TMO app links, lender-doc list + investor questionnaire, Dropbox naming conventions, a broker test sign-up.
-
-Several of these map to existing backlog/review items (TMO sync/webhooks, messaging round-trip, OCR, broker backend, investor docs). I queued a `[recommended]` backlog item (#exb1) to triage the list into the EFS roadmap — say the word and I'll do that pass.
-
-### Re: #exb1 — triage call task list into EFS backlog — opus-4-8
-
-> **Queue prompt:**
->
-> [#exb1]
-
-
-Triaged the [2026-06-03 call task list](file:///home/brian/Videos/2026-06-03%2016-58-49-tasks.md) into this backlog. Added 7 net-new items and mapped the rest onto existing ids; `#exb1` is now done.
-
-**Net-new backlog items added** (top of backlog):
-
-1. Homepage copy + loan-parameters revisions (recommended)
-2. Rate estimator LTV fixes
-3. Application lead-disappears-on-advance bug
-4. Admin loan pipeline — TMO-aligned stages/Kanban
-5. Investor portal dashboard rework (recommended)
-6. Secure wiring-instructions delivery
-7. GoHighLevel CRM messaging/notifications
-
-**Mapped onto existing ids** (no new item — these already cover the call asks):
-
-| Call area | Existing id(s) |
-|---|---|
-| TMO sync / pipeline stages, webhooks | `#dzmm`, `#k2xg` |
-| Borrower message email round-trip | `#xcvg` |
-| Broker portal (referring-broker app, onboarding, tag-to-broker) | `#37ah` |
-| Investor docs (note/signed docs, lender-doc dropdown, accreditation) | `#qakx` |
-| OCR scrub/redact, fillable forms, doc search | `#7fx4`, `#d1h2`, `#f5kq`, `#7a4d`, `#ntcr` |
-| Borrower online payments (Stripe) | `#cm3e` |
-| New-deal / lead email sending domain | `#f4rq`, `#m6ch`, `#p40t` |
-| Logo asset (JPEG → PNG/SVG) | `#x5rn` |
-| Testimonials / reviews section | `#kzt6` |
-| Online-presence cleanup | `#4vb5`/`#a3gc`/`#zhyg`/`#vd6p`/`#tfee`/`#1w4n` |
-
-**EFS-to-provide inputs** (from the call, tracked in the task-list file, not repo backlog items): TMO workflow screenshots, the two TMO app links, the lender-doc list + investor questionnaire, Dropbox naming conventions, and a broker test sign-up to surface TMO's minimum broker fields.
-
-None of this touches code yet — it's backlog organization. Point me at any of the 7 new items (or an existing id) when you want to start implementing.
-❯ Move the tasks md and transcript into equityfundingsource-dev.
-
-### Re: move tasks md + transcript into equityfundingsource-dev — opus-4-8
-
-Moved both into the EFS repo under a new `docs/calls/` directory, committed and pushed (`37fc374`):
-
-- `docs/calls/2026-06-03 16-58-49-tasks.md`
-- `docs/calls/2026-06-03 16-58-49-compressed.transcript.md`
-
-Kept the original filenames so the tasks file's `source:` frontmatter still resolves to the transcript in the same directory. The two `.mp4` recordings (compressed + original) stayed in `~/Videos` — you asked to move the tasks md and transcript only.
-
-Also repointed the 3 backlog items that cited the old `~/Videos` path (`#knpa`, `#19gv`, `#rpzm`) to `src/equityfundingsource-dev/docs/calls/2026-06-03 16-58-49-tasks.md`.
-<!-- agent:boundary:93587187 -->
+<!-- agent:boundary:560fe9a6 -->
 <!-- /agent:exchange -->
 ###
 <!--

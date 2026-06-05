@@ -1,8 +1,16 @@
 # Plan: Unified `queue:` frontmatter state (deprecate `auto` + `queue_active`)
 
-Status: phases 1-3 implemented; phase 4 (writer migration) remaining
+Status: phases 1-4 implemented + live; harness-parity doc rewrites remaining
 
 ## Progress
+
+- **2026-06-04 — Phase 4 done** (`src/agent-doc` commit `f256ff71`). Writer emits
+  canonical `queue: start`/`queue: stop` via `frontmatter::merge_queue_state`,
+  clearing legacy `queue_active:` in the same write (all 14 write sites migrated).
+  Replay-hash / boundary-compare normalizers strip both fields together (no drift
+  loop); drift-authority logic unchanged (reads via `live_continuation_head`).
+  Spec + tests updated; `make check` green; both binaries reinstalled. Remaining:
+  harness-parity instruction-surface doc rewrites only.
 
 - **2026-06-04 — Phase 3 done** (`src/agent-doc` commit `60a466af`). Marker-side
   control: `<!-- agent:queue go -->` / `start` fresh-activates the queue (Auto

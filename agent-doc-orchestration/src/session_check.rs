@@ -2441,16 +2441,66 @@ fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
         .or_else(|| normalized.strip_prefix("+ "))
         .unwrap_or(normalized)
         .trim();
+    // Optional-`do` Stage 2: a `re [#id]` / `re #id` reference never targets a
+    // tracked id — it is inert (no execute, no reap). Skip it before any id
+    // extraction so the closeout guards do not expect a reference to be resolved.
+    let lower_full = normalized.to_ascii_lowercase();
+    if let Some(after_re) = lower_full.strip_prefix("re ") {
+        let after_re = after_re.trim_start();
+        if after_re.starts_with("[#") || after_re.starts_with('#') {
+            return Vec::new();
+        }
+    }
+    // Strip a leading non-id annotation prefix (`[label]`), but NOT a bare id
+    // token `[#id]` — under the optional-`do` grammar that token IS the directive.
     if normalized.starts_with('[')
+        && !normalized.starts_with("[#")
         && let Some(closing) = normalized.find(']')
     {
         normalized = normalized[closing + 1..].trim();
     }
     let lower = normalized.to_ascii_lowercase();
-    let Some(rest) = lower.strip_prefix("do ") else {
-        return Vec::new();
+    // Explicit `do ` prefix keeps its original contract: extract every id target
+    // named after the verb (e.g. `do [#a] then [#b]`).
+    if let Some(rest) = lower.strip_prefix("do ") {
+        return extract_pending_hash_ids(rest);
+    }
+    // Stage 2: the `do` verb is optional — a bare leading `[#id]` / `#id` token
+    // is id-backed. A trailing `:` (`[#id]: note`) keeps the line inert prose.
+    if leads_with_bare_id_token(&lower) {
+        return extract_pending_hash_ids(&lower);
+    }
+    Vec::new()
+}
+
+/// Optional-`do` Stage 2: true when a normalized directive head leads with a
+/// bare id token (`[#id]` or `#id`) that should execute / reap id-backed. A
+/// trailing `:` after the token marks prose, not a directive (`[#id]: note`).
+/// `lower` is expected lowercased and marker-stripped.
+fn leads_with_bare_id_token(lower: &str) -> bool {
+    let (rest, bracketed) = if let Some(r) = lower.strip_prefix("[#") {
+        (r, true)
+    } else if let Some(r) = lower.strip_prefix('#') {
+        (r, false)
+    } else {
+        return false;
     };
-    extract_pending_hash_ids(rest)
+    let id_len = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .count();
+    if id_len == 0 {
+        return false;
+    }
+    let after = &rest[id_len..];
+    if bracketed {
+        match after.strip_prefix(']') {
+            Some(tail) => !tail.starts_with(':'),
+            None => false,
+        }
+    } else {
+        after.is_empty() || after.starts_with([' ', '\t', '.'])
+    }
 }
 
 /// Open (`[ ]`/gated, not done) ids that live specifically in the live
@@ -7773,6 +7823,24 @@ Body\n\
         ];
         let ids = do_directive_target_ids(&prompts);
         assert_eq!(ids, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn do_directive_target_ids_optional_do_stage2_bare_and_reference_forms() {
+        // Optional-`do` Stage 2: the `do` verb is optional for a bare leading id
+        // token, and a `re` reference never targets an id.
+        let prompts = vec![
+            "[#solo]".to_string(),            // bare bracketed → id-backed
+            "- [#listed] do the small fix".to_string(), // bare after list marker
+            "#hashbare proceed".to_string(),  // bare hash token
+            "re [#ref]".to_string(),          // reference → inert
+            "re #ref2".to_string(),           // reference → inert
+            "[#note]: just prose".to_string(), // trailing `:` → inert
+            "see [#mention] for context".to_string(), // not leading → inert
+            "do [#explicit]".to_string(),     // explicit still works
+        ];
+        let ids = do_directive_target_ids(&prompts);
+        assert_eq!(ids, vec!["solo", "listed", "hashbare", "explicit"]);
     }
 
     #[test]

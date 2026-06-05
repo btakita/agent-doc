@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -156,7 +156,7 @@ When `finalize` **fails** — e.g. the IntelliJ visible-buffer guard fired repea
 `#repair-strike-consumed-head`: after `repair` applies an orphaned response, strike the head(s) it consumed using `cycle_state.active_queue_heads` + the same consume predicate `write.rs` uses. Focused, recovery-path-only; the normal path is unchanged. Queued it for implementation.
 
 Net: normal-path strikethrough is solid; the recovery-path strike is the real remaining bug, now tracked with its root cause.
-<!-- agent:boundary:d9a43190 -->
+<!-- agent:boundary:a5907381 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -165,11 +165,12 @@ Net: normal-path strikethrough is solid; the recovery-path strike is the real re
 - ~do [#fmrunid-wire]~
 - ~`do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.~
 - ~Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.~
-- When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
+- ~When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.~
 - We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
 - do [#optional-do-re]
 - monsterrodholders.md had an unfinished turn. The response was not committed. 
 - JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
+- do [#repair-strike-consumed-head]
 <!-- /agent:queue -->
 ###
 <!--

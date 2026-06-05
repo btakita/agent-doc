@@ -3751,7 +3751,27 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     )
                 }
             {
-                eprintln!("[preflight] queue: halt — head prompt modified between cycles");
+                // #queue-no-stall-on-head-edit: a head prompt edit between
+                // cycles only pauses the loop while the operator is actively
+                // mid-edit. Once the buffer settles, adopt the edited head as
+                // the new prompt and keep the queue armed instead of stripping
+                // `auto` + forcing queue_active:false (the old behavior stalled
+                // the loop on every settled head edit). The pause is retained
+                // only while a live typing indicator proves the buffer is still
+                // being edited, so we never grab a half-typed head.
+                let head_edit_mid_typing = crate::debounce::is_typing_via_file(
+                    &file.to_string_lossy(),
+                    preflight_debounce_ms(file),
+                );
+                if !head_edit_mid_typing {
+                    eprintln!(
+                        "[preflight] queue: head prompt modified but buffer settled — adopting edited head, continuing loop (#queue-no-stall-on-head-edit)"
+                    );
+                    adopt_edited_queue_head_into_snapshot(file, &current_content);
+                    // Fall through to normal active-queue handling below; the
+                    // queue stays active with the edited head as the new prompt.
+                } else {
+                eprintln!("[preflight] queue: pause — head prompt modified mid-edit (buffer not settled); not grabbing a half-typed head");
                 // Strip auto and clear queue_active
                 if has_auto {
                     let comps = crate::component::parse(&current_content)?;
@@ -3812,6 +3832,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     synced_queue_ids,
                     warnings: Vec::new(),
                 });
+                }
             }
         }
     }
@@ -4074,6 +4095,45 @@ fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Op
         Err(e) => {
             eprintln!("[preflight] queue: live buffer convergence send failed (non-fatal): {e}")
         }
+    }
+}
+
+/// Absorb an operator's edited queue head into the snapshot when the loop adopts
+/// it instead of halting (#queue-no-stall-on-head-edit). Copying the live file's
+/// queue region into the snapshot makes the adopted head prove the same prompt at
+/// closeout queue-consume and keeps the next cycle from re-detecting a spurious
+/// `item_modified` edit. Best-effort: a parse/load/save failure is logged, never
+/// fatal — the loop still continues with the edited head from the live file.
+fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content: &str) {
+    let snap_now = match snapshot::load(file) {
+        Ok(Some(s)) => s,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("[preflight] queue: adopt-head snapshot load warning (non-fatal): {e}");
+            return;
+        }
+    };
+    let Ok(cur_comps) = crate::component::parse(current_content) else {
+        return;
+    };
+    let Some(cur_q) = cur_comps.iter().find(|c| c.name == "queue") else {
+        return;
+    };
+    let Ok(snap_comps) = crate::component::parse(&snap_now) else {
+        return;
+    };
+    let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") else {
+        return;
+    };
+    let queue_region = &current_content[cur_q.open_start..cur_q.close_end];
+    let mut rebuilt = String::with_capacity(snap_now.len() + queue_region.len());
+    rebuilt.push_str(&snap_now[..snap_q.open_start]);
+    rebuilt.push_str(queue_region);
+    rebuilt.push_str(&snap_now[snap_q.close_end..]);
+    if rebuilt != snap_now
+        && let Err(e) = snapshot::save(file, &rebuilt)
+    {
+        eprintln!("[preflight] queue: adopt-head snapshot sync warning (non-fatal): {e}");
     }
 }
 
@@ -6183,6 +6243,11 @@ mod tests {
         std::fs::write(&doc, &current_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();
 
+        // A live editor is actively mid-edit on the head prompt, so the loop
+        // must still pause/halt rather than adopt a half-typed head
+        // (#queue-no-stall-on-head-edit gates adopt on a settled buffer).
+        crate::debounce::document_changed(&doc.to_string_lossy());
+
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.queue_halted, Some("item_modified".into()));
         assert_eq!(state.queue_active, Some(false));
@@ -6237,7 +6302,12 @@ mod tests {
     }
 
     #[test]
-    fn preflight_halts_when_already_active_queue_head_changes() {
+    fn preflight_pauses_when_active_queue_head_changes_mid_edit() {
+        // #queue-no-stall-on-head-edit (pause case): while a live editor is
+        // actively mid-edit on the head prompt, the loop must still pause/halt
+        // rather than grab a half-typed head. The settled-buffer adopt path is
+        // covered separately by
+        // `preflight_adopts_edited_queue_head_when_buffer_settled`.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -6261,6 +6331,10 @@ mod tests {
         std::fs::write(&doc, &current_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();
 
+        // Mark the document as actively being typed so the head edit reads as
+        // a half-typed buffer.
+        crate::debounce::document_changed(&doc.to_string_lossy());
+
         let state = run_queue_maintenance(&doc, None).unwrap();
 
         assert_eq!(state.queue_active, Some(false));
@@ -6272,6 +6346,77 @@ mod tests {
         assert!(updated.contains("<!-- agent:queue -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("- do [#newhead]"));
+    }
+
+    #[test]
+    fn preflight_adopts_edited_queue_head_when_buffer_settled() {
+        // #queue-no-stall-on-head-edit (adopt case): when an already-active
+        // auto-queue's head prompt changes between cycles and the buffer is
+        // settled (no live typing indicator), the loop must adopt the edited
+        // head as the new prompt and stay armed — NOT strip `auto` / force
+        // queue_active:false. The snapshot must absorb the edited head so
+        // closeout queue-consume proves the same prompt and the next cycle sees
+        // no spurious item_modified edit.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#oldhead]\n",
+            "- do [#nexthead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+        // No typing indicator written → buffer is settled.
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.queue_halted, None,
+            "settled head edit must adopt + continue, not halt"
+        );
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(
+            state.queue_prompts,
+            vec!["do [#newhead]".to_string(), "do [#nexthead]".to_string()],
+            "loop continues with the edited head as the new prompt"
+        );
+
+        // File keeps the armed auto-queue with the edited head.
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("agent:queue auto"), "auto preserved: {updated}");
+        assert!(updated.contains("queue_active: true"), "active preserved: {updated}");
+        assert!(updated.contains("- do [#newhead]"));
+
+        // Snapshot absorbed the edited head so a follow-up pass is idempotent
+        // (no spurious item_modified on the now-converged head).
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("- do [#newhead]"),
+            "snapshot must absorb the adopted head: {snap}"
+        );
+        assert!(
+            !snap.contains("- do [#oldhead]"),
+            "snapshot must drop the stale head: {snap}"
+        );
+        let state2 = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state2.queue_halted, None,
+            "converged head must not re-halt on the next pass"
+        );
+        assert_eq!(state2.queue_active, Some(true));
     }
 
     #[test]

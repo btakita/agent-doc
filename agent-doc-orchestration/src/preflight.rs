@@ -3425,6 +3425,33 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 );
             }
         }
+        // #backlog-queue-sync-pending-add-amplification (decision B/C): while the
+        // queue is already running (persisted-active auto-loop), do NOT promote
+        // freshly-added backlog items into the live queue. Re-mirroring on every
+        // cycle injected each new `--pending-add` as a `do [#id]` head, growing
+        // the queue unboundedly and tripping pending_done_guard on each finalize.
+        // Restrict the sync to ids already present as queue heads so captured
+        // follow-ups wait for the NEXT activation instead of joining mid-loop. A
+        // fresh activation (queue not yet active) still mirrors the full backlog.
+        let persisted_active_incoming = frontmatter::parse(&content)
+            .map(|(fm, _)| fm.queue_active.unwrap_or(false))
+            .unwrap_or(false);
+        if persisted_active_incoming {
+            let existing_queue_ids: std::collections::HashSet<String> = entries
+                .iter()
+                .filter_map(queue_entry_do_id)
+                .map(|id| id.to_ascii_lowercase())
+                .collect();
+            let before = backlog_ids.len();
+            backlog_ids.retain(|id| existing_queue_ids.contains(&id.trim().to_ascii_lowercase()));
+            let held = before - backlog_ids.len();
+            if held > 0 {
+                eprintln!(
+                    "[preflight] queue: held {held} freshly-added backlog id(s) out of the active auto-loop \
+                     (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)"
+                );
+            }
+        }
         if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
             let pre_sync_ids = entries
                 .iter()
@@ -5711,6 +5738,54 @@ mod tests {
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
             state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_holds_fresh_backlog_item_out_of_active_queue() {
+        // #backlog-queue-sync-pending-add-amplification (decision B/C): a backlog
+        // item added while the auto-queue is already running (queue_active: true)
+        // must NOT be promoted into the live queue this cycle — it waits for the
+        // next activation. Prevents unbounded queue growth + pending_done_guard
+        // churn when an agent captures follow-ups mid-loop.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] already running\n",
+            "- [ ] [#beta] freshly added mid-loop\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            updated.contains("- do [#alpha]"),
+            "the already-running head stays:\n{updated}"
+        );
+        assert!(
+            !updated.contains("- do [#beta]"),
+            "a freshly-added backlog item must NOT be promoted into the active queue mid-loop:\n{updated}"
+        );
+        assert!(
+            !state.synced_queue_ids.contains(&"beta".to_string()),
+            "beta must not be a newly-synced queue id while the loop is active: {:?}",
+            state.synced_queue_ids
         );
     }
 

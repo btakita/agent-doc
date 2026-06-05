@@ -165,13 +165,31 @@ Status of the reordered heads:
 - `[#fm-run-id-step]` — not started; `do [#fm-run-id-step]` to drive.
 
 Tell me `do [#queue-state-unify]` (or any head) and I'll run it.
-<!-- agent:boundary:8db4d036 -->
+❯ do [#queue-state-unify]. #spec-test-build-install-commit-push
+### Re: do [#queue-state-unify] — phase 4 shipped — opus-4-8
+
+Done — `#queue-state-unify` phase 4 implemented, tested, built, installed, committed, and pushed (your `#spec-test-build-install-commit-push` preset).
+
+#### What changed (`src/agent-doc` `f256ff71`)
+The queue-maintenance writer now persists the **canonical `queue:` control** instead of `queue_active:`. `frontmatter::merge_queue_state` writes `queue: start` on activation and `queue: stop` on drain/halt, clearing any legacy `queue_active:` line in the same write. All 14 write sites (preflight / route / write) migrated.
+
+Drift-safety preserved: the replay-hash and boundary-compare normalizers now strip `queue:` and `queue_active:` together, so a legacy `queue_active:` and a migrated `queue: stop` compare equal — no snapshot/HEAD churn loop. The metadata-drift authority logic reads via `live_continuation_head` (normalized field), so it needed no change. Reads still accept `queue_active:` as deprecated input.
+
+#### Spec + tests + build/install + push
+- Spec updated (`specs/07-orchestration-commands.md`).
+- Core `merge_queue_state` round-trip test + migrated active-write assertions to `queue: start|stop` across the preflight/route/finalize/run suites (preserved-legacy assertions kept on `queue_active:`).
+- `make check` green (exit 0, clippy clean). Both binaries reinstalled (`cargo install` + `cargo build --release`).
+- Pushed: tagpath `9289827` (main), agent-doc `f256ff71` (`20260422/codex-agent-backend`), superproject `d80595d2c` (main). CI is running on the agent-doc push.
+
+#### Status
+`#queue-state-unify` is now **fully implemented and live** across all phases (canonical `queue:` frontmatter + marker `start`/`go`/`stop` + writer migration). The only thing left is harness-parity instruction-surface doc rewrites (Claude `/loop` / Codex Stop-hook / OpenCode auto-loop wording) — minor polish, not behavior.
+<!-- agent:boundary:8931bdaf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#queue-state-unify]
-- [#tagpath-lint-queue-control]
-- [#fm-run-id-step]
+- do [#tagpath-lint-queue-control]
+- do [#fm-run-id-step]
+- `do [task-id]` should not be necessary to kick off tasks. However, don't lose referencing the task such as `re [task-id]` which should not execute the task.
 - Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
 - When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
 - We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
@@ -189,9 +207,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [ ] [#queue-state-unify] Unify queue activation under one tri-state `queue: start|go|stop` frontmatter key (deprecate `auto` + `queue_active`). **Phase 1+2 DONE** (read normalization; src/agent-doc `3f9b32d4`). Remaining: phase 3 harness-parity doc rewrites, phase 4 writer emits `queue:`/drain→`queue: stop` + `auto`→`queue: start` migration + live build/install. Plan: tasks/agent-doc/plan-queue-state-frontmatter-unification.md
-2. [ ] [#tagpath-lint-queue-control] DONE (src/tagpath 9289827, installed): the tagpath agent-doc lint dialect now accepts bare `start`/`go`/`stop` markers on agent:queue, so a bare `go` marker no longer trips agent-doc/malformed-attr. Part of #queue-state-unify.
-3. [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
+1. [ ] [#tagpath-lint-queue-control] DONE (src/tagpath 9289827, installed): the tagpath agent-doc lint dialect now accepts bare `start`/`go`/`stop` markers on agent:queue, so a bare `go` marker no longer trips agent-doc/malformed-attr. Part of #queue-state-unify.
+2. [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 <!-- /agent:backlog -->
 
 ## Review

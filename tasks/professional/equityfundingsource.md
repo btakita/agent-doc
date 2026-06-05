@@ -60,19 +60,44 @@ Shipped phase 5 — the next un-gated phase. Spec + tests updated, committed + p
 - PRD `rpzm-...` updated: phase 5 marked shipped.
 
 **Remaining `#zwws` phases are externally gated:** 4 (vestings/special-instructions — TMO-writeback-gated `#dzmm`/`#k2xg`/`#7a4d`) and 6 (new-deal email + workflow-priority dashboard — `#f4rq`-gated). No un-gated phase remains, so I'm not continuing the loop — queue phase 4 or 6 once its gate clears.
-<!-- agent:boundary:a4c66b2a -->
+
+### Re: Can we ungate phases 4 & 6 with the TMO cache? — opus-4-8
+
+Short answer: the TMO **cache** by itself doesn't ungate either phase — but the gates are narrower than "all-or-nothing," and a meaningful chunk of both phases is shippable now without waiting on the external conditions.
+
+#### Why the cache alone doesn't do it
+The system runs an explicit `tmo_wins_for_reads_outbox_for_writes` strategy:
+- **TMO cache = the read side.** `tmo_cache` (via `tmo-cache.ts`) is a read-through mirror of TMO data in D1. Reading it never writes anything back into TMO.
+- **`tmo_cache_outbox` = the write side.** Local mutations are written to EFS D1 optimistically, then an outbox row is enqueued for deferred replay into TMO. Today it's used in exactly one place — `add_loan_funding` (the investor fund-commit in `deal_marketplace`).
+
+So phase 4's gate isn't "we lack a cache" — it's "we haven't confirmed TMO's vesting **write** endpoint + field map" (`#7a4d`), plus the sync-direction decision (webhooks vs polling, `#dzmm`/`#k2xg`).
+
+#### Phase 4 — vestings / special instructions: partially un-gate-able
+- **Ship now (EFS-local half):** capture and display vestings + special instructions in EFS D1 and the investor/EFS UI — including multiple vestings per lender and multiple lenders per loan — using the same optimistic-write + `tmo_cache_outbox` pattern that `add_loan_funding` already uses. No TMO confirmation needed for the EFS-owned experience.
+- **Still gated:** the actual **push into TMO**. The outbox gives us the transport, but a vesting outbox row needs a real TMO operation + field mapping to replay against (`#7a4d`), and we should settle push-vs-poll first (`#dzmm`/`#k2xg`). Until then the writeback leg stays parked.
+
+#### Phase 6 — new-deal email + workflow-priority dashboard: un-gate-able, but not via TMO
+This phase has nothing to do with TMO — its gate is `#f4rq` (the EFS Resend sending domain).
+- **Ship now:** the **workflow-priority dashboard** half (urgent action items — wire funds, missing docs — bubbling to the top) has no email dependency at all.
+- **Ship now in testing mode:** the new-deal email can be built exactly like P2b's "I'm interested" — wired through Resend, delivering to the account-allowed recipient until `#f4rq` verifies the production domain, at which point real-investor delivery turns on with no code change.
+
+#### Recommendation
+Decompose `#zwws` into "local-first" sub-work that ships now (phase 4 EFS-local capture/display; phase 6 dashboard + testing-mode email) and keep only the true TMO-push and production-email legs gated. I've captured this as `#zwws-local-first` `[recommended]`. Want me to queue the phase-4 EFS-local half next (it's the larger, higher-value piece)?
+<!-- agent:boundary:2a624f59 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- Can we ungate the items with the TMO cache? See `Remaining #zwws phases (4 and 6) are externally gated — queue one once its gate clears (TMO writeback for phase 4 / EFS Resend sending domain #f4rq for phase 6).`
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#zwws-local-first] [recommended] #zwws un-gate-now decomposition. Phase 4: ship the EFS-local half — capture + display vestings & special instructions in EFS D1 and the investor/EFS UI (multiple vestings per lender, multiple lenders per loan) via the optimistic-write + tmo_cache_outbox pattern (precedent: add_loan_funding in deal_marketplace). The TMO vesting PUSH stays gated on the writeback field-map (#7a4d) + sync direction (#dzmm/#k2xg). Phase 6: the workflow-priority dashboard half (urgent action items bubble to top) has no email gate — shippable now; the new-deal email builds in Resend testing mode like P2b, production delivery gated on #f4rq. TMO cache (read) alone does not ungate either.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

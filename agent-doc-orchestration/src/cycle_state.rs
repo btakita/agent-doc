@@ -210,6 +210,23 @@ impl CycleState {
     pub fn is_open(&self) -> bool {
         !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
     }
+
+    /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)
+    /// from the authoritative cycle-state fields: `run_id` = cycle id, `step` =
+    /// lowercase phase, plus the recorded `turn_id` / `queue_task_id`.
+    ///
+    /// This is the read-side mirror — preflight surfaces it so any invocation or
+    /// editor plugin can see where the cycle is without parsing the sidecar JSON.
+    /// Cycle-state stays authoritative; the document `agent_doc_pipeline:` block
+    /// is only a fallback hint when no live cycle-state exists.
+    pub fn to_pipeline(&self) -> crate::frontmatter::AgentDocPipeline {
+        crate::frontmatter::AgentDocPipeline {
+            run_id: Some(self.cycle_id.clone()),
+            step: Some(cycle_phase_label(self.phase).to_string()),
+            turn_id: self.turn_id.clone(),
+            queue_task_id: self.queue_task_id.clone(),
+        }
+    }
 }
 
 pub fn load(file: &Path) -> Result<Option<CycleState>> {
@@ -1446,5 +1463,39 @@ mod tests {
         let state = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(state.queue_task_id.is_none());
         assert!(state.turn_id.is_none());
+    }
+
+    #[test]
+    fn to_pipeline_mirrors_cycle_state_fields_and_tracks_phase() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let state = start_preflight_with_task(
+            &doc,
+            Some("snap"),
+            Some("body"),
+            Some("#fmrunid-wire"),
+            Some("#fmrunid-wire"),
+        )
+        .unwrap();
+
+        let pipeline = state.to_pipeline();
+        assert_eq!(pipeline.run_id.as_deref(), Some(state.cycle_id.as_str()));
+        assert_eq!(pipeline.step.as_deref(), Some("preflight_started"));
+        assert_eq!(pipeline.turn_id.as_deref(), Some("#fmrunid-wire"));
+        assert_eq!(pipeline.queue_task_id.as_deref(), Some("#fmrunid-wire"));
+        assert!(!pipeline.is_empty());
+
+        // `step` follows the authoritative phase transition.
+        let captured =
+            mark_response_captured(&doc, "captured", Some("snap"), Some("body"), "abc", None)
+                .unwrap();
+        assert_eq!(
+            captured.to_pipeline().step.as_deref(),
+            Some("response_captured")
+        );
+        // run_id stays stable across transitions (same cycle).
+        assert_eq!(captured.to_pipeline().run_id, pipeline.run_id);
     }
 }

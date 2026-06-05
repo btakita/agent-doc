@@ -309,6 +309,15 @@ pub struct PreflightOutput {
     /// per-document cycle/session logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_accretion: Option<crate::session_accretion::SessionAccretionReport>,
+    /// Live finalize-pipeline state (`#fmrunid-wire`): `run_id` / `step` /
+    /// `turn_id` / `queue_task_id` for the current cycle. Resume-detection
+    /// observability so any invocation or editor plugin can see where a crashed
+    /// or in-flight cycle left off. Derived from the authoritative cycle-state
+    /// when one exists; otherwise read from the document `agent_doc_pipeline:`
+    /// frontmatter block as a fallback hint (cycle-state wins on conflict). Null
+    /// when neither is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<crate::frontmatter::AgentDocPipeline>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
@@ -2771,6 +2780,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
     };
 
+    let pipeline = resolve_pipeline_state(file)?;
+
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -2821,6 +2832,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_trigger: queue_state.queue_trigger,
         queue_halted: queue_state.queue_halted,
         session_accretion,
+        pipeline,
     };
 
     let json =
@@ -2828,6 +2840,22 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     println!("{}", json);
 
     Ok(())
+}
+
+/// Resolve the live finalize-pipeline view surfaced in preflight output
+/// (`#fmrunid-wire`). Cycle-state is authoritative; the document
+/// `agent_doc_pipeline:` frontmatter block is only a fallback hint when no live
+/// cycle-state exists (e.g. a crash that wiped `.agent-doc/state` but left the
+/// document mirror behind). Returns `None` when neither is present.
+fn resolve_pipeline_state(file: &Path) -> Result<Option<crate::frontmatter::AgentDocPipeline>> {
+    if let Some(state) = crate::cycle_state::load(file)? {
+        return Ok(Some(state.to_pipeline()));
+    }
+    let current = std::fs::read_to_string(file).unwrap_or_default();
+    Ok(match crate::frontmatter::parse(&current) {
+        Ok((fm, _)) if !fm.pipeline.is_empty() => Some(fm.pipeline),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -11101,5 +11129,54 @@ mod tests {
         let cfg = agent_doc_core::model_tier::ModelConfig::default();
         let result = resolve_agent_model(None, "claude-code", &cfg);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_pipeline_state_none_without_cycle_or_frontmatter() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        assert!(resolve_pipeline_state(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_pipeline_state_falls_back_to_frontmatter_block() {
+        // No cycle-state on disk → read the document `agent_doc_pipeline:` mirror.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_pipeline:\n  run_id: cycle-77\n  step: write_applied\n---\n\nbody\n",
+        )
+        .unwrap();
+        let p = resolve_pipeline_state(&doc).unwrap().expect("frontmatter fallback");
+        assert_eq!(p.run_id.as_deref(), Some("cycle-77"));
+        assert_eq!(p.step.as_deref(), Some("write_applied"));
+    }
+
+    #[test]
+    fn resolve_pipeline_state_cycle_state_wins_over_frontmatter() {
+        // Cycle-state is authoritative; a stale frontmatter block must not override it.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_pipeline:\n  run_id: stale-mirror\n  step: committed\n---\n\nbody\n",
+        )
+        .unwrap();
+        let state = crate::cycle_state::start_preflight_with_task(
+            &doc,
+            Some("snap"),
+            Some("body"),
+            Some("#fmrunid-wire"),
+            Some("#fmrunid-wire"),
+        )
+        .unwrap();
+
+        let p = resolve_pipeline_state(&doc).unwrap().expect("cycle-state present");
+        assert_eq!(p.run_id.as_deref(), Some(state.cycle_id.as_str()));
+        assert_eq!(p.step.as_deref(), Some("preflight_started"));
+        assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
+        assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
     }
 }

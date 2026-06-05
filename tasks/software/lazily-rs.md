@@ -96,7 +96,25 @@ Mechanically: capture `(size, is_copy)` at slot creation (alongside the inline `
 So the two compose cleanly: **(c) handles small `Copy` values optimally regardless of contention; the (a) flag governs only the large/non-`Copy` fallback** (RwLock vs arc-swap). That's the full "best of both," and it's a 0.10/1.0-scale change.
 
 Still analysis — no code changed. If you want, I can: ship the (a) flag as 0.10.0 now (small), and/or open a spec'd plan for (c). Which?
-<!-- agent:boundary:ac1c7c9b -->
+❯ re a: I want this to be both a compile time decision and a runtime decision...where both paths are compiled and one mode or the other is selected in the runtime.
+❯ The next release should also iclude c.
+
+### Re: runtime-selectable read strategy + (c) for next release — opus-4-8
+
+Implemented **phase 1** (runtime-selectable strategy) and planned the rest of the 0.10.0 milestone. Both your directives are captured.
+
+**Phase 1 — runtime-selectable, both paths compiled (`#rdstrat1`)** — committed + pushed (`29dbf7e`):
+- `ThreadSafeContext::with_read_strategy(ReadStrategy)` selects the mode at runtime; `new()`/`default()` = **`LowConcurrency`** (your requested default). `ReadStrategy::HighConcurrency` opts into the arc-swap wait-free read.
+- The slot sidecar is now a `CachedReadStorage` enum (`Locked(RwLock)` | `LockFree(ArcSwapOption)`), variant chosen per the context strategy at slot creation. **Both paths are compiled in**; the cost is one per-read enum branch.
+- Identical `cache_revision` validation envelope for both → cross-thread invalidation safety unchanged; the `thread_safe_loom` model still passes (same algorithm). New tests exercise both strategies; default suite green.
+- This **flips the 0.9.0 default** (which shipped arc-swap) back to `LowConcurrency` — that default change is exactly why it's a 0.10.0 minor bump. Also fixed `BENCHMARKS.md`'s version line (the 0.9.0 release missed it; a version-tracking test caught it now).
+
+**Phase 2 — (c) inline small-`Copy` seqlock (`#rdstrat2`)** — **planned, not yet built**. This is the genuinely delicate part: an inline byte buffer + even/odd seqlock storing small `Copy` values (size+`Copy` conditional, as we discussed), wait-free and allocation-free, optimal in *both* modes. It involves raw byte copies of type-erased values and **must have a Loom/Shuttle model before it lands** — I'm not rushing unsafe concurrency code into the same turn. Queued with the plan.
+
+**Phase 3 — release 0.10.0 (`#rdstrat3`)** — queued; ships once phase 2 is in, gated on your confirm for the crates.io publish (per your "next release should also include c").
+
+Plan with full design + phases: `tasks/software/plan-lazily-0.10-read-strategy.md`. Backlog now holds phases 2 and 3 in priority order. Want me to proceed with phase 2 (c) next — I'd start with the Loom model — or pause here?
+<!-- agent:boundary:960aa220 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,12 +122,14 @@ Still analysis — no code changed. If you want, I can: ship the (a) flag as 0.1
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#vbyc] Phase 2 (#rdstrat2): inline small-Copy seqlock cached-read fast path for ThreadSafeContext (the SPEC's ErasedValue idea) — size+Copy conditional, needs a Loom/Shuttle model before landing. Plan: tasks/software/plan-lazily-0.10-read-strategy.md [recommended]
+- [ ] [#9mhz] Phase 3 (#rdstrat3): release lazily 0.10.0 (runtime-selectable read strategy + inline seqlock; default flips to LowConcurrency) — gate on user confirm for crates.io publish. Plan: tasks/software/plan-lazily-0.10-read-strategy.md [recommended]
 <!-- /agent:backlog -->
 
 ## Review

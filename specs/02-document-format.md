@@ -69,7 +69,7 @@ The `agent:queue` component holds a batch of prompts consumed sequentially. It i
 
 | Form | Example | Description |
 |------|---------|-------------|
-| Single-line | `- do #fix1` | Bare `- ` prefix at column 0 |
+| Single-line | `- do #fix1` | Bare `- ` prefix at column 0. A single stray leading backtick (`` `- text ``, a common code-span mistype) is normalized to `- text` so the item parses as a prompt and self-heals on re-render instead of being silently skipped as inert text (`#queue-line-leading-backtick-drop`). |
 | Multi-line (tilde) | `~~~prompt`...`~~~` | Fenced with `~~~prompt` opener |
 | Multi-line (dash) | `---`...`---` | Fenced with bare `---` |
 | Start fence | `--- start [at <datetime>]` | Activation signal (consumed on use) |

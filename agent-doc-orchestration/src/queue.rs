@@ -178,7 +178,16 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             continue;
         }
 
-        if let Some(rest) = line.strip_prefix("- ") {
+        // A queue item is `- <text>`. Tolerate a single stray leading backtick
+        // (`` `- text ``, a common mistype where the operator's code-span tick
+        // landed before the bullet) by normalizing it to `- text`, so the item
+        // parses — and re-renders — as a real prompt instead of being silently
+        // preserved as inert `Freeform` and skipped (#queue-line-leading-backtick-drop).
+        let item_line = match line.strip_prefix('`') {
+            Some(rest) if rest.starts_with("- ") => rest,
+            _ => line,
+        };
+        if let Some(rest) = item_line.strip_prefix("- ") {
             if let Some(completed) = parse_completed_inline(rest) {
                 entries.push(QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
@@ -991,6 +1000,29 @@ mod tests {
         assert!(matches!(&entries[0], QueueEntry::Prompt(p) if !p.multiline));
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.multiline));
         assert!(matches!(&entries[2], QueueEntry::Prompt(p) if !p.multiline));
+    }
+
+    #[test]
+    fn parse_normalizes_stray_leading_backtick_on_item() {
+        // #queue-line-leading-backtick-drop: a queue item mistyped with a stray
+        // leading backtick (`` `- text ``, the operator's code-span tick landing
+        // before the bullet) must parse as a real prompt — not be silently kept
+        // as inert Freeform and skipped — and re-render canonically as `- text`.
+        let body = "`- There is significant blocking with the sync pipeline.\n- run tests\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0],
+            QueueEntry::Prompt(QueuePrompt {
+                text: "There is significant blocking with the sync pipeline.".to_string(),
+                multiline: false,
+            })
+        );
+        assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "run tests"));
+        // Re-render strips the stray backtick (self-heal to canonical `- `).
+        let rendered = render(&entries);
+        assert!(rendered.contains("- There is significant blocking"), "{rendered}");
+        assert!(!rendered.contains("`-"), "{rendered}");
     }
 
     #[test]

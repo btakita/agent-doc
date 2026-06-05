@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,20 +37,47 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 5 response topic(s): [#zwws] Investor dashboard #rpzm phase 5; Can we ungate phases 4 & 6 with the TMO cache?; [#zwws-local-first] Phase 4 EFS-local; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:44c8d73b -->
+
+### Re: [#67v2a] Admin loan pipeline Kanban — Phase A (read-only) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#67v2a]
+
+
+Shipped Phase A of the TMO **All Loans** Kanban as a read-only admin **Pipeline** section, then `update spec + tests` and `commit + push` per `#spec-test-commit-push`. Committed to `equityfundingsource-dev` `main` (`bb98441..1ee9619`).
+
+**What landed**
+- **Pure board logic** in `app/equityfundingsource/lib/admin/repo.ts` (no D1, unit-tested): `PIPELINE_COLUMNS`, `pipeline_column_id_for_status_`, `pipeline_card_title_`, `pipeline_columns_group_`.
+- **Read-only endpoint** `GET /api/admin/pipeline` (`admin_pipeline_GET_`, registered behind `require_admin_`). Hydrates cards from `admin_loans_R_` + `tmo_cache_rows_by_source_R_`; TMO wins for reads via `tmo_field_` (LoanAmount, EscrowNumber, PropertyStreet, ShortName, NoteRate). No mutation.
+- **UI** `lib/ui--browser--efs/portal/admin/pipeline.tsx` (`AdminPipeline`) — horizontal lanes with per-column counts; cards show title (`{street} - {holding entity}`), loan #, amount, note rate, escrow, property street; each links to the loan detail. Wired into `index.tsx`, sidebar `layout.tsx`, and the server section route.
+
+**Status → column mapping**
+- `Application Received | Processing | Documents | Underwriting → Processing/Active`
+- `Funded`, `Closed`, `Unassigned`, `Denied` map 1:1 to their columns
+- `On Hold` column is reserved (no EFS status maps to it yet)
+- blank/missing → Unassigned; unknown non-empty → Processing/Active (default)
+
+**Verification** — full suite green: `bun test` 306 pass / 0 fail (14 new in `tests/admin-pipeline.test.ts`); `bun run build` + `build:worker` both bundle clean (worker 536kb).
+
+**Still open** (PRD Qs 1–2, needs Robert/April): the exact TMO label for the leftmost active column and the full ordered column list. The current set is a faithful model of the captured screenshots but not yet confirmed. Phase B (#67v2b drag-to-change + outbox writeback) stays gated on the TMO write field map (#7a4d) and sync direction (#dzmm/#k2xg).
+
+Next in the queue: `#zwws-phase6-dashboard`.
+<!-- agent:boundary:5b2dd72a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~[#67v2a]~
+- [#zwws-phase6-dashboard]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#67v2a] [recommended] Phase A of #67v2 admin loan pipeline Kanban: read-only Pipeline view in the admin portal replicating the TMO All Loans board — columns (Processing/Active, Funded, Closed, On Hold, Unassigned, Application Denied) with loan cards (title, loan number, loan amount, property street, by-last-name, escrow number, note rate) from admin_loans_R_ + tmo_cache, status->column mapping, no mutation. Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md.
 - [ ] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

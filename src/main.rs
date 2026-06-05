@@ -115,14 +115,23 @@ pub enum PatchMode {
     Prepend,
 }
 
-/// Turn lifecycle state for `agent-doc turn-status`
+/// Turn lifecycle actions for `agent-doc turn-status`
 /// (#claude-busy-status-during-active-turn).
-#[derive(Clone, Debug, ValueEnum)]
-pub enum TurnStatusState {
-    /// A turn just started (e.g. `UserPromptSubmit` hook).
+#[derive(Subcommand)]
+pub enum TurnStatusAction {
+    /// A turn just started (UserPromptSubmit hook): show "turn in progress".
     Active,
-    /// The turn just ended (e.g. `Stop` hook).
+    /// The turn just ended (Stop hook): clear the status.
     Idle,
+    /// Install the Claude Code hooks that drive the monitor into settings.json.
+    Install {
+        /// Settings file to merge into (default: ./.claude/settings.json).
+        #[arg(long)]
+        settings: Option<PathBuf>,
+        /// Install into ~/.claude/settings.json instead of the project file.
+        #[arg(long)]
+        user: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -951,9 +960,8 @@ enum Commands {
     /// (#claude-busy-status-during-active-turn). Best-effort; no-op outside tmux.
     #[command(name = "turn-status")]
     TurnStatus {
-        /// `active` when a turn starts, `idle` when it ends.
-        #[arg(value_enum)]
-        state: TurnStatusState,
+        #[command(subcommand)]
+        action: TurnStatusAction,
     },
     /// Derive a structured post-preflight planning/dispatch record for a document
     Plan {
@@ -2464,10 +2472,13 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
-        Commands::TurnStatus { state } => agent_doc_orchestration::turn_status::run(matches!(
-            state,
-            TurnStatusState::Active
-        )),
+        Commands::TurnStatus { action } => match action {
+            TurnStatusAction::Active => agent_doc_orchestration::turn_status::run(true),
+            TurnStatusAction::Idle => agent_doc_orchestration::turn_status::run(false),
+            TurnStatusAction::Install { settings, user } => {
+                skill::install_turn_status_hooks(settings.as_deref(), user)
+            }
+        },
         Commands::Upgrade => upgrade::run(),
         Commands::LibPath => {
             // Print the path to the shared library built alongside this binary.

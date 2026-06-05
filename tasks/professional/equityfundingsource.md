@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue_active: false
 ---
 
 ## Status
@@ -60,14 +60,14 @@ Shipped phase 5 — the next un-gated phase. Spec + tests updated, committed + p
 - PRD `rpzm-...` updated: phase 5 marked shipped.
 
 **Remaining `#zwws` phases are externally gated:** 4 (vestings/special-instructions — TMO-writeback-gated `#dzmm`/`#k2xg`/`#7a4d`) and 6 (new-deal email + workflow-priority dashboard — `#f4rq`-gated). No un-gated phase remains, so I'm not continuing the loop — queue phase 4 or 6 once its gate clears.
-<!-- agent:boundary:c1a6c378 -->
+<!-- agent:boundary:a4c66b2a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

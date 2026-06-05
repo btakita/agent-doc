@@ -87,7 +87,25 @@ Replace the GitHub secret with a **Granular Access Token**: npmjs.com → *Acces
 The `v0.1.62` tag predates recent `commands/*.md` additions on `main`, so CI packs the tag's snapshot — **12 files vs 20 on current `main`**. If you want the newer commands shipped, we should cut a new version + tag; otherwise `0.1.62` ships its 12-file snapshot.
 
 `#0y9e` stays gated until the granular token is in place. Halting the queue (everything left is blocked on this one token).
-<!-- agent:boundary:19a74dd8 -->
+
+### Re: release + publish (token updated) — still E403 — opus-4-8
+
+You updated the GitHub `NPM_TOKEN` (07:33) and I re-triggered the publish — but npm **rejected it with the exact same E403**, so the updated secret still isn't a token npm will accept.
+
+#### What I did
+- Re-triggered `release.yml` on `v0.1.62` (run [27002024784](https://github.com/btakita/tsift/actions/runs/27002024784)).
+- `verify` ✅, `build` ✅, `publish crates.io` ✅, `publish GitHub release` ✅, **`publish OpenCode npm plugin` ❌** — `E403: Two-factor authentication or granular access token with bypass 2fa enabled is required`.
+
+#### Why it's still failing
+The secret is being read and used (auth reaches npm, then 403s), so this is a **token-type** problem, not wiring. The token still isn't a granular token npm accepts under your account's "2FA required for writes" policy. Two things to check:
+1. It must be created from the **Granular Access Token** tab specifically (npmjs.com → Access Tokens → *Generate New Token* → **Granular Access Token** — *not* "Classic Token / Automation"). Classic/automation tokens can't satisfy 2FA-on-writes.
+2. Its **Permissions → Packages and scopes** must be **Read and write**, with the scope including `opencode-tsift` (or "All packages"). A read-only or mis-scoped granular token also 403s.
+
+#### Fastest path that doesn't depend on token type — OTP
+Give me a current 6-digit npm authenticator code and I'll publish **immediately, locally** with `npm publish --otp=<code>` using the passage token. The OTP supplies the 2FA directly, so it works even with the classic token. (CI can't prompt for OTP — that path strictly needs a correct granular token.)
+
+`#0y9e` stays gated until either a working granular token lands or you hand me an OTP.
+<!-- agent:boundary:9ce71b62 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,10 +115,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~complete the wip~
-- ~NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions~
-- release + publish
-- ~do [#0y9e]~
+- I updated the GH NPM_TOKEN. release + publish
 <!-- /agent:queue -->
 
 ## Backlog

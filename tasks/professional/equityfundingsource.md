@@ -125,7 +125,27 @@ Net: with the current corky tooling I have no way to actually *see* the board, a
 `#67v2` is a known feature: admin loan pipeline with **TMO-aligned stages + Kanban** (drag cards, auto-advance when stage requirements are met) synced to the dashboard, mirroring TMO stages as the single source of truth. There's prior art to build on — the investor pipeline already defines `Reviewing → Committed → Documents → Funding → Active` and admin loan status exists — but the board screenshots tell me the **real** TMO column names, ordering, and per-stage requirements, which I need to model it correctly.
 
 I've **gated `#67v2`** as blocked-on-input. Drop the board images (or the resolvable thread id) and re-queue it, and I'll produce the workflow design + first implementation slice.
-<!-- agent:boundary:efe6a2b4 -->
+
+### Re: [#67v2] TMO board retrieved via chromium-bridge → admin Kanban design — opus-4-8
+
+Got the board (chromium-bridge, since corky couldn't resolve the Gmail web-thread-id and doesn't extract attachment binaries). Opened the "Workflow for loans" thread (April Armas / Judith Krug, Jun 4) in your authenticated session and read all three PDF attachments via the projector.
+
+#### What the TMO board is
+A Kanban titled **"All Loans"** grouping loans into **status columns** (header = name + count): an **active/processing** column (4 loans), **Funded**, **Closed**, **On Hold**, **Unassigned**, and **Application Denied** (Judith couldn't capture that last one). Loan cards carry: **title** (`{property} - {vesting}`, e.g. "202 N California St - Laws Trust"), **loan number**, **loan amount**, **property street**, **by-last-name** (borrower/entity), **escrow number**, **note rate**.
+
+#### Design captured (PRD)
+`src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md` (EFS `bb98441`, superproject `dcfc68efe`) — column/card model + phased plan: **A** read-only Pipeline Kanban (queued as `#67v2a`) → **B** drag-to-change-status (EFS-local + `tmo_cache_outbox`, gated on `#7a4d`/`#dzmm`/`#k2xg`) → **C** stage requirements + auto-advance → **D** admin-dashboard summary. Builds on the investor stage-map, `admin_loans_R_`, `tmo_loan_status`, and the `tmo_cache` read + outbox write pattern.
+
+#### Confirm before exact column modeling
+1. The **first (active/processing) column's exact label** — cut off at the left edge of every screenshot.
+2. The **full ordered column list** (between the captured columns and Application Denied).
+3. Columns as a **workflow sequence** vs. status buckets, and **per-stage requirements** (drives Phase C auto-advance).
+
+`#67v2` (epic) stays gated pending those; `#67v2a` (Phase A read-only Kanban) can start now. Want me to build Phase A next?
+
+#### Privacy note
+The board screenshot has a real borrower's PII + your Gmail chrome, and you livestream — kept it **local-only** (`tasks/professional/assets/tmo-board-all-loans.png`, not committed); the PRD captures the structure in text.
+<!-- agent:boundary:08d742c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,6 +158,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#67v2a] [recommended] Phase A of #67v2 admin loan pipeline Kanban: read-only Pipeline view in the admin portal replicating the TMO All Loans board — columns (Processing/Active, Funded, Closed, On Hold, Unassigned, Application Denied) with loan cards (title, loan number, loan amount, property street, by-last-name, escrow number, note rate) from admin_loans_R_ + tmo_cache, status->column mapping, no mutation. Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md.
 - [ ] [#zwws-phase6-dashboard] [recommended] #zwws phase 6 un-gated half: workflow-priority dashboard — urgent action items (wire funds, missing docs/info) bubble to the top with in-app indicators; available deals lead when nothing is urgent. The new-deal email is the gated half (build in Resend testing mode like P2b; production delivery gated on #f4rq). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

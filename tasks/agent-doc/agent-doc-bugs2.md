@@ -29,40 +29,11 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-082224.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-085605.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#queue-no-stall-on-head-edit]; do [#codex-mcp-server]; Fix the equityfundingsource.md finalize race condition; 1 more
+- Archived 1 response topic(s): JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue — opus-4-8
-
-Fixed. Root cause was in the **route** path, not preflight.
-
-**Diagnosis.** Preflight already resolved this case correctly: `inactive` frontmatter (`queue: stop` → `queue_active=false`) plus a marker-side `go`/`start` token activates via `marker_control` (preflight.rs). But the route/dispatch path — which JB `Run Agent Doc` backs through `agent-doc route` — used a narrower check. `inactive_route_queue_head_in_content` (route.rs) computed `has_auto` **only** from the legacy `auto` attribute:
-
-```rust
-let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
-```
-
-So a `&lt;!-- agent:queue go --&gt;` (or `start`) marker on a `queue: stop` document was treated as inert: `resolve_activation` returned inactive, the function returned `None`, and route never recognized an activatable head → the queue never started.
-
-**Fix.** Mirror preflight's resolution in the route path: `go`/`start` fresh-activate the queue head, and a marker-side `stop` forces it inert (and wins over `auto`/`go`/`start`).
-
-```rust
-let marker_control = crate::queue::marker_control(&queue_component.attrs);
-if matches!(marker_control, Some(QueueControl::Stop)) { return Ok(None); }
-let has_auto = crate::queue::has_auto_attr(&queue_component.attrs)
-    || matches!(marker_control, Some(QueueControl::Start));
-```
-
-**Changed** (submodule `src/agent-doc`, commit `6e3ce39d`, pushed):
-- `agent-doc-orchestration/src/route.rs` — `inactive_route_queue_head_in_content` honors marker-side `go`/`start`/`stop`.
-- `agent-doc-orchestration/src/route/tests.rs` — `route_activates_queue_stop_with_marker_go_head` (the exact monsterrodholders scenario) + `route_does_not_activate_queue_with_marker_stop`.
-- `specs/07-orchestration-commands.md` — documented route-path marker parity.
-
-**Verification:** new + existing `inactive_route_queue_head` / `activate_existing_route_queue_head` tests pass; full `make check` green (clippy + tests, no failures). Built `--release` + `cargo install --path .` so both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` (tmux) carry the fix. Live JB `Run Agent Doc` on a real `queue: stop` + `agent:queue go` doc is the remaining manual gate.
-<!-- agent:boundary:0467a4ae -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

@@ -151,7 +151,40 @@ They share `route.rs`, so they are **not cleanly separable per file**. Running `
 #### Recommended next step (when the working tree is yours/clean)
 
 Once the concurrent session commits its WIP, the clean sequence is: `make check` → push `20260422/codex-agent-backend` → `cargo install --path . && cargo build --release` → re-open this session and confirm `queue: stop` collapses `queue_active`. If you want the live fix sooner without waiting, I can build+install **from a detached worktree at HEAD `40859a62`** (phases 1-3, no foreign WIP) — say the word.
-<!-- agent:boundary:7014038d -->
+
+### Re: complete the wip + release prep — opus-4-8
+
+> **Queue prompt:**
+>
+> complete the wip
+
+
+Both queued items handled. The release **publish** is deliberately **not** run — stopped at the manual-testing gate per your choice.
+
+#### "complete the wip" — done
+
+The uncommitted WIP I flagged last turn (`pending_cmd.rs`, `src/main.rs`, `runbooks/pending-ops.md`) is now committed as **`243997ee feat(#review-list-query): agent-doc review list — token-efficient review triage`**. The earlier "concurrent session" read was wrong per your confirmation — it was your WIP, and it landed cleanly. Working tree is clean. `#queue-state-unify` is also fully committed (all 4 phases, incl. `f256ff71` phase 4) and pushed.
+
+#### Verification — green
+
+- **Tests:** full `cargo test --workspace` → **0 failures** (main binary 2274 passed / 226 ignored; all 19 binaries `0 failed`). The 2 `route::tests` failures noted in memory for this branch are **fixed** by the concurrent route work (`97927e1e`, `40859a62`).
+- **Clippy:** `cargo clippy -- -D warnings` → clean.
+- **version-sync:** `Cargo.toml` == `pyproject.toml` == `0.34.0`.
+
+#### Release prep — done up to the gate
+
+- **No version bump needed:** last tag is `v0.33.16`; `0.34.0` is already set in both manifests but never tagged/released — `0.34.0` *is* the pending release.
+- **Built + installed both binaries** at `0.34.0` (current HEAD `243997ee`): `~/.cargo/bin/agent-doc` (tmux/spawned sessions) and `target/release/agent-doc` (the `.bin/agent-doc` symlink). Live binary now matches committed source — `queue: stop` is honored live (preflight already rewrites to canonical `queue: start`).
+
+#### Deliberately deferred (not done — your gate)
+
+1. **VERSIONS.md finalization** (`## Unreleased` → `## 0.34.0`). Deferred on purpose: concurrent sessions are still appending to `## Unreleased`, so renaming it now would race/conflict and prematurely close the changelog. This belongs at tag time, once the branch settles.
+2. **Publish chain** (irreversible): merge `20260422/codex-agent-backend` → `main`, tag `v0.34.0`, `cargo publish`, PyPI (auto via CI on GitHub release), `gh release create`.
+
+#### To proceed after you've manually tested
+
+Flip the queue marker from `stop` back to `go` (or just say "publish"). I've left `- release + publish` queued under a **stopped** queue so nothing auto-publishes in the meantime. When you green-light it, I'll finalize VERSIONS.md, merge to main, tag, and publish all targets.
+<!-- agent:boundary:3b2960fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,7 +193,9 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~complete the wip~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

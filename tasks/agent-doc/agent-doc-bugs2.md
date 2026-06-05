@@ -15,14 +15,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
 
  <!-- agent:status patch=replace -->
-Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB plugin guard, already removed). Recommended eager busy-cue check in DispatchOnlyBusyQueue. GPT delegation already addressed (Option A+C). Queue drained.
- <!-- /agent:status -->
+Draining queue (`queue: go`, 18 items). Head 1/18 answered: **queue↔backlog freshness**. Verified the steady-state reconcile pipeline is sound (reap `[x]`→archive `agent:done`→commit at preflight.rs:2063, BEFORE queue maintenance at 2364 strikes done/gated `do [#id]` heads at 3612, holds amplification at 3439, dedups at 3562, clears drained at 3646). Residual freshness gap is the divergence/IPC-timeout window (`#finalize-divergence-orphans-committed-head` + IPC items), all queued as `do [#id]` below — fixed there with a repro, not speculatively mid-live-edit. No code change this cycle; refreshed this Status to match true queue state (the prior "Queue drained" was itself stale with 18 live items — the exact staleness you flagged).
+<!-- /agent:status -->
 
 ## Exchange
 
@@ -95,22 +95,57 @@ Split into the rule (done) and the fighting (real bug, scoped).
 **The no-collision rule is already in place.** `reject_colliding_explicit_id` (`pending_cmd.rs:190`, `#preset-item-id-collision-enforce`) fails any `--pending-add` whose explicit `id=`/`[#id]` collides with a `prompt_presets` key or an existing active `agent:backlog`/`agent:review`/`agent:icebox` id, at the mutation boundary. Your case slipped through only because — as you noted — `#next-steps` became a preset *after* the item existed, so there was no collision at add-time. Gap I'm adding: a preflight **warning** for that *retroactive* case (a preset key added later that now matches an existing backlog id).
 
 **agent-doc fighting your `[#next-steps-2]` rename is the real bug** — and it's unfixed. Body-unchanged id renames get reverted because the item's identity still lives in the CRDT/snapshot state (`.agent-doc/crdt/<hash>.yrs`) under the old id, so the merge re-imposes it (candidates: CRDT merge, backfill re-derivation, or the `priority queue` backlog→queue reconcile). The fix is to treat an explicit-id rename of an existing item as authoritative when the new id doesn't collide, and re-key the CRDT identity + any `do [#old]` queue ref in the same cycle. It needs a real repro before touching core id logic (rushing it risks every backlog id), so I've scoped it: `tasks/agent-doc/plan-backlog-id-user-rename-revert.md`, captured as `#backlog-id-user-rename-revert`. This **supersedes** the `crdt-backlog-id-revert-treadmill` memory workaround — that note gets deleted when the binary fix ships (your item 6).
-<!-- agent:boundary:7b19d6a7 -->
+
+### Re: Backlog not updating with queue progress / items uncommitted over several runs / status not fresh — opus-4-8
+
+> **Queue prompt:**
+>
+> The backlog has not been updating with the queue progress. Some queue items remain uncommitted over several runs. I don't think the current status of the queue items is fresh.
+
+This is the umbrella symptom for a cluster you've already captured (and queued as `do [#id]` below). I traced all three sub-claims through the binary before deciding what's safe to ship — and the honest finding is that the steady-state reconcile is **not** the broken part, so I did not force a speculative core-queue change into a queue you're live-editing.
+
+**What I verified is sound (steady state).** Per-cycle, preflight runs in this order:
+1. `run_pending_maintenance` (`preflight.rs:2063`) reaps every `[x]` backlog item, archives it to `agent:done`, and commits in the same pass.
+2. *Then* `run_queue_maintenance` (`2364`) collects `done_ids` (`3405`, now including everything just reaped) and: auto-strikes any `do [#id]` head whose id is done or review-gated (`strike_done_queue_head_prompts`, `3612`); holds freshly-added backlog items out of an already-active loop so capture can't amplify the queue (`3439`, `#backlog-queue-sync-pending-add-amplification`); collapses duplicate live prompts (`3562`); and flips `queue_active:false` + empties the body once the live head set drains (`3646`).
+
+So "user checks a backlog item `[x]` → its `do [#id]` queue head lingers" does **not** reproduce at steady state — the reap runs first and the strike consults the post-reap done set. I checked the ordering specifically because that was the most plausible clean gap; it's closed.
+
+**Where the residual freshness loss actually lives (and why it's not a one-cycle fix).**
+- **`do [#id]` heads stay live until something marks the id done.** The strike is driven by `agent:done`/review-gate membership, never by heading prose (`queue_head_has_explicit_completion_signal`, `write.rs:2808`). If a cycle answers a `do [#id]` head without an explicit `--done`/`--pending-gate`, the backlog item stays `[ ]` and the head stays queued — by design, so a *halt/refusal* that names the id can't false-strike it. That's the "backlog not updating with the queue progress" you see when an item is discussed but not formally completed. This is agent discipline (the skill's `do #id` closeout rule), reinforced by the binary's `pending_done_guard`.
+- **Free-text heads only orphan in the divergence window.** `queue_consumption_allowed_for_response` (`write.rs:2988`) already consumes a free-text head positionally — response present, not answering a foreign `❯` exchange prompt — *not* by literal heading similarity, so the steady path strikes them. They survive "over several runs" only when the answered head wasn't struck in the same commit: the live-typing finalize divergence (`#finalize-divergence-orphans-committed-head`) and the IPC-timeout/visible-buffer races (`#finalize-visible-buffer-ipc-timeout-race`, `#adoc-queue-ipc-buffer-divergence`). Crucially, there is **no preflight catch-up strike for free-text heads** the way there is for `do [#id]` heads — so once one orphans, nothing auto-reaps it next cycle. That asymmetry is the real binary gap, and it's exactly `#finalize-divergence-orphans-committed-head`.
+- **"Status not fresh" was literally true.** The `## Status` component said *"Queue drained"* while 18 items were live. That component is agent-authored prose, not binary-maintained — the machine-fresh state already rides in preflight's `queue_prompts`/`queue_active`. So the fix is a conduct rule (keep `## Status` synced to real queue/backlog state each cycle), which I'm applying now by refreshing it.
+
+**What I shipped this cycle:** no code — and that's deliberate, not a punt. Every candidate fix (free-text catch-up strike, divergence reconcile) touches the strike/match core that you're *also* reporting as churn-prone, while you're actively editing this document's queue. Landing that speculatively now would risk the exact mid-edit churn you flagged. The correct place for it is `do [#finalize-divergence-orphans-committed-head]` (already queued below) with a forced divergence/IPC-timeout repro, plus a symmetric free-text-head catch-up strike gated behind strict committed-HEAD prompt evidence. I refreshed the stale `## Status` to match true state and consumed this head.
+
+**Net:** steady-state reconcile verified sound; residual = (1) `do [#id]` heads need explicit `--done` discipline, (2) free-text heads lack a preflight orphan catch-up — captured in `#finalize-divergence-orphans-committed-head` / `#free-text-head-answer-match-too-literal`, both queued as `do [#id]`. No new backlog item — this maps cleanly onto existing captures.
+<!-- agent:boundary:e597728b -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.~
-- ~The last session had a queue stall and an error `I'm stopping the loop rather than continuing it — re-running would treadmill on an already-completed prompt.`. Please fix this issue.~
-`- There is significant blocking with the main sync pipeline. We need to keep the main sync pipeline fast, so syncing is responsive when I switch files in the editor. Can we have a hotpath to identify if a tmux pane claims a document and show it quickly or create a new tmux pane if these is no claiming pane? The other stuff can be deferred. We just need sync to always be responsive and to show the tmux pane. If the tmux pane needs time to load and has slower sync tasks, that should not block the main sync pipeline.
-- ~Claude stopped the run with a background agent to build. agent-doc Claude should not present an idle Claude session while the previous turn is still running...The build should happen on the main agent...not a subagent.~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- The backlog has not been updating with the queue progress. Some queue items remain uncommitted over several runs. I don't think the current status of the queue items is fresh.
+- There is significant blocking with the main sync pipeline. We need to keep the main sync pipeline fast, so syncing is responsive when I switch files in the editor. Can we have a hotpath to identify if a tmux pane claims a document and show it quickly or create a new tmux pane if these is no claiming pane? The other stuff can be deferred. We just need sync to always be responsive and to show the tmux pane. If the tmux pane needs time to load and has slower sync tasks, that should not block the main sync pipeline.
 - I asked to create `backlog #next-steps` in interview.md. `#next-steps` is defined in `prompt_presets`. The agent added the backlog item with the id `[#next-steps]`, which collides with the prompt preset. I manually changed the id to `[#next-steps-2]`. agent-doc should ensure the added backlog item is not in conflict with `prompt_presets` or any other id in the document. I also had to fight agent-doc with my id change. agent-doc kept on setting the id back to `[#next-steps]` even though I changed it to `[#next-steps-2]`...This happened at least 2 times. Update, I did not have #next-steps in the prompt preset, so I added it later. But the rule of no-conflict between a backlog id and prompt preset or other id in the document still stands. Please ensure the rule is in place.
 - My agents are creating memory entries to get around various agent-doc churn issues. Please evaluate the memories and treat those workaround as bugs. Please clear out any agent-doc workarounds from memory so I can dogfood any agent-doc issues. These issues should be fixed on the non-memory harness or binary level.
-- The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`. 
+- The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.
+---
+JB `Run Agent Doc` on monsterrodholders.md stalled. No feedback. I manually started the run.
+```
+[route] target tmux session: 0
+Error: authoritative actor generation 281 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+```
+---
 - do [#queue-consume-ipc-timeout-live-verify]
+- agent-doc monsterrodholders.md response are not being written into the document.
+- do [#per-cycle-protocol-output-overhead]
+- do [#skill-md-token-footprint-reduce]
+- Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
-- do [#queue-line-leading-backtick-drop]
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]
+- do [#writer-emits-deprecated-queue-active-false]
+- do [#backlog-queue-sync-pending-add-amplification]
+- do [#finalize-divergence-orphans-committed-head]
+- do [#free-text-head-answer-match-too-literal]
 <!-- /agent:queue -->
 ###
 <!--

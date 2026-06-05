@@ -115,6 +115,16 @@ pub enum PatchMode {
     Prepend,
 }
 
+/// Turn lifecycle state for `agent-doc turn-status`
+/// (#claude-busy-status-during-active-turn).
+#[derive(Clone, Debug, ValueEnum)]
+pub enum TurnStatusState {
+    /// A turn just started (e.g. `UserPromptSubmit` hook).
+    Active,
+    /// The turn just ended (e.g. `Stop` hook).
+    Idle,
+}
+
 #[derive(Parser)]
 #[command(
     name = "agent-doc",
@@ -936,6 +946,15 @@ enum Commands {
     },
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
+    /// Surface turn-in-progress status on the agent's own tmux pane border.
+    /// Hook-driven: `UserPromptSubmit` runs `active`, `Stop` runs `idle`
+    /// (#claude-busy-status-during-active-turn). Best-effort; no-op outside tmux.
+    #[command(name = "turn-status")]
+    TurnStatus {
+        /// `active` when a turn starts, `idle` when it ends.
+        #[arg(value_enum)]
+        state: TurnStatusState,
+    },
     /// Derive a structured post-preflight planning/dispatch record for a document
     Plan {
         /// Path to the session document
@@ -2445,6 +2464,10 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
+        Commands::TurnStatus { state } => agent_doc_orchestration::turn_status::run(matches!(
+            state,
+            TurnStatusState::Active
+        )),
         Commands::Upgrade => upgrade::run(),
         Commands::LibPath => {
             // Print the path to the shared library built alongside this binary.

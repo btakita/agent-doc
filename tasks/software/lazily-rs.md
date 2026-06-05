@@ -73,13 +73,13 @@ Next queue head: `do [#s0fc]` — make the Cloudflare signaling endpoint consuma
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#xtwf]
+- ~do [#xtwf]~
 - do [#s0fc]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog queue go -->
+<!-- agent:backlog queue -->
 - [ ] [#s0fc] The Cloudflare endpoint should be usable as a dependency for projects that want to leverage lazily-rs for distributed systems...such as is the plan for agent-doc.
 <!-- /agent:backlog -->
 

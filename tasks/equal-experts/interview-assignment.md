@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -259,13 +259,24 @@ A Fake (one in-memory implementation of a contract) beats scattered mocks when t
 Keep `httpx.MockTransport` (no new dependency), but **consolidate the client tests behind one shared fake-endpoint handler** — a single `product -> payload` dict + handler (returns 404 for unknown, the payload otherwise), exposed as a pytest fixture. That captures the API's shape **once**, kills the repetition, and stays well within the brief's simplicity bar. A standalone Fake API *class* or a spun-up local server would be over-engineering for a single GET endpoint — more moving parts than the thing under test.
 
 Net: a small fake *fixture*, not a fake *service*. Want me to refactor `test_price_client.py` to that shared fixture now (committed local, no push)? It's ~15 lines net and makes the client tests express one contract instead of five.
-<!-- agent:boundary:af8c935d -->
+
+### Re: Fake API — decision pending (answered above) — opus-4-8
+
+> **Queue prompt:**
+>
+> Should we also consider a Fake API for testing instead of mocks? Mocks are simple but brittle and repeat testing assumptions. A Fake would consolidate the assumptions. This is not as simple as it could possibly be but is more maintainable than mocks.
+
+
+Consolidating this queue item with the full answer in **Re: Fake API vs mocks** just above (both items landed in one cycle; the queue carries one head per turn, so this drains the second).
+
+**TL;DR:** a small fake *fixture* — yes; a fake *service* — no. Keep `httpx.MockTransport`, consolidate `test_price_client.py` behind one shared `product -> payload` fake-endpoint fixture so the API shape is expressed once instead of five times. A standalone Fake API class/server is over-engineering for a single GET endpoint.
+
+This needs your call — say **"refactor to the shared fake"** and I'll apply it (committed local, no push), or leave the mocks as-is. Either way `#next-steps-2` stays gated for your review.
+<!-- agent:boundary:09bf8233 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- ~I would like a smoke test for the real API calls. This should include all products hitting the real api.~
-- Should we also consider a Fake API for testing instead of mocks? Mocks are simple but brittle and repeat testing assumptions. A Fake would consolidate the assumptions. This is not as simple as it could possibly be but is more maintainable than mocks.
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

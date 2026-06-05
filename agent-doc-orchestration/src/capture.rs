@@ -24,8 +24,10 @@
 //! - Capture writes are atomic JSON replacements.
 //! - Recovery replays only the captured response body; it never regenerates
 //!   content from hooks or history.
-//! - Hash validation uses exact content SHA-256 for both the document and the
-//!   snapshot baseline.
+//! - Hash validation uses content SHA-256 for both the document and the
+//!   snapshot baseline. The document hash is taken with the managed
+//!   `agent_doc_pipeline:` frontmatter block stripped (#22a8) so the mid-cycle
+//!   pipeline mirror never reads as replay-baseline drift.
 //!
 //! ## Evals
 //! - `capture_response_persists_record_and_cycle_metadata`
@@ -247,7 +249,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         snapshot_hash: snapshot_content
             .as_deref()
             .map(crate::ops_log::content_hash),
-        file_hash: Some(crate::ops_log::content_hash(&file_content)),
+        file_hash: Some(replay_file_hash(&file_content)),
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
         state: CaptureState::Captured,
@@ -302,7 +304,7 @@ fn checkpoint_partial_response_for_cycle(
         snapshot_hash: snapshot_content
             .as_deref()
             .map(crate::ops_log::content_hash),
-        file_hash: Some(crate::ops_log::content_hash(&file_content)),
+        file_hash: Some(replay_file_hash(&file_content)),
         response_sha256,
         response_body: redacted_response,
     };
@@ -441,10 +443,20 @@ pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
     Ok(latest)
 }
 
+/// #22a8 (Phase 5b write-side): hash the document for capture replay/commit
+/// validation with the managed `agent_doc_pipeline:` frontmatter block removed.
+/// The block is mirrored onto disk mid-cycle (after response capture, cleared at
+/// a terminal phase), so a raw hash would read that managed write as document
+/// drift and fail the replay baseline. Stripping it keeps replay validation
+/// invariant to the mirror, matching the diff layer.
+fn replay_file_hash(content: &str) -> String {
+    crate::ops_log::content_hash(&agent_doc_core::frontmatter::strip_pipeline_block_lines(content))
+}
+
 pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
-    let current_file_hash = crate::ops_log::content_hash(&current_file);
+    let current_file_hash = replay_file_hash(&current_file);
     let current_snapshot = crate::snapshot::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
@@ -682,7 +694,7 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
             }
             let current_file = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {} for capture commit", file.display()))?;
-            let current_file_hash = crate::ops_log::content_hash(&current_file);
+            let current_file_hash = replay_file_hash(&current_file);
             if record.file_hash.as_deref() != Some(current_file_hash.as_str()) {
                 record.file_hash = Some(current_file_hash);
                 changed = true;

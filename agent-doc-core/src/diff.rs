@@ -223,7 +223,13 @@ struct PromptPrefixLine {
 /// Delegates to `component::strip_comments` — the shared implementation
 /// available to both the binary and external crates.
 pub fn strip_comments(content: &str) -> String {
-    component::strip_comments(content)
+    // #22a8 (Phase 5b write-side): also drop the managed `agent_doc_pipeline:`
+    // frontmatter block so a pipeline-only mirror write (emitted on every
+    // hot-path phase transition) reads as no change and never surfaces as a user
+    // edit. Both sides of every diff pass through this, so a pipeline-only delta
+    // cancels to `no_changes`. Shared with the write-side splice so the strip and
+    // the write agree byte-for-byte on the block boundary.
+    crate::frontmatter::strip_pipeline_block_lines(&component::strip_comments(content))
 }
 
 /// Annotate a unified diff with content-source markers.
@@ -999,6 +1005,18 @@ fn line_is_managed_state_only(line: &str) -> bool {
     }
     // Frontmatter queue activity toggle (`queue_active: true|false`)
     if trimmed.starts_with("queue_active:") {
+        return true;
+    }
+    // #22a8: managed `agent_doc_pipeline:` mirror block (key + indented children
+    // such as `run_id:` / `step:` / `turn_id:` / `queue_task_id:`). The diff
+    // already strips this block, but classify it as managed state too so any
+    // residual line never reads as a user prompt.
+    if trimmed.starts_with("agent_doc_pipeline:")
+        || trimmed.starts_with("run_id:")
+        || trimmed.starts_with("step:")
+        || trimmed.starts_with("turn_id:")
+        || trimmed.starts_with("queue_task_id:")
+    {
         return true;
     }
     // Queue body lines: `- do ...`, `- ~do ...~` (strikethrough)
@@ -3770,6 +3788,44 @@ Please fix the bug.\n\
             PromptBearingChangeKind::ContentEdit,
             "queue_active: false"
         )));
+    }
+
+    #[test]
+    fn pipeline_only_frontmatter_write_is_no_change() {
+        // #22a8: writing / clearing the managed agent_doc_pipeline block on a
+        // phase transition must read as no change (diff cancels both sides).
+        let snapshot = "---\nqueue: start\n---\n\n## Body\n- item\n";
+        let with_pipeline = "---\nqueue: start\nagent_doc_pipeline:\n  run_id: cycle-123\n  step: response_captured\n  turn_id: \"#x\"\n---\n\n## Body\n- item\n";
+        assert!(
+            unified_diff_from_contents(snapshot, with_pipeline).is_none(),
+            "adding a pipeline block must not register as a change"
+        );
+        assert!(
+            unified_diff_from_contents(with_pipeline, snapshot).is_none(),
+            "clearing a pipeline block must not register as a change"
+        );
+        // A real body edit alongside a pipeline write is still detected.
+        let with_pipeline_and_edit = "---\nqueue: start\nagent_doc_pipeline:\n  run_id: cycle-123\n  step: committed\n---\n\n## Body\n- item changed\n";
+        assert!(
+            unified_diff_from_contents(snapshot, with_pipeline_and_edit).is_some(),
+            "a real body edit must still be detected through a pipeline write"
+        );
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_pipeline_block_lines() {
+        for line in [
+            "agent_doc_pipeline:",
+            "  run_id: cycle-123",
+            "  step: write_applied",
+            "  turn_id: \"#x\"",
+            "  queue_task_id: \"#x\"",
+        ] {
+            assert!(
+                change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
+                "pipeline line should be managed state: {line:?}"
+            );
+        }
     }
 
     #[test]

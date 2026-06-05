@@ -915,6 +915,96 @@ pub fn clear_pipeline_state(content: &str) -> Result<String> {
     write(&fm, body)
 }
 
+/// #22a8 (Phase 5b write-side): byte-precise removal of the `agent_doc_pipeline:`
+/// block (its key line plus indented children) from the leading `--- ... ---`
+/// frontmatter region. Every other byte is preserved verbatim — unlike
+/// [`clear_pipeline_state`], this never re-serializes the rest of the
+/// frontmatter, so it cannot reorder or reformat other fields. Returns the input
+/// unchanged when there is no leading frontmatter region or no block.
+pub fn strip_pipeline_block_lines(content: &str) -> String {
+    let lines: Vec<&str> = content.split('\n').collect();
+    if lines.first().map(|l| l.trim_end()) != Some("---") {
+        return content.to_string();
+    }
+    let Some(close_idx) = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, l)| l.trim_end() == "---")
+        .map(|(i, _)| i)
+    else {
+        return content.to_string();
+    };
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut skipping = false;
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 || i >= close_idx {
+            skipping = false;
+            out.push(line);
+            continue;
+        }
+        if skipping {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                continue;
+            }
+            skipping = false;
+        }
+        if line.trim_start().starts_with("agent_doc_pipeline:") {
+            skipping = true;
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n")
+}
+
+/// #22a8 (Phase 5b write-side): byte-precise mirror of the `agent_doc_pipeline:`
+/// block into a document's frontmatter. Removes any existing block, then — when
+/// `pipeline` is non-empty — renders a fresh block (via the struct's canonical
+/// serializer, so `#`-prefixed ids are correctly quoted) and splices it in just
+/// before the closing `---`. All other frontmatter bytes are preserved, so the
+/// diff layer's matching strip cancels the write to `no_changes`. Clears the
+/// block (leaving nothing behind) when `pipeline.is_empty()`.
+pub fn splice_pipeline_block(content: &str, pipeline: &AgentDocPipeline) -> Result<String> {
+    let stripped = strip_pipeline_block_lines(content);
+    if pipeline.is_empty() {
+        return Ok(stripped);
+    }
+    #[derive(serde::Serialize)]
+    struct Wrap<'a> {
+        agent_doc_pipeline: &'a AgentDocPipeline,
+    }
+    let rendered = serde_yaml::to_string(&Wrap {
+        agent_doc_pipeline: pipeline,
+    })
+    .map_err(|e| anyhow::anyhow!("serialize agent_doc_pipeline block: {e}"))?;
+    let block_lines: Vec<&str> = rendered.trim_end_matches('\n').split('\n').collect();
+
+    let lines: Vec<&str> = stripped.split('\n').collect();
+    if lines.first().map(|l| l.trim_end()) != Some("---") {
+        return Ok(stripped);
+    }
+    let Some(close_idx) = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, l)| l.trim_end() == "---")
+        .map(|(i, _)| i)
+    else {
+        return Ok(stripped);
+    };
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + block_lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i == close_idx {
+            for bl in &block_lines {
+                out.push((*bl).to_string());
+            }
+        }
+        out.push((*line).to_string());
+    }
+    Ok(out.join("\n"))
+}
+
 /// Set both agent_doc_format and agent_doc_write, clearing deprecated agent_doc_mode.
 pub fn set_format_and_write(
     content: &str,
@@ -1365,6 +1455,37 @@ mod tests {
         assert_eq!(fm2.pipeline.run_id.as_deref(), Some("cycle-99"));
         assert_eq!(fm2.pipeline.step.as_deref(), Some("committed"));
         assert_eq!(fm2.pipeline.turn_id.as_deref(), Some("#fm-run-id-step"));
+    }
+
+    #[test]
+    fn splice_pipeline_block_is_byte_precise_and_strip_cancels() {
+        // #22a8: the write-side splice must touch ONLY the pipeline block, and
+        // the diff-side strip must cancel it back to the original bytes.
+        let base = "---\nagent_doc_session: abc-123\nagent: claude\nprompt_presets:\n  '#x': do the thing\nqueue: start\n---\n\n## Body\n- item\n";
+        let pipeline = AgentDocPipeline {
+            run_id: Some("cycle-99".into()),
+            step: Some("response_captured".into()),
+            turn_id: Some("#22a8".into()),
+            queue_task_id: None,
+        };
+        let spliced = splice_pipeline_block(base, &pipeline).unwrap();
+        // The block is present and parseable…
+        assert!(spliced.contains("agent_doc_pipeline:"));
+        let (fm, _) = parse(&spliced).unwrap();
+        assert_eq!(fm.pipeline.run_id.as_deref(), Some("cycle-99"));
+        assert_eq!(fm.pipeline.turn_id.as_deref(), Some("#22a8"));
+        // …every non-block field/byte is preserved (presets, order, body).
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+        // Stripping the block yields the ORIGINAL bytes exactly.
+        assert_eq!(strip_pipeline_block_lines(&spliced), base);
+        // Clearing (empty pipeline) also returns the original bytes.
+        assert_eq!(
+            splice_pipeline_block(&spliced, &AgentDocPipeline::default()).unwrap(),
+            base
+        );
+        // Idempotent: re-splicing the same state does not stack blocks.
+        let twice = splice_pipeline_block(&spliced, &pipeline).unwrap();
+        assert_eq!(twice.matches("agent_doc_pipeline:").count(), 1);
     }
 
     #[test]

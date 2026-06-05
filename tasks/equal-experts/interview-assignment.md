@@ -504,11 +504,23 @@ Note: a bare `- [#next-steps-2]` in the active queue tripped the dispatch guard 
 When you're ready, just say the word:
 - **"approve"** → move it to Done (no push), or
 - **"submit"** → push the `solution` branch to the EqualExperts remote (and, on a separate explicit go, mark the assignment complete).
-<!-- agent:boundary:a86eeb9a -->
+
+### Re: Session doc copied into the repo — opus-4-8
+
+Done — added **`AGENT_SESSION.md`** to the submodule (`solution` `ahead 10`, **not pushed**).
+
+- It's a **point-in-time snapshot** of this agent-doc session (the committed HEAD version), copied verbatim — frontmatter, the full Exchange Q&A, and the queue/backlog/review sections. It captures the design reasoning (client/logic split, no-FastAPI, round-half-up rounding, test strategy) and complements the README's AI-usage disclosure.
+- Being a snapshot, it won't include this very response; say the word any time and I'll refresh it.
+
+One option to consider: the raw copy includes agent-doc tooling bits (the `agent_doc_*` frontmatter, `prompt_presets`, and the empty `Queue`/`Backlog`/`Review` markers). If you'd rather the submission carry a **clean narrative** — just the Status + Exchange, no tooling markers — say **"trim the session doc"** and I'll produce that version instead.
+
+Full suite still green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
+<!-- agent:boundary:0aed961f -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Add a copy of this agent doc into the repo. Update the README to refer to the agent doc copy explaining what agent-doc is and what this session document is. Explain how I used the agent-doc including using agent:queue, the agent:exchange. commit.
 <!-- /agent:queue -->
 
 ## Backlog

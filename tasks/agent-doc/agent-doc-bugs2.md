@@ -193,7 +193,7 @@ Implemented, tested, installed, pushed (`52617ed5`).
 - `make check`: 708 core + **2271** orchestration, 0 failed; clippy clean. Installed + release-built.
 
 This is the fix for the friction that forced manual strikes on items 3, 5, and 6 today — the live binary now self-heals the free-text head on repair.
-<!-- agent:boundary:3cb2c258 -->
+<!-- agent:boundary:50da7bcb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -217,7 +217,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
-- [x] [#repair-strike-consumed-head] [plan] repair-based recovery does not strike/consume the queue head its recovered response answered. write.rs owns queue consumption (should_consume_queue_prompt_for_write, #queue-strike-on-halt); repair.rs has none — so when finalize fails (e.g. IDE visible-buffer guard) and recovery goes through repair, the consumed free-text head stays unstruck and preflight re-presents it. FIX: after repair applies an orphaned response, strike the head(s) it consumed using cycle_state.active_queue_heads + the same consume predicate. Live repro: item 3 (optional-do/re) this session needed a manual strike.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 

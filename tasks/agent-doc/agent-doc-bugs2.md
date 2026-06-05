@@ -47,7 +47,7 @@ Already implemented in `src/tagpath` (commit `9289827`, pushed to `origin/main`)
 - Commit `9289827` confirmed in `origin/main` history (0 ahead / 0 behind, tree clean).
 
 Marking `#tagpath-lint-queue-control` done and striking the consumed queue head.
-<!-- agent:boundary:fe5f3a8f -->
+<!-- agent:boundary:07e4f563 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -71,8 +71,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [x] [#tagpath-lint-queue-control] DONE (src/tagpath 9289827, installed): the tagpath agent-doc lint dialect now accepts bare `start`/`go`/`stop` markers on agent:queue, so a bare `go` marker no longer trips agent-doc/malformed-attr. Part of #queue-state-unify.
-2. [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
+1. [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -97,7 +97,7 @@ Queue drained — `#xtwf` and `#s0fc` both consumed.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#xtwf]~
-- do [#s0fc]
+- ~do [#s0fc]~
 <!-- /agent:queue -->
 
 ## Backlog

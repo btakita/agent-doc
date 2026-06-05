@@ -719,7 +719,7 @@ export const AgentDocTurnStatus = async ({ $ }) => ({
 /// `base`, when set, roots every harness path under it (project-relative; used by
 /// tests and `--dir`). Otherwise `user` selects each harness's user config dir,
 /// else the project-local (cwd) paths.
-pub fn install_turn_status_hooks(base: Option<&Path>, user: bool) -> Result<()> {
+pub fn install_turn_status_hooks(base: Option<&Path>, user: bool, tmux: bool) -> Result<()> {
     // Claude — settings.json: UserPromptSubmit/Stop/SessionStart.
     let claude = turn_status_path(base, user, ".claude/settings.json", ".claude/settings.json");
     ensure_parent_dir(&claude)?;
@@ -746,7 +746,28 @@ pub fn install_turn_status_hooks(base: Option<&Path>, user: bool) -> Result<()> 
 
     println!("  start (UserPromptSubmit / chat.message)   -> {TURN_STATUS_ACTIVE_COMMAND}");
     println!("  end   (Stop / SessionStart / session.idle) -> {TURN_STATUS_IDLE_COMMAND}");
-    println!("  enable visibility: tmux set -g pane-border-status top");
+
+    // Visibility: the pane-border title is only shown when tmux `pane-border-status`
+    // is enabled. `--tmux` applies it to the running server immediately (safe,
+    // non-destructive); persisting it stays a recommendation because tmux config
+    // paths are user-specific (symlinks / dotfiles repos) and risky to auto-edit.
+    if tmux {
+        let applied = std::process::Command::new("tmux")
+            .args(["set", "-g", "pane-border-status", "top"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if applied {
+            println!("  tmux: applied `pane-border-status top` to the running server");
+        } else {
+            println!("  tmux: could not apply `pane-border-status` (no running server / not in tmux)");
+        }
+        println!("  tmux: to persist, add to your tmux config: set -g pane-border-status top");
+    } else {
+        println!(
+            "  visibility: enable the pane border to see it — `agent-doc turn-status install --tmux` (applies now), or add `set -g pane-border-status top` to your tmux config"
+        );
+    }
     Ok(())
 }
 
@@ -1632,8 +1653,8 @@ mod tests {
         )
         .unwrap();
 
-        super::install_turn_status_hooks(Some(dir.path()), false).unwrap();
-        super::install_turn_status_hooks(Some(dir.path()), false).unwrap(); // idempotent re-run
+        super::install_turn_status_hooks(Some(dir.path()), false, false).unwrap();
+        super::install_turn_status_hooks(Some(dir.path()), false, false).unwrap(); // idempotent re-run
 
         let cmds = |v: &serde_json::Value, event: &str| -> Vec<String> {
             v["hooks"][event]

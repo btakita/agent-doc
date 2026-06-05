@@ -131,6 +131,10 @@ pub enum TurnStatusAction {
         /// Install into each harness's user config dir instead of the project.
         #[arg(long)]
         user: bool,
+        /// Also enable tmux `pane-border-status` on the running server so the
+        /// "turn in progress" border title is visible immediately.
+        #[arg(long)]
+        tmux: bool,
     },
 }
 
@@ -2475,8 +2479,8 @@ fn main() -> anyhow::Result<()> {
         Commands::TurnStatus { action } => match action {
             TurnStatusAction::Active => agent_doc_orchestration::turn_status::run(true),
             TurnStatusAction::Idle => agent_doc_orchestration::turn_status::run(false),
-            TurnStatusAction::Install { dir, user } => {
-                skill::install_turn_status_hooks(dir.as_deref(), user)
+            TurnStatusAction::Install { dir, user, tmux } => {
+                skill::install_turn_status_hooks(dir.as_deref(), user, tmux)
             }
         },
         Commands::Upgrade => upgrade::run(),

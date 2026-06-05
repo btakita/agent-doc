@@ -96,7 +96,20 @@ Corrected the landing per your refinement (EFS `3e06907`, pushed):
 **Files:** `routes.ts` (landing), `dashboard.tsx` (+ `DealPipeline`/`AvailableDealsPreview`), `data.ts` (pipeline model). 4 new tests (14 pass in the investor suite); plan updated; builds green. The 2 reds remain the teammate's `apply4-P1` + `borrower-message-notify`.
 
 `#zwws` still tracks the remaining phases (2b I'm-interested + dead-code cleanup, 3 simplified portfolio, 4 vestings, 5 questionnaire, 6 new-deal email — the workflow-priority piece is now partly realized by this pipeline module). Re-queue it for the next one.
-<!-- agent:boundary:26ea9241 -->
+
+### Re: #zwws — investor dashboard phase 3 (simplified portfolio) — opus-4-8
+
+Shipped phase 3 (EFS `8d40c66`, pushed): **simplified portfolio**, since EFS doesn't service loans.
+
+- **Metrics dropped:** Avg. yield, YTD distributions, Next distribution. **Now showing:** **Total funded** + **Loans with EFS** (count).
+- Subtitle drops the "next distribution" line → "{n} active loans with EFS".
+- Position cards already carry **address, amount, rate, maturity, upcoming payment**, sourced from accepted EFS funding records (new-system only).
+- `dashboard.tsx`; test added (15 pass in the investor suite); plan updated; builds green.
+
+**Progress:** P1 nav · P2 dashboard-composite landing · P3 simplified portfolio — all shipped. `#zwws` now tracks 2b (I'm-interested + dead-code), 4 (vestings, TMO-gated), 5 (questionnaire), 6 (new-deal email).
+
+Continuing to `#pt5w` next — fixing the teammate's 2 red tests as you queued.
+<!-- agent:boundary:0419eab6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,14 +118,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~The `/portal-investor` root should redirect to the dashboard. The dashboard needs modules including, available deals and any existing deal pipelines. The existing deal pipeline should have the deal details, a pipeline map including what step of the pipeline the deal is at, and the next actionable step.~
-- [#zwws]
+- ~[#zwws]~
 - [#pt5w]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 2b 'I'm interested' email package + dead-code cleanup (distributions/statements routes/types); 3 simplified portfolio; 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email (#f4rq) + workflow-priority. Shipped: P1 nav (30037e3), P2 available-deals-first landing (2f2ef47). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
+- [ ] [#zwws] [recommended] Investor dashboard rework — remaining phases: 2b 'I'm interested' email + dead-code cleanup (distributions/statements routes/types); 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 5 requirements/questionnaire; 6 new-deal email (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P3 simplified portfolio (8d40c66). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [ ] [#pt5w] [blocked-external] 2 tests red on EFS origin/main from a teammate's folder-restructure (b356b27 et al.), NOT from #knpa: tests/borrower-message-notify.test.ts imports the moved lib/borrower_messages/notify.js (now lib/borrower/messages/notify.ts); apply4 P1 prequal-handoff test also fails. Fix the stale import + apply4 P1 regression.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.

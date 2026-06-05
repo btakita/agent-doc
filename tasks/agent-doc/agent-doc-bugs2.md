@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -156,7 +156,7 @@ When `finalize` **fails** — e.g. the IntelliJ visible-buffer guard fired repea
 `#repair-strike-consumed-head`: after `repair` applies an orphaned response, strike the head(s) it consumed using `cycle_state.active_queue_heads` + the same consume predicate `write.rs` uses. Focused, recovery-path-only; the normal path is unchanged. Queued it for implementation.
 
 Net: normal-path strikethrough is solid; the recovery-path strike is the real remaining bug, now tracked with its root cause.
-<!-- agent:boundary:285fc3d8 -->
+<!-- agent:boundary:d9a43190 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

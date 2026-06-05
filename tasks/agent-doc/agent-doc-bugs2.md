@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue_active: true
 ---
 
 ## Status
@@ -156,17 +156,35 @@ I captured this as **`[#queue-no-stall-on-head-edit]`**. **Recommended default:*
 
 #### One practical note for right now
 The doc is open and being edited live in IntelliJ, and **every `finalize` this session has tripped the "editor buffer ≠ disk" guard** — I've recovered each one via `write --commit`, but it's why things felt stop-and-go. The next queue items, `do [#optional-do-re]` and `do [#22a8]`, are **code changes that need clean commits**. Please **save the doc in IntelliJ**, then say "go" and I'll drain those two cleanly.
-<!-- agent:boundary:d893f215 -->
+
+### Re: do [#optional-do-re] — Stage 1 shipped — opus-4-8
+
+Done. Stage 1 (the default small fix) is implemented, tested, built, installed, committed, and pushed — **submodule `730a96fb`** on `20260422/codex-agent-backend`.
+
+#### What changed (queue lines only — lowest blast radius)
+- **`re [#id]` / `re #id` now references without executing.** Such a line is parsed as `Freeform`: preserved verbatim, never run, synced, or reaped. The literal `re ` verb is required, so prose like `rebuild`, `re-run`, or `reference …` is untouched.
+- **`do` is now optional for kick-off.** A bare leading `[#id]` / `#id` is recognized as an id-backed directive (same as `do [#id]`). A trailing colon (`[#id]: note`) stays inert prose, so incidental id mentions don't accidentally execute.
+
+#### Verification
+- New unit tests: `reference_directive_excluded_from_prompts`, `reference_directive_does_not_match_prose`, `is_do_directive_accepts_do_and_bare_id_forms`.
+- `make check`: **2277** orchestration + core, **0 failed**, clippy clean.
+- `cargo install --path .` + `cargo build --release` — both binaries refreshed.
+- Spec updated: `specs/07-orchestration-commands.md` documents the grammar.
+
+#### Deliberately deferred to Stage 2 (`[#optional-do-re-stage2]`)
+The closeout **guards** (`do_directive_target_ids_in_line`, `pending_done_guard`, queue-head provenance, `expect_done_or_gate`) still key off the literal `do ` verb, so they don't yet *reap* a bare `[#id]` head. That's the higher-blast-radius half and lands with dedicated per-guard tests. For now: bare `[#id]` executes and is classified id-backed; explicit `do [#id]` remains the form that auto-reaps.
+
+Marking `#optional-do-re` done. Next in your queue: `do [#22a8]`, `do [#codex-self-reinvoke-prevent]`, `do [#queue-no-stall-on-head-edit]` — I'll keep draining (still recommend saving the doc in IntelliJ so closeouts stop tripping the buffer guard).
+<!-- agent:boundary:9b0b26e9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~agent-doc should recognize `#codex-self-reinvoke-prevent` as a valid id in the backlog and use that id for the backlog item. agent-doc should also correct the format as `[#codex-self-reinvoke-prevent]`.~
-- ~The agent added #codex-self-reinvoke-prevent into the backlog, which is malformed. It should be `[#codex-self-reinvoke-prevent]`.~
-- ~The queue should not stall if the user edits the queue.~
-- ~do [#csrp]~
 - ~do [#optional-do-re]. Do the default small fix.~
 - do [#22a8]. Do the default auto-delete when the turn ends.
-- JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
+- ~do [#codex-self-reinvoke-prevent]~
+- JB `Run Agent Doc` on monsterrodholders.md stalled for ~1 minute. It eventually started.
+- JB `Fix Document` + related agent-doc task should finish any unfinished turn.
+- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 <!-- /agent:queue -->
 ###
 <!--
@@ -181,9 +199,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#optional-do-re-stage2] [recommended] optional-do grammar Stage 2 (exchange directives + closeout guards). Stage 1 shipped (submodule 730a96fb): queue-line re-reference + bare-[#id] is_do_directive recognition. Stage 2 = teach do_directive_target_ids_in_line / pending_done_guard / queue-head-provenance / expect_done_or_gate to accept the bare [#id] form and skip the re form, with dedicated per-guard tests (higher blast radius). Plan: tasks/agent-doc/plans/optional-do-directive-and-re-reference.md.
 - [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 - [ ] [#codex-self-reinvoke-prevent] [recommended] prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect this-pane-already-owns-this-doc first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
-- [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 - [ ] [#22a8] [blocked: design decision] Phase 5b write-side — mirror agent_doc_pipeline into doc frontmatter at each cycle phase transition + clear at terminal. NEXT: (1) resolve block lifecycle (plan says commit-at-finalize, backlog says clear-at-terminal — pick one); (2) add agent_doc_pipeline to preflight + session_check managed-state diff-ignore so mirror writes never read as user prompts; (3) live-verify on hot path with IDE buffer settled. Foundation: read-side dc4065c5; plan tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 <!-- /agent:backlog -->
 

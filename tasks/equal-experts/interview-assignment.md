@@ -62,12 +62,53 @@ So `✅ Test both any client and logic` is asking for two test surfaces:
 - Ship it as a tested library — no executable app of any kind.
 
 A secondary, weaker reading of "client" is "the caller of your library's public API" (i.e., write integration-style tests from a consumer's viewpoint). That's worth doing too, but the primary intent — given the explicit Price API section — is the HTTP client. I'd structure the solution around a `PriceClient` + `Cart` split and let `#next-steps` proceed on that basis.
-<!-- agent:boundary:3032eacc -->
+
+### Re: Python stack — drop FastAPI, single Python package — opus-4-8
+
+Python is a good pick, but I'd **drop FastAPI entirely** and **not introduce a JS client**. Both add exactly the kind of layer the brief warns against.
+
+#### Why no FastAPI / no "service"
+
+- `❌ Submit any form of app, such as web APIs` — a FastAPI service *is* a web API. Building one is the one deliverable explicitly disallowed.
+- There is nothing for us to serve. The **Price API already exists** and is hosted externally (`https://equalexperts.github.io/backend-take-home-test-data/{product}.json`). We are a *consumer* of it, not its author. We don't build it, and we don't stand up a local copy.
+- In tests we don't need a running server either — we stub the HTTP call **in-process** (no socket, no port).
+
+#### Why no separate JS client
+
+- A second language/runtime is added complexity for zero benefit and splits "client + logic" across two toolchains. `❌ Add unnecessary layers`.
+- "Client" here = the small **Price API HTTP client** *inside* the Python package — not a separate app or front-end. Keep it in the same language as the cart.
+
+#### Recommended shape — one Python package, library only
+
+```
+shopping_cart/
+  __init__.py
+  price_client.py   # PriceClient: get_price(name) -> Decimal; wraps httpx, parses JSON
+  cart.py           # Cart: add(name, qty), subtotal, tax, total (Decimal, ROUND_UP, 2dp)
+tests/
+  test_price_client.py   # respx/responses-mocked HTTP: URL, parse, 404/non-200
+  test_cart.py           # pure logic incl. the worked example -> 15.02 / 1.88 / 16.90
+pyproject.toml
+README.md
+```
+
+- **HTTP lib:** `httpx` (or `requests` — either is fine; `httpx` is a touch more modern). One dependency.
+- **Money math:** `decimal.Decimal` with `ROUND_UP` / quantize to `0.01`. The brief says "rounded up", so use `ROUND_UP` (not bankers'/half-up) and decide whether tax rounds before or after summing — I'd round the final tax and total only, and note the assumption in the README.
+- **Tests:** `pytest` + `respx` (httpx) or `responses` (requests) to mock the price endpoint so tests are offline and deterministic. Test the client and the cart logic separately, per `✅ Test both`.
+- **No** `main()`, CLI, server, persistence, or DI framework. The "interface" is the `Cart` class API, exercised by tests.
+
+#### Net answer to your question
+
+Neither a JS client nor a separate Python *service*. **One Python library**: `PriceClient` (httpx) + `Cart`, with `pytest` + `respx`. That is the simplest thing that satisfies "test both client and logic" while staying inside the ❌ no-app rule.
+
+If you'd still like FastAPI in the picture for your own learning, we could keep it as a throwaay *outside* the submission, but I wouldn't include it in what we push. Want me to update `#next-steps-2` to pin this Python/httpx/pytest decision and scaffold the package?
+<!-- agent:boundary:d3178923 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+- Let's plan on a Python stack for the api + client. Keep it simple per the instructions. Use FastAPI for the service. Should we use a JS client or another Python client to keep it simple?
 <!-- /agent:queue -->
 
 ## Backlog

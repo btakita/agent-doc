@@ -422,11 +422,45 @@ You were right that the worked-example test alone didn't pin the *semantics* (ev
 - `test_tax_is_twelve_point_five_percent_of_subtotal_rounded_up` — asserts `tax == ROUND_UP(subtotal * 0.125)` and that `8.43 → 1.06` (round-**up**, not half-up which would give 1.05).
 
 Suite: **32 passed, 7 skipped**. `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:2816c037 -->
+
+### Re: How tax rounding actually works (industry + tax authorities) — opus-4-8
+
+I researched this against US Streamlined Sales Tax and general VAT practice. Short version: **tax is computed on the (un-pre-rounded) subtotal, then the tax is rounded — and the real-world rounding is round-to-nearest-cent (half-up), not ceiling.** Neither real option "rounds the subtotal up first."
+
+#### The authoritative US rule (SSUTA §324)
+The Streamlined Sales and Use Tax Agreement — the closest thing to a multi-state standard — specifies:
+1. Compute tax = `taxable_amount × rate`, carried to **three decimal places**.
+2. Round to a whole cent: **round up only when the third decimal is ≥ 5** (i.e., ≥ half a cent), else round down. That's **round-half-up to the nearest cent**, not "always up".
+3. The seller may **elect item-basis or invoice/aggregate-basis**. Aggregate = compute the tax on the **whole taxable subtotal once**, then round once. This is allowed and generally preferred because it minimises accumulated rounding error.
+
+So the subtotal is just the exact sum of line amounts (already whole cents); it is **not** "rounded up and then taxed." Tax is taken on that subtotal and the **tax** is what gets rounded.
+
+#### VAT (EU/UK) — same shape, details vary
+VAT rules leave rounding to member states: traders may round **per line or per invoice**, and typically round to the nearest unit (UK HMRC also historically allowed rounding *down* per line for invoice traders). Again: VAT is computed on the net total, and it's the VAT figure that's rounded — not a pre-rounded subtotal.
+
+#### Answer to your exact question
+- "Subtotal rounded up, then tax on that" — **not** how it's done.
+- "Tax calculated on the (raw, exact) subtotal, then rounded" — **yes**, this is the standard. With the one correction that the rounding is **to the nearest cent (half-up)**, not ceiling.
+
+#### How this maps to our code (and the brief)
+- We compute `tax = round(subtotal × 0.125)` on the **exact** subtotal (subtotal is the precise sum) — that matches the aggregate-basis standard. ✓
+- We use **`ROUND_UP` (ceiling)** because **the brief explicitly says "rounded up"** — a deliberate simplification that diverges from real authorities' round-half-up. For the worked example it doesn't matter (1.8775 rounds to 1.88 either way), but e.g. a raw tax of 1.881 → **1.89** under our ceiling vs **1.88** under real-world half-up.
+- Because prices are whole cents, "round subtotal then tax" ≡ "tax on raw subtotal" anyway (shown last cycle) — so the only meaningful rounding decision is the tax, which we round once. That's aligned with the standard.
+
+**Recommendation:** keep `ROUND_UP` for the submission (the brief is explicit and the assignment is graded against it), and add a one-line note in the README assumptions that production code should use round-half-up to the nearest cent per SSUTA/VAT. Want me to add that note?
+
+**Sources:**
+- [Streamlined Sales Tax — Rounding Rule Issue Paper (SSUTA §324)](https://www.streamlinedsalestax.org/docs/default-source/issue-papers/rounding-rule.pdf)
+- [Streamlined Sales Tax — Approved Rounding Rules](https://www.streamlinedsalestax.org/docs/default-source/miscellaneous/approved-rounding-rules.pdf)
+- [Ohio Dept. of Taxation — ST 2005-05 (calculation & rounding)](https://tax.ohio.gov/business/ohio-business-taxes/sales-and-use/information-releases/st200505)
+- [TaxJar — Rounding in sales tax reporting](https://www.taxjar.com/blog/file/rounding-issues-sales-tax-returns)
+- [Microsoft Dynamics 365 — Tax calculation rounding rules (line vs total)](https://learn.microsoft.com/en-us/dynamics365/finance/localizations/global/tax-calculation-rounding-rules)
+<!-- agent:boundary:ecae971f -->
 <!-- /agent:exchange -->
 
 ## Queue
 <!-- agent:queue -->
+- Please research the correct behavior across the industry + tax authorities. Is the subtotal generally rounded up then the tax is calculated on that, or is the tax calculated on the raw subtotal then rounded up?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -68,7 +68,35 @@ The reason arc-swap costs anything uncontended is the `Arc` itself: refcount tra
 - I'd skip (b) unless you have a concrete bimodal-contention workload that justifies the per-read branch.
 
 Say which (or both a+c) and I'll implement / spec it. No code changed this turn — this is analysis.
-<!-- agent:boundary:7be6f76e -->
+❯ Can option a be a flag for a high-concurrency mode and a low concurrency mode? With the default being low concurrency mode.
+❯ Would using c be a conditional on the size of the value?
+### Re: (a) as a high/low-concurrency flag, default low — opus-4-8
+
+Yes, with one constraint to design around: **cargo features are additive booleans**, so the clean shape is a single opt-in flag, default off = low-concurrency:
+
+- **default (flag off) = low-concurrency mode** → `parking_lot::RwLock` reads (optimal uncontended). This is exactly your "default low concurrency."
+- **`high_concurrency` flag on** → `arc_swap::ArcSwapOption` reads (optimal at 8+ cores).
+
+You can't have a feature that *subtracts* default behavior (features must be additive — enabling one can't remove arc-swap if it were the default), so the toggle has to be "default RwLock, opt **into** lock-free," not "default lock-free, opt out." That happens to match what you want.
+
+One honest consequence: **0.9.0 already shipped arc-swap as the *default*.** Flipping the default to RwLock (low-concurrency) is a default perf/dependency change — not a breaking API change, but it changes the out-of-the-box profile and drops `arc-swap` from the default build (it becomes `dep:arc-swap` behind the flag). That warrants a **0.10.0** minor bump, not a 0.9.x patch. Net win: low-concurrency users get the faster uncontended path *and* one fewer dependency by default; high-concurrency users add `features = ["high_concurrency"]`.
+
+### Re: is (c) conditional on the value's size? — opus-4-8
+
+Yes — and on one more property: **size AND copyability**.
+
+The inline `ErasedValue` fast path applies when:
+1. **`size_of::<T>() <= INLINE_CAP`** — the value fits a fixed inline buffer (small-buffer optimization, e.g. a `usize`/24-byte inline slot), and
+2. **`T: Copy`** (or a sealed plain-old-data marker) — required for soundness, not just speed.
+
+Why copyability, not just size: a seqlock read copies the bytes *without* synchronization and then validates the sequence (`cache_revision`). If a writer is mid-update, the reader can momentarily observe a **torn** value. For `Copy`/POD that's harmless — the torn bytes are discarded on the revision-mismatch retry, no `Drop`, no allocation, no interior pointers followed. For a non-`Copy` `Clone` type that owns heap/resources, cloning a torn value would dereference garbage pointers → UB. So the inline-seqlock path is gated to `Copy` within the size bound; **everything else falls back to the `Arc<dyn Any>` path** (RwLock or arc-swap per the (a) flag).
+
+Mechanically: capture `(size, is_copy)` at slot creation (alongside the inline `TypeId` we already store), and the read branches on a per-node bool — a single load+branch, far cheaper than the `Arc` refcount it avoids. For the common reactive cases (numbers, small `Copy` structs) you get wait-free, allocation-free, contention-free reads; large or owning values keep today's behavior.
+
+So the two compose cleanly: **(c) handles small `Copy` values optimally regardless of contention; the (a) flag governs only the large/non-`Copy` fallback** (RwLock vs arc-swap). That's the full "best of both," and it's a 0.10/1.0-scale change.
+
+Still analysis — no code changed. If you want, I can: ship the (a) flag as 0.10.0 now (small), and/or open a spec'd plan for (c). Which?
+<!-- agent:boundary:ac1c7c9b -->
 <!-- /agent:exchange -->
 ###
 <!--

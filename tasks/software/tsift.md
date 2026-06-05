@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: stop
 ---
 
 ## Status
@@ -105,7 +105,7 @@ The secret is being read and used (auth reaches npm, then 403s), so this is a **
 Give me a current 6-digit npm authenticator code and I'll publish **immediately, locally** with `npm publish --otp=<code>` using the passage token. The OTP supplies the 2FA directly, so it works even with the classic token. (CI can't prompt for OTP — that path strictly needs a correct granular token.)
 
 `#0y9e` stays gated until either a working granular token lands or you hand me an OTP.
-<!-- agent:boundary:9ce71b62 -->
+<!-- agent:boundary:429f59b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +115,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~I updated the GH NPM_TOKEN. release + publish~
 <!-- /agent:queue -->
 
 ## Backlog

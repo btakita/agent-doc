@@ -88,14 +88,14 @@ Two parts.
 
 **(b) Session must not present as idle while a turn is in flight — design-gated.** This is a harness-scheduling property agent-doc cannot directly enforce (Claude Code owns tool scheduling and the between-tool "idle" presentation). Plan: `tasks/agent-doc/plan-claude-idle-session-during-active-build.md`. Recommended path: a visible *turn-in-progress* busy status on the owned pane + the conduct rule now (achievable, directly addresses "looks idle"); a hard supervisor busy-lease / Stop-hook gate is the durable fix but is gated on the `#subagent-blocks-session` scope decision (which layer blocks, what counts as "the work", how the lease releases). Captured as `#claude-busy-status-during-active-turn`.
 
-### Re: Backlog id must not collide with `prompt_presets` / stop reverting my manual id rename — opus-4-8 (HEAD)
+### Re: Backlog id must not collide with `prompt_presets` / stop reverting my manual id rename — opus-4-8
 
 Split into the rule (done) and the fighting (real bug, scoped).
 
 **The no-collision rule is already in place.** `reject_colliding_explicit_id` (`pending_cmd.rs:190`, `#preset-item-id-collision-enforce`) fails any `--pending-add` whose explicit `id=`/`[#id]` collides with a `prompt_presets` key or an existing active `agent:backlog`/`agent:review`/`agent:icebox` id, at the mutation boundary. Your case slipped through only because — as you noted — `#next-steps` became a preset *after* the item existed, so there was no collision at add-time. Gap I'm adding: a preflight **warning** for that *retroactive* case (a preset key added later that now matches an existing backlog id).
 
 **agent-doc fighting your `[#next-steps-2]` rename is the real bug** — and it's unfixed. Body-unchanged id renames get reverted because the item's identity still lives in the CRDT/snapshot state (`.agent-doc/crdt/<hash>.yrs`) under the old id, so the merge re-imposes it (candidates: CRDT merge, backfill re-derivation, or the `priority queue` backlog→queue reconcile). The fix is to treat an explicit-id rename of an existing item as authoritative when the new id doesn't collide, and re-key the CRDT identity + any `do [#old]` queue ref in the same cycle. It needs a real repro before touching core id logic (rushing it risks every backlog id), so I've scoped it: `tasks/agent-doc/plan-backlog-id-user-rename-revert.md`, captured as `#backlog-id-user-rename-revert`. This **supersedes** the `crdt-backlog-id-revert-treadmill` memory workaround — that note gets deleted when the binary fix ships (your item 6).
-<!-- agent:boundary:c72724a3 -->
+<!-- agent:boundary:c98cf27c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

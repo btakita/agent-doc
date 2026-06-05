@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue: start
 ---
 
 ## Status
@@ -455,12 +455,13 @@ VAT rules leave rounding to member states: traders may round **per line or per i
 - [Ohio Dept. of Taxation — ST 2005-05 (calculation & rounding)](https://tax.ohio.gov/business/ohio-business-taxes/sales-and-use/information-releases/st200505)
 - [TaxJar — Rounding in sales tax reporting](https://www.taxjar.com/blog/file/rounding-issues-sales-tax-returns)
 - [Microsoft Dynamics 365 — Tax calculation rounding rules (line vs total)](https://learn.microsoft.com/en-us/dynamics365/finance/localizations/global/tax-calculation-rounding-rules)
-<!-- agent:boundary:ecae971f -->
+<!-- agent:boundary:b6c82444 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue -->
-- Please research the correct behavior across the industry + tax authorities. Is the subtotal generally rounded up then the tax is calculated on that, or is the tax calculated on the raw subtotal then rounded up?
+<!-- agent:queue auto go -->
+- Yes add the note and use test first TDD to implement the corrected rounding procedure. 
+- I notice the integration tests are skipped. Each agent turn should run the integration tests. Please enable these tests and make them pass if they fail.
 <!-- /agent:queue -->
 
 ## Backlog

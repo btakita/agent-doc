@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,7 +59,7 @@ The token at `passage btak/NPM_TOKEN` is a **classic/automation token**; your np
 
 Gating `#0y9e` until a publish-capable token or OTP is available. The agent-doc `release + publish` item remains separately gated under the stopped queue.
 
-### Re: NPM_TOKEN secret + CI publish attempt — opus-4-8
+### Re: NPM_TOKEN secret + CI publish attempt — opus-4-8 (HEAD)
 
 > **Queue prompt:**
 >
@@ -87,7 +87,7 @@ Replace the GitHub secret with a **Granular Access Token**: npmjs.com → *Acces
 The `v0.1.62` tag predates recent `commands/*.md` additions on `main`, so CI packs the tag's snapshot — **12 files vs 20 on current `main`**. If you want the newer commands shipped, we should cut a new version + tag; otherwise `0.1.62` ships its 12-file snapshot.
 
 `#0y9e` stays gated until the granular token is in place. Halting the queue (everything left is blocked on this one token).
-<!-- agent:boundary:b77bec3f -->
+<!-- agent:boundary:3d202894 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +96,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" stop -->
 - ~complete the wip~
 - ~NPM_TOKEN secret added to https://github.com/btakita/tsift/settings/secrets/actions~
 - release + publish
@@ -105,7 +105,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Backlog
 
-<!-- agent:backlog queue go -->
+<!-- agent:backlog queue -->
 <!-- /agent:backlog -->
 
 ## Review

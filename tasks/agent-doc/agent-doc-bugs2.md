@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -79,14 +79,52 @@ You're right — I buried these in jargon. Here they are in plain English, each 
 **Top of backlog: `#optional-do-re`.**
 
 Everything else from this session is shipped. Say "go" and I'll build `#optional-do-re`, or change any default above.
-<!-- agent:boundary:e784b1f5 -->
+
+### Re: why does Codex refuse "recursive submit because this pane already owns the document"? — opus-4-8
+
+> **Queue prompt:**
+>
+> agent-doc monsterrodholders.md had an issue `It again refused recursive submit because this Codex pane already owns the document.`. Why do we get into this state? We need to never get into this state.
+
+
+> **Queue prompt:**
+>
+> monsterrodholders.md had an unfinished turn. The response was not committed.
+
+
+Short version: this is a **guard working as designed**, not a corruption bug. But you're right that we shouldn't keep *triggering* it. Here's the plain-English why, then what "never get into this state" actually requires.
+
+#### What's happening
+In Codex, `agent-doc <FILE>` is run as a literal shell command **from inside the Codex pane itself**. When that same pane is already the registered owner of the document (it's the live agent-doc actor for `monsterrodholders.md`), running `agent-doc <FILE>` again is the pane asking itself to spin up a *fresh* agent turn — in the very pane that's already mid-turn being that agent.
+
+That's a snake-eating-its-tail loop: the pane can't hand a new turn to itself while it's busy running the command that's asking for it. So agent-doc detects "the pane I'd dispatch into **is** the pane I'm running in" and **refuses before doing any work**, with `recursive direct invocation would deadlock`. It then marks the empty cycle as cleanly abandoned so nothing stays wedged.
+
+This only happens on **Codex**. Claude Code runs the workflow in-process (no shelling out), so it can't re-enter its own pane. Codex shells out, so it can.
+
+#### Why we keep landing in it
+The refusal is correct — the problem is that *something re-runs `agent-doc <FILE>` in the owner pane* to "continue" the work. That re-run is usually one of:
+- a queue/Stop-hook auto-loop trying to drain the next item,
+- the JetBrains **Run Agent Doc** / **Fix Document** action firing on the doc, or
+- a manual retry.
+
+In the owner pane, the right way to continue is **not** to re-invoke the command. It's to **answer in the current turn and persist with `agent-doc finalize` / `write --commit`**. agent-doc already detects this and hands back that exact instruction (the `owned_pane_self_invocation` contract) instead of just erroring — so when you hit it, the recovery is: respond here, then finalize; don't re-run `agent-doc <FILE>`.
+
+#### "Never get into this state"
+The deadlock guard itself we want to **keep** — without it you'd get a real hang. What needs fixing is the *upstream* trigger: the auto-loop / JB action / retry path should check "does this pane already own this doc?" **first** and route to in-pane continuation, so the recursive command is never attempted at all.
+
+That prevention work is partly tracked already (#49 `#codex-owned-pane-prompt-miss`, #45 `#codex-owned-pane-auto-queue-stuck`, #44 followups — all gated on live Codex verification). I've added a focused backlog item, **`#codex-self-reinvoke-prevent`**, for the missing piece: stop the re-invocation at its source rather than only catching it at the guard.
+
+So: nothing was lost or corrupted by the refusal — the monsterrodholders turn just needs to be finished *in its owner pane* (answer + finalize), which is exactly what the next queue item (`JB Fix Document should finish any unfinished turn`) is about.
+<!-- agent:boundary:4dda3db3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#review-list-query]~
-- monsterrodholders.md had an unfinished turn. The response was not committed.
+- ~monsterrodholders.md had an unfinished turn. The response was not committed.~
+- ~agent-doc monsterrodholders.md had an issue `It again refused recursive submit because this Codex pane already owns the document.`. Why do we get into this state? We need to never get into this state.~
 - Add #next-steps to the backlog. I have no idea what Stage 2, review-lint Stage 2, Phase 5b write-site lifecycle mean.
-- do [#optional-do-re]
+- do [#optional-do-re]. Do the default small fix.
+- do [#22a8]. Do the default auto-delete when the turn ends.
 - JB `Fix Document` + related agent-doc task should finish any unfinished turn. 
 <!-- /agent:queue -->
 ###
@@ -102,8 +140,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
-2. [ ] [#22a8] [blocked: design decision] Phase 5b write-side — mirror agent_doc_pipeline into doc frontmatter at each cycle phase transition + clear at terminal. NEXT: (1) resolve block lifecycle (plan says commit-at-finalize, backlog says clear-at-terminal — pick one); (2) add agent_doc_pipeline to preflight + session_check managed-state diff-ignore so mirror writes never read as user prompts; (3) live-verify on hot path with IDE buffer settled. Foundation: read-side dc4065c5; plan tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
+1. [ ] [#csrp] [recommended] #codex-self-reinvoke-prevent — prevent owner-pane re-invocation of `agent-doc <FILE>` (Codex). The recursive-direct-invocation guard (run.rs recursive_codex_direct_invocation_diagnostic) correctly refuses + abandons the empty cycle, but it fires because something still RE-RUNS the entrypoint inside the owning pane (Stop-hook auto-loop, JB Run, or operator retry). True prevention: those re-invocation sources should detect 'this pane already owns this doc' first and route to an in-pane continuation (answer-in-turn + finalize/write --commit) instead of shelling out agent-doc <FILE> again. Builds on existing recovery items #codex-owned-pane-prompt-miss (#49), #codex-owned-pane-auto-queue-stuck (#45), #codex-owned-pane-prompt-miss-followups (#44); plans tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md + plan-recursive-direct-invocation-abandon.md.
+2. [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
+3. [ ] [#22a8] [blocked: design decision] Phase 5b write-side — mirror agent_doc_pipeline into doc frontmatter at each cycle phase transition + clear at terminal. NEXT: (1) resolve block lifecycle (plan says commit-at-finalize, backlog says clear-at-terminal — pick one); (2) add agent_doc_pipeline to preflight + session_check managed-state diff-ignore so mirror writes never read as user prompts; (3) live-verify on hot path with IDE buffer settled. Foundation: read-side dc4065c5; plan tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
 <!-- /agent:backlog -->
 
 ## Review

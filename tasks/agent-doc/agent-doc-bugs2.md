@@ -34,6 +34,7 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 1 response topic(s): JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+<!-- agent:boundary:ec7bcb9e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -52,6 +53,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+ 
 <!-- /agent:backlog -->
 
 ## Review

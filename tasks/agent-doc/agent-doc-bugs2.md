@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -284,13 +284,12 @@ I meant: manually open a doc in the IDE and watch the block appear during the tu
 Marking **#22a8 done**.
 
 Next: you also said *"for fail-open-after-wait, do the highest value work"* — that's `#route-ready-wait-fast-fail` items (1) fast-fail provably-dead panes + (2) per-harness adaptive timeout. I'll take that as the next focused cycle.
-<!-- agent:boundary:e8acba88 -->
+<!-- agent:boundary:aa21f98d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Can we improve the performance of fail-open-after-wait?~
 - ~What does "When you want the writes live, it's a focused session: route every doc-baseline hash through the strip (the invariance sweep) + the live-verify pass." mean? I want this implemented already. Do whatever you need to do to implement this. I'm not sure what live verification you need.~
-- for fail-open-after-wait, do the highest value wins: (1) + (2)
 - do [#optional-do-re-stage2]
 - do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
 - do [#route-ready-wait-fast-fail]

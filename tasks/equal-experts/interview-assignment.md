@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -272,11 +272,12 @@ Consolidating this queue item with the full answer in **Re: Fake API vs mocks** 
 **TL;DR:** a small fake *fixture* — yes; a fake *service* — no. Keep `httpx.MockTransport`, consolidate `test_price_client.py` behind one shared `product -> payload` fake-endpoint fixture so the API shape is expressed once instead of five times. A standalone Fake API class/server is over-engineering for a single GET endpoint.
 
 This needs your call — say **"refactor to the shared fake"** and I'll apply it (committed local, no push), or leave the mocks as-is. Either way `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:09bf8233 -->
+<!-- agent:boundary:2968b065 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- I notice that `PriceClient` is a client to the API. Does the README expect a client for the `Cart`?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: go
 ---
 
 
@@ -87,7 +87,25 @@ Done (Both: Rust crate + TS package, per your scope choice). Committed + pushed 
 - **commit + push** — `cbdb4b8`; CI wired for both (`test-signaling-client` step + the Worker job's `npm run check`).
 
 Queue drained — `#xtwf` and `#s0fc` both consumed.
-<!-- agent:boundary:3bd97897 -->
+
+### Re: release + publish — opus-4-8
+
+Released and published **lazily v0.9.0**.
+
+- **Version** — `0.8.0 → 0.9.0` (minor; all changes since 0.8.0 are additive feature flags). Added `exclude = ["signaling/"]` so the standalone TS Worker/client subtree stays out of the published crate (verified: 0 signaling files in the package, 34 files / 139 KiB compressed).
+- **Verify** — `cargo publish --dry-run` compiled the packaged crate clean; the session's full suite (default 120 + tokio + async + loom 12 + distributed 11 + signaling-client 3, and 31 TS tests) is green. `make check`'s only red remains the pre-existing host-sensitive `benchmark-check` staleness (you chose full publish over regenerating BENCHMARKS.md).
+- **Commit + tag** — `d17e09c` "release v0.9.0", tag `v0.9.0`, pushed to `main`.
+- **crates.io** — `cargo publish` → **lazily v0.9.0 published** (irreversible; yank-only).
+- **GitHub release** — https://github.com/btakita/lazily-rs/releases/tag/v0.9.0 (generated notes).
+
+What shipped since 0.8.0:
+- `distributed` — `RemoteOp` + per-peer permission allowlist (#39c5)
+- `signaling-client` — async Rust client for the signaling endpoint (#s0fc)
+- arc-swap lock-free `ThreadSafeContext` cached reads (#vd5v — a documented contention tradeoff after the #xtwf A/B)
+- (in-repo, not in the crate) the #yxjw Cloudflare Worker + `@lazily/signaling` TS client under `signaling/`
+
+Queue fully drained. Note: `@lazily/signaling` (the npm package) is **not** published — only the Rust crate went to crates.io. Say the word if you want the TS package published to npm too.
+<!-- agent:boundary:61cb466e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +116,7 @@ Queue drained — `#xtwf` and `#s0fc` both consumed.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#xtwf]~
 - ~do [#s0fc]~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

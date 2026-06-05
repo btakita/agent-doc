@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -29,161 +29,12 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-214204.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260605-002451.md`*
 
 Compacted content:
-- Archived 5 response topic(s): Frontmatter pipeline fields & reentrant phases; #finalize-owned-pane-response-patchback remaining work; #reentrant-phase5-integration & #finalize-owned-pane-response-patchback; 2 more
+- Archived 9 response topic(s): JB Run Agent Doc stall + #finalize-owned-pane-response-patchback; snapshot resync; JB stall + queue items; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: JB Run Agent Doc stall + #finalize-owned-pane-response-patchback — glm-5.1
-
-Two fixes implemented, tested, and installed:
-
-#### 1. JB `Run Agent Doc` stalls after 1 turn (#opencode-jb-stall)
-
-**Root cause:** When `busy_dispatch_only_should_wait_for_ready()` skipped the 60s wait because a queue fallback existed (`prompt_context.is_some()` from JB), neither the ready-prompt recovery nor the timeout-idle recovery ran. The project controller projected the actor as `Busy` even though the opencode pane was idle (no busy cue in the bottom 12 lines). Every subsequent JB Run Agent Doc queued into `agent:queue auto` instead of dispatching, and the queue never drained.
-
-**Fix:** Added an **eager busy-cue check** in `route_via_authoritative_actor()` (route.rs:4197) — when dispatch-only, actor is Busy, wait was skipped, and the live pane shows no busy cue, promote the stale Busy projection to Ready and dispatch immediately.
-
-```
-route_eager_busy_cue_recovery file=... pane=... harness=opencode busy_cue=false
-```
-
-#### 2. #finalize-owned-pane-response-patchback recovery adoption
-
-**Plan step 5 implemented:** When the codex_final_gate detects an abandoned recursive-direct-invocation cycle with no captured response, but a response heading (`### Re:`) is already visible in `agent:exchange` (manually patched in), the gate adopts it idempotently instead of blocking. New `exchange_tail_has_response_heading()` helper. Original block (exit 2) preserved when no response heading exists.
-
-**Files:** `route.rs` (eager busy-cue recovery), `session_check.rs` (patchback adoption + helper + regression test).
-
-**Verification:** `make check` 2256 passed, 2 pre-existing failures unrelated. Binary rebuilt and installed.
-
-### Re: snapshot resync — glm-5.1
-
-> **Queue prompt:**
->
-> do [#finalize-owned-pane-response-patchback]
-
-
-Snapshot resync after repair commit.
-
-### Re: JB stall + queue items — glm-5.1
-
-JB stall fixed (eager busy-cue check, route.rs). Frontmatter step/run_id not yet implemented. Recommend queue: start/stop (Option B). Queue driving exchange prompts is follow-up. Review management: split actionable items + annotations.
-
-### Re: queue semantic framework + harness parity — opus-4-8
-
-Took ownership (`agent: claude`). Evaluated the semantic framework you proposed. Recommendation: **collapse all queue activation onto a single tri-state frontmatter key `queue:`**, and retire both `auto` (marker attribute) and `queue_active` (boolean) into deprecated input aliases.
-
-**Recommended model**
-
-| frontmatter | meaning | replaces |
-|-------------|---------|----------|
-| `queue: start` (alias `queue: go`) | active — drive the queue now | `queue_active: true` + marker `auto` |
-| `queue: stop` | inactive — halt | `queue_active: false` |
-| (absent) | unmanaged / inactive | absence of both |
-
-**Why a verb tri-state, not `queue_auto: true` or `queue: auto`/`stop`:** `queue_active` is a boolean — it records *state* but loses *intent*, and lives in a different place than `auto`, so the two drift. A verb (`start`/`stop`/`go`) is an imperative that reuses agent-doc's existing directive grammar — `do #id`, `run queue`, and the `--- start` / `--- stop` control fences already in the queue body. One vocabulary, one concept. And unlike `auto`, a single key with start/stop is symmetric, so the bidirectionality you want is structural rather than a sync rule: there is exactly one field to read and write.
-
-**Bidirectional / migration (normalize-on-read):**
-- `&lt;!-- agent:queue … auto --&gt;` → normalizes to `queue: start`, strips `auto` from the marker.
-- `queue_active: true|false` → normalizes to `queue: start|stop` (kept as deprecated input so existing docs — including this one — keep working).
-- `go` ≡ `start`; drain sets `queue: stop` (today's "auto removed, queue_active cleared", one field); manual `queue: stop` never re-adds start.
-
-**Harness parity (your point 5):** the three continuation paths already gate on `queue_active`/`auto` — Claude Code `/loop`, the Codex Stop-hook (`active_auto_queue_prompt`), and the OpenCode auto-loop. This is mostly a read-path consolidation: they all read the unified `queue:` state, and preflight keeps emitting `queue_active`/`queue_trigger` derived from it. So `queue: start`/`go` starts and drains identically under Codex and Claude Code, matching OpenCode.
-
-Captured as plan `tasks/agent-doc/plan-queue-state-frontmatter-unification.md` (4 phases) and backlog `[#queue-state-unify]`. The separate "drive `agent:exchange` prompts into backlog then prepend their ids to the queue" prompt composes on top of this state model — kept as its own item, not folded in.
-
-### Re: implemented #queue-state-unify (phase 1+2) — opus-4-8
-
-Implemented the unified queue control you selected. Committed, tested, isolation-verified.
-
-#### What landed (`src/agent-doc` `3f9b32d4`, superproject `568ff2fd8`)
-
-- **`QueueControl` enum** — `start`/`go` → active, `stop` → inactive. Lenient parse (case/whitespace-insensitive); an unknown value (typo) is ignored, never flips activation.
-- **`Frontmatter.queue` field + `normalize_queue_control()`** — folds a recognized `queue:` value onto the existing `queue_active` boolean in **both** parse paths. So every existing reader — preflight activation, Claude `/loop` continuation, Codex Stop-hook, OpenCode auto-loop — honors `queue: start|go|stop` through one read path, no per-harness wiring. The canonical key wins over a stale `queue_active:`.
-- `queue_active:` and the `auto` marker stay accepted as **deprecated input** (back-compat; this doc keeps working).
-- Spec updated (`specs/07-orchestration-commands.md`); 7 core + 2 orchestration tests.
-
-This satisfies your core ask — **`queue: start` / `queue: go` now activates the queue identically under Claude/Codex/OpenCode**, and `queue: stop` halts it.
-
-#### Verification
-
-Full orchestration lib suite in a clean-HEAD sibling worktree (with my files applied): **2257 passed / 2 failed**. The 2 failures (`route::tests::fresh_start_ack_outcome…`, `…rejects_codex_footer_without_prompt`) are **pre-existing route prompt-detection failures at HEAD** on this branch — they fail on clean HEAD without my change too, and sit in the concurrent session's `route.rs` area. Not introduced here.
-
-#### Boundaries (honest)
-
-- **Not built/installed live yet.** The working tree carries a concurrent session's uncommitted `route.rs`/`session_check.rs`; a `cargo install` would bundle that incomplete work. Live install is deferred until it lands — the code is committed + green for its own scope.
-- **Phases 3–4 remain** (`#queue-state-unify`): writer emitting `queue:` / drain → `queue: stop`, the `auto` → `queue: start` normalize-on-write migration, and harness-parity doc rewrites. The read path is the high-value slice and it's done.
-
-#### Your new queue item
-
-Captured *"Implement `run_id` + `step` frontmatter…for re-entrancy / pipeline state"* as backlog `[#fm-run-id-step]` (relates the reentrant-finalize-pipeline plan). It's a separate substantial feature — flagged, not folded into this turn.
-
-### Re: test suite green + marker control (phase 3) — opus-4-8
-
-Did the test-suite fix you asked for, and shipped the marker-side queue control. All committed.
-
-#### Test suite — fixed, `make check` green (exit 0, 0 failures)
-
-Root cause of the 2 pre-existing route failures: `ready_prompt_candidate` treated a Codex **status/footer-only** capture (`gpt-5.5 high · … Context 70% used`, no `›` prompt) as dispatch-ready. Codex always renders a real `›` prompt when ready, so a footer alone is not ready — only OpenCode treats a bare footer/idle splash as ready. Split the branch by harness. `src/agent-doc` `40859a62`. Both `ready_prompt_candidate_rejects_codex_footer_without_prompt` and `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` now pass; verified green in a clean-HEAD worktree (independent of the concurrent uncommitted `route.rs` work, which I left untouched).
-
-#### Marker control `start`/`go`/`stop` — phase 3 (`60a466af`)
-
-`&lt;!-- agent:queue go --&gt;` / `start` now fresh-activates the queue (Auto trigger, like legacy `auto`); `stop` halts + clears; the token is stripped on drain/halt; `start`/`go`/`stop` are recognized (no typo warning). With phase 1+2, `queue: go` in frontmatter also activates. 5 new tests.
-
-#### Why your `go` warned and the queue items didn't strike
-
-Both are the **same root cause**: the *live* `agent-doc` binary predates my commits (install is deferred — the working tree still carries another session's uncommitted `route.rs`/`session_check.rs`, so a `cargo install` would bundle their incomplete work). So the running binary:
-- doesn't recognize marker `go` → emits `misplaced_component_attr` and ignores it;
-- doesn't recognize `queue: go` → the queue never activated → **nothing consumed the heads, so no `~strikethrough~`**.
-
-Your strikethrough expectation is correct existing behavior — it just never fired because the queue stayed inactive under the old binary. Once the concurrent route work lands and I can `cargo install`, marker `go` / `queue: go` will activate and the consume pass will strike completed `do [#id]` heads. (Note: the queue heads `- [#fm-run-id-step]` / `- [#queue-state-unify]` are bare `[#id]` refs, not `do [#id]` directives — the strike/consume pass keys off `do [#id]`.) I did not hand-strike them: striking is the binary's job and a manual edit would be lossy.
-
-#### State
-
-Committed: phase 3 `60a466af`, route fix `40859a62`, superproject `66a841dfc`. `#queue-state-unify` remains for phase 4 (writer emits canonical `queue:`) + the live install once the concurrent work lands.
-
-### Re: installed — `queue: go` / marker `go` now live — opus-4-8
-
-Done. Built + installed both binaries; the feature works live.
-
-- **tagpath lint fix** (`src/tagpath` `9289827`): `start`/`go`/`stop` are now valid bare `agent:queue` markers, so `&lt;!-- agent:queue go --&gt;` no longer trips `agent-doc/malformed-attr`. 114 lib tests pass. agent-doc builds against local `../tagpath` via the `.cargo/config.toml` patch.
-- **`make check` green**; installed both binaries (`cargo install --path .` + `cargo build --release`).
-- **Live verify:** preflight now reports `queue_active: true`, `queue_trigger: auto`, zero warnings — `go` is recognized and activates the queue; the lint-gate no longer blocks it.
-
-Your `[#fm-run-id-step]` / `[#queue-state-unify]` heads are bare `[#id]` refs, not `do [#id]` — prefix with `do ` to have the queue drive them. `#queue-state-unify` gated (phases 1-3 live; phase 4 = writer emits canonical `queue:`). Not auto-driving the big features without an explicit `do`.
-
-### Re: queue reorder — opus-4-8
-
-Reorder registered: `[#queue-state-unify]` is now the head, then `[#tagpath-lint-queue-control]`, then `[#fm-run-id-step]`.
-
-These are still **bare `[#id]` refs, not `do [#id]` directives**, so the live queue treats them as references and won't execute them. To have the active queue actually drive a head, prefix it with `do ` — e.g. change `- [#queue-state-unify]` to `- do [#queue-state-unify]`. (That's the same `do` grammar as the rest of the queue; bare `[#id]` stays a pointer so reordering/prioritizing doesn't accidentally kick off work.)
-
-Status of the reordered heads:
-- `[#queue-state-unify]` — phases 1-3 shipped + live; **phase 4** remains and is the riskiest slice (switching the writer to emit canonical `queue:`/drain→`queue: stop` instead of `queue_active:`, which touches the spurious-drift + strip-queue-active invariants in `closeout.rs`/`git.rs`). I'll implement it on an explicit `do [#queue-state-unify]`, ideally on its own focused turn.
-- `[#tagpath-lint-queue-control]` — **done** (`src/tagpath 9289827`, installed); it can be struck/reaped.
-- `[#fm-run-id-step]` — not started; `do [#fm-run-id-step]` to drive.
-
-Tell me `do [#queue-state-unify]` (or any head) and I'll run it.
-❯ do [#queue-state-unify]. #spec-test-build-install-commit-push
-### Re: do [#queue-state-unify] — phase 4 shipped — opus-4-8
-
-Done — `#queue-state-unify` phase 4 implemented, tested, built, installed, committed, and pushed (your `#spec-test-build-install-commit-push` preset).
-
-#### What changed (`src/agent-doc` `f256ff71`)
-The queue-maintenance writer now persists the **canonical `queue:` control** instead of `queue_active:`. `frontmatter::merge_queue_state` writes `queue: start` on activation and `queue: stop` on drain/halt, clearing any legacy `queue_active:` line in the same write. All 14 write sites (preflight / route / write) migrated.
-
-Drift-safety preserved: the replay-hash and boundary-compare normalizers now strip `queue:` and `queue_active:` together, so a legacy `queue_active:` and a migrated `queue: stop` compare equal — no snapshot/HEAD churn loop. The metadata-drift authority logic reads via `live_continuation_head` (normalized field), so it needed no change. Reads still accept `queue_active:` as deprecated input.
-
-#### Spec + tests + build/install + push
-- Spec updated (`specs/07-orchestration-commands.md`).
-- Core `merge_queue_state` round-trip test + migrated active-write assertions to `queue: start|stop` across the preflight/route/finalize/run suites (preserved-legacy assertions kept on `queue_active:`).
-- `make check` green (exit 0, clippy clean). Both binaries reinstalled (`cargo install` + `cargo build --release`).
-- Pushed: tagpath `9289827` (main), agent-doc `f256ff71` (`20260422/codex-agent-backend`), superproject `d80595d2c` (main). CI is running on the agent-doc push.
-
-#### Status
-`#queue-state-unify` is now **fully implemented and live** across all phases (canonical `queue:` frontmatter + marker `start`/`go`/`stop` + writer migration). The only thing left is harness-parity instruction-surface doc rewrites (Claude `/loop` / Codex Stop-hook / OpenCode auto-loop wording) — minor polish, not behavior.
-<!-- agent:boundary:8931bdaf -->
+<!-- agent:boundary:9d110fc2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -318,13 +318,29 @@ It now documents:
 `help(Cart)` / IDE hovers now show the interface and usage. Verified the suite stays green (**22 passed, 6 skipped**); the `>>>` block is documentation only — doctests aren't collected (no `--doctest-modules`), so it won't make the suite hit the network.
 
 `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:78a633c3 -->
+
+### Re: PriceClient docstring — interface + example added — opus-4-8
+
+> **Queue prompt:**
+>
+> The PriceClient pydoc should include the interface and example usage.
+
+
+Done. Expanded the `PriceClient` class docstring (committed in the submodule, `solution` `ahead 5`, **not pushed**).
+
+It now documents:
+- **Interface** — `get_price(product) -> Decimal`, the URL it issues, and the error contract (`ProductNotFound` on 404, `PriceApiError` on other non-200 / malformed payload).
+- **Known products** — the five valid names.
+- **Examples** — live usage (`get_price("cornflakes") -> Decimal('2.52')`) and the offline `httpx.MockTransport` injection pattern used by the tests.
+
+Suite still green (**22 passed, 6 skipped**); the `>>>` blocks are documentation only (doctests not collected). Both `Cart` and `PriceClient` now carry full interface + example docstrings.
+
+`#next-steps-2` stays gated for your review.
+<!-- agent:boundary:061a9ff0 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- ~The Cart pydoc should include the interface and example usage.~
-- The PriceClient pydoc should include the interface and example usage.
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

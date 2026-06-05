@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -176,7 +176,7 @@ There's **no token-efficient query** of `agent:review` — to triage you must re
 Ship Stage 1 (`review list`) first — smallest high-value piece. Do you want the Stage 2 stale-review **lint** (warn-only), or skip it for now?
 
 Net: feed-back already exists (`review ungate-tasks`); the missing query (`#review-list-query`) is the unlock for triaging the 62 items, now planned + backlogged.
-<!-- agent:boundary:82a194a9 -->
+<!-- agent:boundary:922307db -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

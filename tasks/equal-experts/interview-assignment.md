@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -492,12 +492,23 @@ Done (same commit, submodule `solution` `ahead 9`, **not pushed**).
 - **Standing practice:** I'll run the full suite — integration included — every turn from now on and report the result, per your instruction.
 
 README updated (the test section now documents default-on integration + the `SKIP_INTEGRATION` opt-out). `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:c21df08a -->
+### Re: #next-steps-2 re-verified — green, still gated — opus-4-8
+
+Re-verified per your choice; **no state change** — `#next-steps-2` deliberately stays gated in Review (not done).
+
+- **Full suite: 40 passed** (33 unit + 7 live-API integration), run this turn including the real Price API.
+- Not approved, not done, **not pushed**. Submodule `solution` is `ahead 9` of origin, local only.
+
+Note: a bare `- [#next-steps-2]` in the active queue tripped the dispatch guard (it reads as "do this backlog item", but the item lives in Review, not the backlog). I cleared the queue line and left the gate untouched, so we're unblocked without changing review state.
+
+When you're ready, just say the word:
+- **"approve"** → move it to Done (no push), or
+- **"submit"** → push the `solution` branch to the EqualExperts remote (and, on a separate explicit go, mark the assignment complete).
+<!-- agent:boundary:a86eeb9a -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- [#next-steps-2]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

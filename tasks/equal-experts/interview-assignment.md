@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -372,11 +372,12 @@ Yes, the *tests* use mock data (by design, for offline determinism). The problem
 3. **Fixed the misleading docstring example** to be product-aware so copying it no longer yields 2.52 for everything.
 
 Offline suite: **27 passed, 7 skipped**. `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:54b4f4de -->
+<!-- agent:boundary:e5c5bd72 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- I see what happened, I used the MockTransport in the tests, which always returns 2.52 for every product. Can we have the MockTransport provide some variation in prices to ensure our tests are robust against product price differences?
 <!-- /agent:queue -->
 
 ## Backlog

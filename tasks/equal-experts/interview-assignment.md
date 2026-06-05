@@ -336,7 +336,43 @@ It now documents:
 Suite still green (**22 passed, 6 skipped**); the `>>>` blocks are documentation only (doctests not collected). Both `Cart` and `PriceClient` now carry full interface + example docstrings.
 
 `#next-steps-2` stays gated for your review.
-<!-- agent:boundary:061a9ff0 -->
+
+### Re: "always 2.52" — no production bug; the mock + a weak test fooled you — opus-4-8
+
+> **Queue prompt:**
+>
+> I manually tested the products with the api and the prices are incorrect. Always 2.52 for all products. cheerios should be 8.43. Are we using mock data? Why did the test pass?
+
+
+Good catch, and your instinct to distrust the green suite was right. I investigated rather than assumed. Findings:
+
+#### The real API and our code are correct
+I curled all five endpoints and ran the actual `PriceClient` against the live API:
+
+| product | price |
+|---|---|
+| cheerios | **8.43** |
+| cornflakes | 2.52 |
+| frosties | 4.99 |
+| shreddies | 4.68 |
+| weetabix | 9.98 |
+
+`PriceClient().get_price("cheerios")` returns `8.43`. So production code hits the real API and returns correct per-product prices. **No bug in the shipping code.**
+
+#### Where "always 2.52" came from — mock data
+Yes, the *tests* use mock data (by design, for offline determinism). The problem: the old mock handler returned a **fixed** `{"price": 2.52}` and ignored the requested product. If you ran that snippet — e.g. the offline example that was in the `PriceClient` docstring — across all products, every one comes back `2.52`. That's the fake ignoring the product, not the API.
+
+#### Why the test passed (the real defect — in the test, not the code)
+- The **unit** tests mock HTTP, so they validate parsing/logic, never real prices.
+- The **integration** smoke test *did* hit the real API, but I only asserted `price > 0` and internal consistency — so it passed whether cheerios was 8.43 or 2.52. **That was too weak.** That's the honest answer to "why did the test pass?".
+
+#### What I fixed (committed in the submodule, `ahead 6`, not pushed)
+1. **Integration test now asserts exact live prices** per product **and** that the five are distinct — it would now fail loudly on an "always 2.52". Verified: `RUN_INTEGRATION=1 pytest` → 7 passed against the real API.
+2. **Mocks are now product-aware** via a shared `fake_price_api` fixture (`tests/conftest.py`) keyed by a real catalogue — cheerios returns 8.43, not a blanket 2.52. This also lands the "consolidate the fake" idea you raised earlier: the response shape lives in one place.
+3. **Fixed the misleading docstring example** to be product-aware so copying it no longer yields 2.52 for everything.
+
+Offline suite: **27 passed, 7 skipped**. `#next-steps-2` stays gated for your review.
+<!-- agent:boundary:54b4f4de -->
 <!-- /agent:exchange -->
 
 ## Queue

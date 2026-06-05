@@ -34,15 +34,41 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 3 response topic(s): do [#route-ready-wait-fast-fail]; why does agent-doc recursively shell out the same command; do Option B + add an Option A plan
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1d13d954 -->
+
+### Re: do [#queue-no-stall-on-head-edit] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
+
+
+Done. The queue auto-loop no longer stalls when you edit the **head** prompt between cycles on a settled buffer — it adopts the edit and keeps looping. It only pauses while you're actively mid-edit.
+
+**What changed** (`preflight.rs`, `run_queue_maintenance` `item_modified` branch):
+
+- Before: any head-prompt change between cycles → hard halt (`queue_halted=item_modified`): stripped `auto`, forced `queue_active:false`. That stalled the loop on *every* settled head edit and required a manual restart.
+- After: the halt is gated on a live typing indicator. If the buffer is **settled** (`is_typing_via_file` false — no editor tracking, or the indicator has gone idle), the loop **adopts the edited head as the new prompt** and stays armed (`auto` + `queue_active:true` preserved). Only when you're **actively mid-edit** does it keep the old pause, so it never grabs a half-typed head.
+- New helper `adopt_edited_queue_head_into_snapshot` copies the live file's queue region into the snapshot, so closeout queue-consume proves the same head and the next cycle sees no spurious `item_modified` edit (idempotent — verified by a second maintenance pass in the test).
+
+Tail/non-head edits already didn't stall, and that path is unchanged — so "proceed to the next item while the operator types in a later item" already held.
+
+**Tests** (`preflight.rs`):
+- `preflight_adopts_edited_queue_head_when_buffer_settled` — settled head edit adopts + continues (`queue_halted=None`, active, `queue_prompts=[newhead, nexthead]`), snapshot absorbs the new head, follow-up pass doesn't re-halt.
+- `preflight_pauses_when_active_queue_head_changes_mid_edit` — repurposed the old halt test; now marks active typing so the mid-edit pause still halts.
+- Updated `queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt` to mark active typing so it still exercises the halt + live-buffer convergence path.
+
+**Verification:** orchestration crate `2279 passed, 0 failed`; `agent-doc` lib `23 passed`; `make check` exit 0. Built `--release` + `cargo install` (both binaries refreshed). Submodule committed `0d84ec15` + pushed (`20260422/codex-agent-backend`); superproject pointer bump `fdc2e826d`.
+
+Next queue item is `do [#codex-mcp-server]` — that's the deferred Option A MCP-server epic (its own draft plan), not a one-cycle `--done`; I'll handle its closeout appropriately when the loop reaches it.
+<!-- agent:boundary:546a1f07 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~do [#route-ready-wait-fast-fail]~
-- ~Why is agent-doc recursively shelling out the same agent-doc command? Fix this pipeline. Should we move to a mcp instead or can the cli be fixed to not recursively call itself with codex?~
-- do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.
-- ~do [#codex-self-reinvoke-prevent]~
-- do [#codex-mcp-vs-cli-reinvoke]
+- ~do [#queue-no-stall-on-head-edit]: If the prompt is not complete, wait until it is complete if it is the current item in the queue. If it is under the next item for the queue to process, proceed to the next item while the operator is typing in the prompt.~
+- ~do [#codex-mcp-vs-cli-reinvoke]~
+- do [#codex-mcp-server]
+- The agent-doc turn on equityfundingsource.md stalled on the finalize step with the message `My response can't commit because IntelliJ and the agent are racing on the doc, and I'm independently blocked on the images. I'm halting rather than fighting the buffer.`. Fix this race condition.
+- JB `Run Agent Doc` on monsterrodholders.md with `queue: stop` and `agent:queue go` should start the queue.
 <!-- /agent:queue -->
 ###
 <!--
@@ -58,7 +84,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#codex-mcp-server] [recommended] Option A (deferred, root-cause fix for the Codex recursive self-shell-out): drive Codex agent-doc via an MCP server so Codex calls tools against a persistent session instead of spawning a fresh CLI in the owner pane — removes the recursion structurally. Supersedes the Option B interim (#codex-self-reinvoke-prevent, shipped) for Codex once the MCP surface exists. Plan: tasks/agent-doc/plans/codex-mcp-server-option-a.md.
-- [ ] [#queue-no-stall-on-head-edit] [recommended] queue auto-loop halts (queue_halted=item_modified) when the user edits the HEAD prompt between cycles (preflight.rs item_modified branch ~3748-3814 + queue::detect_head_prompt_modified). Tail appends and non-head edits already do NOT stall. Refinement: instead of stripping auto + forcing queue_active:false on a head edit, adopt the edited head as the new prompt and keep the loop armed so user edits continue rather than stall. CAVEAT: must not grab a half-typed head — gate adopt-and-continue on a settled buffer (no live_prompt_drift_after_preflight) and keep the pause only while actively mid-edit. Requested 2026-06-05.
 <!-- /agent:backlog -->
 
 ## Review

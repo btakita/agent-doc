@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -131,14 +131,14 @@ So "auto-recognize a bare `#x` as the id" is a real **design tradeoff**, not jus
 **My recommendation:** the durable fix is the one I've already adopted — I always write the id explicitly as `[#descriptive-name]`, so you get readable ids without the binary having to guess. If you'd rather I *also* implement the bare-`#x` → `[#x]` auto-correction (accepting that a leading bare tag becomes the id), say so and I'll build it with tests. Otherwise I'll leave the parser as-is.
 
 Backlog now reads cleanly: `[#codex-self-reinvoke-prevent]`, `[#optional-do-re]`, `[#22a8]`.
-<!-- agent:boundary:d766a25d -->
+<!-- agent:boundary:591ba2d0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- agent-doc should recognize `#codex-self-reinvoke-prevent` as a valid id in the backlog and use that id for the backlog item. agent-doc should also correct the format as `[#codex-self-reinvoke-prevent]`.
-- The agent added #codex-self-reinvoke-prevent into the backlog, which is malformed. It should be `[#codex-self-reinvoke-prevent]`.
+- ~agent-doc should recognize `#codex-self-reinvoke-prevent` as a valid id in the backlog and use that id for the backlog item. agent-doc should also correct the format as `[#codex-self-reinvoke-prevent]`.~
+- ~The agent added #codex-self-reinvoke-prevent into the backlog, which is malformed. It should be `[#codex-self-reinvoke-prevent]`.~
 - The queue should not stall if the user edits the queue.
-- do [#csrp]
+- ~do [#csrp]~
 - do [#optional-do-re]. Do the default small fix.
 - do [#22a8]. Do the default auto-delete when the turn ends.
 - JB `Fix Document` + related agent-doc task should finish any unfinished turn. 

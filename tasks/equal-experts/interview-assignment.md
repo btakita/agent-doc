@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -162,11 +162,12 @@ python -m pytest    # 22 passed
 - AI-usage disclosure estimates ~95% AI-generated — adjust to your comfort before submitting.
 
 Tell me what to change, or say "submit" when you're ready and I'll push to the EqualExperts remote + (only on your explicit go) mark complete.
-<!-- agent:boundary:97588433 -->
+<!-- agent:boundary:0be74f3b -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- Where is the venv? Does the README stipulate that I should manually test the app or are the tests sufficient?
 <!-- /agent:queue -->
 
 ## Backlog

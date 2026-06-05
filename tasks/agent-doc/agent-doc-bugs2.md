@@ -55,7 +55,7 @@ Token-efficient triage of `agent:review` — one compact line per gated item: `#
 Stage 2 (warn-only stale-review lint) and Stage 3 (selective `ungate-tasks --ids/--tag`) per `tasks/agent-doc/plans/review-gated-item-management.md`. **Stage 2 needs your call**: warn-only lint flagging gated items with no `NEXT:`, or skip? I left it out rather than guess.
 
 Marking `#review-list-query` done.
-<!-- agent:boundary:447af293 -->
+<!-- agent:boundary:eccef8e3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -77,7 +77,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 

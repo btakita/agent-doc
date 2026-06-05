@@ -263,6 +263,55 @@ pub struct StreamConfig {
     pub max_lines: Option<usize>,
 }
 
+/// Live finalize-pipeline state tracker (`#fm-run-id-step`, Phase 5 of
+/// `tasks/agent-doc/plans/reentrant-finalize-pipeline.md`).
+///
+/// Surfaces the current cycle's identity and step directly in frontmatter so any
+/// `agent-doc` invocation — or an editor plugin / JB `Run Agent Doc` action — can
+/// read where a crashed or resumed cycle left off without replaying the git log or
+/// parsing `.agent-doc/cycle_state`.
+///
+/// This is ephemeral runtime state, not user configuration: the orchestration layer
+/// writes it at each phase transition and clears it once the cycle reaches a terminal
+/// phase. `step` is a free-form string (the orchestration `CyclePhase` rendered
+/// lowercase, e.g. `preflight_started` / `response_captured` / `write_applied` /
+/// `committed`) so an older core build round-trips a newer phase name without data
+/// loss, and so `agent-doc-core` need not depend on the orchestration `CyclePhase`
+/// enum.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDocPipeline {
+    /// Logical turn identifier — the backlog/queue task ID driving this cycle
+    /// (e.g. `#fm-run-id-step`), or an auto-generated id when the queue prompt has
+    /// no backlog match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    /// Cycle-state run identifier (the `cycle-<millis>` capture/cycle id) for
+    /// correlating frontmatter state with `.agent-doc/captures` + cycle_state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// Current pipeline step — the orchestration `CyclePhase` rendered as a
+    /// lowercase string. Free-form so a newer phase round-trips through an older
+    /// core build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    /// Backlog ID for the queued task, when the driving queue prompt resolved to
+    /// (or created) a tracked backlog item. Distinct from `turn_id` only when the
+    /// turn id is auto-generated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_task_id: Option<String>,
+}
+
+impl AgentDocPipeline {
+    /// True when no field is populated. Used by `skip_serializing_if` so a drained
+    /// or terminal cycle leaves no `agent_doc_pipeline:` block behind in the document.
+    pub fn is_empty(&self) -> bool {
+        self.turn_id.is_none()
+            && self.run_id.is_none()
+            && self.step.is_none()
+            && self.queue_task_id.is_none()
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PendingCaptureGuardMode {
@@ -583,6 +632,16 @@ pub struct Frontmatter {
         rename = "agent_doc_security_review"
     )]
     pub security_review: Option<String>,
+    /// Live finalize-pipeline state tracker (`#fm-run-id-step`). Ephemeral runtime
+    /// state written at each cycle phase transition and cleared at a terminal phase;
+    /// surfaces `run_id` / `step` / `turn_id` / `queue_task_id` for crash re-entrancy
+    /// and observability without a dedicated git commit. See [`AgentDocPipeline`].
+    #[serde(
+        default,
+        skip_serializing_if = "AgentDocPipeline::is_empty",
+        rename = "agent_doc_pipeline"
+    )]
+    pub pipeline: AgentDocPipeline,
 }
 
 /// Resolve a user-authored prompt preset reference to the frontmatter key.
@@ -638,6 +697,7 @@ impl Frontmatter {
             || self.dispatch.is_some()
             || self.collaboration.is_some()
             || !self.prompt_presets.is_empty()
+            || !self.pipeline.is_empty()
     }
 
     /// Resolve the canonical (format, write) pair from all three fields.
@@ -812,6 +872,46 @@ pub fn set_session_id(content: &str, session_id: &str) -> Result<String> {
 pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.resume = Some(resume_id.to_string());
+    write(&fm, body)
+}
+
+/// Update the live finalize-pipeline tracker in a document's frontmatter,
+/// preserving every other field and the body (`#fm-run-id-step`).
+///
+/// Each `Some` argument overwrites that field; each `None` leaves the existing
+/// value untouched. Use [`clear_pipeline_state`] to drop the whole
+/// `agent_doc_pipeline:` block at a terminal cycle phase.
+pub fn set_pipeline_state(
+    content: &str,
+    run_id: Option<&str>,
+    step: Option<&str>,
+    turn_id: Option<&str>,
+    queue_task_id: Option<&str>,
+) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    if let Some(v) = run_id {
+        fm.pipeline.run_id = Some(v.to_string());
+    }
+    if let Some(v) = step {
+        fm.pipeline.step = Some(v.to_string());
+    }
+    if let Some(v) = turn_id {
+        fm.pipeline.turn_id = Some(v.to_string());
+    }
+    if let Some(v) = queue_task_id {
+        fm.pipeline.queue_task_id = Some(v.to_string());
+    }
+    write(&fm, body)
+}
+
+/// Drop the live finalize-pipeline tracker from a document's frontmatter,
+/// preserving every other field and the body (`#fm-run-id-step`).
+///
+/// Called at a terminal cycle phase so a drained cycle leaves no stale
+/// `agent_doc_pipeline:` block behind. No-op when the block is already absent.
+pub fn clear_pipeline_state(content: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.pipeline = AgentDocPipeline::default();
     write(&fm, body)
 }
 
@@ -1213,6 +1313,72 @@ mod tests {
     }
 
     #[test]
+    fn pipeline_is_empty_default() {
+        let p = AgentDocPipeline::default();
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn parse_pipeline_all_fields() {
+        let content = "---\nagent_doc_pipeline:\n  turn_id: \"#fm-run-id-step\"\n  run_id: cycle-1780600334196\n  step: response_captured\n  queue_task_id: \"#fm-run-id-step\"\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.pipeline.turn_id.as_deref(), Some("#fm-run-id-step"));
+        assert_eq!(fm.pipeline.run_id.as_deref(), Some("cycle-1780600334196"));
+        assert_eq!(fm.pipeline.step.as_deref(), Some("response_captured"));
+        assert_eq!(fm.pipeline.queue_task_id.as_deref(), Some("#fm-run-id-step"));
+        assert!(!fm.pipeline.is_empty());
+    }
+
+    #[test]
+    fn empty_pipeline_is_not_serialized() {
+        // A drained/terminal cycle must leave no `agent_doc_pipeline:` block behind.
+        let fm = Frontmatter {
+            session: Some("abc".to_string()),
+            ..Default::default()
+        };
+        let out = write(&fm, "Body\n").unwrap();
+        assert!(!out.contains("agent_doc_pipeline"));
+    }
+
+    #[test]
+    fn set_pipeline_state_merges_without_disturbing_other_fields() {
+        let content =
+            "---\nagent_doc_session: abc-123\nagent: claude\nqueue: start\n---\n\n## Body\n";
+        // Set run_id + step, leave turn_id/queue_task_id untouched.
+        let updated =
+            set_pipeline_state(content, Some("cycle-99"), Some("write_applied"), None, None).unwrap();
+        let (fm, body) = parse(&updated).unwrap();
+        assert_eq!(fm.pipeline.run_id.as_deref(), Some("cycle-99"));
+        assert_eq!(fm.pipeline.step.as_deref(), Some("write_applied"));
+        assert!(fm.pipeline.turn_id.is_none());
+        // Other frontmatter fields and the body survive untouched.
+        assert_eq!(fm.session.as_deref(), Some("abc-123"));
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+        assert_eq!(fm.queue_active, Some(true));
+        assert!(body.contains("## Body"));
+
+        // A second merge updates step + turn_id while preserving the prior run_id.
+        let updated2 =
+            set_pipeline_state(&updated, None, Some("committed"), Some("#fm-run-id-step"), None)
+                .unwrap();
+        let (fm2, _) = parse(&updated2).unwrap();
+        assert_eq!(fm2.pipeline.run_id.as_deref(), Some("cycle-99"));
+        assert_eq!(fm2.pipeline.step.as_deref(), Some("committed"));
+        assert_eq!(fm2.pipeline.turn_id.as_deref(), Some("#fm-run-id-step"));
+    }
+
+    #[test]
+    fn clear_pipeline_state_drops_block_only() {
+        let content = "---\nagent_doc_session: abc-123\nagent_doc_pipeline:\n  run_id: cycle-1\n  step: response_captured\n---\n\nBody\n";
+        let cleared = clear_pipeline_state(content).unwrap();
+        assert!(!cleared.contains("agent_doc_pipeline"));
+        let (fm, body) = parse(&cleared).unwrap();
+        assert!(fm.pipeline.is_empty());
+        assert_eq!(fm.session.as_deref(), Some("abc-123"));
+        assert!(body.contains("Body"));
+    }
+
+    #[test]
     fn parse_queue_unknown_value_leaves_queue_active_untouched() {
         // A typo must never silently flip activation.
         let (fm, _) = parse("---\nqueue: bogus\nqueue_active: true\n---\n\n").unwrap();
@@ -1442,6 +1608,7 @@ mod tests {
             queue_prompt_echo_max_chars: None,
             collaboration: None,
             security_review: None,
+            pipeline: AgentDocPipeline::default(),
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

@@ -92,7 +92,7 @@ Fields:
 A plain `.md` is **not** auto-converted into an agent-doc session. `route`, `run`, and `start` fail closed before injecting `agent_doc_session:` frontmatter unless the document opts in. The pure predicate `agent_doc_core::project_config::is_agent_doc_document(rel_path, content, config)` (FFI: `agent_doc_is_session_document(path)`) returns true when ANY of:
 
 1. `documents.auto_session_for_all_md = true` (escape hatch).
-2. Frontmatter carries any agent-doc-managed field — `Frontmatter::has_agent_doc_marker()` (e.g. `agent_doc_session`/`session`, `agent_doc_format`, `agent_doc_write`, `agent_doc_mode`, `agent_doc_stream`, `agent`, `resume`, model overrides, `*_args`, `branch`, `queue_active`, `prompt_presets`). Existing sessions stay sessions.
+2. Frontmatter carries any agent-doc-managed field — `Frontmatter::has_agent_doc_marker()` (e.g. `agent_doc_session`/`session`, `agent_doc_format`, `agent_doc_write`, `agent_doc_mode`, `agent_doc_stream`, `agent`, `resume`, model overrides, `*_args`, `branch`, `queue_active`, `prompt_presets`, `agent_doc_pipeline`). Existing sessions stay sessions.
 3. The project-relative path matches a `documents.include` glob.
 
 When none hold, the gate returns an error naming the opt-in paths (`agent-doc init <file>`, an `agent_doc_format:` field, a `[documents] include` glob, or the escape hatch) and **does not mutate the file**. A malformed frontmatter block bypasses the gate so its own contextual YAML parse error surfaces. `agent-doc init <file>` and `agent-doc claim <file>` remain explicit per-file opt-ins that scaffold. Editor plugins should call the FFI gate so **Run Agent Doc** / SubmitAction is hidden for non-opted-in `.md`.

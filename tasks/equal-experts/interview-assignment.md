@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue: stop
 ---
 
 ## Status
@@ -131,18 +131,54 @@ Done both parts of your queue item.
 - **Session commits stay in agent-loop.** This session-doc cycle commits to agent-loop, and I'll record the submodule pointer bump here too. No `git push` anywhere.
 
 This honours both rules: the deliverable history lives in the submodule (local only), while the agent-doc session machinery stays in agent-loop. Say "scaffold" when you want the `shopping_cart/` package + first failing tests, same commit-local-no-push handling.
-<!-- agent:boundary:4040babf -->
+
+### Re: #next-steps-2 implemented — committed local, not pushed, awaiting your review — opus-4-8
+
+> **Queue prompt:**
+>
+> [#next-steps-2]. Do not push or mark as complete. I need to review.
+
+
+Shopping cart implemented per `PLAN.md` / `SPEC.md`. **Committed in the submodule locally (branch `solution`, `ahead 2` of origin), nothing pushed, not marked complete.** Gated `#next-steps-2` for your review.
+
+#### What landed (`src/equal-experts-neat-exhilarating-friendly-inspiration/`)
+- `shopping_cart/price_client.py` — `PriceClient.get_price(name) -> Decimal`; httpx; `ProductNotFound` (404) / `PriceApiError` (non-200, malformed body); base URL injectable.
+- `shopping_cart/cart.py` — `Cart.add(name, qty)`, accumulates per product; `subtotal` / `tax` (12.5%) / `total`, all `Decimal` rounded **up** to 2dp.
+- `tests/` — **22 tests, all green**. Client tests mock HTTP in-process via `httpx.MockTransport` (no network, no respx); cart tests stub the client. Includes the brief's worked example as an explicit assertion (15.02 / 1.88 / 16.90).
+- `pyproject.toml`, `.gitignore`; `README.md` updated with usage, assumptions/tradeoffs, and the AI-tool-usage disclosure.
+
+#### Verification
+```
+python -m pytest    # 22 passed
+```
+
+#### Deliberately NOT done (per your instruction)
+- **No `git push`** — neither the submodule nor agent-loop is pushed.
+- **Not marked complete** — the SnapCode completion link is untouched.
+
+#### Review pointers
+- Rounding rule (subtotal/tax/total each `ROUND_UP` to 2dp; tax from rounded subtotal) — see README "Assumptions". Easy to switch to line-item rounding if you prefer.
+- Stub prices for non-example products in `test_cart.py` are arbitrary (only cornflakes 2.52 / weetabix 9.98 must match the brief).
+- AI-usage disclosure estimates ~95% AI-generated — adjust to your comfort before submitting.
+
+Tell me what to change, or say "submit" when you're ready and I'll push to the EqualExperts remote + (only on your explicit go) mark complete.
+<!-- agent:boundary:97588433 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue -->
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#next-steps-2] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#next-steps-2] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure
+<!-- /agent:review -->
 
 ## Icebox
 

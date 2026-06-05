@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -515,12 +515,30 @@ Done — added **`AGENT_SESSION.md`** to the submodule (`solution` `ahead 10`, *
 One option to consider: the raw copy includes agent-doc tooling bits (the `agent_doc_*` frontmatter, `prompt_presets`, and the empty `Queue`/`Backlog`/`Review` markers). If you'd rather the submission carry a **clean narrative** — just the Status + Exchange, no tooling markers — say **"trim the session doc"** and I'll produce that version instead.
 
 Full suite still green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
-<!-- agent:boundary:0821cc8a -->
+### Re: README documents agent-doc + superrepo; session copy refreshed — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a copy of this agent doc into the repo. Update the README to refer to the agent doc copy explaining what agent-doc is and what this session document is. Explain how I used the agent-doc including using agent:queue, the agent:exchange, agent:backlog, and agent:review. Explain I'm using a private superrepo to keep the assignment simple...that I would normally have a per project or per client superrepo for full tracability while keeping the project source code clean. commit.
+
+
+Done and committed in the submodule (`solution` `ahead 11`, **not pushed**). No new follow-up items — the directive was fully completed this cycle.
+
+- **`AGENT_SESSION.md` refreshed** to the latest session snapshot (540 lines).
+- **README — new "Development process — agent-doc" section** that:
+  - explains what agent-doc is (document-driven AI pair-programming; the markdown doc is the interface) and links to `AGENT_SESSION.md` as the design record;
+  - describes each managed section — **`agent:queue`** (queued directives), **`agent:exchange`** (the `### Re:` design narrative), **`agent:backlog`** (tracked todos), **`agent:review`** (code-complete, gated on your review);
+  - adds the **superrepo note**: this assignment repo is kept clean by developing inside a private superrepo (this repo as a submodule); normally a per-project/per-client superrepo captures the full design trail for traceability without cluttering the deliverable.
+- Also refreshed the AI Tool Usage test count (now 40 tests).
+
+Full suite green: **40 passed** (incl. live-API integration). `#next-steps-2` stays gated; nothing pushed.
+
+Note: `AGENT_SESSION.md` is a point-in-time snapshot (it can't contain the reply describing its own latest refresh). When you're ready to **submit**, I'd refresh it one last time as part of that push so it's current.
+<!-- agent:boundary:25f93823 -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue auto go -->
-- Add a copy of this agent doc into the repo. Update the README to refer to the agent doc copy explaining what agent-doc is and what this session document is. Explain how I used the agent-doc including using agent:queue, the agent:exchange, agent:backlog, and agent:review. Explain I'm using a private superrepo to keep the assignment simple...that I would normally have a per project or per client superrepo for full tracability. commit.
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

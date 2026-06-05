@@ -34,11 +34,31 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 Compacted content:
 - Archived 8 response topic(s): do [#tagpath-lint-queue-control]; do [#fm-run-id-step]; do [#fmrunid-wire]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:264754db -->
+
+### Re: do [#review-list-query] — opus-4-8
+
+Shipped Stage 1 (`243997ee`, installed). Deferred Stage 2 (lint) since the decision is still open.
+
+#### `agent-doc review list <FILE>`
+Token-efficient triage of `agent:review` — one compact line per gated item: `#id [gate-type] summary #tags`, with a `→ NEXT: …` line when annotated. Filters: `--gate-type`, `--tag` (bare or `#`-prefixed), `--has-next` (actionable), `--no-next` (stale set to split/drop), `--json`.
+
+**Verified live on this doc:** `review list --has-next` returns exactly **1** of the 62 gated items — the Phase 5b write-side item I annotated with `NEXT:`. That's the whole point: 61 items are un-annotated/stale, 1 is actionable, and you can see that in one command instead of reading the component.
+
+#### Also surfaced
+`agent-doc review ungate-tasks <FILE>` already exists (feeds gated items back to the backlog as ungate tasks) — documented it alongside `list` in the pending-ops runbook with the `[gate] summary. NEXT: …` annotation convention.
+
+#### Verification
+- `list_review_items` + filter/extraction unit tests (tags, NEXT, gate-type/tag/has-next filters).
+- `make check`: 708 core + **2272** orchestration, 0 failed; clippy clean. Installed + release-built.
+
+#### Deferred (still open)
+Stage 2 (warn-only stale-review lint) and Stage 3 (selective `ungate-tasks --ids/--tag`) per `tasks/agent-doc/plans/review-gated-item-management.md`. **Stage 2 needs your call**: warn-only lint flagging gated items with no `NEXT:`, or skip? I left it out rather than guess.
+
+Marking `#review-list-query` done.
+<!-- agent:boundary:447af293 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~do [#repair-strike-consumed-head]~
 - do [#review-list-query]
 - monsterrodholders.md had an unfinished turn. The response was not committed. 
 - do [#optional-do-re]
@@ -57,7 +77,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
+- [x] [#review-list-query] [plan] Stage 1 of tasks/agent-doc/plans/review-gated-item-management.md — add 'agent-doc review list <FILE> [--gate-type --tag --has-next --json]': token-efficient query of agent:review (one compact line per gated item: id, gate-type, NEXT summary), filterable, so a quick pass can triage the 62-item list. Read-only, low-risk. Stages 2 (warn-only NEXT lint) + 3 (selective ungate-tasks --ids/--tag) follow.
 - [ ] [#optional-do-re] [plan] Implement optional-do directive + re reference per tasks/agent-doc/plans/optional-do-directive-and-re-reference.md. Stage 1 (queue-only: bare [#id] executes id-backed, re [#id] references without executing) recommended first; Stage 2 (exchange directives + closeout guards) gated on scope confirmation.
 <!-- /agent:backlog -->
 

@@ -7,8 +7,10 @@ prompt_presets:
   '#commit-push': commit all uncommitted files
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue_active: false
 ---
 
 ## Status
@@ -66,14 +68,12 @@ A secondary, weaker reading of "client" is "the caller of your library's public 
 ## Queue
 
 <!-- agent:queue -->
-- Add a git submodule to git@github.com:EqualExperts-Assignments/equal-experts-neat-exhilarating-friendly-inspiration-72a3934e990b.git in src/equal-experts-neat-exhilarating-friendly-inspiration
-- Read the README.md. Add backlog #next-steps for the tasks of the take-home exercise.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#next-steps] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure, (6) push + mark complete at https://app.snapcode.review/submission_links/9c362eaf-9ef0-45f3-8467-0660e3a68754
+- [ ] [#next-steps-2] Implement Equal Experts shopping cart: (1) choose language/framework, (2) add-product with Price API integration (GET https://equalexperts.github.io/backend-take-home-test-data/{product}.json), (3) cart state: subtotal / tax 12.5% / total, rounded up to 2dp, (4) unit tests for client + logic, (5) update README with assumptions + AI usage disclosure, (6) push + mark complete at https://app.snapcode.review/submission_links/9c362eaf-9ef0-45f3-8467-0660e3a68754
 <!-- /agent:backlog -->
 
 ## Icebox

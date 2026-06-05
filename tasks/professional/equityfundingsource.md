@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue_active: true
 ---
 
 ## Status
@@ -32,38 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-062907.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-064822.md`*
 
 Compacted content:
+- Archived 1 response topic(s): [#zwws] Investor dashboard #rpzm phase 2b
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: [#zwws] Investor dashboard #rpzm phase 2b — opus-4-8
-
-> **Queue prompt:**
->
-> [#zwws]
-
-
-Shipped phase 2b of the investor dashboard rework (one phase, per the "queue one phase at a time" note). Spec + tests updated, committed + pushed (EFS `cd4253a`, superproject pointer `3c183f21e`).
-
-#### "I'm interested" on each offer
-- Every available-deal card now has an **I'm interested** button → `POST /api/investor/deals/:id/interested`.
-- The endpoint emails EFS staff a lead and sends the investor a confirmation package via Resend (`lib/investor/interest/notify.ts`, mirroring the application-lead sender). The action always succeeds and reports per-leg email status — a missing/failed email never blocks the click.
-- **Gated, but live-safe:** until an EFS-owned sending domain is verified in Resend (`#f4rq`), testing mode delivers only to the account-allowed `INVESTOR_INTEREST_NOTIFICATION_TO` (added to `wrangler.toml`, defaults to the application-lead sender). The investor-confirmation leg is wired and starts delivering to real investors the moment `#f4rq` lands — no further code change needed.
-
-#### Distributions / statements dead-code removal
-EFS doesn't service loans, so the distribution/statement surfaces are gone:
-- Deleted `distributions.tsx` + `statements.tsx`; removed the `distributions`/`statements` members from `investor_section_T` (UI layout + portal routes), the `SECTION_URLS`/`SECTION_ICONS`/`URLS` entries, and the `GET /api/investor/distributions` route + handler.
-- Dropped the dead distribution metrics from the dashboard endpoint/client and the `INVESTOR_DISTRIBUTIONS` fixture + interface.
-- Kept the pure `gformula` distribution calc helpers — they're general formulas with dedicated tests and no longer wired to any route.
-
-#### Verification
-- `bun test`: **282 pass / 0 fail** (added phase-2b e2e coverage for the interest button, endpoint, Resend notify, and the removed surfaces).
-- `bun run build` + `bun run build:worker`: clean. (Pre-existing project-wide `fetch().then(data: T)` tsc notes are unchanged — the project gates on `bun run check`, not strict `tsc`.)
-- Updated the QA runbook (`docs/qa-investor-portal.md`), seed fixtures, smoke script, and the PRD (`rpzm-...`, phase 2b marked shipped).
-
-**Remaining `#zwws` phases:** 4 (vestings/special-instructions — TMO-writeback-gated), 5 (requirements/questionnaire — next un-gated phase), 6 (new-deal email — `#f4rq`-gated). Queue the next phase when ready.
-<!-- agent:boundary:1aeabcac -->
+<!-- agent:boundary:2618c829 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#zwws]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -169,7 +169,32 @@ Done. Split the 1960-line `src/tsift/SPEC.md` monolith into behavior-bounded sib
 **Commit/push:** tsift pushed — `83b8f72` on `btakita/tsift`. Superproject `src/tsift` pointer committed locally (`1a64cd8af`); push still deferred — the shared agent-loop superproject remains many concurrent-session commits ahead of origin with submodule conflicts in unrelated areas, so I'm not force-reconciling other sessions' work. The tsift deliverable is pushed and CI-green.
 
 `#trt1` (findings-layer implementation) remains OPEN in the backlog — design-stage, awaiting your explicit go-ahead.
-<!-- agent:boundary:4f6effdc -->
+### Re: SKILL.md as primary source — instruction-architecture refactor — opus-4-8
+
+> **Queue prompt:**
+>
+> Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.
+
+
+Done — both queued instruction tasks, executed together as one coherent refactor with **SKILL.md as the primary source** (your direction).
+
+**`.claude/skills/tsift/SKILL.md` is now the comprehensive primary source.** It was an outdated thin copy (v0.1.0, ~3 commands); it now carries the full tsift command surface — search/navigation, the graph substrate (graph-db map/refresh/evidence/related/backend-eval, convex-sync, conflict-matrix, dispatch-trace, dependency-dag), editing, digests/sessions, cached analysis/lint, tooling, global flags — plus version/freshness checks, and **dispatches to `runbooks/`** so a turn loads only what it needs. `tsift-version` bumped to 0.1.62.
+
+**Runbooks** (`.claude/skills/tsift/runbooks/`), extracted **verbatim** from the old `src/tsift/CLAUDE.md`:
+- `command-reference.md` (full command/flag table + global flags)
+- `conventions.md`, `hook-integration.md`, `internals.md` (graph module, deps, dev, versioning, repo)
+- (existing `search-strategies.md` kept)
+
+**`src/tsift/AGENTS.md` → lean canonical; `CLAUDE.md` → symlink.** AGENTS.md no longer duplicates the command reference — it's a short header that defers to the skill + runbooks, keeps the `tsift init`-managed Code Navigation block, and documents the standalone fallback (`SPEC.md`/`specs/` + `tsift --help` + `VERSIONS.md`). `CLAUDE.md` is now a symlink → `AGENTS.md` (AGENTS.md canonical).
+
+**Design choice you may want to confirm:** the primary SKILL.md + runbooks live in the superproject skill dir (`.claude/skills/tsift/`, where Claude Code skills are invocable), not inside the submodule. A standalone `btakita/tsift` clone therefore relies on `SPEC.md`/`specs/` (the authoritative normative reference, which *is* in the submodule) + `tsift --help` rather than the skill. If you'd rather the runbooks also live inside `src/tsift/` for full standalone self-containment, say so and I'll relocate + symlink them.
+
+**Verification:** `make check` green (no test/clippy breakage from the doc restructure — instruction files aren't behavior). Content is relocated, not lost.
+
+**Commit/push:** submodule pushed — `f935297` on `btakita/tsift` (AGENTS lean + CLAUDE symlink). Superproject skill + runbooks + pointer committed locally — `8931cd535`; push still deferred (shared superproject diverged from origin with unrelated-submodule conflicts).
+
+`#trt1` (findings-layer implementation) remains OPEN — still awaiting your explicit go-ahead.
+<!-- agent:boundary:51b67af0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -179,11 +204,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.~
-- ~Split up SPEC.md into separated specs/*.md files.~
-- Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.
+- ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
 - Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.
 - [#trt1]
+- Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.
 <!-- /agent:queue -->
 
 ## Backlog

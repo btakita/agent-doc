@@ -21,6 +21,14 @@ Root-cause candidates (need a repro to pin):
 
 **Fix direction:** treat an operator's explicit-id rename of an existing item as authoritative — when a backlog line's leading `[#id]` changed on disk vs snapshot, the body text is otherwise stable, and the new id does not collide (`identity_collision_for_new_id` is None), adopt the new id into the snapshot/CRDT state instead of reverting. Re-key the CRDT item identity and any `do [#old]` queue reference to the new id in the same cycle.
 
+## RESOLVED (2026-06-06)
+
+Both parts are complete; the item is closed **done**, not gated:
+
+- **Part 1 — add-time collision reject:** implemented (`reject_colliding_explicit_id`, `#preset-item-id-collision-enforce`).
+- **Part 1 — retroactive preset-collision warning:** ALREADY implemented and wired. `preset_item_id_collision_warning` (`preflight.rs:723`, via `detect_identity_collisions`) emits a `preset_item_id_collision` preflight warning when the same `#id` resolves under multiple active sources (e.g. a `prompt_presets` key equal to an active backlog/review id). Wired at `preflight.rs:2610`, with tests (`detect_identity_collisions_flags_preset_vs_backlog_id`).
+- **Part 2 — id-revert:** does NOT reproduce in any binary path. Verified across backfill (`write --pending-add`), the CRDT merge (git-backed doc + populated `.yrs` + finalize-merge cycle), and the backlog→queue sync (`sync_backlog_into_queue` writes the queue from the *current* renamed id and never rewrites the backlog). The historical live revert was fixed by prior work. Locked in with a deterministic regression test `crdt_merge_preserves_user_backlog_id_rename` (`merge.rs`): a merge of snapshot-side old id vs disk-side renamed id keeps the renamed id. The superseded memory `project_crdt_backlog_id_revert_treadmill.md` is already gone.
+
 ## Investigation findings (2026-06-06, autonomous pass)
 
 Reproduced the simple path on a temp template doc: add a backlog item (got

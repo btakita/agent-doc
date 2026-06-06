@@ -29,74 +29,17 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-043936.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-053245.md`*
 
 Compacted content:
-- Archived 1 response topic(s): monsterrodholders responses not being written
+- Archived 3 response topic(s): do [#per-cycle-protocol-output-overhead]; Clear Session Context blocked while autolooping; do [#skill-md-token-footprint-reduce]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#per-cycle-protocol-output-overhead] — Phase 1 shipped (omit empty arrays) — opus-4-8
-
-> **Queue prompt:**
->
-> I was unable to run JB `Clear Session Context` on monsterrodholders.md while it was autolooping. If the queue is empty, agent-doc should pause/stop the autoloop if a command is sent to it. The loop should then resume afterwards.
-
-
-> **Queue prompt:** do [#per-cycle-protocol-output-overhead]
-
-Shipped the safe, contained piece of this and narrowed the item to the larger remaining work.
-
-**Phase 1 (done, `af37f70f`, installed):** `PreflightOutput` omitted `claims` and `layout_issues` from per-cycle JSON when empty. Those were the only two `Vec` fields missing `skip_serializing_if` — the struct already skips 20+ empty fields and `session_accretion` already gates its prose arrays. So a healthy cycle no longer spends bytes on `"claims": []` / `"layout_issues": []`. Safe: no non-Rust consumer reads those keys; internal Rust consumers get empty Vecs via `serde(default)`; SKILL.md already treats `claims` as optional. Test `preflight_output_omits_empty_claims_and_layout_issues`; `make check` green.
-
-**Honest scope:** this is a small down-payment (~2 empty arrays). The bulk of the ~707B/cycle is structural duplication between `preflight` and `plan` (both carry `baseline_file`, tier fields) plus the plan round-trip. The real wins remain:
-- (a) merge `preflight`+`plan` into one envelope (drop duplicated fields + a process round-trip),
-- (c) skip the full plan contract on no-op cycles,
-- optional `--compact` mode gating verbose prose.
-
-Those change the **stable preflight/plan contract** and need SKILL.md/doc alignment + a consumer audit, so I deferred them rather than rush a hot-path contract change mid-session — I'm literally relying on this output to drive the loop. Narrowed `#per-cycle-protocol-output-overhead` to record Phase 1 done + (a)/(c) remaining; kept it open (not done).
-
-### Re: Clear Session Context blocked while autolooping — captured as command-preemption feature — opus-4-8
-
-> **Queue prompt:**
->
-> do [#per-cycle-protocol-output-overhead]
-
-
-> **Queue prompt:** I was unable to run JB Clear Session Context on monsterrodholders.md while it was autolooping. If the queue is empty, agent-doc should pause/stop the autoloop if a command is sent to it. The loop should then resume afterwards.
-
-(Note: this answers the struck "Clear Session Context" request above — the positional queue-consume put it under a different heading last cycle; this is the real answer. Grouping it with the per-cycle-output head resolution this cycle.)
-
-**Your request is valid and not currently supported.** `Clear Session Context` → `agent-doc interrupt-clear`, and when the pane is busy the busy guard hard-blocks it (`session_clear_live_busy_guard_blocked`, "Wait for the turn to finish, then retry"). With a self-driving `queue: start` + `agent:queue auto` loop, the pane is busy ~continuously, so there's never a quiet window — the command is effectively unrunnable. That's exactly what you hit.
-
-**The fix is operator-command preemption of the auto-loop** (pause → run → resume): the command sets durable `queue: stop` (recording the prior start/auto state), a non-interrupting Clear **defers** to the next inter-iteration idle gap so it doesn't kill in-flight work (explicit "Interrupt and Clear" stays the destructive path), and the supervisor resumes `queue: start` once the pane returns to a dispatch-ready prompt.
-
-**Why I captured it instead of shipping it now:** this is a supervisor-coordination feature (auto-loop pause/resume + command sequencing + the Codex interrupt-key rules from `#codex-interrupt-clear-ctrl-g-opens-editor`) that must be live-verified on a busy auto-looping Codex pane. Rushing supervisor pause/resume mid-session — on the very loop driving this work — is the exact class of change that's repeatedly failed live verification when hurried. Captured as `#autoloop-command-preemption` with a concrete design (plan `tasks/agent-doc/plan-autoloop-command-preemption.md`), linked to the related `#clear-stops-running-process`.
-
-**Also this cycle:** gated `#per-cycle-protocol-output-overhead` — Phase 1 shipped (`af37f70f`, omit empty `claims`/`layout_issues` from per-cycle JSON, installed); the larger merge-envelope / skip-on-noop phases remain in the narrowed item.
-
-### Re: do [#skill-md-token-footprint-reduce] — Phase 1 shipped (~15%), deeper target guard-blocked — opus-4-8
-
-> **Queue prompt:**
->
-> do [#skill-md-token-footprint-reduce]
-
-
-> **Queue prompt:** do [#skill-md-token-footprint-reduce]
-
-Shipped a Phase-1 reduction and hit a real blocker for the stretch target.
-
-**Phase 1 (done, `db4b664a`, installed):** extracted the non-guarded secondary prose from Workflow steps 1/1b/2 into two new **on-demand** runbooks (`respond.md`, `persist-closeout.md`). SKILL.md went 16927 → 14311 bytes (~15%); the installed `.claude` skill dropped to ~122 lines. Runbooks load on demand (0 tokens until read), so the moved prose (cross-document pending rule, session-doc staging rule, session-accretion anchors, icebox/`agent:done` migration, streaming detail) is a net per-session saving. All `skill::tests` + `test_cli::test_skill_md_contains_required_steps` pass, `audit-docs` clean, mirrors regenerated, both binaries + cdylib installed.
-
-**Why not the 8-10KB target:** the guard tests pin **most** invariant prose verbatim in the **rendered/installed** SKILL.md — `bundled_skill_contains_*` (≈10 assertions) plus `test_skill_md_contains_required_steps` check exact phrases like "Pending capture rule", "Manual repair / missed patchback rule (all harnesses)", "external CI-start blocker", "create the plan file first", "Never use the harness label (`codex`, `claude`)", etc. Runbooks are **not** part of the rendered per-harness file, so any further extraction fails those guards. I tried the aggressive extraction first; it broke ~14 guard assertions, so I restored every pinned phrase to the spine and kept only the genuinely-unguarded prose in runbooks.
-
-**The real prerequisite (captured in the narrowed item):** redesign the guards to verify each invariant **ships in bundled content** (spine + bundled runbooks) rather than verbatim-in-spine — then the remaining pinned blocks can move to runbooks and reach 8-10KB. That's a deliberate test-contract change (it redefines "the invariant ships"), so I didn't force it mid-loop. Narrowed `#skill-md-token-footprint-reduce` to Phase 1 done + that prerequisite.
-<!-- agent:boundary:dd969135 -->
+<!-- agent:boundary:bdd4a191 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~I was unable to run JB `Clear Session Context` on monsterrodholders.md while it was autolooping. If the queue is empty, agent-doc should pause/stop the autoloop if a command is sent to it. The loop should then resume afterwards.~
-- ~do [#per-cycle-protocol-output-overhead]~
-- ~do [#skill-md-token-footprint-reduce]~
+- On monsterrodholders.md, the auto loop may have been running on an empty queue. As I was typing into the queue, nothing seemed to happen. I ran JB `Run Agent Doc` nothing happend for 60s. JB `Run Agent Doc` should have paused the autoloop and ran the document then unpause the autoloop. It should have been autoloop->`Run Agent Doc`->pause autoloop->`Run Agent Doc` starts autoloop->loop finishes->unpause autoloop. Would this pipeline work?
+- [#skill-md-token-footprint-reduce]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
 - do [#claude-busy-status-during-active-turn]

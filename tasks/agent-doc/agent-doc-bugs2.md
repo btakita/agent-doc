@@ -309,7 +309,22 @@ Verified against the live CLI just now:
 So: originally **not** a public command (the `__` was tsift's convention for hidden internal subcommands the hooks call automatically); **now yes** — it's the public `digest-runner`, with the `__` form kept only as a legacy alias. Prefer `tsift digest-runner` going forward.
 
 (Related: the next queued note — "after I added this question, agent-doc deleted it from the queue during finalize" — is the `#queue-edit-lost-during-finalize-crdt` bug I root-caused earlier this session: the IPC drift guard blocks the candidate that holds your concurrent queue add and falls back to a snapshot without it. Plan: `tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md`. The CRDT merge does preserve the add — it reappears on the next preflight — which is why your question survived to be answered here.)
-<!-- agent:boundary:7e718bea -->
+
+### Re: agent-doc deleted my queued task during finalize — opus-4-8
+
+> **Queue prompt:**
+>
+> After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.
+
+
+That's the bug I root-caused earlier this session: **`#queue-edit-lost-during-finalize-crdt`** (gated, plan `tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md`). It's the same mechanism that bit several finalizes this session.
+
+What happens: when you add a queue line *while* `finalize` is mid-write, the live editor buffer (the IPC ack candidate) now holds your add, so it differs from the binary's `content_ours` (baseline + response, no post-baseline edits). The `ipc_snapshot_would_absorb_live_prompt_drift_after_preflight` guard then **blocks** adopting that candidate (so it never silently bakes an unanswered prompt into the committed snapshot) and falls back to `content_ours` — which lacks your add — recording it as a `dropped_queue_prompt`. So the item *transiently vanishes from the committed queue*.
+
+The reassuring part: it's not data loss. The CRDT merge keeps your add on disk, so the **next preflight re-surfaces it** — which is exactly why your `__digest-runner` question survived the deletion and got answered one cycle later.
+
+The fix (deferred to a clean session, since it touches the most sensitive finalize path): when the only post-baseline drift is added `agent:queue` lines, *merge* them into `content_ours` instead of block-and-drop. Shares a fix surface with `#finalize-divergence-orphans-committed-head`. No new action this cycle — it's tracked and gated.
+<!-- agent:boundary:fb61dd02 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -327,7 +342,7 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 - ~[#claude-busy-status-during-active-turn]~
 - ~do [#ci-per-test-timeout-guard]~
 - ~Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?~
-- After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.
+- ~After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.~
 - When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact.
 - [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
 - do [#claude-busy-status-during-active-turn]

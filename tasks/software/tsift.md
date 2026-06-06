@@ -287,7 +287,52 @@ Short answer: **no — not as a turnkey release+publish right now.** I checked b
 **Recommendation.** Hold the combined release. If you want to move one piece forward, the lower-risk path is **tsift only**, and even that needs you to (a) confirm the npm-publish route (granular token vs. CI) and (b) say whether `v0.1.62` already shipped so I bump-vs-retag correctly. agent-doc should wait until its work lands on `main` with a clean tree and the manual-testing gate is cleared.
 
 Tell me which repo + which publish route and I'll execute. I did not publish anything this cycle.
-<!-- agent:boundary:9534f13e -->
+
+### Re: Why JSON files for the community cache / other caches instead of SQLite? — opus-4-8
+
+It's a deliberate split by **access pattern**, not an oversight. tsift already uses SQLite where SQLite earns its keep, and JSON where it doesn't.
+
+**What's in SQLite:** the durable, queryable, incrementally-updated substrate — the index (`IndexDb`), the graph projection (`.tsift/graph.db`: symbols, edges, call graph), and findings (`.tsift/findings.db`). These need indexed lookups, transactions, partial row updates, and graph-traversal queries. That's exactly what a relational store is for.
+
+**What's in JSON:** *derived, content-addressed, rebuildable* caches. The community cache is the textbook case (`commands/community_detection.rs`):
+- The cache key is a `content_hash` of `{version, root, scope, graph_watermark, tagpath}`, where `graph_watermark` folds in the source snapshot + edge/symbol counts.
+- It's stored as one blob per key: `.tsift/community-cache/<scope>/<hash>.json`.
+- Read = deserialize the whole `CommunityResult`; write = serialize the whole thing. There are **no partial reads, no row updates, no joins** — you either have the exact snapshot or you recompute.
+
+For that shape, SQLite buys you nothing and costs you something:
+1. **Self-invalidating for free.** Any graph change → new watermark → new key → automatic cache miss → recompute. No invalidation logic, no schema migrations, no stale-row cleanup. A superseded entry is just an orphaned file.
+2. **No writer-lock contention with `graph.db`.** The graph is a single-writer SQLite file (the whole supervisor/writer-lock story). Keeping rebuildable caches out of it avoids competing for that lock and avoids bloat/VACUUM churn on the real DB.
+3. **Cheap, portable, debuggable, throwaway** — trivially inspectable, gitignorable, `rm`-able, zero schema cost.
+
+The other caches follow the same rule: `cycle-packet-cache/.../<hash>.json`, `conflict-matrix-cache/.../<hash>.json`, the `token-index.json` pre-filter. All content-addressed or whole-blob snapshots of derived data. Rule of thumb in tsift: **if it's queried in pieces and mutated incrementally → SQLite; if it's a rebuildable snapshot keyed by a hash and read whole → JSON file.** Putting the community cache in SQLite would add schema/migration/lock overhead to something that is fundamentally "hash → blob, recompute on miss."
+
+### Re: Why does the NPM_TOKEN still fail? (passage btak/NPM_TOKEN + gh secret) — opus-4-8
+
+I pulled the exact CI error from the failed `publish OpenCode npm plugin` job:
+
+```
+npm error code E403
+npm error 403 Forbidden - PUT https://registry.npmjs.org/opencode-tsift -
+  Two-factor authentication or granular access token with bypass 2fa enabled
+  is required to publish packages.
+```
+
+So the wiring you did is **correct** — I verified both `vars.TSIFT_ENABLE_NPM_PUBLISH=true` and the `NPM_TOKEN` secret are present, and the job ran (it didn't skip). The failure is purely the **token type**.
+
+`passage btak/NPM_TOKEN` is a **classic / automation** token. npm now enforces 2FA at publish time for your account, and a classic token — even an "automation" one — **cannot bypass that 2FA**. Only a **Granular Access Token** with "bypass two-factor authentication" can publish non-interactively. That's the literal meaning of the error.
+
+**Fix (one-time):**
+1. npmjs.com → Account → Access Tokens → **Generate New Token → Granular Access Token**.
+2. Permissions: **Packages and scopes → Read and Write**, scoped to `opencode-tsift` (or all packages); confirm it's allowed to **bypass 2FA**.
+3. Replace the gh `NPM_TOKEN` secret with the new granular token (update `passage btak/NPM_TOKEN` too if you want them in sync).
+4. **Re-run just the failed job** on the v0.1.63 Release run — no re-tag needed (crates.io/GitHub already published, and the publish step is idempotent). Or publish locally: `npm publish` from `packages/opencode-tsift` with the granular token.
+
+This is the same gotcha noted in memory; I queued **the granular-token fix + job re-run** as a backlog item so it isn't lost.
+
+---
+
+**Release status (in flight):** the `v0.1.63` Release workflow has **verify ✓, all 3 platform builds ✓, GitHub Release ✓**, and **crates.io publish is still running** (it publishes all 19 crates with rate-limit retries). The npm leg failed as diagnosed above. I'll confirm the crates.io result when it lands.
+<!-- agent:boundary:4a7fbfdd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -297,12 +342,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Is now a good time to release + publish skill-harness and tsift? If yes, release + publish.
+- Why does tsift use json files for the community cache or other caches? Why not use sqlite?
+- What about passage btak/NPM_TOKEN? I also setup the NPM_TOKEN on gh for tsift. I don't understand why this is still failing.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rtsw] Fix opencode-tsift npm publish E403: the gh NPM_TOKEN (from passage btak/NPM_TOKEN) is a classic/automation token, which cannot bypass npm's 2FA-for-publish. Generate a Granular Access Token at npmjs.com (read+write for opencode-tsift, 'bypass 2FA' enabled), replace the gh NPM_TOKEN secret, then re-run the failed 'publish OpenCode npm plugin' job on the v0.1.63 Release run (no re-tag needed). Vars/secret are otherwise correct (TSIFT_ENABLE_NPM_PUBLISH=true). Supersedes the auth half of #npm-auth-setup.
 <!-- /agent:backlog -->
 
 ## Review

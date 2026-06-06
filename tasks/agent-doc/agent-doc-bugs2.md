@@ -129,7 +129,29 @@ In `write.rs:3012` (`queue_consumption_allowed_for_response`), a free-text head 
 (What looked like the bug this session was the *correct* keep behavior: you were adding new prompts to the queue concurrently, so the cycle legitimately saw a foreign prompt and held the head. Heading wording was never the cause.)
 
 Marking `#free-text-head-answer-match-too-literal` **done**.
-<!-- agent:boundary:d053e2b0 -->
+
+### Re: why so many IPC disk writes / File Cache Conflicts, CRDT blocked, non-blocking loop + per-doc queues — opus-4-8
+
+> **Queue prompt:**
+>
+> Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
+
+
+Diagnosed from the code, with a phased redesign plan: **`tasks/agent-doc/plan-ipc-crdt-pipeline-redesign.md`** (`9d8d56599`).
+
+**Why so many IPC disk writes → File Cache Conflicts:** every write tries `try_ipc` first (drops a patch for the IDE plugin to apply via the Document API), then **blocks up to 2s** for the ack (`ipc_socket.rs:95`). On timeout it **falls back to a direct disk write** — and a direct disk write while IntelliJ holds the file open is exactly what raises the "file modified externally" dialog. The 2s ack misses whenever the editor is busy/unfocused/mid-keystroke, so conflicts scale with *how often IPC times out*, which is constant under live editing.
+
+**Why the CRDT pipeline is so often blocked:** the runtime is **synchronous + sequential** ("No async — sequential per-run") behind a single doc lock. Each finalize runs read → diff → merge → IPC-write (blocks ≤2s) → consume → commit in order, so the 2s IPC round-trip stalls the whole turn, and one doc's slow IPC serializes everything. Plus downstream guards historically **re-rejected the successful CRDT merge** (the divergence symptom).
+
+**The redesign (yes, both are the answer):**
+1. **DONE** — consume trusts the merge (`#finalize-divergence-orphans-committed-head`), which is why finalizes stopped blocking this turn.
+2. Visible-buffer guard: verify via merged CRDT state, not a raw disk-vs-buffer byte compare.
+3. **Non-blocking IPC** — fire-and-reconcile: send the patch, record a pending ack, continue; a background reconciler merges the ack or coalesces to far fewer disk writes. Removes the per-write 2s stall.
+4. **Per-document work queues** — one worker per doc hash; doc A never blocks doc B.
+5. Coalesce/debounce writes across all paths.
+
+Phase 1 shipped; 2-5 are scoped in the plan, ordered by risk (the non-blocking IPC is highest, SimWorld-covered first). This is the root that dissolves the whole IPC/CRDT symptom cluster (incl. `#queue-edit-lost`, `#finalize-visible-buffer-ipc-timeout-race`).
+<!-- agent:boundary:061a9810 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -138,7 +160,7 @@ Marking `#free-text-head-answer-match-too-literal` **done**.
 - ~do [#backlog-queue-sync-pending-add-amplification]~
 - ~do [#finalize-divergence-orphans-committed-head]~
 - ~do [#free-text-head-answer-match-too-literal]~
-- Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
+- ~Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?~
 - Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard? Create a comprehensive plan.
 <!-- /agent:queue -->
 ###

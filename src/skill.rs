@@ -205,6 +205,11 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "baseline-drift.md",
         include_str!("../runbooks/baseline-drift.md"),
     ),
+    ("respond.md", include_str!("../runbooks/respond.md")),
+    (
+        "persist-closeout.md",
+        include_str!("../runbooks/persist-closeout.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).

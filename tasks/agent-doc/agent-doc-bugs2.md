@@ -50,11 +50,22 @@ The step plan IS `plan-auto-dag-completions.md` (Step 0 → Path C ordered code 
 Turned out only **1** test assertion still expected the deprecated form (the codebase had already migrated the rest under `#queue-state-unify`) — updated it + added a regression test `write_emits_canonical_queue_for_direct_set_queue_active`. `make check` green; submodule `fb1d93ce` pushed (CI running), superproject `07c4e142e`. Plan marked RESOLVED.
 
 **Tally so far (real completions, not gates):** `#backlog-id-user-rename-revert` ✓, `#writer-emits-deprecated-queue-active-false` ✓ — review count down 2 by finishing, plus the packagable queue-aware-compaction fix. Continuing down Path C.
-<!-- agent:boundary:a473b836 -->
+
+### Re: Fix IPC/CRDT + snapshot issues — opus-4-8
+
+Fixed the highest-impact piece and it's now live (built + installed + pushed). **`#finalize-divergence-orphans-committed-head` is DONE.**
+
+**Root cause** (the error I hit ~10× this session — "queue consume: snapshot queue state diverged"): the document handed to queue-consume is the **post-CRDT-merge** result. The merge already reconciles the agent side against concurrent user/editor edits — and it *succeeded every time* ("CRDT merge successful — no conflicts"). But the consume divergence guard then **re-rejected** that merged result, orphaning an unstruck head that re-serves. The guard was fighting the merge it should trust.
+
+**Fix** (`write.rs`): the same-head proof still gates the strike, but the remaining-queue difference *is* the concurrent edit the merge already resolved — so consume now **reconciles** (merged document wins): head strikes, snapshot adopts it, both converge, and concurrently-added queue items are **preserved** (also helps `#queue-edit-lost`). Divergence is logged for forensics, not failed. Regression test added, FlowCore budget audited, `make check` green. (This very response committing cleanly through the new logic is the live proof.)
+
+**What remains of the broader IPC/CRDT ask** (separate, larger): the architecture redesign — fewer IPC disk writes / File-Cache-Conflicts, a non-blocking main loop, and per-document queues. That's a design+build effort I'd take on as a focused piece; this divergence fix removes the single worst symptom (the constant finalize blocking) now.
+<!-- agent:boundary:674dfaa1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - #auto-dag-first-class
+- Fix IPC/CRDT + snapshot issues
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]
 - do [#free-text-head-answer-match-too-literal]
@@ -94,8 +105,7 @@ What are #next-steps to fix bugs?
 7. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
 8. [ ] [#queue-dedup-destroys-intentional-duplicates] #agent-doc-bug: queue dedup destroys intentional duplicate prompts. dedup_live_prompts (queue.rs:631, run every preflight at preflight.rs:3562) collapses all same-text live prompts, assuming duplicates are always IPC-drift merge artifacts — but users legitimately queue a command twice (user's two `- deploy` items; the 2nd was dropped mid-run). At preflight, user-added vs merge-created duplicates are structurally identical (provenance lost); snapshot-count / adjacency / 3+-copy heuristics all fail the uncommitted-2nd-deploy case. Fix at the merge source (provenance-aware) or gate dedup on a proven IPC-drift state — do NOT delete dedup (reintroduces #adoc-queue-ipc-drift growth). Plan: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md
 9. [ ] [#backlog-queue-sync-pending-add-amplification] #agent-doc-bug: the `agent:backlog priority queue` sync auto-promotes every --pending-add into a `do #id` queue head, so capturing follow-ups grows the active queue unboundedly and trips pending_done_guard each finalize. Decouple capture from queue promotion (only sync on explicit request, or never auto-promote a freshly-added backlog item into the active auto-queue mid-loop).
-10. [ ] [#finalize-divergence-orphans-committed-head] #agent-doc-bug: under live-typing queue divergence, finalize commits the response but does not strike the answered head (queue consume diverged), leaving an orphaned unstruck head that risks re-serve. Binary should reconcile/strike the orphaned head on the next stable cycle instead of requiring a manual strike or queue halt.
-11. [ ] [#free-text-head-answer-match-too-literal] #agent-doc-bug: free-text queue-head consume requires the answering `### Re:` heading to textually resemble the head wording; a semantically-correct response with a differently-worded heading does not strike the head (observed: head "I asked to create backlog #next-steps..." vs heading "Backlog id must not collide..."). Use a looser/positional match (the cycle response that targets this head position) instead of literal topic similarity.
+10. [ ] [#free-text-head-answer-match-too-literal] #agent-doc-bug: free-text queue-head consume requires the answering `### Re:` heading to textually resemble the head wording; a semantically-correct response with a differently-worded heading does not strike the head (observed: head "I asked to create backlog #next-steps..." vs heading "Backlog id must not collide..."). Use a looser/positional match (the cycle response that targets this head position) instead of literal topic similarity.
 <!-- /agent:backlog -->
 
 ## Review

@@ -1,81 +1,65 @@
 ---
-description: "Code-search and code-navigation skill for tsift. TRIGGER: user invokes /tsift or explicitly asks to search/explore a codebase with tsift. VERSION CHECK: compare installed tsift binary against tsift-version before relying on this copied skill text."
+description: "Primary source for the tsift code-RAG CLI: AST-aware search, call-graph queries, the graph substrate, digests/session-review, batch/semantic editing, and model routing. TRIGGER: user invokes /tsift or asks to search/explore/navigate a codebase with tsift, or work on the tsift repo. VERSION CHECK: compare the installed tsift binary against tsift-version below before relying on copied text."
 user-invocable: true
 argument-hint: "[query or symbol]"
-tsift-version: "0.1.0"
+tsift-version: "0.1.62"
 ---
 
 # tsift
 
-Search a codebase using Sift (hybrid BM25 + vector search) via tsift CLI. Also provides AST symbol indexing, call-graph queries, batch editing, model-tier routing, and SQL introspection.
+Token-efficient CLI for code agents — AST-aware search, call-graph queries, a provider-neutral graph substrate, batch + semantic editing, bounded digests/session-review, SQL introspection, and model-tier routing.
 
-## Version Check
+This skill is the **primary agent-facing source** for tsift. It carries the full command surface here and dispatches to [runbooks/](runbooks/) for detail so a turn loads only what it needs. The submodule's `src/tsift/AGENTS.md` (and its `CLAUDE.md` symlink) defer to this skill; for standalone tsift checkouts, fall back to `tsift --help` and `src/tsift/VERSIONS.md`.
 
-- Run `tsift --version` and compare it to `tsift-version` in this file's frontmatter.
-- If the installed binary is newer, treat this skill text as stale. Refresh from `src/tsift/CLAUDE.md` and `src/tsift/VERSIONS.md`, and prefer `tsift --help` / subcommand help for the live command surface.
-- Keep `tsift-version` aligned with `src/tsift/Cargo.toml`.
+## Version & Freshness Check
 
-## Freshness Check
-
-- Run `tsift status` at session start before relying on `search`, `explain`, or `graph`.
-- If `tsift status` reports `index: stale` or `use: (none — run tsift index first)`, run `tsift index .` before continuing.
-- If `tsift search` times out with `The index may be stale`, treat that as a required reindex. This is common in resumed tmux sessions with an old `.tsift/index.db`.
-- After `tsift index .`, retry the original tsift command. Reserve `--timeout 0` for cases where you intentionally want an uncapped long-running search on a fresh index.
+- Run `tsift --version`; compare to `tsift-version` above. If the binary is newer, treat copied text as stale — prefer `tsift --help` / subcommand `--help` for the live surface, and refresh from `src/tsift/VERSIONS.md`. Keep `tsift-version` aligned with `src/tsift/Cargo.toml`.
+- Run `tsift status` at session start before relying on `search`, `explain`, or `graph`. If it reports `index: stale` or `use: (none …)`, run `tsift status --fix` (or `tsift index .`). If `tsift search` times out with "The index may be stale" (common in resumed tmux sessions), run `tsift index .` and retry. Reserve `--timeout 0` for intentional uncapped searches on a fresh index.
 
 ## TRIGGER
 
-- User asks to search code, find symbols, or explore a codebase with `/tsift`
-- User asks about call graphs, callers/callees of a function
-- User asks to index a project for symbol search
+- Search code, find symbols, navigate callers/callees, communities, or shortest paths with `/tsift`.
+- Explore architecture / build a graph map / get a resumable context pack for a codebase.
+- Work on the tsift repo itself (`src/tsift/...`).
 
 ## SKIP
 
-- General grep/ripgrep usage (handled by rtk rewrite hook)
-- File-level search (use Glob/Grep tools directly)
-- Non-code search (use WebSearch)
+- Plain grep/ripgrep (handled by the rtk/tsift rewrite hook), file-level search (Glob/Grep), non-code search (WebSearch).
 
 ## Prerequisites
 
-Binary: `tsift` (installed via `cargo install --path src/tsift`)
+Binary: `tsift` (installed via `cargo install --path src/tsift`). Run from the owning repo/submodule root; under a submodule (e.g. `src/tsift/...`) switch to that root first so the narrower local index/instructions load.
 
-## Commands
+## Command surface
 
-### Index a project
+Prefer envelope previews and bounded digests over raw reads. Full flag detail and fail-closed semantics: [runbooks/command-reference.md](runbooks/command-reference.md).
 
-```bash
-tsift index [path]                    # Index current dir or path
-tsift index [path] --workspace        # Per-submodule indexing
-tsift index [path] --submodule <name> # Index one submodule
-```
+**Search & navigation** — `search` (hybrid BM25+vector; `--strategy lexical|hybrid|vector`, `--scope`/`--federated`), `symbol-read`, `explain`, `graph` (`--callers`/`--callees`), `communities` (Louvain), `path` (BFS shortest path), `index` (`--workspace`/`--submodule`/`--check`/`--exit-code`), `status`, `locks`.
 
-### Search symbols
+**Graph substrate** — `traverse`, `graph-db` (`map`, `refresh`, `status`, `evidence`, `related`, `neighborhood`, `doctor`, `compact`, `backend-eval`), `convex-sync`, `conflict-matrix`, `dispatch-trace`, `dependency-dag`. See [src/tsift/specs/graph.md](../../../src/tsift/specs/graph.md).
 
-```bash
-tsift search "<query>"                # Hybrid BM25 + vector search
-tsift search "<query>" --strategy lexical   # Fast text-only
-tsift search "<query>" --federated    # Search all federated submodules
-tsift search "<query>" --scope <name> # Search within one submodule
-```
+**Editing** — `edit` (atomic JSON batch), `edit-intents` (semantic code + Markdown intents with `--verify`/`--apply`).
 
-### Call-graph queries
+**Digests & sessions** — `diff-digest`, `test-digest`, `log-digest`, `metric-digest`, `session-digest`, `session-cost`, `session-review` (`--next-context`), `context-pack`.
 
-```bash
-tsift graph <symbol>                  # Show callers AND callees
-tsift graph <symbol> --callers        # Who calls this?
-tsift graph <symbol> --callees        # What does this call?
-tsift graph <symbol> --json           # Structured output
-tsift graph <symbol> --scope <name>   # Restrict to submodule
-```
+**Cached analysis & lint** — `summarize` (cached LLM analysis), `lint` (markdown concept lint), `audit`, `audit-tagpath`.
 
-### Other commands
+**Tooling** — `route` (task→model tier), `rewrite` (`--run` executes the envelope-first tsift equivalent for harnesses without `PreToolUse` hooks), `sql`, `init` (`--codex`/`--opencode`/`--workspace`).
 
-```bash
-tsift edit --file edits.json          # Batch file edits (atomic)
-tsift route "<task description>"      # Classify → haiku/sonnet/opus
-tsift rewrite "<command>"             # Rewrite grep/rg → tsift search
-tsift sql <db> [-q "SQL"]             # SQLite introspection
-```
+Global flags: `--compact`, `--envelope`, `--pretty`, `--terse`, `--schema`, `--absolute`, `--tabular`.
+
+When a search envelope includes `report.scale_guard`, run one of its `narrow_commands` before fanning out parallel agents.
+
+## Verification
+
+Run `make check` (clippy + full suite) from `src/tsift` before committing; capture the exit explicitly (an rtk wrapper can mask it — grep output for `result: FAILED`). After local changes, check CI with `gh run list --workflow CI --limit 1` and fix failures before calling work complete.
 
 ## Runbooks
 
-- [runbooks/search-strategies.md](runbooks/search-strategies.md) — when to use lexical vs hybrid vs vector
+- [runbooks/command-reference.md](runbooks/command-reference.md) — full command/flag table + global flags.
+- [runbooks/conventions.md](runbooks/conventions.md) — read-only SQL/graph, fail-closed scope rules, transactional index updates, lint discovery, edit-intents semantics.
+- [runbooks/hook-integration.md](runbooks/hook-integration.md) — auto-reindex, search/digest rewrite, RTK filtering, cross-harness fallback, stale-session recovery.
+- [runbooks/internals.md](runbooks/internals.md) — graph module, dependencies, development, versioning, repo.
+- [runbooks/search-strategies.md](runbooks/search-strategies.md) — lexical vs hybrid vs vector.
+
+Spec: the normative behavior lives in [src/tsift/SPEC.md](../../../src/tsift/SPEC.md) (index) and its `specs/*.md` siblings.

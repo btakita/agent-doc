@@ -218,6 +218,11 @@ The two remaining queue items both depend on authorizing `#trt1`:
 I'm pausing the auto-loop here since the remaining work is blocked on that one decision. Tell me how to proceed on `#trt1` and I'll drain the rest.
 ### Re: #trt1 Phase 1 — implement, then backlog the rest — opus-4-8
 
+> **Queue prompt:**
+>
+> [#trt1]
+
+
 **Phase 1 shipped and verified.** The Findings Graph Layer Phase 1 (`#trt1p1`) is implemented: `tsift finding add` / `tsift finding list`, backed by a dedicated `.tsift/findings.db` (via `SqliteGraphStore`) that is independent of the rebuildable code projection — so authored findings survive `tsift index` / `graph-db refresh` (a test proves it: `finding_survives_code_graph_projection_refresh`).
 
 - `tsift finding add --kind <finding|decision|note> --title --body --about <symbol|file> [--confidence] [--status draft|trusted] [--relates <id>] [--json]` — deterministic content-derived id; `concerns` edge to the resolved `code_symbol` (anchored by **body-span watermark**, so unrelated edits in the same file don't mark it stale) or `file`; `relates_to` for threading.
@@ -230,7 +235,7 @@ I'm pausing the auto-loop here since the remaining work is blocked on that one d
 **Remaining phases → backlog** (`#trt1p2` injection, `#trt1p3` graph-menu/exports, `#trt1p4` passive harvest), each pointing at the `specs/graph.md` design.
 
 The queued **"configure agent-loop tsift config to use findings graph layer"** stays gated — its trigger is *"once `#trt1` is complete,"* and #trt1 is only Phase-1 complete (phases 2–4 pending in the backlog). Tell me when to pick up the next phase.
-<!-- agent:boundary:0a326a89 -->
+<!-- agent:boundary:f8900647 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,7 +247,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
 - ~Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.~
-- [#trt1]
+- ~[#trt1]~
 - Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.
 <!-- /agent:queue -->
 
@@ -252,12 +257,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#trt1p2] Findings Graph Layer Phase 2 — hot-path injection: fold trusted, fresh findings into context-pack (then search/explain) for nodes already in the result set. Plan: src/tsift/specs/graph.md § Findings Graph Layer.
 - [ ] [#trt1p3] Findings Graph Layer Phase 3 — graph menu + exports: annotate graph-db map with attached findings, and on-demand md/html projection (tsift map --format md|html). Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p4] Findings Graph Layer Phase 4 — passive harvest: config-gated draft extraction of candidate findings from agent-doc session archives/summaries, with draft→trusted promotion. Plan: src/tsift/specs/graph.md.
-- [ ] [#trt1] [recommended] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), with provenance+confidence+freshness fields gated on community_graph_watermark for staleness; expose retrieval via context-pack/search injection and a / graph-menu command; opt-in/passive capture from agent-doc session archives; md/html as on-demand projection, graph store as source of truth. Spec in src/tsift/SPEC.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#trt1] [recommended] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), with provenance+confidence+freshness fields gated on community_graph_watermark for staleness; expose retrieval via context-pack/search injection and a / graph-menu command; opt-in/passive capture from agent-doc session archives; md/html as on-demand projection, graph store as source of truth. Spec in src/tsift/SPEC.md.
 - [/] [#0y9e] I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
 - [/] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [/] [#surreal-batch-bfs] #surreal-batch-bfs-gated: Batch frontier expansion - gated (low)

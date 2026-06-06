@@ -36,7 +36,41 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): [#trt1p3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f4fafd21 -->
+
+### Re: [#trt1p4] — Findings Graph Layer Phase 4 (passive harvest) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#trt1p4]
+
+
+Shipped Phase 4. **The Findings Graph Layer is now feature-complete (Phases 1–4).** Clean queue drain (head matched the work).
+
+#### Passive harvest — `tsift finding harvest`
+
+Closes the capture loop: extracts `draft` candidate findings from the agent-doc session archives tsift already accumulates (`.agent-doc/archives/*.md`). A line becomes a candidate only when it pairs a decision/insight signal (`decided`, `decision`, `invariant`, `gotcha`, `by design`, `fail-closed`, `source of truth`, …) with an inline-code token that resolves to an **indexed symbol or real file** (a resolvable watermark proves the anchor). `kind` = `decision` for design-intent, else `note`.
+
+- **Fail-closed gate** — bails unless `.tsift/config.toml` sets `[findings] passive_harvest = true` (new `FindingsConfig`, default off). A user who never opts in sees zero captured rows.
+- **Safe by construction** — everything lands as `draft` (excluded from injection until promoted), runs are bounded (`HARVEST_CAP`), idempotent (content-derived ids), and never overwrite an existing finding (`skipped_existing`).
+
+#### Promotion — `tsift finding promote <id>`
+
+Flips a `draft` → `trusted` (preserving anchor/watermark/provenance), the precision gate that makes a finding eligible for hot-path injection (Phase 2) and map annotation (Phase 3). Idempotent on trusted; fails closed on unknown id.
+
+#### Verification
+
+- **Tests** — 5 new CLI tests in `tests/finding.rs` (fail-closed gate, draft extraction, idempotency, promotion+idempotent-repromote, unknown-id) + 2 config tests in `tsift-index/src/config.rs`. Full finding suite 18/18.
+- **`make check` + clippy** — green on **rustc 1.96.0** (CI-matched toolchain).
+- **Live smoke** — `cargo install --path .` (both binaries); confirmed live `tsift finding harvest` gates on config and harvests idempotently.
+- **Shipped** — `tsift@6e568b1` (pushed), superproject pointer `agent-loop@d0ce227`. CI monitoring in progress.
+
+#### Queue / backlog
+
+- `#trt1p4` → **done**. Phases 1–4 all shipped.
+- Remaining: **`#trt1p2b`** (fold findings into `search`/`explain` — the last hot-path sub-scope) → **`#trt1cfg`** (configure agent-loop to use the layer; its phase-2–4 gate is now satisfied, so it unblocks once p2b lands).
+
+Top of backlog (`#next-steps`): **`#trt1p2b`** — search/explain hot-path injection (same trusted/fresh/result-set contract as context-pack).
+<!-- agent:boundary:824d8e36 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +83,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#trt1]~
 - ~[#trt1p2]~
 - ~[#trt1p3]~
-- [#trt1p4]
+- ~[#trt1p4]~
 - [#trt1p2b]
 - [#trt1cfg]
 - ~Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.~
@@ -58,7 +92,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#trt1p4] Findings Graph Layer Phase 4 — passive harvest: config-gated draft extraction of candidate findings from agent-doc session archives/summaries, with draft→trusted promotion. Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p2b] Findings Graph Layer Phase 2b — fold trusted, fresh findings into `search` and `explain` output, reusing the trusted/fresh/result-set injection contract from context-pack (#trt1p2). Plan: src/tsift/specs/graph.md § Hot-path injection (Phase 2).
 - [ ] [#trt1cfg] After #trt1 phases 2-4 ship (findings hot-path injection), configure agent-loop's tsift config to use the findings graph layer. Gated on #trt1 completion.
 <!-- /agent:backlog -->

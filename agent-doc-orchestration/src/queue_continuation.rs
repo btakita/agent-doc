@@ -342,6 +342,78 @@ pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
     }
 }
 
+/// A clear that an operator command deferred because the pane was busy under an
+/// active auto-queue loop (`#autoloop-command-preemption` Phase 2b). The
+/// supervisor idle-queue watch delivers `clear_command` at the next idle gap,
+/// then resumes the loop. The record is the durable hand-off between the
+/// `session clear` command path (which pauses + records) and the supervisor
+/// (which delivers + resumes), so the two never need to share memory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredOperatorClear {
+    pub file: String,
+    /// Harness-specific clear command text to submit into the pane (e.g.
+    /// `/clear`), captured at defer time so the watch does not re-derive it.
+    pub clear_command: String,
+    pub written_at: u64,
+}
+
+fn deferred_clear_marker_path(file: &Path) -> Result<Option<PathBuf>> {
+    let Some(root) = crate::fs_util::find_project_root(file) else {
+        return Ok(None);
+    };
+    let hash = crate::snapshot::doc_hash(file)?;
+    Ok(Some(
+        root.join(".agent-doc/deferred-clears")
+            .join(format!("{hash}.json")),
+    ))
+}
+
+/// Record that a non-interrupting operator clear was deferred while the pane was
+/// busy under an active auto-loop. Paired with [`clear_cooldown`] (which pauses
+/// the loop); the watch delivers `clear_command` once the pane is idle, then
+/// clears both markers to resume.
+pub fn write_deferred_operator_clear(file: &Path, clear_command: &str) -> Result<()> {
+    let Some(path) = deferred_clear_marker_path(file)? else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let payload = DeferredOperatorClear {
+        file: file.to_string_lossy().into_owned(),
+        clear_command: clear_command.to_string(),
+        written_at: now_secs(),
+    };
+    let json = serde_json::to_string_pretty(&payload).context("serialize deferred clear marker")?;
+    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+/// Read the pending deferred operator clear for `file`, if any.
+pub fn read_deferred_operator_clear(file: &Path) -> Result<Option<DeferredOperatorClear>> {
+    let Some(path) = deferred_clear_marker_path(file)? else {
+        return Ok(None);
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => Ok(serde_json::from_str(&content).ok()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+    }
+}
+
+/// Remove the deferred-clear marker (after the watch delivers the clear, or when
+/// the operator runs an explicit interrupt-clear that supersedes it).
+pub fn clear_deferred_operator_clear_marker(file: &Path) -> Result<()> {
+    let Some(path) = deferred_clear_marker_path(file)? else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
+    }
+}
+
 pub fn load_marker(file: &Path) -> Result<Option<ContinuationMarker>> {
     let Some(path) = marker_path(file)? else {
         return Ok(None);
@@ -494,6 +566,34 @@ mod tests {
         std::fs::write(&doc, &content).unwrap();
         crate::snapshot::save(&doc, &content).unwrap();
         doc
+    }
+
+    #[test]
+    fn deferred_operator_clear_marker_roundtrips_and_clears() {
+        // The durable hand-off between the `session clear` defer path and the
+        // supervisor watch (`#autoloop-command-preemption` Phase 2b).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]"], true, true);
+
+        assert!(
+            read_deferred_operator_clear(&doc).unwrap().is_none(),
+            "no marker before a defer"
+        );
+
+        write_deferred_operator_clear(&doc, "/clear").unwrap();
+        let record = read_deferred_operator_clear(&doc)
+            .unwrap()
+            .expect("marker present after write");
+        assert_eq!(record.clear_command, "/clear");
+        assert!(record.file.contains("task.md"));
+
+        clear_deferred_operator_clear_marker(&doc).unwrap();
+        assert!(
+            read_deferred_operator_clear(&doc).unwrap().is_none(),
+            "marker dropped after delivery/supersede"
+        );
+        // Clearing an absent marker is a no-op, not an error.
+        clear_deferred_operator_clear_marker(&doc).unwrap();
     }
 
     #[test]

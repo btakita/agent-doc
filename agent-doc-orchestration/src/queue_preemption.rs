@@ -83,6 +83,36 @@ pub fn plan_busy_clear(queue_active: bool) -> BusyClearOutcome {
     }
 }
 
+/// What the supervisor idle-queue watch should do about a deferred operator
+/// clear on a given tick (`#autoloop-command-preemption` Phase 2b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferredClearStep {
+    /// No deferred clear is pending — the watch behaves exactly as before
+    /// (drain decision unchanged). This is the common path and MUST be a
+    /// complete no-op so the existing auto-loop cannot regress.
+    None,
+    /// A deferred clear is pending but the pane is still mid-turn — wait for the
+    /// inter-iteration idle gap; do not interrupt in-flight work.
+    WaitForIdle,
+    /// A deferred clear is pending and the pane has reached a dispatch-ready
+    /// prompt — deliver the clear now, then clear both markers to resume the
+    /// loop.
+    Deliver,
+}
+
+/// Decide the deferred-clear step for one watch tick. Deliver only when a clear
+/// is actually pending AND the pane shows a dispatch-ready prompt; otherwise
+/// wait (pending-but-busy) or no-op (nothing pending). Keeping this pure makes
+/// the live-thread wiring trivially testable and guarantees the
+/// nothing-pending path is a no-op.
+pub fn plan_deferred_clear_step(deferred_clear_pending: bool, prompt_ready: bool) -> DeferredClearStep {
+    match (deferred_clear_pending, prompt_ready) {
+        (false, _) => DeferredClearStep::None,
+        (true, false) => DeferredClearStep::WaitForIdle,
+        (true, true) => DeferredClearStep::Deliver,
+    }
+}
+
 /// Durably pause an active auto-queue by writing canonical inactive queue state.
 /// Returns the rewritten content plus the control to restore on resume.
 ///
@@ -162,6 +192,38 @@ mod tests {
             plan_busy_clear(false),
             BusyClearOutcome::HardBlock,
             "a busy pane with no loop keeps the existing fail-closed block"
+        );
+    }
+
+    #[test]
+    fn deferred_clear_step_no_op_when_nothing_pending() {
+        // The common path: no deferred clear → complete no-op so the existing
+        // auto-loop drain cannot regress, regardless of prompt readiness.
+        assert_eq!(
+            plan_deferred_clear_step(false, true),
+            DeferredClearStep::None
+        );
+        assert_eq!(
+            plan_deferred_clear_step(false, false),
+            DeferredClearStep::None
+        );
+    }
+
+    #[test]
+    fn deferred_clear_step_waits_while_pane_busy() {
+        assert_eq!(
+            plan_deferred_clear_step(true, false),
+            DeferredClearStep::WaitForIdle,
+            "a pending clear must not interrupt the in-flight turn"
+        );
+    }
+
+    #[test]
+    fn deferred_clear_step_delivers_on_idle_prompt() {
+        assert_eq!(
+            plan_deferred_clear_step(true, true),
+            DeferredClearStep::Deliver,
+            "deliver the deferred clear once the pane reaches a dispatch-ready prompt"
         );
     }
 

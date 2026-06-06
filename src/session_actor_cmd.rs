@@ -764,8 +764,17 @@ fn reconcile_idle_projection_before_clear(
             .is_some();
             match agent_doc_orchestration::queue_preemption::plan_busy_clear(queue_active) {
                 agent_doc_orchestration::queue_preemption::BusyClearOutcome::PauseAndDefer => {
+                    // Pause the loop (the idle-queue watch honors this cooldown)
+                    // AND record the deferred clear so the supervisor delivers it
+                    // at the next idle gap and resumes (`#autoloop-command-preemption`
+                    // Phase 2b). The two markers are the durable hand-off between
+                    // this command path and the supervisor watch thread.
                     agent_doc_orchestration::queue_continuation::write_clear_cooldown(
                         &ctx.canonical_file,
+                    )?;
+                    agent_doc_orchestration::queue_continuation::write_deferred_operator_clear(
+                        &ctx.canonical_file,
+                        harness_clear_command(&ctx.harness),
                     )?;
                     agent_doc_orchestration::ops_log::log_op(
                         &ctx.canonical_file,
@@ -1108,6 +1117,18 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_interrupt_clear",
     )?;
+    // The explicit interrupt-clear is the destructive path and runs now, so it
+    // supersedes any clear the non-interrupting path deferred to the idle gap —
+    // drop the deferred-clear marker so the supervisor watch does not ALSO
+    // deliver a second clear (`#autoloop-command-preemption` Phase 2b).
+    if let Err(err) = agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
+        &ctx.canonical_file,
+    ) {
+        eprintln!(
+            "[interrupt-clear] warning: failed to drop deferred-clear marker for {}: {err:#}",
+            ctx.canonical_file.display()
+        );
+    }
     let tmux = Tmux::default_server();
     let evidence = live_pane_evidence(&ctx, &tmux);
     let pane = evidence

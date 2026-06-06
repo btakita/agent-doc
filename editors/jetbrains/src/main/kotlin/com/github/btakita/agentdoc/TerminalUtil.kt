@@ -634,7 +634,22 @@ object TerminalUtil {
             args = listOf("clear"),
             startedMessage = "Clearing session context for ${file.name}",
             onSuccess = { relativePath, output ->
-                showHint(project, output.ifBlank { "Cleared session context for $relativePath" })
+                // #autoloop-command-preemption Phase 2b: a non-interrupting clear
+                // against a busy auto-loop now succeeds by DEFERRING (pause the
+                // loop, deliver the clear at the next idle gap, resume) instead of
+                // hard-blocking. Surface that as a distinct "deferred" notice so
+                // the operator knows it will run shortly, not that it ran now.
+                if (isDeferredQueuePreemptClear(output)) {
+                    notifyInfo(
+                        project,
+                        "Clear Session Context deferred for $relativePath.\n" +
+                            "The pane is busy under an active queue auto-loop, so the loop was paused " +
+                            "and the clear will run automatically at the next idle gap, then the loop resumes. " +
+                            "Use Interrupt and clear to clear immediately instead.",
+                    )
+                } else {
+                    showHint(project, output.ifBlank { "Cleared session context for $relativePath" })
+                }
             },
             onFailure = { relativePath, exitCode, output ->
                 val busyRefusal = parseBusySessionClearRefusal(output)
@@ -865,6 +880,12 @@ object TerminalUtil {
             append(telemetry.eventNames.joinToString(", "))
         }
     }
+
+    /// True when `agent-doc session clear` succeeded by deferring against a busy
+    /// auto-loop (`#autoloop-command-preemption` Phase 2b). The binary prints
+    /// `session_clear deferred for ...` to stderr on that path.
+    internal fun isDeferredQueuePreemptClear(output: String): Boolean =
+        output.contains("session_clear deferred for")
 
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
         val protectedMatch = PROTECTED_CLEAR_REFUSAL_HEADER_REGEX.find(output)

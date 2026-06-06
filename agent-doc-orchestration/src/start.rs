@@ -1608,6 +1608,80 @@ fn spawn_idle_queue_watch_thread(
                 );
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
+
+                // `#autoloop-command-preemption` Phase 2b: a non-interrupting
+                // `session clear` against this busy auto-loop deferred itself
+                // (paused the loop via the clear cooldown + recorded a
+                // deferred-clear marker). Deliver that clear here at the idle
+                // gap, then drop both markers to resume the loop. When no marker
+                // exists this is a complete no-op, so the existing drain path
+                // below is unchanged.
+                let deferred_clear = crate::queue_continuation::read_deferred_operator_clear(&path)
+                    .unwrap_or(None);
+                match crate::queue_preemption::plan_deferred_clear_step(
+                    deferred_clear.is_some(),
+                    prompt_visible,
+                ) {
+                    crate::queue_preemption::DeferredClearStep::None => {}
+                    crate::queue_preemption::DeferredClearStep::WaitForIdle => {
+                        // Pending clear, pane still mid-turn: do not interrupt
+                        // in-flight work; wait for the next idle tick.
+                        continue;
+                    }
+                    crate::queue_preemption::DeferredClearStep::Deliver => {
+                        let clear_cmd = deferred_clear
+                            .as_ref()
+                            .map(|d| d.clear_command.clone())
+                            .unwrap_or_default();
+                        match auto_trigger_inject_command(&shared, &stop, &clear_cmd) {
+                            AutoTriggerOutcome::Cancelled => return,
+                            AutoTriggerOutcome::Sent => {
+                                // Resume: drop the deferred-clear record AND the
+                                // pause cooldown so the next tick drains normally.
+                                if let Err(err) =
+                                    crate::queue_continuation::clear_deferred_operator_clear_marker(
+                                        &path,
+                                    )
+                                {
+                                    eprintln!(
+                                        "[agent-doc] idle-queue watch: failed to drop deferred-clear marker: {err:#}"
+                                    );
+                                }
+                                if let Err(err) =
+                                    crate::queue_continuation::clear_cooldown_marker(&path)
+                                {
+                                    eprintln!(
+                                        "[agent-doc] idle-queue watch: failed to clear cooldown after deferred clear: {err:#}"
+                                    );
+                                }
+                                last_dispatched = None;
+                                clear_cooldown_logged = false;
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_deferred_clear_delivered harness={} cmd=\"{}\"",
+                                        harness.binary, clear_cmd
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: delivered deferred operator clear and resumed the loop"
+                                );
+                                // Let the clear run; resume drains on a later tick.
+                                continue;
+                            }
+                            _ => {
+                                // Delivery failed: keep the marker and retry on
+                                // the next idle tick (do not resume yet).
+                                log_event(
+                                    &mut session_log,
+                                    "idle_queue_watch_deferred_clear_failed",
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 match idle_queue_drain_decision(
                     clear_cooldown_active,
                     prompt_visible,

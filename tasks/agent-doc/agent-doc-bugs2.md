@@ -254,7 +254,24 @@ Root-caused this (the bug had no plan) and confirmed it against a **live repro o
 **Fix direction:** a user *queue add* ≠ an unanswered *exchange prompt*. When the only post-baseline drift is added `agent:queue` lines (no exchange/response conflict), merge them into `content_ours` (reuse `content_ours_merged_with_disk_edits` / `merge_contents_crdt`, scoped to the queue component) instead of block-and-drop — so the queue item survives the same commit. Exchange-prompt drift keeps blocking. Must gate against `dedup_live_prompts` (`#queue-dedup-destroys-intentional-duplicates`) and handle striking the consumed head + keeping the new tail add in one commit.
 
 Full plan (with the exact symbols, design, and SimWorld tests): **`tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md`** (committed `4365ee2b0`). Shares a fix surface with `#finalize-divergence-orphans-committed-head`.
-<!-- agent:boundary:a69fe922 -->
+
+### Re: [#autoloop-command-preemption] Phase 2b (your queued "do Phase 2b") — opus-4-8
+
+Done — shipped Phase 2b out of queue order as you asked. The preemption feature is now functionally complete; only Phase 3 (operator live-verify) remains, so I've gated the item.
+
+**The full pause → deliver-on-idle → resume loop now works:**
+- **Durable hand-off marker** `DeferredOperatorClear` (`queue_continuation.rs`) — written by the Phase 2a defer branch alongside the clear cooldown, so the `session clear` path and the supervisor never need shared memory.
+- **Pure decision** `plan_deferred_clear_step(pending, prompt_ready)` → `None` / `WaitForIdle` / `Deliver` (3 tests).
+- **Supervisor `idle-queue-watch`** (`start.rs`) consults it each tick *before* the drain decision: on `Deliver` it injects the recorded clear command via `auto_trigger_inject_command`, then drops both markers (deferred-clear + cooldown) to resume. On `None` it's a **complete no-op** — the existing auto-loop drain is byte-for-byte unchanged, so zero regression risk to the common path.
+- **`interrupt-clear`** drops the deferred marker first, so the destructive path supersedes a pending deferred clear (no double-clear).
+- **JB plugin** recognizes the `session_clear deferred for …` outcome and shows a "deferred — runs at the next idle gap, then resumes" notice instead of "Cleared"/"blocked". Built `0.2.148` (both zips).
+
+`make check` green; 6 new unit tests total across 2a+2b; both binaries rebuilt + installed; submodule pushed (`841bbc4f`, CI running).
+
+**Phase 3 (gated, your verify):** the live supervisor only picks up the new watch logic after the running `agent-doc start` restarts. To verify: start an auto-loop, run Clear Session Context, confirm the loop pauses → the clear runs at the idle gap → the loop resumes, with no queue items lost. Reinstall the JB plugin (`0.2.148`) to see the deferred notice.
+
+(Queue head `#claude-busy-status-during-active-turn` left untouched for a later cycle.)
+<!-- agent:boundary:2f2481a6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

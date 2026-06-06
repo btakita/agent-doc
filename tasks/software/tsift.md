@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -179,7 +179,37 @@ tsift decides "this fetch is a runbook, emit a stub with a re-fetch hint"; agent
 One nuance worth keeping: agent-doc already owns session/cycle state (`cycle_state.rs`), so it's the natural place to *provide the session-identity adapter* (layer 2) — but the ledger itself (layer 1) still belongs in the leaf crate that agent-doc depends on, not inside agent-doc.
 
 **Caveat (unchanged):** don't build any of this until re-measurement proves the nudge didn't already close the gap — #7qky stays gated. But designing the **seam** now is free and worth it: have `tsift runbook <name>` and agent-doc's runbook references both call the same ledger interface from day one, so the enforcement can drop in later without reworking either consumer. I've recorded this placement decision on the gated #7qky item.
-<!-- agent:boundary:9e53529b -->
+
+### Re: Is the nudge in effect in monsterrodholders, and how successful? — opus-4-8
+
+> **Queue prompt:**
+>
+> Please look at the monsterrodholders.md session. Is the nudge in effect? If yes, how successful was it?
+
+
+No — the nudge is **not yet in effect** for monsterrodholders, and even if it were, that session is the wrong place to see its impact. Two independent reasons, both from the logs:
+
+**1. No monsterrodholders session has run since the nudge went live.**
+- Nudge committed/installed into the surfaces at **2026-06-06 02:33 EDT** (06:33 UTC).
+- The real monsterrodholders agent-doc sessions (`7a627c84`, `d39155c7`, `d0da43fc`, `e1015ac9`) all last ran **2026-06-05 or earlier** — newest activity `e1015ac9` at 2026-06-05T04:39Z. All pre-nudge.
+- The one "today" hit my search surfaced (`32e4e1a3`, 06:59Z) is **this very session** (tsift.md) — it only matches "monsterrodholders" because the string lives in my memory/CLAUDE.local context, not because it's a monsterrodholders session.
+- A Claude Code session only picks up the new SKILL.md at skill-invocation time, so the nudge can't apply retroactively to a session that ended yesterday. It takes effect the next time `/agent-doc .../monsterrodholders.md` is freshly invoked.
+
+**2. monsterrodholders barely reads runbooks at all — there's almost nothing for the nudge to act on.**
+Pre-nudge baseline across all four real sessions: **1 runbook read total, 0 redundant.**
+| Session | reads | distinct | redundant |
+|---|---|---|---|
+| 7a627c84 | 0 | 0 | 0 |
+| d39155c7 | 0 | 0 | 0 |
+| d0da43fc | 0 | 0 | 0 |
+| e1015ac9 | 1 | 1 | 0 |
+
+That's consistent with my earlier finding: Claude Code already had the lowest, cleanest redundancy (all cross-turn, ~0 same-turn waste). monsterrodholders is a Claude research session, so it was never the target. **The nudge targets Codex's per-cycle shell re-reads** (`.codex/AGENTS.md`, which now carries the nudge), where the 12.6% redundancy and the `harness-invocation`/`commit`/`pending-ops` hot-path re-`cat`ing actually live.
+
+**So, to actually measure success:** look at **Codex** sessions that run *after* 2026-06-06 06:33 UTC and re-measure the redundant-read rate against the 12.6% baseline — not Claude research sessions like monsterrodholders. That's exactly the re-measurement #7qky is gated on; it has no data yet because no qualifying Codex session has run since install. Bottom line: nudge is live in the surfaces, but its first measurable test is a fresh post-install Codex cycle, not monsterrodholders.
+
+(Housekeeping: preflight is now flagging this exchange as large — `block`-level accretion, 6 response sections. If you want, I can run `agent-doc compact tasks/software/tsift.md --commit` to archive the resolved Q&A tail. Not doing it without your go-ahead.)
+<!-- agent:boundary:b73308ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -188,8 +218,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Please look at the monsterrodholders.md session. Is the nudge in effect? If yes, how successful was it?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

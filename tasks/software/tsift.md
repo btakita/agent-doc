@@ -76,7 +76,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
 - ~Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.~
 - ~[#trt1]~

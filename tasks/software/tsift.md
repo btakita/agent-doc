@@ -131,7 +131,18 @@ The `#spec-test-build-install-commit-push` preset ran `make check`, which reveal
 **Verification:** `cargo test --workspace` → **1223 passed (50 suites), 0 failed**; `cargo clippy --workspace --all-targets -D warnings` → **clean**. `cargo install --path .` → tsift 0.1.62 installed.
 
 **Commit/push:** tsift committed + pushed — `678672f` on `btakita/tsift`. Superproject `src/tsift` pointer committed locally (`cf5df5f7f`); its push is deferred because the shared agent-loop superproject is 34 concurrent-session commits ahead of origin with submodule conflicts in unrelated areas (boost-client/monsterrodholders) — I did not force-reconcile other sessions' work. The tsift deliverable itself is pushed and CI-green.
-<!-- agent:boundary:ea0cbb12 -->
+### Re: [#trt1] queue reference — opus-4-8
+
+Treating the bare `[#trt1]` line as a backlog **reference**, not an implementation directive — the planner reads it as `prompt_response` with no repo actions or prompt targets (there's no `do #trt1` / `implement` imperative). So I'm not speculatively building the feature off a fresh, unreviewed design.
+
+State: the findings graph layer is **design-complete** — the `## Findings Graph Layer` section shipped to `src/tsift/SPEC.md` last cycle (committed `678672f`, CI-green). Implementation stays in the backlog as design-stage (`#trt1`, still OPEN — not completed this cycle).
+
+To build it, give an explicit go-ahead. Options:
+- `do #trt1` — full 4-phase feature.
+- **Phase 1 first (recommended)** — `finding`/`decision`/`note` nodes + `concerns`/`scopes`/`relates_to` edges + watermark staleness + `tsift finding add/list`. Note `GraphStore` already stores arbitrary typed nodes/edges, so this is mostly a new CLI subcommand + persistence, not a schema change. Review before Phases 2–4 (hot-path injection → graph-menu/exports → passive harvest).
+
+I've drained the `[#trt1]` queue reference so we stop auto-looping on it; `#trt1` remains in the backlog for you to trigger when ready.
+<!-- agent:boundary:75fa904b -->
 <!-- /agent:exchange -->
 ###
 <!--

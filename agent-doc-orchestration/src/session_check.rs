@@ -3841,10 +3841,12 @@ fn open_cycle_message(file: &Path, state: &crate::cycle_state::CycleState) -> Re
             .starts_with("recursive_direct_invocation_blocked")
     {
         return Ok(format!(
-            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. Retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",
+            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. If the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`). Otherwise retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",
             state.cycle_id,
             phase_name(state.phase),
             state.last_event,
+            state.file,
+            state.file,
             state.file,
             ipc_hint
         ));

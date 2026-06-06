@@ -235,7 +235,7 @@ fn classify_no_change_cycle_state(
                     state.cycle_id
                 ),
                 recovery:
-                    "dispatch from the document's managed pane (editor Run Agent Doc) or restart the owner with `agent-doc start <FILE>` instead of a nested direct `agent-doc <FILE>`"
+                    "if the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status <FILE>` (or `agent-doc session clear <FILE>`) — idle pane evidence repairs a stale busy actor back to ready. Otherwise dispatch from the document's managed pane (editor Run Agent Doc) or restart the owner with `agent-doc start <FILE>` instead of a nested direct `agent-doc <FILE>`"
                         .to_string(),
             };
         }
@@ -1097,9 +1097,11 @@ fn recursive_codex_direct_invocation_diagnostic(
 ) -> Option<String> {
     let detail = owned_pane_self_invocation_detail(file, session_id, agent_name)?;
     Some(format!(
-        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document ({}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed); retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
+        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document ({}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed). If the pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`) — idle pane evidence repairs a stale busy actor back to ready; otherwise retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
         file.display(),
         detail,
+        file.display(),
+        file.display(),
         file.display()
     ))
 }
@@ -1610,6 +1612,13 @@ mod tests {
                 assert!(summary.contains("recursive direct invocation"));
                 assert!(summary.contains("cycle-1"));
                 assert!(recovery.contains("managed pane"));
+                // #stale-busy-recursion-recovery-discoverability: a stale busy
+                // idle pane must be recoverable without a pane kill via the
+                // existing idle-reconcile path, so the diagnostic must surface
+                // `session status` / `session clear` ahead of the heavy restart.
+                assert!(recovery.contains("agent-doc session status"));
+                assert!(recovery.contains("agent-doc session clear"));
+                assert!(recovery.contains("without killing the pane"));
             }
             NoChangeVerdict::Clean => panic!("expected an abnormal no-change verdict"),
         }

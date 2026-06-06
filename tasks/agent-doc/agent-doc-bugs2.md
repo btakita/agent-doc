@@ -115,13 +115,23 @@ The other two questions I'd decide as implementation detail (tell me if you disa
 3. Operator live-verify on the monsterrodholders busy Codex pane (gating; only you can run it).
 
 Say **"defer, go"** and I'll implement phases 1–2 and gate 3 for your live-verify. Or steer the fork. The remaining queue (`#autoloop-command-preemption` + 8 more) stays put until you call it.
-<!-- agent:boundary:6c61edf5 -->
+### Re: Fix the root cause of the buffer corruption — opus-4-8
+
+Investigated with the fresh repro and shipped a root-cause **contributor** fix (`90d649a1`, pushed, built + installed). Being precise about what's fixed vs. what still needs your live-verify, because the evidence doesn't let me claim the whole thing is closed.
+
+**Fixed (deterministic, tested):** One finalize builds its IPC patches up to **three times** — socket attempt, file-IPC fallback, and the `run_stream` timeout re-write. Each call minted a **fresh random boundary**, so the same response went to the plugin under different boundary IDs (your repro logged `60aecabf` then `fc36ee6c`). When a socket patch lands but its ACK times out, the binary re-sends under a new boundary the plugin can't match → `append_with_boundary` falls through to an unconditional append → re-added content. Fix: derive the boundary deterministically from the stable `patch_id`, threaded to all rebuild sites, so every rebuild of one write carries an **identical** boundary the plugin dedups/replaces instead of appending. Tests: `boundary_id_from_seed_*` + `build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds`; `make check` green.
+
+**Honest scope — not fully confirmed:** your live buffer hit **107235 ≈ 85% of the 57970-byte doc duplicated** — a *near-full-document* doubling, much bigger than just the exchange response. That signature points beyond the boundary divergence to a full-doc merge/apply path — likely the `#ipcfullprompt` class your plugin CLAUDE.md documents ("two divergent baselines merge-applied twice" via duplicate PromptPoller tracking keys). I **cannot confirm** the boundary fix eliminates the ~2× duplication without a live-IntelliJ repro — that's the operator-gated part of `#finalize-visible-buffer-ipc-timeout-race`, and I won't overclaim it. Full analysis + the remaining plugin-side hardening (atomic `patch_id` dedup before async apply; single-canonical-key PromptPoller guard; reload-then-reapply exit-75 recovery) is in `plan-finalize-visible-buffer-ipc-timeout-race.md`.
+
+**Next:** with the updated binary installed, if the doubling recurs on a finalize-timeout, capture the new `ops.log` `visible_write_deferred_live_buffer_changed` `live_len/live_hash` so we can confirm whether it's down to just the exchange (boundary fix worked, residual elsewhere) or still full-doc (the merge path). The `#autoloop-command-preemption` fork is still open and the rest of the queue is paused until you steer.
+<!-- agent:boundary:77353b12 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~[#skill-md-token-footprint-reduce]~
 - ~[#jb-run-preempt-autoloop-priority]~
 - [#autoloop-command-preemption]
+- Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
 - do [#claude-busy-status-during-active-turn]

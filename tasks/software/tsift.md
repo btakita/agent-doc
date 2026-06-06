@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -106,7 +106,34 @@ I measured it against real session logs. Verdict: **yes, the soft discipline is 
 - Scope: Claude = the agent-loop project transcripts (284 sessions); Codex = all 2026 rollout sessions (~2,866); OpenCode = full DB.
 
 Bottom line for the discipline-vs-enforcement question from the prior turn: the soft discipline already eliminates in-context waste, so a hard read-once hook would only reclaim the cross-turn tail — and that tail is dominated by Codex's per-cycle shell re-reads, which is the targeted, high-value case rather than a broad win.
-<!-- agent:boundary:309062ec -->
+
+### Re: Implement #7qky for Codex only, not Claude/OpenCode? — opus-4-8
+
+> **Queue prompt:**
+>
+> Should we implement [#7qky] for Codex based on the last response? But not on Claude/OpenCode?
+
+
+The asymmetry you're pointing at is real and correct: **scope any intervention to Codex, leave Claude/OpenCode alone.** But I'd push back on implementing *#7qky as written* (the hard read-once `Read` hook) even for Codex — pick the cheaper, lower-risk Codex fix first.
+
+**Why not Claude/OpenCode** — the data settles it:
+- Claude's 11.4% redundancy is *entirely cross-turn* (same-turn waste = 0). A read-once block there would fire exactly on the post-compaction re-reads that are legitimately needed → it starves the model. Net-negative.
+- OpenCode is 5.3% and 3 of its 4 re-reads are `harness-invocation.md` — too little to justify any mechanism.
+
+**Why Codex is the right target** — 12.6%, 89 re-reads concentrated in `harness-invocation.md` ×22, `commit.md` ×16, `pending-ops.md` ×15. Those are the closeout/hot-path runbooks re-`cat`'d nearly every cycle.
+
+**But #7qky (the hook) is the wrong first move, even for Codex:**
+1. **Mechanism mismatch.** #7qky was written as a Claude-style `PreToolUse` hook on the `Read` tool. Codex doesn't read runbooks through a `Read` tool — it shells out (`cat`/`sed` a `runbooks/*.md`). Enforcing read-once would mean intercepting arbitrary shell exec and pattern-matching commands — fragile, and easy to evade with `head`/`awk`/redirects.
+2. **A hard block can still starve Codex.** Within a long Codex session the earlier `cat` output can be compacted out too; blocking the re-read then removes content it genuinely lost.
+3. **Cheaper fix likely closes most of the gap.** The Codex re-reads cluster on 3 hot-path runbooks. Two lower-risk options dominate the hook on ROI:
+   - **(a) Inline the 3 hot-path runbooks** (`harness-invocation`, `commit`, `pending-ops`) into Codex's always-loaded `AGENTS.md` closeout section, so there's nothing to re-read — turns the re-read into a zero-cost cache hit.
+   - **(b) Strengthen the retain-don't-reread nudge** in Codex's AGENTS.md / Stop-hook guidance, since Codex's in-context discipline is measurably weaker than Claude's (which already runs at ~0 same-turn waste).
+4. **The measurement is medium-confidence** (Codex shell heuristic). I'd want to re-measure after a cheap fix before committing to hook machinery.
+
+**Recommendation:** Yes to Codex-only scope; no to building the hook yet. Do (a) inline the 3 hot-path runbooks for Codex first, re-measure, and only build an enforcement mechanism if the 12.6% doesn't drop. I've re-scoped #7qky to reflect this (Codex-targeted, cheap-fix-first, hook as fallback) so it doesn't get picked up as a blanket all-harness hook.
+
+If you'd rather I just implement (a) now — inline the three runbooks into the Codex AGENTS.md closeout surface — say the word and I'll do it as its own cycle.
+<!-- agent:boundary:71eebe2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,8 +142,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Should we implement [#7qky] for Codex based on the last response? But not on Claude/OpenCode?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

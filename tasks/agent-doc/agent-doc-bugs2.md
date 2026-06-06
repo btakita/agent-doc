@@ -174,7 +174,7 @@ You're right — and my earlier "it's just a feedback problem" framing was wrong
 **Shipped:** `route.rs` (`busy_dispatch_only_should_wait_for_ready` gains the active-turn gate; new `dispatch_only_busy_refusal_message` helper) + 3 unit tests + spec `08-session-routing.md`. `make check` green; both binaries + FFI cdylib rebuilt/installed. Submodule `b93b3c3c` pushed.
 
 **Honest gaps:** (1) the exact JB 60s-stall repro needs prompt-bearing drift *while* the pane is busy — I would not manufacture that on your live monsterrodholders doc, so the end-to-end JB verification is captured as `#jb-busy-active-turn-stall-live-verify` (deterministic logic is unit-tested). (2) The superproject pointer push is deferred (`#adoc-route-busy-fix-superproject-pointer-push`): `pull --rebase` conflicts on the `src/boost-client` submodule pointer from concurrent work, so I aborted rather than touch another session's pointer. The fix is live locally and on the submodule remote regardless.
-<!-- agent:boundary:891be022 -->
+<!-- agent:boundary:5f3a15ce -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -186,7 +186,7 @@ Error: authoritative actor generation 281 for tasks/monsterrodholders.md owns pa
 ```
 ~~~
 ---
-JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it.
+JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it. 60s its way too long. It should be snappy and start right away. There is no active turn.
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.

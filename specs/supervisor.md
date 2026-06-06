@@ -434,6 +434,27 @@ distinct from the one-shot restart auto-trigger:
   failed inject is not recorded as dispatched, so it retries on the next idle
   tick. Successful drains log `idle_queue_watch_drain`; failures log
   `idle_queue_watch_drain_failed`.
+- **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
+  one-shot busy→ready completion transition on the pty→stdout thread is
+  edge-triggered on the latest output chunk. When an injected turn's composer
+  redraw lands split so the final chunk carries no detectable prompt — e.g. an
+  `auto_trigger_inject` recursive `agent-doc <FILE>` that hit the recursion
+  guard and returned — the actor can stay wedged `busy` over an idle pane with
+  no further bytes to retrigger ready, so the session presents as "truly stuck"
+  and even a pane kill + restart re-enters the state. The watch closes this with
+  a polling backstop driven by the pure
+  `stale_busy_idle_reconcile_decision(actor_busy, pane_has_busy_cue, clear_cooldown_active, ticks)`:
+  when the in-memory actor is `busy`/`starting`, a fresh `tmux capture-pane`
+  shows no harness `has_busy_cue` (the same direct evidence `route.rs` uses for
+  its stale-busy repairs — not the supervisor's edge-triggered pty buffer that
+  missed the redraw), no clear cooldown is pausing the loop, and the
+  idle-over-busy condition has held for `STALE_BUSY_RECONCILE_TICKS` consecutive
+  polls (~2s debounce so a turn still spinning up is never cut short), the watch
+  transitions the actor back to `ready` (`caller=supervisor reason=idle_pane_reconcile`,
+  persisted through `mark_lifecycle`), resets the prompt latch and dispatch
+  dedup, and logs `idle_queue_watch_stale_busy_reconciled`. The next idle tick
+  then drains any active head normally. This recovers the wedge with no pane
+  kill and no operator `session status`/`session clear`.
 
 Live end-to-end verification (a real busy Codex/Claude pane returning to idle and
 draining the route-appended head with no duplicate injection into the active

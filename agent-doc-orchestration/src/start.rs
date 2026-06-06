@@ -226,6 +226,11 @@ const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Consecutive idle-over-busy polls the idle-queue watch must observe before it
+/// reconciles a stale-busy actor back to ready (`#stale-busy-after-auto-inject-no-clear`).
+/// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane
+/// evidence — long enough that a turn still spinning up is never cut short.
+const STALE_BUSY_RECONCILE_TICKS: u32 = 4;
 const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -1286,6 +1291,68 @@ fn idle_queue_prompt_visible(
     child_output_prompt_visible(harness, &output)
 }
 
+/// Whether the authoritative in-memory actor state is `busy` or `starting` —
+/// the two non-dispatchable states a stale projection can wedge in.
+fn actor_state_is_busy_or_starting(shared: &SupervisorShared) -> bool {
+    shared.actor_state.lock().unwrap().is_some_and(|state| {
+        matches!(
+            state,
+            crate::session_actor::ActorState::Busy | crate::session_actor::ActorState::Starting
+        )
+    })
+}
+
+/// Direct pane evidence for the stale-busy reconcile: capture the supervisor's
+/// owned pane fresh via tmux and report whether the harness shows a busy cue.
+/// Returns `None` when no pane id is known or the capture fails, so the caller
+/// treats unreadable evidence as "not proven idle" and never reconciles on it.
+///
+/// This deliberately reads the live pane (the same `has_busy_cue` test
+/// `route.rs` uses for its stale-busy repairs) rather than the supervisor's
+/// edge-triggered pty `terminal_screen` buffer — that buffer is exactly what
+/// missed the composer redraw and left the actor wedged.
+fn supervisor_pane_has_busy_cue(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<bool> {
+    let pane = shared
+        .inject_pane
+        .clone()
+        .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
+    let tmux = crate::sessions::Tmux::default_server();
+    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    Some(harness.has_busy_cue(&content))
+}
+
+/// Decide whether the idle-queue watch should reconcile a stale-busy actor back
+/// to ready (`#stale-busy-after-auto-inject-no-clear`).
+///
+/// The supervisor's one-shot pty completion transition (busy→ready on
+/// `prompt_ready`, see the pty→stdout thread) is edge-triggered on the latest
+/// output chunk. When an injected turn's composer redraw lands split so the
+/// final chunk carries no detectable prompt — e.g. an `auto_trigger_inject`
+/// recursive `agent-doc <FILE>` that hit the recursion guard and returned — the
+/// actor can stay wedged `busy` over an idle pane with no further bytes to
+/// retrigger the transition. The session then presents as "truly stuck" and a
+/// pane kill + restart re-enters the same state.
+///
+/// This polling backstop self-heals it: reconcile only when the actor is
+/// projected busy/starting, the live pane shows no busy cue, no clear cooldown
+/// is pausing the loop, and the idle-over-busy condition has held for
+/// `STALE_BUSY_RECONCILE_TICKS` consecutive polls (debounce so a turn that is
+/// still spinning up is never cut short). Pure for unit testing the gate.
+fn stale_busy_idle_reconcile_decision(
+    actor_busy: bool,
+    pane_has_busy_cue: bool,
+    clear_cooldown_active: bool,
+    consecutive_idle_busy_ticks: u32,
+) -> bool {
+    actor_busy
+        && !pane_has_busy_cue
+        && !clear_cooldown_active
+        && consecutive_idle_busy_ticks >= STALE_BUSY_RECONCILE_TICKS
+}
+
 fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
     // Primary: parse terminal screen for the structured permission dialog
     let output = child_output_for_detection(shared);
@@ -1589,6 +1656,7 @@ fn spawn_idle_queue_watch_thread(
             let path = PathBuf::from(&file);
             let mut last_dispatched: Option<String> = None;
             let mut clear_cooldown_logged = false;
+            let mut idle_busy_ticks: u32 = 0;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -1606,6 +1674,56 @@ fn spawn_idle_queue_watch_thread(
                     &mut session_log,
                     &mut clear_cooldown_logged,
                 );
+
+                // `#stale-busy-after-auto-inject-no-clear`: poll-based self-heal
+                // for a stale busy actor wedged over an idle pane. The
+                // edge-triggered pty completion transition can miss an injected
+                // turn's composer redraw (e.g. a recursive `agent-doc <FILE>`
+                // that hit the recursion guard and returned), leaving the actor
+                // `busy` with no further output to retrigger ready. Re-derive
+                // ready from direct pane evidence so the session never gets
+                // "truly stuck" needing a pane kill or `session clear`.
+                let actor_busy = actor_state_is_busy_or_starting(&shared);
+                let pane_busy_cue = if actor_busy && !clear_cooldown_active {
+                    supervisor_pane_has_busy_cue(&shared, &harness)
+                } else {
+                    None
+                };
+                match pane_busy_cue {
+                    Some(false) => idle_busy_ticks = idle_busy_ticks.saturating_add(1),
+                    _ => idle_busy_ticks = 0,
+                }
+                if stale_busy_idle_reconcile_decision(
+                    actor_busy,
+                    pane_busy_cue == Some(true),
+                    clear_cooldown_active,
+                    idle_busy_ticks,
+                ) {
+                    shared.transition_actor_state(
+                        crate::session_actor::ActorState::Ready,
+                        "supervisor",
+                        "idle_pane_reconcile",
+                    );
+                    // Reset the one-shot prompt latch so a later genuine
+                    // busy→ready edge still fires normally, and clear the
+                    // dispatch dedup so the now-ready actor can drain its head.
+                    shared.prompt_visible_once.store(false, Ordering::Relaxed);
+                    idle_busy_ticks = 0;
+                    last_dispatched = None;
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "idle_queue_watch_stale_busy_reconciled harness={} pane={} after_ticks={}",
+                            harness.binary,
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            STALE_BUSY_RECONCILE_TICKS
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)"
+                    );
+                }
+
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
 
@@ -5182,6 +5300,65 @@ Done.
             idle_queue_drain_decision(false, true, Some("do [#b]"), Some("do [#a]")),
             IdleQueueDrainDecision::Dispatch
         );
+    }
+
+    #[test]
+    fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {
+        // Actor wedged busy, live pane shows no busy cue, cooldown clear, and the
+        // idle-over-busy condition has held for the full debounce window: reconcile.
+        assert!(stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            false,
+            STALE_BUSY_RECONCILE_TICKS
+        ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_waits_for_full_debounce() {
+        // One idle observation is not enough — a turn spinning up briefly shows no
+        // busy cue. Hold off until the debounce window is satisfied.
+        for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
+            assert!(
+                !stale_busy_idle_reconcile_decision(true, false, false, ticks),
+                "should not reconcile after only {ticks} idle ticks"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_busy_reconcile_skips_when_pane_busy() {
+        // The pane shows a busy cue — a turn is genuinely running. Never reconcile,
+        // regardless of how many ticks elapsed.
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            true,
+            false,
+            STALE_BUSY_RECONCILE_TICKS + 10
+        ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_skips_when_actor_ready() {
+        // Actor already dispatchable: nothing to reconcile.
+        assert!(!stale_busy_idle_reconcile_decision(
+            false,
+            false,
+            false,
+            STALE_BUSY_RECONCILE_TICKS
+        ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_skips_during_clear_cooldown() {
+        // A non-interrupting operator clear paused the loop; do not race it by
+        // flipping the actor ready underneath the deferred clear.
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            true,
+            STALE_BUSY_RECONCILE_TICKS
+        ));
     }
 
     #[test]

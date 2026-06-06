@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: start
 ---
 
 ## Status
@@ -101,7 +101,7 @@ The failure mode to avoid is a graph that fills with confident-sounding, unverif
 ### Net recommendation
 
 It's a strong fit and a low-risk extension because it reuses the substrate. I've queued it as a `[recommended]` backlog item (findings graph layer) rather than starting implementation, since the active queue was inactive and this is a design question. If you want to proceed, the first concrete slice I'd spec is: the `Finding` node + anchored edge schema in `GraphStore`, watermark-based staleness, and injection into `context-pack` — the menu command and md/html export build cleanly on top of that. The one thing to watch is staleness/rot; anchoring to handles + watermark gating is the mitigation, not an afterthought.
-<!-- agent:boundary:02e01f34 -->
+<!-- agent:boundary:aa18e0dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,8 +110,9 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Can tsift log additional useful metadata in a graph structure with codebases and corpuses? The idea is a large complex codebase has many design desicisions and interdependent parts. Can we cache how the parts fit together from a systems perspective and present a graph menu to the agent? What are effective ways of doing this? Can we cache agent "findings" and research into tsift using a graph structure? Would this be better in a md or html document instead for visibility? What if the user does not request such findings? Can tsift assist with capturing this knowledge for the agent to use to navigate, create md/html files, and other tasks?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.
+- [#trt1]
 <!-- /agent:queue -->
 
 ## Backlog

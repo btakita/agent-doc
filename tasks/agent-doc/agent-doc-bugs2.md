@@ -196,15 +196,39 @@ Fix: added a `taiki-e/install-action` nextest step before `make check`, so CI ta
 **The `__` prefix:** it marks an **internal/plumbing** command. `__digest-runner` is **hidden from `tsift --help`** — the `__` (dunder, from Python's "internal" convention) signals "not part of the public CLI contract." It *is* directly callable (it has `--help` and runs), but you normally never invoke it by hand: the public entrypoints are the PreToolUse/rewrite hooks and `tsift rewrite --run '<cmd>'`, which call `__digest-runner` under the hood to turn noisy test/build output into a bounded, artifact-backed digest.
 
 **The queue item that vanished:** real bug, captured as `#queue-edit-lost-during-finalize-crdt`. You typed into the queue *while a finalize was mid-write* (the "File was modified during response generation. CRDT merging…" path churning on the editor-buffer block); the CRDT merge transiently dropped the item, then it recovered on the next preflight. It shouldn't visibly disappear — the merge should preserve a user-added queue item cleanly. Same family as the editor-buffer race dominating this session. Continuing.
-<!-- agent:boundary:8b575143 -->
+
+### Re: `__` prefix in `tsift __digest-runner` + the queue item that vanished — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` error on this document
+> ```
+> [route] target tmux session: 0
+> [preflight] pending: 1 gated item(s)
+> [preflight] review: 71 item(s), 71 gated
+> Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md owns pane %23 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+> ```
+
+
+**`__` prefix:** an **internal/plumbing** command, hidden from `tsift --help` (the `__` dunder = "internal" convention). Directly callable but not public — the public path is the PreToolUse/rewrite hooks and `tsift rewrite --run '<cmd>'`, which call `__digest-runner` to turn noisy test/build output into a bounded artifact-backed digest.
+
+**Vanished queue item:** real bug (`#queue-edit-lost-during-finalize-crdt`) — a queue edit typed during a mid-write finalize was transiently CRDT-dropped, then recovered. Root cause this session: the route-owned supervisor's idle-queue watch / file-watcher racing manual finalizes, not IntelliJ. Continuing.
+<!-- agent:boundary:7d75e9f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~[#skill-md-token-footprint-reduce]~
-- ~[#jb-run-preempt-autoloop-priority]~
-- ~[#autoloop-command-preemption]~
-- ~Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"~
-- ~Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.~
+~~~done
+JB `Run Agent Doc` error on this document
+```
+[route] target tmux session: 0
+[preflight] pending: 1 gated item(s)
+[preflight] review: 71 item(s), 71 gated
+Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md owns pane %23 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+```
+~~~
+- [#autoloop-command-preemption]
+- [#queue-edit-lost-during-finalize-crdt]
+- [#claude-busy-status-during-active-turn]
 - do [#ci-per-test-timeout-guard]
 - Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
 - After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.

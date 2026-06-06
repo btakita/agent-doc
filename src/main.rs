@@ -1467,6 +1467,18 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Explicitly strike the leading free-text queue head(s) already answered by
+    /// this turn's response(s). Use when a single cycle answered multiple
+    /// free-text heads (the strike heuristic only consumes one head per
+    /// finalize), to drain the answered stragglers instead of re-serving them.
+    /// Scoped to free-text heads; id-backed heads must be reaped via `--done`.
+    Consume {
+        /// Path to the session document
+        file: PathBuf,
+        /// Number of leading free-text heads to strike (default 1)
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2723,6 +2735,9 @@ fn main() -> anyhow::Result<()> {
         },
         Commands::Queue { action } => match action {
             QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
+            QueueAction::Consume { file, count } => {
+                agent_doc_orchestration::queue_cmd::consume(&file, count)
+            }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
             // Determine scan root: explicit --scope, or cwd, or project root

@@ -2823,7 +2823,7 @@ fn cycle_answered_foreign_exchange_prompt(
     })
 }
 
-fn active_queue_head_text(content: &str) -> Result<Option<String>> {
+pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     let (fm, _) = frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
@@ -2997,7 +2997,7 @@ fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
 /// heading-id consumption paths can ever strike it — so it is consumed by being
 /// answered: a captured response body for the cycle completes it
 /// (#free-text-queue-head-consume).
-fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
+pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     let Some(queue_head) = active_queue_head_text(content)? else {
         return Ok(false);
     };

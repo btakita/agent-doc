@@ -324,7 +324,23 @@ What happens: when you add a queue line *while* `finalize` is mid-write, the liv
 The reassuring part: it's not data loss. The CRDT merge keeps your add on disk, so the **next preflight re-surfaces it** — which is exactly why your `__digest-runner` question survived the deletion and got answered one cycle later.
 
 The fix (deferred to a clean session, since it touches the most sensitive finalize path): when the only post-baseline drift is added `agent:queue` lines, *merge* them into `content_ours` instead of block-and-drop. Shares a fix surface with `#finalize-divergence-orphans-committed-head`. No new action this cycle — it's tracked and gated.
-<!-- agent:boundary:fb61dd02 -->
+
+### Re: don't stall the queue to ask about compacting — opus-4-8
+
+> **Queue prompt:**
+>
+> When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact. I expected this queue to run overnight, not stall before completing the first task.
+
+
+Understood, and fair — I did exactly that twice this session. I'll stop.
+
+**New rule for me:** while a queue is actively draining, I keep draining. I won't pause to ask about compaction. If accretion is high I'll note it in one line of a response (or compact silently only if you've set `agent_doc_auto_compact`), but never block the queue on a compaction question. Compaction prompts are only for when the queue is idle / you're driving a turn directly.
+
+- Saved to memory as durable cross-session feedback (`feedback_no_compact_prompt_during_queue_drain`).
+- Queuing a backlog item to make it a durable rule in the agent-doc skill's auto-loop section (the skill is what nudges toward asking — the fix belongs there, alongside the existing "ask the user before compacting" accretion guidance, scoped to *not while draining*).
+
+Continuing the drain now.
+<!-- agent:boundary:6d46c633 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -343,7 +359,7 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 - ~do [#ci-per-test-timeout-guard]~
 - ~Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?~
 - ~After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.~
-- When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact. I expected this queue to run overnight, not stall before completing the first task.
+- ~When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact. I expected this queue to run overnight, not stall before completing the first task.~
 - [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]

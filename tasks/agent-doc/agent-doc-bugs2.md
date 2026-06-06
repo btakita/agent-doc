@@ -66,18 +66,33 @@ Done, and the right call — a memory only helps me; you ship agent-doc to other
 2 new unit tests; `make check` green; both binaries rebuilt + installed; submodule `782bf4c9` pushed (CI running), superproject `706a9614b`.
 
 Going forward I'll treat agent-doc behavior problems as product fixes. (One related note: the supervisor-self-race / finalize-divergence *recovery recipe* I also have in memory is arguably the same category — want me to fold that into AGENTS.md / a runbook as a packagable troubleshooting doc too? I'll do it on the next pass unless you say otherwise.)
-<!-- agent:boundary:edf07aa3 -->
+
+### Re: [#backlog-id-user-rename-revert] do — opus-4-8
+
+> **Queue prompt:**
+>
+> "I also have in memory is arguably the same category — want me to fold that into AGENTS.md / a runbook as a packagable troubleshooting doc too?": Yes
+
+
+Investigated and narrowed the root cause; the fix stays gated (it touches core CRDT identity, too sensitive to ship unattended mid-drain).
+
+**Repro (temp template doc):** added an item (`[#b1hv]`), renamed the leading id to a custom `[#b1hv-2]` on disk, ran `preflight` + `write --pending-add` — **the renamed id survived, no revert.** So:
+- **Candidate #2 (backfill / `find_valid_hash_id` re-derivation) is ruled out** — a custom non-hash id is not treated as "missing" or reassigned by the pending/backfill path.
+- `write --pending-add` doesn't create `.agent-doc/crdt/<hash>.yrs`, so the simple path never exercises the CRDT merge.
+
+So the live revert is in the **CRDT identity merge (#1, most likely)** or the **backlog→queue-sync reconcile (#3)**. The fix (re-key CRDT item identity + `do [#old]` queue ref) is a sensitive core change — per your "packagable, careful" bar it lands in an attended pass with a git+CRDT finalize-merge repro green, not unattended during a drain. Findings recorded in `plan-backlog-id-user-rename-revert.md` (`d2fe7c104`). Gating the item.
+<!-- agent:boundary:bef1d7df -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~do [#claude-busy-status-during-active-turn]~
-- ~"Saved to memory as durable cross-session feedback (`feedback_no_compact_prompt_during_queue_drain`).". Since I am the auhthor of agent-doc, I don't want memory solutions. I want durable and packagable solutions so other people don't run into the same issue. Please remove the memory entry and create a different way to solve this. Update AGENTS.md with the CLAUDE.md symlink with these agent-doc development instructions.~
+- ~"I also have in memory is arguably the same category — want me to fold that into AGENTS.md / a runbook as a packagable troubleshooting doc too?": Yes~
 - do [#backlog-id-user-rename-revert]
 - do [#writer-emits-deprecated-queue-active-false]
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]
 - do [#free-text-head-answer-match-too-literal]
-- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities?
+- Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
+- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard?
 <!-- /agent:queue -->
 ###
 <!--

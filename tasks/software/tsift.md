@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: start
 ---
 
 ## Status
@@ -37,7 +37,7 @@ Compacted content:
 - Archived 13 response topic(s): Can tsift cache system-level design knowledge in a graph?; How to model findings effectively; The "graph menu" for the agent; 10 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 
-### Re: [#trt1cfg] — configure agent-loop to use the findings layer — opus-4-8 (HEAD)
+### Re: [#trt1cfg] — configure agent-loop to use the findings layer — opus-4-8
 
 `#trt1cfg` is the queue head, but it is **blocked**: it is gated on Findings Graph Layer phases 2–4 shipping, and only Phase 1 (`#trt1p1`) was committed. Those phases also sit *after* `#trt1cfg` in the queue — a dependency-ordering inversion. So this cycle I did the real next unblockable work, **Phase 2 (`#trt1p2`) hot-path injection**, and moved `#trt1cfg` to the end of the backlog so it drains after its dependencies.
 
@@ -67,7 +67,7 @@ New `collect_injectable_findings` helper in `commands/finding.rs`; wiring + `Con
 - `#trt1cfg` stays open/blocked until p3, p4, and p2b ship.
 
 Top of backlog (`#next-steps`): **`#trt1p3`** — Phase 3 (graph menu + md/html exports).
-<!-- agent:boundary:9dc496f7 -->
+<!-- agent:boundary:71fdd3bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,17 +80,16 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
 - ~Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.~
 - ~[#trt1]~
-- ~[#trt1p2]~
+- [#trt1cfg]
+- [#trt1p2]
 - [#trt1p3]
 - [#trt1p4]
-- [#trt1p2b]
-- [#trt1cfg]
-- ~Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.~
+- Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
+<!-- agent:backlog queue -->
 - [ ] [#trt1p3] Findings Graph Layer Phase 3 — graph menu + exports: annotate graph-db map with attached findings, and on-demand md/html projection (tsift map --format md|html). Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p4] Findings Graph Layer Phase 4 — passive harvest: config-gated draft extraction of candidate findings from agent-doc session archives/summaries, with draft→trusted promotion. Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p2b] Findings Graph Layer Phase 2b — fold trusted, fresh findings into `search` and `explain` output, reusing the trusted/fresh/result-set injection contract from context-pack (#trt1p2). Plan: src/tsift/specs/graph.md § Hot-path injection (Phase 2).

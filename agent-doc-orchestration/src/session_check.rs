@@ -501,8 +501,19 @@ fn check_dropped_queue_prompt_guard(
 }
 
 /// Collect the assistant `### Re:` response prose from an exchange component
-/// body (heading + boundary + comment lines excluded). Used to detect queue
-/// lines that were copied out of a response body.
+/// body (heading + boundary + comment + blockquote lines excluded). Used to
+/// detect queue lines that were copied out of a response body.
+///
+/// Blockquote lines (`> …`) are EXCLUDED: every `### Re:` response echoes the
+/// prompt it is answering as a `> **Queue prompt:** … > <verbatim head text>`
+/// quote. Including those echoes made the contamination guard
+/// (`check_queue_response_contamination_guard`) false-positive on any
+/// still-live free-text queue head whose text a response quoted — the response
+/// legitimately quotes the head it answered, and an earlier response that
+/// quoted a near-identical prompt would flag an unrelated live queue item too.
+/// The guard targets assistant ANSWER prose copied into the queue, not the
+/// prompt-echo, so blockquoted quotes are not response prose for this purpose.
+/// (#jb-run-agent-doc-response-queue-contamination — blockquote-echo false positive)
 fn assistant_response_text(exchange_body: &str) -> String {
     let mut in_response = false;
     let mut out = String::new();
@@ -515,7 +526,11 @@ fn assistant_response_text(exchange_body: &str) -> String {
         if trimmed.starts_with("<!-- agent:boundary") {
             continue;
         }
-        if in_response && !trimmed.is_empty() && !trimmed.starts_with("<!--") {
+        if in_response
+            && !trimmed.is_empty()
+            && !trimmed.starts_with("<!--")
+            && !trimmed.starts_with('>')
+        {
             out.push_str(trimmed);
             out.push('\n');
         }
@@ -9375,6 +9390,41 @@ Body\n\
                 GuardResult::None
             ),
             "legitimate free-text queue prompt must not be flagged"
+        );
+    }
+
+    /// `#jb-run-agent-doc-response-queue-contamination` blockquote-echo false
+    /// positive: a still-live free-text queue HEAD whose verbatim text the
+    /// answering `### Re:` response quotes in its `> **Queue prompt:**` echo must
+    /// NOT be flagged as contamination. The response legitimately quotes the
+    /// prompt it answered; the blockquote is a prompt-echo, not answer prose.
+    #[test]
+    fn queue_contamination_ignores_blockquoted_prompt_echo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let head = "The backlog has not been updating with the queue progress. Some queue items remain uncommitted over several runs.";
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: Backlog freshness — opus-4-8\n\n",
+                "> **Queue prompt:**\n>\n> {head}\n\n",
+                "Diagnosed the freshness symptom; steady-state reconcile is sound.\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- {head}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            head = head
+        );
+        fs::write(&doc, content).unwrap();
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::None
+            ),
+            "a live free-text head quoted in the answering response's blockquote echo must not be flagged"
         );
     }
 

@@ -29,37 +29,15 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-043626.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-043936.md`*
 
 Compacted content:
-- Archived 18 response topic(s): Head 1 re-served after compact; agent-doc dropped my 2nd `- deploy` queue item during a run; Make the main sync pipeline fast / responsive on file switch; 15 more
+- Archived 1 response topic(s): monsterrodholders responses not being written
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: monsterrodholders responses not being written — likely the same contamination, now resolving — opus-4-8
-
-> **Queue prompt:**
->
-> agent-doc monsterrodholders.md response are not being written into the document.
-
-
-> **Queue prompt:** agent-doc monsterrodholders.md response are not being written into the document.
-
-I checked the live evidence, and this looks like **the same root cause** as the 1-pane-1-document issue — and it's resolving now that the contamination is fixed.
-
-**Evidence responses are landing again (post-fix):**
-- `f1ae73a` (00:35) "agent-doc response: clear regional hero queue" and `a53ecee` (00:25) "agent-doc response: expose next regional queue" — both committed real response content into `monsterrodholders.md`.
-- The only `out_of_band_write` for monsterrodholders in `ops.log` is ~51 days old; there is no recent missing-writeback signature.
-
-**Why contamination caused it:** while pane %1 was bound to two documents (`monsterrodholders [codex]` + stale `astro-listings [claude-code]`), there was no single authoritative actor, so monsterrodholders' closeout/writeback had an ambiguous target — responses didn't reliably land (and your queue adds didn't process). After the bind-time eviction (`25ff1116`) made %1 single-owner, both queue processing and response writebacks resumed (the two response commits above).
-
-**Honest caveat:** "response not written" is a bug *class* with more than one cause. The contamination explains the recent monsterrodholders case, but the direct-chat/Codex final-gate variant and the IPC-merge-drop variant are separate signatures tracked by `#codex-final-response-repeat` / `#codex-final-response-live-verify` (plan `plan-codex-final-response-not-written.md`), still gated pending a live repro of *their* path. I'm not closing those — only attributing the recent monsterrodholders symptom to the contamination.
-
-Captured `#monsterrod-writeback-post-contamination-confirm` to verify on your side: if monsterrodholders responses still go missing *after* the fix, tell me and I'll capture the exact signature. Right now the commit record says they're writing.
-<!-- agent:boundary:b587a7b3 -->
+<!-- agent:boundary:78acf5e1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~agent-doc monsterrodholders.md response are not being written into the document.~
 - do [#per-cycle-protocol-output-overhead]
 - do [#skill-md-token-footprint-reduce]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.

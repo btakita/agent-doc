@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -209,7 +209,36 @@ That's consistent with my earlier finding: Claude Code already had the lowest, c
 **So, to actually measure success:** look at **Codex** sessions that run *after* 2026-06-06 06:33 UTC and re-measure the redundant-read rate against the 12.6% baseline — not Claude research sessions like monsterrodholders. That's exactly the re-measurement #7qky is gated on; it has no data yet because no qualifying Codex session has run since install. Bottom line: nudge is live in the surfaces, but its first measurable test is a fresh post-install Codex cycle, not monsterrodholders.
 
 (Housekeeping: preflight is now flagging this exchange as large — `block`-level accretion, 6 response sections. If you want, I can run `agent-doc compact tasks/software/tsift.md --commit` to archive the resolved Q&A tail. Not doing it without your go-ahead.)
-<!-- agent:boundary:944a99fa -->
+
+### Re: Promote `tsift __digest-runner` to a public `tsift digest-runner` command — opus-4-8
+
+> **Queue prompt:**
+>
+> Promote `tsift __digest-runner` to be a public CLI command. Remove the `__` prefix...`tsift digest-runner`
+
+
+> **Queue prompt** (`#spec-test-build-install-commit-push`):
+>
+> Promote `tsift __digest-runner` to be a public CLI command. Remove the `__` prefix...`tsift digest-runner`
+
+Done — shipped, built, installed, committed, and pushed.
+
+**What changed.** `__digest-runner` was a `hide = true` internal helper. It's now a first-class public command:
+
+- `cli.rs`: `#[command(name = "digest-runner", alias = "__digest-runner")]` with a `///` doc comment, and `hide = true` dropped. So `tsift --help` now lists it:
+  > `digest-runner    Run a shell command and emit a bounded, artifact-backed test/log digest envelope`
+- **Backward compatible.** `__digest-runner` stays as a *hidden* clap alias, so everything already emitting the old name keeps resolving: rewrite-generated commands, the `.codex`/`.opencode` hooks, and instruction files installed in other projects. I verified both names execute and both return `"tool":"digest-runner"`.
+- **New emissions use the public name.** `rewrite.rs`'s `build_digest_runner_command` and the `tsift init` instruction templates (managed Code Navigation block + OpenCode `tsift-test-digest`/`tsift-log-digest` commands) now emit `tsift --envelope digest-runner ...`.
+- **Docs/surfaces updated:** `specs/{search-navigation,output-formats,release-integration}.md`, `AGENTS.md`/`CLAUDE.md`, the `opencode-tsift` package commands + README, and a `VERSIONS.md` Unreleased entry (`#digest-runner-public`).
+
+**Spec + tests.** Integration tests in `exit_code.rs` now invoke the public `digest-runner`; added `digest_runner_legacy_underscore_alias_still_resolves` to lock the alias; `rewrite`/`sim_world`/`init` unit tests now assert the emitted form is `digest-runner` and *not* the underscore form.
+
+**Verification.** `make check` green — `RAW_EXIT=0`, zero `FAILED`/`error` lines (RTK-digested log; exit captured explicitly per the masking caveat). Targeted runs: digest-runner integration 5 passed, rewrite 6 passed, sim_world 3 passed, init 41 passed. Release built; `cargo install --path .` refreshed `~/.cargo/bin/tsift`, which confirms the public command in `--help`.
+
+**Commits.** tsift submodule `3a69aed` → pushed to `btakita/tsift main`; superproject pointer bump `acf6cf87f`. tsift CI for `3a69aed` is **in progress** (prior commit green); local full suite is green.
+
+**Note on naming.** I kept the legacy `__digest-runner` working rather than hard-removing it, since hooks and installed instruction files in other projects still call it — a clean break would break those mid-flight. Queued **#rx4x** to regenerate the agent-loop superproject's own instruction surfaces (CLAUDE.md, SKILL.md, runbooks) onto the public name; they still work via the alias, so it's non-breaking cleanup, not urgent.
+<!-- agent:boundary:5739316a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,13 +247,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Promote `tsift __digest-runner` to be a public CLI command. Remove the `__` prefix...`tsift digest-runner`
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rx4x] Regenerate agent-loop superproject instruction surfaces (CLAUDE.md, CLAUDE.local.md, .claude/skills/tsift/SKILL.md + runbooks) to emit the public `tsift digest-runner` instead of `__digest-runner`. They still work via the hidden alias, so this is non-breaking cleanup — run `tsift init` (+ --opencode) to refresh the managed Code Navigation block and command shortcuts. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

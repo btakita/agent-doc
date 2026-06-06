@@ -142,14 +142,29 @@ You re-invoked on the open fork without steering it, so per your standing "go wi
 - **Phase 3** — operator live-verify on a busy auto-looping Codex pane (only you can run it).
 
 Gated the item (Phase 1 code-complete; Phases 2–3 await wiring + your live-verify). If you'd rather I push straight through Phase 2 now, say so and I'll wire the command path. Remaining queue: the light-models question + 7 `do` items — say "continue" to drain or steer.
-<!-- agent:boundary:0c892db7 -->
+
+### Re: Corruption fix + #autoloop-command-preemption Phase 1 (resuming after the buffer block) — opus-4-8
+
+> **Queue prompt:**
+>
+> Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"
+
+
+The editor buffer reconciled (live buffer back to the clean 62933 = HEAD), so I can persist again. Catching the document up to work already shipped this session:
+
+**Corruption fix** (this head) — shipped `90d649a1`: IPC patch rebuilds now derive a deterministic boundary from `patch_id`, so socket/file/fallback rebuilds carry an identical boundary instead of three divergent random ones. That closes one real vector. The recurrence you just hit (finalize blocked 3+×, editor buffer diverging) is the **residual full-document path** (`#ipcfullprompt` / `#finalize-visible-buffer-ipc-timeout-race`) — still gated on a JB-plugin fix (atomic `patch_id` dedup before async apply; single-canonical-key PromptPoller guard) + your live-verify. Analysis is in `plan-finalize-visible-buffer-ipc-timeout-race.md`.
+
+**`#autoloop-command-preemption` Phase 1** — shipped `51d7e174`: new `queue_preemption` module (defer policy + durable pause/resume transforms, 7 tests). Gating the item now: Phase 1 code-complete; Phase 2 (wire into `session clear`/`interrupt-clear` + supervisor resume + JB "deferred" message) and Phase 3 (live-verify) remain in `plan-autoloop-command-preemption.md`.
+
+Next drainable head is the **light-models / blocking-sub-agent question** — I'll take that next. Continuing the queue.
+<!-- agent:boundary:58f3ce36 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~[#skill-md-token-footprint-reduce]~
 - ~[#jb-run-preempt-autoloop-priority]~
 - ~[#autoloop-command-preemption]~
-- Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"
+- ~Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"~
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
 - do [#claude-busy-status-during-active-turn]

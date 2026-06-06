@@ -4181,7 +4181,13 @@ fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Op
         .and_then(|(fm, _)| fm.queue_active)
         .unwrap_or(false);
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let fm_yaml = format!("queue_active: {queue_active}");
+    // #queue-active-deprecated-line-stuck: converge with the CANONICAL `queue:`
+    // control, never the deprecated `queue_active:` line. Emitting the legacy form
+    // here re-introduced `queue_active: true` into the live route-owned buffer on
+    // every preflight (the buffer then flushed it back to disk, undoing the
+    // repair-step migration that drops it). The canonical key is the sole queue
+    // control; readers still fold it onto `queue_active` in memory.
+    let fm_yaml = format!("queue: {}", if queue_active { "start" } else { "stop" });
     match crate::ipc_socket::send_queue_convergence(
         root,
         &canonical.to_string_lossy(),
@@ -6545,10 +6551,9 @@ mod tests {
             );
             let conv = convergences[0];
             assert_eq!(conv["queue_auto"], serde_json::json!(false));
-            assert_eq!(
-                conv["frontmatter"],
-                serde_json::json!("queue_active: false")
-            );
+            // #queue-active-deprecated-line-stuck: convergence carries the
+            // canonical `queue:` control, never the deprecated `queue_active:`.
+            assert_eq!(conv["frontmatter"], serde_json::json!("queue: stop"));
         }
 
         // Idempotency: a follow-up maintenance pass on the converged document

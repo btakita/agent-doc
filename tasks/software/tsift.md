@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -209,7 +209,7 @@ That's consistent with my earlier finding: Claude Code already had the lowest, c
 **So, to actually measure success:** look at **Codex** sessions that run *after* 2026-06-06 06:33 UTC and re-measure the redundant-read rate against the 12.6% baseline — not Claude research sessions like monsterrodholders. That's exactly the re-measurement #7qky is gated on; it has no data yet because no qualifying Codex session has run since install. Bottom line: nudge is live in the surfaces, but its first measurable test is a fresh post-install Codex cycle, not monsterrodholders.
 
 (Housekeeping: preflight is now flagging this exchange as large — `block`-level accretion, 6 response sections. If you want, I can run `agent-doc compact tasks/software/tsift.md --commit` to archive the resolved Q&A tail. Not doing it without your go-ahead.)
-<!-- agent:boundary:b73308ae -->
+<!-- agent:boundary:944a99fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,7 +218,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Promote `tsift __digest-runner` to be a public CLI command. Remove the `__` prefix...`tsift digest-runner`
 <!-- /agent:queue -->
 
 ## Backlog

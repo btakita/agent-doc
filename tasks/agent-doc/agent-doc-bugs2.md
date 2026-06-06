@@ -35,7 +35,16 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 21 response topic(s): Would the autoloop → Run Agent Doc → pause → unpause pipeline work?; Queued #jb-run-preempt-autoloop-priority + #autoloop-command-preemption under `go`; Closing #skill-md-token-footprint-reduce at Phase-1; 18 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4dd5220c -->
+
+### Re: [#claude-busy-status-during-active-turn] do — opus-4-8
+
+The concrete code piece shipped last cycle (the readable `.agent-doc/turn-active.json` marker + self-expiry). The two remaining parts can't safely land inside this unattended drain, so I'm gating the item:
+
+- **Conduct rule (deferred to an out-of-loop release).** I authored it ("long build/test on the main agent, stream to a watchable file, never report idle while in flight") and verified the wording, but `SKILL.md` is `include_str!`'d into the binary — making it live needs a binary rebuild + a **version-gated** `skill install` mirror regen. A mid-loop version bump would trip preflight's auto-update check and force a `--reload restart` prompt, **stalling the very overnight queue you asked to run uninterrupted**. So I reverted the working-tree edits (kept the tree clean) and stored the ready-to-apply text in `plan-claude-idle-session-during-active-build.md` for a deliberate, attended skill release. (It also surfaced a real source/binary skew: committed `SKILL.md` is `0.33.16` vs the `0.34.0` binary — reconcile in that release.)
+- **Hard busy-lease (gated).** Wire route/supervisor to read `turn_active(base)` and fail-closed; still gated on the `#subagent-blocks-session` scope decision.
+
+Gating `#claude-busy-status-during-active-turn` — code-complete for the unblocked part, remainder is a release-cycle item + a gated design decision. Continuing the drain.
+<!-- agent:boundary:e51df028 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

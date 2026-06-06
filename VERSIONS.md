@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queued IPC fallback patches carry a generation token for late-apply fencing
+  (`#late-ipc-patch-duplicate-stall`).** A boundary-reposition IPC that times out
+  queues a durable fallback patch file; a wedged/slow applier could apply it
+  minutes late — after the cycle already committed — re-materializing a duplicate
+  `### Re:` block and stalling the auto-queue. The write side already fences a
+  fresh send for an already-committed cycle (`try_ipc`) and reposition-only
+  patches already carry no response body, so `queue_file_ipc_reposition_boundary`
+  now also tags the queued `.agent-doc/patches/<hash>.json` with `cycle_id` and a
+  `baseline_hash` of the live doc it targets, giving the asynchronous applier the
+  same generation token to drop a superseded patch. Test
+  `queued_file_reposition_patch_carries_generation_token`. The plugin-side
+  consumption of the token (`PatchWatcher` apply fence) and listener de-wedge are
+  tracked follow-ups; spec `specs/07-closeout-commands.md`, plan
+  `tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md`.
+
 - **Free-text queue head consumed despite a prompt-prefix flip on an answered
   prompt (`#free-text-head-consume-genuine-not-struck`).** The answered-free-text-head
   decision (`cycle_answered_foreign_exchange_prompt`) diffs the *normalized

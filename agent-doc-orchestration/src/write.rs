@@ -10188,6 +10188,23 @@ pub fn queue_file_ipc_reposition_boundary(
         );
     }
 
+    // #late-ipc-patch-duplicate-stall: tag the queued file patch with the cycle
+    // id + a baseline content hash of the doc it targets so a LATE applier (the
+    // plugin's PatchWatcher, or the supervisor IPC listener) can fence a
+    // superseded patch — drop a patch whose cycle already committed or whose
+    // baseline no longer matches the live doc instead of blindly re-applying it
+    // minutes late and re-materializing a duplicate response block. The
+    // write-side guard in `try_ipc` already rejects a fresh send for an
+    // already-committed cycle; this carries the same generation token on the
+    // durable file patch so the asynchronous apply side can make the identical
+    // decision. (Plan: tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md.)
+    if let Ok(Some(cs)) = crate::cycle_state::load(file) {
+        payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
+    }
+    if let Ok(live) = std::fs::read_to_string(file) {
+        payload["baseline_hash"] = serde_json::Value::String(crate::debounce::content_hash(&live));
+    }
+
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
     crate::ops_log::log_op(
         file,
@@ -12717,6 +12734,51 @@ mod tests {
             cycle_answered_foreign_exchange_prompt(Some(baseline), genuine_foreign, head),
             "a genuinely new unrelated `❯` prompt absent from baseline is foreign work"
         );
+    }
+
+    #[test]
+    fn queued_file_reposition_patch_carries_generation_token() {
+        // #late-ipc-patch-duplicate-stall: the durable file reposition patch must
+        // carry the cycle id + a baseline content hash so a LATE applier can
+        // fence a superseded patch (drop instead of re-materialize a duplicate
+        // response block). Reposition-only body invariant must hold too.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        let doc = root.join("plan.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — opus\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        let cs =
+            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
+        assert!(matches!(result, FileIpcRepositionResult::Queued));
+
+        let hash = snapshot::doc_hash(&doc).unwrap();
+        let patch_file = root.join(".agent-doc/patches").join(format!("{hash}.json"));
+        let payload: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
+
+        assert_eq!(
+            payload["cycle_id"].as_str(),
+            Some(cs.cycle_id.as_str()),
+            "queued reposition patch must tag the originating cycle id"
+        );
+        assert_eq!(
+            payload["baseline_hash"].as_str(),
+            Some(crate::debounce::content_hash(content).as_str()),
+            "queued reposition patch must tag the baseline content hash it targets"
+        );
+        // Reposition-only invariant: no response body re-materialized.
+        assert_eq!(payload["patches"], serde_json::json!([]));
+        assert_eq!(payload["unmatched"], serde_json::json!(""));
+        assert_eq!(payload["reposition_boundary"], serde_json::json!(true));
+        assert!(existing_patch_is_reposition_only(&payload));
     }
 
     // #queue-strike-on-halt: queue head consumption requires an explicit

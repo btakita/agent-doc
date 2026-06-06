@@ -232,7 +232,29 @@ Net effect: instead of an unrunnable block, the operator now gets the quiet wind
 **Still gated (tracked in plan-autoloop-command-preemption.md):**
 - **Phase 2b** — auto-deliver the deferred clear from the supervisor idle-queue watch on the next idle gap (so the operator doesn't re-run it) + resume by restoring `queue: start`, and flip the JB plugin message from "blocked" to "deferred" (JB build + version bump). Touches the live supervisor watch thread.
 - **Phase 3** — operator live-verify on a busy auto-looping Codex pane.
-<!-- agent:boundary:37e8fe30 -->
+
+### Re: [#queue-edit-lost-during-finalize-crdt] — opus-4-8
+
+> **Queue prompt:**
+>
+> [#queue-edit-lost-during-finalize-crdt]
+
+
+Root-caused this (the bug had no plan) and confirmed it against a **live repro on this doc this session**. Implementation is deferred to a clean session — it's the most sensitive part of finalize and I'm not touching it mid-churn.
+
+**It's not CRDT data loss — it's the drift guard being too blunt.** Mechanism (all in `write.rs`):
+1. `finalize` builds `content_ours` = baseline + response, with **no** post-baseline user edits.
+2. You add a line to `agent:queue` during the IPC write window, so the IPC ack candidate (live editor buffer) now contains your add and differs from `content_ours`.
+3. `ipc_snapshot_would_absorb_live_prompt_drift_after_preflight` sees prompt-bearing content not in `content_ours` and **blocks** adopting the candidate (correct intent: never silently bake an unanswered prompt into the committed snapshot).
+4. The block path commits `content_ours` (which **lacks** your add), records it via `record_dropped_queue_prompts`, logs `recovery=content_ours_snapshot_next_cycle`.
+5. Next preflight re-reads the live file (your add is still on disk) → "recovers on a later preflight."
+
+`dropped_queue_prompt_guard` (session_check.rs) is the *detection* net; there's no *prevention*. This is the same `live_prompt_drift_after_preflight` invariant that fired while committing the Phase 2a response earlier this session (candidate 76165 vs content_ours 76144).
+
+**Fix direction:** a user *queue add* ≠ an unanswered *exchange prompt*. When the only post-baseline drift is added `agent:queue` lines (no exchange/response conflict), merge them into `content_ours` (reuse `content_ours_merged_with_disk_edits` / `merge_contents_crdt`, scoped to the queue component) instead of block-and-drop — so the queue item survives the same commit. Exchange-prompt drift keeps blocking. Must gate against `dedup_live_prompts` (`#queue-dedup-destroys-intentional-duplicates`) and handle striking the consumed head + keeping the new tail add in one commit.
+
+Full plan (with the exact symbols, design, and SimWorld tests): **`tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md`** (committed `4365ee2b0`). Shares a fix surface with `#finalize-divergence-orphans-committed-head`.
+<!-- agent:boundary:36107c9e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -246,11 +268,12 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 ```
 ~~~
 - ~[#autoloop-command-preemption]~
-- [#queue-edit-lost-during-finalize-crdt]
+- ~[#queue-edit-lost-during-finalize-crdt]~
 - [#claude-busy-status-during-active-turn]
 - ~do [#ci-per-test-timeout-guard]~
 - Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
 - After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.
+- [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]
 - do [#writer-emits-deprecated-queue-active-false]

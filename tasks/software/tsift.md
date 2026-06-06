@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue_active: true
 ---
 
 ## Status
@@ -31,43 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-033119.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-041407.md`*
 
 Compacted content:
-- Archived 13 response topic(s): Can tsift cache system-level design knowledge in a graph?; How to model findings effectively; The "graph menu" for the agent; 10 more
+- Archived 1 response topic(s): [#trt1cfg]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: [#trt1cfg] — configure agent-loop to use the findings layer — opus-4-8
-
-`#trt1cfg` is the queue head, but it is **blocked**: it is gated on Findings Graph Layer phases 2–4 shipping, and only Phase 1 (`#trt1p1`) was committed. Those phases also sit *after* `#trt1cfg` in the queue — a dependency-ordering inversion. So this cycle I did the real next unblockable work, **Phase 2 (`#trt1p2`) hot-path injection**, and moved `#trt1cfg` to the end of the backlog so it drains after its dependencies.
-
-#### Phase 2 shipped — `context-pack` findings injection
-
-Trusted, fresh findings now ride the existing agent hot path instead of needing a separate `tsift finding list` call. `context-pack` gains a `findings` section:
-
-- **Result-set scoped** — a finding is injected only when its `about` anchor matches a node already in the result set: touched files/symbols, diff-preview files + their touched symbols, and the exploration packet's source-window files + relationship endpoints. Never a blanket store dump.
-- **Trusted + fresh only** — `draft` findings, stale findings (anchor advanced past the captured watermark), and no-watermark findings are excluded, so confident-but-wrong authored context can't reach the hot path.
-- **Cheap + safe** — capped at the preview-item budget, body-truncated, omitted entirely when empty, and fails open to empty when `findings.db` is absent (zero envelope change for projects with no authored knowledge). Each preview carries a stable `handle`, `id`, `kind`, `title`, `about`, `anchor_kind`, optional `confidence`, and an `expand` command back to the full anchored set.
-
-New `collect_injectable_findings` helper in `commands/finding.rs`; wiring + `ContextPackFindingPreview` in `context_pack.rs`; spec in `specs/graph.md` § Hot-path injection (Phase 2); `VERSIONS.md` updated.
-
-#### Verification
-
-- **Tests** — 4 new CLI tests in `packages/tsift-cli/tests/finding.rs` (injection, draft-exclusion, stale-exclusion, result-set scoping); `finding` suite 13/13 green.
-- **`make check`** — full suite green (exit 0; scanned the log for `result: FAILED`/errors per the RTK exit-masking caveat — none).
-- **Live smoke** — `cargo install --path .` (both `tsift` and `tsift-cli`); a real fixture confirms the `findings` section appears in the live `context-pack --json` envelope.
-- **CI** — pushed `tsift@ed10268`; CI run `27051669940` in progress at finalize. Local `make check` mirrors the CI suite and is green.
-- Committed + pushed: `tsift@ed10268`; superproject pointer bump `agent-loop@443de61`.
-
-#### Queue / backlog
-
-- `#trt1p2` → **done**.
-- Added `#trt1p2b` — the remaining sub-scope of hot-path injection: fold findings into `search`/`explain` (same contract).
-- Reordered the backlog into true dependency order so the blocked config item lands last: **`#trt1p3` → `#trt1p4` → `#trt1p2b` → `#trt1cfg`**.
-- `#trt1cfg` stays open/blocked until p3, p4, and p2b ship.
-
-Top of backlog (`#next-steps`): **`#trt1p3`** — Phase 3 (graph menu + md/html exports).
-<!-- agent:boundary:5021656a -->
+<!-- agent:boundary:3294525f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,20 +45,21 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
 - ~Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.~
 - ~[#trt1]~
-- [#trt1cfg]
-- [#trt1p2]
+- ~[#trt1p2]~
 - [#trt1p3]
 - [#trt1p4]
-- Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.
+- [#trt1p2b]
+- [#trt1cfg]
+- ~Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.~
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog queue -->
+<!-- agent:backlog priority queue -->
 - [ ] [#trt1p3] Findings Graph Layer Phase 3 — graph menu + exports: annotate graph-db map with attached findings, and on-demand md/html projection (tsift map --format md|html). Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p4] Findings Graph Layer Phase 4 — passive harvest: config-gated draft extraction of candidate findings from agent-doc session archives/summaries, with draft→trusted promotion. Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p2b] Findings Graph Layer Phase 2b — fold trusted, fresh findings into `search` and `explain` output, reusing the trusted/fresh/result-set injection contract from context-pack (#trt1p2). Plan: src/tsift/specs/graph.md § Hot-path injection (Phase 2).

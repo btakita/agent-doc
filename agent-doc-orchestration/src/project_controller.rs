@@ -700,6 +700,74 @@ pub fn close_stale_starting_actors(
     close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
+/// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": a tmux pane
+/// owns at most one document. When `owner_document_id` (re)binds `pane_id`, close
+/// any OTHER document whose actor record still points at the same pane with a
+/// non-closed state. A second live binding is stale cross-document contamination
+/// — a prior document's actor that was never closed when this pane was reused
+/// (the case `admin detect` flags as `cross_document_pane`). Closing the stale
+/// binding makes the pane resolve to a single owner so navigation finds the
+/// correct pane. Best-effort per record: a CAS failure (a concurrent writer
+/// raced this eviction) logs and skips that record rather than failing the
+/// owner's bind. Returns the number of evicted bindings.
+pub fn evict_cross_document_pane_bindings(
+    project_root: &Path,
+    owner_document_id: &str,
+    pane_id: &str,
+    caller: &str,
+) -> Result<usize> {
+    if pane_id.is_empty() {
+        return Ok(0);
+    }
+    let now = timestamp_secs();
+    let store = load_actor_store(project_root)?;
+    let mut evicted = 0;
+    for record in store.values() {
+        if record.document_id == owner_document_id
+            || record.pane_id != pane_id
+            || record.state == crate::session_actor::ActorState::Closed
+        {
+            continue;
+        }
+        let mut next = record.clone();
+        next.state = crate::session_actor::ActorState::Closed;
+        next.last_transition = crate::session_actor::ActorLastTransition {
+            caller: caller.to_string(),
+            reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
+            timestamp: now,
+            prior_generation: record.generation,
+            new_generation: record.generation,
+        };
+        match store_actor_record(project_root, Some(record.generation), &next) {
+            Ok(_) => {
+                crate::ops_log::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
+                        caller,
+                        record.document_id,
+                        owner_document_id,
+                        pane_id,
+                        record.generation,
+                        record.state.as_str()
+                    ),
+                );
+                evicted += 1;
+            }
+            Err(err) => {
+                crate::ops_log::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
+                        caller, record.document_id, pane_id, record.generation, err
+                    ),
+                );
+            }
+        }
+    }
+    Ok(evicted)
+}
+
 fn emit_actor_projection(project_root: &Path) -> Result<()> {
     let store = load_actor_store(project_root)?;
     let path = actor_projection_path(project_root);

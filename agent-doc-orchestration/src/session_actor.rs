@@ -248,11 +248,33 @@ fn store_record_in(
             new_generation: update.generation,
         },
     };
-    crate::project_controller::store_actor_record(
+    let stored = crate::project_controller::store_actor_record(
         base_dir,
         update.expected_prior_generation,
         &record,
-    )
+    )?;
+    // "1 pane = 1 document": once this document owns the pane (any non-closed
+    // state), evict any OTHER document still bound to the same pane. This
+    // self-heals stale cross-document pane contamination on the next bind/state
+    // transition so a pane resolves to a single owner and navigation finds the
+    // correct pane (#monsterrod-pane-cross-doc-contamination).
+    if stored.state != ActorState::Closed
+        && let Err(err) = crate::project_controller::evict_cross_document_pane_bindings(
+            base_dir,
+            &stored.document_id,
+            &stored.pane_id,
+            update.caller,
+        )
+    {
+        crate::ops_log::log_op(
+            &document_path_from_base_dir(base_dir, file),
+            &format!(
+                "evict_cross_document_pane_bindings_failed document={} pane={} error={}",
+                stored.document_id, stored.pane_id, err
+            ),
+        );
+    }
+    Ok(stored)
 }
 
 pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {
@@ -727,6 +749,52 @@ mod tests {
         assert_eq!(record.last_transition.prior_generation, 0);
         assert_eq!(record.last_transition.new_generation, 1);
         assert_eq!(record.harness, "codex");
+    }
+
+    #[test]
+    fn binding_a_pane_evicts_other_documents_bound_to_it() {
+        // "1 pane = 1 document": when document B binds a pane already owned by
+        // document A, A's stale binding is evicted (closed) so the pane resolves
+        // to a single owner (#monsterrod-pane-cross-doc-contamination).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_a = seed_project_file(
+            &tmp,
+            "tasks/a.md",
+            "---\nagent_doc_session: sess-a\nagent: codex\n---\nBody\n",
+        );
+        let doc_b = seed_project_file(
+            &tmp,
+            "tasks/b.md",
+            "---\nagent_doc_session: sess-b\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&doc_a, "sess-a", "%1", "@1", 1).unwrap();
+        let a_before = load_record_in(tmp.path(), &doc_a.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(a_before.pane_id, "%1");
+        assert_ne!(a_before.state, ActorState::Closed);
+
+        // Document B binds the SAME pane %1 — must evict A's stale binding.
+        record_session_start(&doc_b, "sess-b", "%1", "@1", 1).unwrap();
+
+        let a_after = load_record_in(tmp.path(), &doc_a.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            a_after.state,
+            ActorState::Closed,
+            "document A's stale binding to pane %1 must be evicted when B takes the pane"
+        );
+        let b_after = load_record_in(tmp.path(), &doc_b.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(b_after.pane_id, "%1");
+        assert_ne!(
+            b_after.state,
+            ActorState::Closed,
+            "document B must own the pane after binding it"
+        );
     }
 
     #[test]

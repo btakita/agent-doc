@@ -296,7 +296,20 @@ You're right and I was wrong about the auto-loop. I'm correcting it plainly: mon
 **Net for this whole thread:** the operative fix was `25ff1116` (1 pane = 1 document eviction), live-verified. The other two (`b93b3c3c` snappy refusal, `d3aeb18d` active-loop deferral) are valid defensive route fixes but were **not** what was breaking your case — I should have found the contamination first instead of theorizing the loop. Apologies for the back-and-forth.
 
 Please confirm on your side: with %1 now single-owner, does adding a queue item to monsterrodholders process, and does JB Run Agent Doc land? If anything still no-ops, tell me what you observe and I'll trace the dispatch path from the now-clean binding.
-<!-- agent:boundary:1e5dd57a -->
+
+### Re: do [#queue-consume-ipc-timeout-live-verify] — gated (live-only, can't run headless) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-consume-ipc-timeout-live-verify]
+
+
+> **Queue prompt:** do [#queue-consume-ipc-timeout-live-verify]
+
+This is a verify-only item for an already-shipped fix (`#queue-consume-on-stream-ipc-timeout`, `761e0f43`, incl. the `doc_lock` deadlock fix). It asks to drive a real IPC-timeout `finalize` (exit 75) on a queued free-text head from IntelliJ and confirm the head is struck in the same commit without re-serving. There is no code/spec delta to produce — the deterministic core is shipped and unit-tested.
+
+This headless tmux/CLI agent-doc session **cannot drive an IntelliJ plugin IPC timeout** (no JB plugin runtime / deferred-patch IPC channel here), so I can't complete the live verification. Per the `do #id` closeout rule, an item that is code-complete but awaiting external/live validation is **gated** (`[/]`), not marked done — marking it done would falsely claim a verification that didn't happen. Gated so it stops re-serving on the auto-loop; live-verify it in IntelliJ whenever convenient (drive an IPC timeout on a queued head, confirm one-commit strike + no re-serve).
+<!-- agent:boundary:0f2aee46 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -317,7 +330,7 @@ Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pa
 - ~"evidence does **not** show monsterrodholders idle" You don't have the right evidence. You are missing the evidence. I saw Codex idle with my own eyes and I can manually run agent-doc from Codex. Something is missing. I'm tired of arguing with you about this. You need to look deeper. Stop punting with gibberish and lies.~
 - ~We need to figure out how to have 1 tmux pane for 1 document. Nothing more. If there is a pane, it needs to be found when navigating to the document.~
 - ~"If what you actually want is for that pane to **stop** auto-looping so you can drive it manually, say so and I'll halt its queue (`queue: stop`) — that's a one-line change to monsterrodholders.md, not a code fix." You claim that monsterrodholders.md was auto-looping, but I added an item to the queue but nothing processed. The Codex session remained idle. I only ran JB `Run Agent Doc` because the session was idle. Note the queue was empty, I added an item to the queue, nothing happened, I tried JB `Run Agent Doc`, nothing happened.~
-- do [#queue-consume-ipc-timeout-live-verify]
+- ~do [#queue-consume-ipc-timeout-live-verify]~
 - agent-doc monsterrodholders.md response are not being written into the document.
 - do [#per-cycle-protocol-output-overhead]
 - do [#skill-md-token-footprint-reduce]

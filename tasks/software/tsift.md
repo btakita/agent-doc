@@ -133,7 +133,26 @@ The asymmetry you're pointing at is real and correct: **scope any intervention t
 **Recommendation:** Yes to Codex-only scope; no to building the hook yet. Do (a) inline the 3 hot-path runbooks for Codex first, re-measure, and only build an enforcement mechanism if the 12.6% doesn't drop. I've re-scoped #7qky to reflect this (Codex-targeted, cheap-fix-first, hook as fallback) so it doesn't get picked up as a blanket all-harness hook.
 
 If you'd rather I just implement (a) now — inline the three runbooks into the Codex AGENTS.md closeout surface — say the word and I'll do it as its own cycle.
-<!-- agent:boundary:d9ba1716 -->
+
+### Re: Implement #7qky in tsift or skill-harness? — opus-4-8
+
+I implemented the **nudge** in the **skill-harness** this turn (per your "nudge-only, re-measure first" pick), and that's the right home for *that* piece. But your tsift-vs-skill-harness question is the sharper one for the *enforcement* fallback — and there my answer is **tsift**, not a per-harness hook. Both parts below.
+
+**What shipped (skill-harness) — done + verified:**
+- Added a retain-don't-reread paragraph to the shared `## Runbooks` section of `src/agent-doc/SKILL.md` (the one source that renders to every harness via `skill.rs` `include_str!`). Contract-safe, no per-harness divergence.
+- Rebuilt release binary, regenerated all four installed surfaces (`agent-doc skill install --all` → Claude / Codex / OpenCode / Cursor), each +2 lines, nudge confirmed present in all.
+- `make check`: **3756 passed, 0 failed, exit 0**; `audit-docs`: clean (2 non-blocking mtime advisories).
+- Commits: submodule `a68864f5` (SKILL.md + VERSIONS.md only — staged precisely to avoid the unrelated in-flight `write.rs`/`id.rs`/`template.rs`/lazily-`Cargo.lock` changes), superproject `8c4e4a99` (regenerated surfaces + submodule pointer).
+- **Caveat (honest):** `cargo install --path .` (which refreshes `~/.cargo/bin`, used by tmux-spawned sessions) currently **fails** — but on a *pre-existing* `agent-doc-orchestration/src/write.rs` E0061 from another task's in-flight work, surfaced only under `cargo install`'s fresh dep resolution (the workspace cargo-patch hides it for `cargo build`/`make check`). My change is markdown-only and cannot cause it. The nudge is live regardless, because it lives in the **static installed surfaces**, not the binary — future sessions read it no matter which binary version runs. `~/.cargo/bin` can be refreshed once that `write.rs` work lands.
+
+**Where the enforcement fallback belongs — tsift, not skill-harness:**
+- The **skill-harness can only advise** (prose the model may ignore) — that's the nudge, already shipped. It cannot *enforce* read-once.
+- A **per-harness hook** enforces but is fragmented and fragile: a Claude `PreToolUse` Read hook covers Claude only; Codex reads via shell `cat` (no Read tool), so you'd have to intercept arbitrary shell exec — easy to evade. Three different mechanisms for three harnesses.
+- **tsift is the one mechanism that covers all three.** If runbook fetches route through a dedup-aware `tsift runbook <name>` (returning full content on first fetch this session, a "already delivered — reuse" stub on repeat), the read-once guarantee becomes *deterministic and tool-owned*, identical across Claude/Codex/OpenCode. It sidesteps the shell-vs-Read-tool mismatch entirely, and tsift already owns bounded, session-aware content delivery (envelopes, context-pack, source-read). The cost is adoption: the SKILL instructions must point runbook reads at tsift instead of raw `Read`/`cat`.
+- So: **nudge in skill-harness (done); enforcement, if re-measurement proves it's needed, in tsift** — fitting, since this is the tsift backlog. I'd spec it as a `tsift runbook` fetch with per-session dedup rather than scatter hooks across harnesses.
+
+**#7qky status:** moved to Review, **gated** on re-measurement — re-run the 3-harness redundant-read analysis after Codex sessions accumulate with the nudge live, compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). Build the tsift enforcement only if Codex's rate doesn't drop.
+<!-- agent:boundary:379cd051 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,18 +162,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- [#7qky]
+- Should [#7qky] be implemented in tsift or skill-harness?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#7qky] [recommended] Reduce Codex redundant runbook reads (12.6%, concentrated in harness-invocation/commit/pending-ops re-cat'd each cycle). Codex-scoped ONLY — Claude (11.4%, all cross-turn/post-compaction) and OpenCode (5.3%) do not justify any mechanism and a hard block would starve post-compaction re-reads. Cheap fix FIRST: (a) inline the 3 hot-path runbooks into Codex AGENTS.md closeout surface so re-reads become zero-cost; (b) strengthen retain-don't-reread nudge in Codex AGENTS.md/Stop-hook. Re-measure; only build a read-once enforcement hook (path+content-hash, exempt post-compaction/mid-session edits) as a fallback if 12.6% doesn't drop. NOT a Claude PreToolUse Read hook — Codex reads via shell cat, not a Read tool.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#7qky] [recommended] Reduce Codex redundant runbook reads. SHIPPED (v0.34.0 unreleased): retain-don't-reread nudge in shared SKILL `## Runbooks` source -> regenerated all harness surfaces; contract-safe, no per-harness divergence. GATED on re-measurement: re-run the 3-harness redundant-read analysis after Codex sessions accumulate with the nudge live, compare against baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). Only build a Codex read-once enforcement mechanism as a fallback if Codex's rate does not drop. NOT a Claude PreToolUse Read hook.
 - [/] [#trt1] [recommended] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), with provenance+confidence+freshness fields gated on community_graph_watermark for staleness; expose retrieval via context-pack/search injection and a / graph-menu command; opt-in/passive capture from agent-doc session archives; md/html as on-demand projection, graph store as source of truth. Spec in src/tsift/SPEC.md.
 - [/] [#0y9e] I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
 - [/] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)

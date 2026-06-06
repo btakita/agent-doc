@@ -267,7 +267,27 @@ A full sweep (incl. hidden `.claude`/`.codex`) confirms zero `__digest-runner` r
 Acknowledged — the queue is now inactive (`queue: stop`, `queue_active: false`, `go` removed from the queue block) with no items pending, so there's nothing to drain and the auto-loop stays off. No repo work this cycle.
 
 The backlog/review still hold the 13 gated items (e.g. `#7qky`, `#trt1*`, the SurrealDB substrate threads) if you want to pick one up next — just add it to the queue or say the word.
-<!-- agent:boundary:e83680bc -->
+
+### Re: Is now a good time to release + publish skill-harness and tsift? — opus-4-8
+
+> **Queue item** (inactive queue): Is now a good time to release + publish skill-harness and tsift? If yes, release + publish.
+
+Short answer: **no — not as a turnkey release+publish right now.** I checked both repos' state and held off on publishing. Breakdown:
+
+**agent-doc (skill-harness) — not release-ready.** This is the blocker.
+- It's on the feature branch `20260422/codex-agent-backend`, **1158 commits ahead of `main`** — releases come from main, not a long-lived feature branch.
+- The working tree has **uncommitted in-flight changes**: a substantial 41-line `.claude/skills/agent-doc/SKILL.md` edit plus `Cargo.lock`. That's mid-stream work — publishing now would either ship it half-done or strand it.
+- Version is `0.34.0` with no `v0.34.0` tag yet (unreleased). The build itself compiles cleanly (the old `write.rs` E0061 cargo-install blocker from earlier is gone), so the *code* is fine — it's the branch + uncommitted state that isn't.
+
+**tsift — healthy, but "publish" isn't one command.**
+- Clean on `main`, **CI green** on the latest push (the `digest-runner` promotion, 3a69aed), 49 unreleased entries in VERSIONS.md at 0.1.62. Genuinely shippable content.
+- But tsift is *private* (not crates.io). Its publish target is the `opencode-tsift` npm package, which has **never been published** (npm returns 404). First publish needs the granular npm token path (the classic token hits E403/2FA) or CI wiring (`TSIFT_ENABLE_NPM_PUBLISH` + `NPM_TOKEN` secret + a `v*` tag push) — that's exactly what backlog items `#0y9e`, `#astnav-npm`, and `#npm-auth-setup` cover, and they're still gated.
+- The existing `v0.1.62` tag also needs a decision: if it was never published, move it to HEAD; if it was, bump the version first.
+
+**Recommendation.** Hold the combined release. If you want to move one piece forward, the lower-risk path is **tsift only**, and even that needs you to (a) confirm the npm-publish route (granular token vs. CI) and (b) say whether `v0.1.62` already shipped so I bump-vs-retag correctly. agent-doc should wait until its work lands on `main` with a clean tree and the manual-testing gate is cleared.
+
+Tell me which repo + which publish route and I'll execute. I did not publish anything this cycle.
+<!-- agent:boundary:9534f13e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -277,6 +297,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Is now a good time to release + publish skill-harness and tsift? If yes, release + publish.
 <!-- /agent:queue -->
 
 ## Backlog

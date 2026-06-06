@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue_active: false
 ---
 
 ## Status
@@ -31,116 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-043708.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-054319.md`*
 
 Compacted content:
-- Archived 1 response topic(s): [#trt1p3]
+- Archived 3 response topic(s): [#trt1p4]; [#trt1p2b]; [#trt1cfg]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: [#trt1p4] — Findings Graph Layer Phase 4 (passive harvest) — opus-4-8
-
-> **Queue prompt:**
->
-> [#trt1p4]
-
-
-Shipped Phase 4. **The Findings Graph Layer is now feature-complete (Phases 1–4).** Clean queue drain (head matched the work).
-
-#### Passive harvest — `tsift finding harvest`
-
-Closes the capture loop: extracts `draft` candidate findings from the agent-doc session archives tsift already accumulates (`.agent-doc/archives/*.md`). A line becomes a candidate only when it pairs a decision/insight signal (`decided`, `decision`, `invariant`, `gotcha`, `by design`, `fail-closed`, `source of truth`, …) with an inline-code token that resolves to an **indexed symbol or real file** (a resolvable watermark proves the anchor). `kind` = `decision` for design-intent, else `note`.
-
-- **Fail-closed gate** — bails unless `.tsift/config.toml` sets `[findings] passive_harvest = true` (new `FindingsConfig`, default off). A user who never opts in sees zero captured rows.
-- **Safe by construction** — everything lands as `draft` (excluded from injection until promoted), runs are bounded (`HARVEST_CAP`), idempotent (content-derived ids), and never overwrite an existing finding (`skipped_existing`).
-
-#### Promotion — `tsift finding promote <id>`
-
-Flips a `draft` → `trusted` (preserving anchor/watermark/provenance), the precision gate that makes a finding eligible for hot-path injection (Phase 2) and map annotation (Phase 3). Idempotent on trusted; fails closed on unknown id.
-
-#### Verification
-
-- **Tests** — 5 new CLI tests in `tests/finding.rs` (fail-closed gate, draft extraction, idempotency, promotion+idempotent-repromote, unknown-id) + 2 config tests in `tsift-index/src/config.rs`. Full finding suite 18/18.
-- **`make check` + clippy** — green on **rustc 1.96.0** (CI-matched toolchain).
-- **Live smoke** — `cargo install --path .` (both binaries); confirmed live `tsift finding harvest` gates on config and harvests idempotently.
-- **Shipped** — `tsift@6e568b1` (pushed), superproject pointer `agent-loop@d0ce227`. CI monitoring in progress.
-
-#### Queue / backlog
-
-- `#trt1p4` → **done**. Phases 1–4 all shipped.
-- Remaining: **`#trt1p2b`** (fold findings into `search`/`explain` — the last hot-path sub-scope) → **`#trt1cfg`** (configure agent-loop to use the layer; its phase-2–4 gate is now satisfied, so it unblocks once p2b lands).
-
-Top of backlog (`#next-steps`): **`#trt1p2b`** — search/explain hot-path injection (same trusted/fresh/result-set contract as context-pack).
-
-### Re: [#trt1p2b] — hot-path injection for search + explain — opus-4-8
-
-> **Queue prompt:**
->
-> [#trt1p2b]
-
-
-Shipped `#trt1p2b`, completing Phase 2 hot-path injection across all three agent surfaces. Clean queue drain.
-
-#### What changed
-
-- **`tsift explain <symbol>`** now folds trusted, fresh findings concerning its result set — the focused symbol, displayed callers/callees, and community members — into the JSON/envelope output (budget + non-budget paths) and a non-JSON `Findings` section.
-- **`tsift search <query>`** does the same for matched symbol names and their files.
-
-Both reuse the Phase 2 trusted+fresh contract via a new `collect_result_set_finding_previews` helper: `findings` array capped at 10, body-truncated, omit-when-empty, fail-open. Each preview carries `id`/`kind`/`title`/`about`/`anchor_kind`/optional `confidence`/`body` and an `expand` command back to the full anchored set.
-
-#### Verification
-
-- **Tests** — 3 new CLI tests in `tests/finding.rs` (explain injection, search injection, draft exclusion for both); full finding suite 21/21.
-- **`make check` + clippy** — green on **rustc 1.96.0**.
-- **Live smoke** — `cargo install --path .` (both binaries); confirmed live `tsift explain`/`search --json` carry the `findings` array, and a draft about a matched symbol is excluded.
-- **Shipped** — `tsift@d7aff19` (pushed), superproject pointer `agent-loop@fc846a3`. CI monitoring in progress.
-
-#### Findings Graph Layer status — injection complete
-
-Authored "why" now rides every agent navigation surface: `context-pack`, `search`, `explain`, and the `graph-db map` overview.
-
-#### Queue / backlog
-
-- `#trt1p2b` → **done**.
-- **One item remains: `#trt1cfg`** — configure agent-loop's own tsift config to use the findings layer. Its gate (phases 2–4 shipped) is now fully satisfied, so it's unblocked.
-
-Top of backlog (`#next-steps`): **`#trt1cfg`** — the final queue item.
-
-### Re: [#trt1cfg] — configure agent-loop to use the findings layer — opus-4-8
-
-> **Queue prompt:**
->
-> [#trt1cfg]
-
-
-Done — the **final queue item**. The Findings Graph Layer (`#trt1`) is now both feature-complete *and* in use by agent-loop.
-
-#### What "configure" means here
-
-Findings **injection** (context-pack / search / explain / `graph-db map`) is automatic and needs no config. The only config-gated capability is passive harvest, so configuration =
-
-- **`.tsift/config.toml`** (local, `.tsift/` is gitignored) → `[findings] passive_harvest = true`.
-- **`runbooks/findings-layer.md`** (committed) documenting authoring, harvest+promotion, and the automatic injection surfaces.
-
-#### Verification
-
-Enabling the gate and running `tsift finding harvest` against agent-loop's real history confirmed the layer is active: **994 archives scanned, 100 draft candidates captured** (capped), all `draft` so none reach the hot path until promoted with `tsift finding promote <id>`.
-
-#### Closeout caveat — superproject push deferred
-
-The runbook is committed locally (`agent-loop@05ad1fd5e`), but the agent-loop **superproject has diverged** from origin (origin advanced with unrelated monsterrodholders / boost-client commits while local main carries many concurrent-session commits). I did **not** force a rebase/merge — with 20+ dirty instruction files and many submodules, that's the dirty-tree submodule hazard, and it's a multi-session coordination concern. The push should be integrated deliberately. **All tsift code is already pushed to the tsift remote and CI-green; only the superproject pointer/doc push is pending.**
-
-#### Findings Graph Layer — complete
-
-| Phase | Item | Surface |
-| --- | --- | --- |
-| 1 | `#trt1p1` | capture (`finding add`/`list`) |
-| 2 | `#trt1p2` + `#trt1p2b` | injection into context-pack, search, explain |
-| 3 | `#trt1p3` | `graph-db map` annotation + md/html exports |
-| 4 | `#trt1p4` | config-gated passive harvest + draft→trusted promotion |
-| cfg | `#trt1cfg` | agent-loop opted in + documented |
-
-Queue drained — `/loop` terminates. `#next-steps`: backlog is empty of `#trt1*` items; the one open follow-up is the deferred superproject push (coordinate when the concurrent sessions settle).
-<!-- agent:boundary:036104c4 -->
+<!-- agent:boundary:6ec8ab43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,7 +45,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

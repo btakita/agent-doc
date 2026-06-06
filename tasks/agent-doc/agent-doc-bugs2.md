@@ -158,7 +158,23 @@ This item is **verify-only and live-bound** — it asks to drive a real IPC-time
 This headless tmux/CLI agent-doc session **cannot drive an IntelliJ plugin IPC timeout** (no JB plugin runtime, no deferred-patch IPC channel in this path), so I can't complete the live verification from here. Gating `#queue-consume-ipc-timeout-live-verify` to `[/]` (awaiting live IntelliJ repro) rather than marking it done — per the `do #id` closeout rule, an item that's code-complete-but-needs-external-validation is gated, not closed.
 
 Note: the JB-stall head just above is already answered at HEAD (orphaned-but-answered from `#finalize-divergence-orphans-committed-head`); leaving its strike reconciliation to the binary on this stable cycle.
-<!-- agent:boundary:d2ca7177 -->
+
+### Re: JB Run Agent Doc on monsterrodholders.md stalled again — fixed (busy active-turn skip-wait) — opus-4-8
+
+> **Queue prompt:** JB `Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses. `[route] ... authoritative actor generation 282 ... busy did not return to a dispatch-ready prompt ... after waiting 60s.`
+
+You're right — and my earlier "it's just a feedback problem" framing was wrong. There were two questions: (1) was the pane falsely detected as busy, and (2) is the 60s-stall-then-error itself a bug. I checked both against evidence instead of guessing.
+
+**Evidence.** I captured the live pane %1 right now — it is **genuinely** busy: `• Working (7m 29s • esc to interrupt)` with a queued `› Summarize recent commits` draft. So this is *not* a false-positive busy detection. (Good thing I verified — my first instinct was to add a Codex stale-cue override to `dispatch_blocker_reason`; that would have **injected into your live 7m29s turn** and scrambled it. I did not ship that.)
+
+**The real bug** is the one you're pointing at: the 60-second *silent ready-wait* before the refusal. The ops log confirmed the failure path — `route_wait_for_ready_timeout elapsed_ms=60112` → `route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`. That ready-wait exists for *cold-starting* panes that might soon reach a prompt. But when the pane proves a genuine active turn, a multi-minute turn can never reach a dispatch-ready prompt inside the 60s budget — so the wait does nothing but stall before the inevitable "session still running" refusal.
+
+**Fix (`#jb-run-agent-doc-busy-active-turn-stall`, shipped `b93b3c3c`):** when a bare dispatch-only Run Agent Doc targets a busy actor with no prompt/queue fallback, route probes the live pane once for an active-turn `busy_proof_line` (`esc to interrupt` / working spinner). If present, it **skips the busy ready-wait** and refuses immediately (logs `route_dispatch_only_busy_active_turn_skip_wait`), and words the refusal as a busy active turn — not the misleading cold-start "after waiting 60s". A busy projection *without* a live active-turn cue still serves the bounded wait, so a turn about to finish is still picked up. This makes the with-drift path match the no-drift path, which already refused fast (`codex blocked after 0.2s`).
+
+**Shipped:** `route.rs` (`busy_dispatch_only_should_wait_for_ready` gains the active-turn gate; new `dispatch_only_busy_refusal_message` helper) + 3 unit tests + spec `08-session-routing.md`. `make check` green; both binaries + FFI cdylib rebuilt/installed. Submodule `b93b3c3c` pushed.
+
+**Honest gaps:** (1) the exact JB 60s-stall repro needs prompt-bearing drift *while* the pane is busy — I would not manufacture that on your live monsterrodholders doc, so the end-to-end JB verification is captured as `#jb-busy-active-turn-stall-live-verify` (deterministic logic is unit-tested). (2) The superproject pointer push is deferred (`#adoc-route-busy-fix-superproject-pointer-push`): `pull --rebase` conflicts on the `src/boost-client` submodule pointer from concurrent work, so I aborted rather than touch another session's pointer. The fix is live locally and on the submodule remote regardless.
+<!-- agent:boundary:891be022 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -169,6 +185,13 @@ JB `Run Agent Doc` on monsterrodholders.md stalled. No feedback. I manually star
 Error: authoritative actor generation 281 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
 ```
 ~~~
+---
+JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it.
+```
+[route] target tmux session: 0
+Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+```
+---
 - do [#queue-consume-ipc-timeout-live-verify]
 - agent-doc monsterrodholders.md response are not being written into the document.
 - do [#per-cycle-protocol-output-overhead]
@@ -206,6 +229,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.
+- [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.
 - [ ] [#test-submodule-worktree-git-identity] #agent-doc-bug: agent-doc tests that git-commit inside a checked-out submodule worktree (super/.git/modules/<sub>) don't set user.email/user.name there, so they pass locally (dev has global identity) but fail CI exit-128 — a green-local/red-CI flake. Fix at the test level: set the two config lines in the submodule worktree before the commit. Live example: flow::closeout::tests::classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent (closeout.rs ~1383). Same class as the codex_final_gate test-bin-PATH flake fixed this session (0f7607a2). Replaces the deleted feedback_submodule_worktree_test_git_identity memory workaround.
 - [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
 - [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md

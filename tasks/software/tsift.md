@@ -36,7 +36,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): [#trt1p4]; [#trt1p2b]; [#trt1cfg]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:6ec8ab43 -->
+
+### Re: Does a runbook re-read duplicate context across turns? — opus-4-8
+
+Short answer: yes, by default. Runbooks are plain markdown files (`src/agent-doc/runbooks/*.md`) that are **not** in the always-loaded path — SKILL.md only links to them, and they enter context only when the model explicitly `Read`s one. That on-demand design is deliberate: it keeps the hot path small.
+
+But there's no cross-turn dedup of tool results. Each `Read` of a runbook appends its full content as a fresh tool-result block to the transcript. So if the same runbook is read on turn 1 and again on turn 3, its tokens sit in the context window **twice** — the harness does not notice that the bytes are identical and collapse them.
+
+What changes that:
+
+- **Context compaction** — when the window fills and the harness summarizes older turns, the earlier copy gets compressed into the summary, so the duplication is transient, not permanent. It still cost tokens while it was live.
+- **Prompt caching** — repeated identical prefixes can be served from cache (cheaper), but caching is about *cost*, not about *removing* the content from the window. The tokens still occupy context.
+- **Retain-don't-reread discipline** — the practical mitigation: read a runbook once, keep the relevant facts in working memory, and don't re-open it on a later turn unless the content actually changed or was summarized away.
+
+So: duplicated in the raw transcript = yes; permanently duplicated = no (compaction reclaims it); avoidable = yes (read once, retain). The SKILL/runbook split exists precisely so a turn that doesn't need a given runbook never pays for it at all.
+<!-- agent:boundary:329e9e65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,6 +60,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- If a runbook is called multiple times in a session on separate turns, will the context from the runbook be duplicated?
 <!-- /agent:queue -->
 
 ## Backlog

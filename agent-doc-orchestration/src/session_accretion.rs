@@ -113,6 +113,32 @@ pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Compaction guidance line for an over-accreted exchange.
+///
+/// Queue-aware (`#no-compact-prompt-during-queue-drain`): while an `agent:queue`
+/// is actively draining, the agent must NOT stall the queue to ask the user about
+/// compacting — a self-driving queue is meant to run unattended, so a compaction
+/// question blocks the very work the user queued. On an active queue, compaction
+/// happens only via an explicit `agent_doc_auto_compact` opt-in; otherwise the
+/// agent keeps draining and notes the size in one line. Off the queue (idle /
+/// user-driven turn), the agent asks before compacting as before.
+fn compaction_guidance(file: &Path, auto_compact_opt_in: bool, queue_active: bool) -> String {
+    if auto_compact_opt_in {
+        format!(
+            "Run `agent-doc compact {} --commit` before another large turn.",
+            file.display()
+        )
+    } else if queue_active {
+        "Exchange is large, but an `agent:queue` is active — do NOT stall the queue to ask about compacting. Compact only with an explicit `agent_doc_auto_compact` opt-in (frontmatter or `.agent-doc/config.toml`); otherwise keep draining and note the size in one line of the response."
+            .to_string()
+    } else {
+        format!(
+            "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
+            file.display()
+        )
+    }
+}
+
 fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionReport> {
     let (exchange_lines, response_sections) = exchange_metrics(content);
     let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
@@ -129,6 +155,10 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
         .map(|(fm, _)| fm.auto_compact.is_some())
         .unwrap_or(false)
         || rc.project_config().agent_doc_auto_compact.is_some();
+    let queue_active = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.queue_active == Some(true))
+        .unwrap_or(false);
     let recent_restart_count = session_id
         .as_deref()
         .map(|session_id| recent_restart_metrics(file, session_id, now))
@@ -204,17 +234,7 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
             || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
             || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
         {
-            if auto_compact_opt_in {
-                guidance.push(format!(
-                    "Run `agent-doc compact {} --commit` before another large turn.",
-                    file.display()
-                ));
-            } else {
-                guidance.push(format!(
-                    "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
-                    file.display()
-                ));
-            }
+            guidance.push(compaction_guidance(file, auto_compact_opt_in, queue_active));
         }
         if recent_restart_count >= WARN_RESTART_EVENTS
             || startup_miss_active
@@ -267,6 +287,10 @@ fn inspect_at_with_context(
         .map(|(fm, _)| fm.auto_compact.is_some())
         .unwrap_or(false)
         || rc.project_config().agent_doc_auto_compact.is_some();
+    let queue_active = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.queue_active == Some(true))
+        .unwrap_or(false);
     let recent_restart_count = session_id
         .as_deref()
         .map(|session_id| recent_restart_metrics(file, session_id, now))
@@ -342,17 +366,7 @@ fn inspect_at_with_context(
             || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
             || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
         {
-            if auto_compact_opt_in {
-                guidance.push(format!(
-                    "Run `agent-doc compact {} --commit` before another large turn.",
-                    file.display()
-                ));
-            } else {
-                guidance.push(format!(
-                    "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
-                    file.display()
-                ));
-            }
+            guidance.push(compaction_guidance(file, auto_compact_opt_in, queue_active));
         }
         if recent_restart_count >= WARN_RESTART_EVENTS
             || startup_miss_active
@@ -677,6 +691,53 @@ mod tests {
             "opt-in caller should not get the gated phrasing, got {:?}",
             report.guidance
         );
+    }
+
+    #[test]
+    fn inspect_does_not_ask_to_compact_while_queue_active() {
+        // #no-compact-prompt-during-queue-drain: a self-draining `agent:queue`
+        // must not be stalled by a compaction question — the binary surfaces
+        // don't-stall guidance instead of "ask the user".
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir, doc) = setup_doc(&content);
+
+        let report = inspect(&doc).unwrap();
+
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.contains("do NOT stall the queue")),
+            "active queue must get the don't-stall guidance, got {:?}",
+            report.guidance
+        );
+        assert!(
+            !report
+                .guidance
+                .iter()
+                .any(|line| line.contains("ask the user")),
+            "active queue must NOT be told to ask the user about compacting, got {:?}",
+            report.guidance
+        );
+    }
+
+    #[test]
+    fn compaction_guidance_precedence_opt_in_beats_queue_active() {
+        // An explicit auto-compact opt-in still wins over the queue-active branch.
+        let g = compaction_guidance(Path::new("/tmp/doc.md"), true, true);
+        assert!(g.starts_with("Run `agent-doc compact"), "got {g}");
+        // Queue active, no opt-in → don't-stall guidance.
+        let g = compaction_guidance(Path::new("/tmp/doc.md"), false, true);
+        assert!(g.contains("do NOT stall the queue"), "got {g}");
+        // Idle (no queue), no opt-in → ask the user.
+        let g = compaction_guidance(Path::new("/tmp/doc.md"), false, false);
+        assert!(g.contains("ask the user before compacting"), "got {g}");
     }
 
     #[test]

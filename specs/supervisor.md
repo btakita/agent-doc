@@ -391,8 +391,12 @@ This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any 
 ### Idle-queue watch (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`)
 
 When a busy-pane `Run Agent Doc` route cannot inject into an active turn, it
-appends the prompt to `agent:queue auto`, sets `queue_active: true`, and returns
-`Ok` (`route.rs` `AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue`). The
+inserts the prompt **ahead of pending auto items** in `agent:queue auto` (a
+manual operator dispatch preempts the auto-loop rather than landing at the tail —
+`#jb-run-preempt-autoloop-priority`; the priority insert lands after any leading
+queue directive such as a preset/start fence and never supersedes a lone auto
+prompt, so the pending auto-loop item is preserved), sets `queue_active: true`,
+and returns `Ok` (`route.rs` `AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue`). The
 drain is otherwise harness-delegated: the Codex `Stop` hook drains on turn-end,
 and Claude relies on `/loop` or a manual re-trigger. A Claude session not running
 `/loop` therefore has no guaranteed drain, so the queued head can sit forever —

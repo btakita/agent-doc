@@ -1891,10 +1891,18 @@ fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+/// Enqueue a routed dispatch prompt into a document's `agent:queue`.
+///
+/// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
+/// busy/blocked pane: it must PREEMPT pending auto-loop items, so the prompt is
+/// inserted ahead of the first queued prompt and never supersedes a lone auto
+/// prompt (#jb-run-preempt-autoloop-priority). Non-priority callers keep the
+/// legacy tail-append (+ lone stale-prompt supersede) behavior.
 fn enqueue_route_dispatch_prompt(
     file: &Path,
     prompt_text: &str,
     source: &str,
+    priority: bool,
 ) -> Result<RouteQueueEnqueueOutcome> {
     let prompt_text = queue_prompt_text_for_route_change(prompt_text)
         .ok_or_else(|| anyhow::anyhow!("route queue prompt is empty"))?;
@@ -1924,9 +1932,13 @@ fn enqueue_route_dispatch_prompt(
                         .iter()
                         .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
                         .count();
-                    let replace_single_auto_prompt =
-                        crate::queue::has_auto_attr(&queue_component.attrs)
-                            && active_prompt_count == 1;
+                    // #jb-run-preempt-autoloop-priority: a priority dispatch must
+                    // preempt, so it never supersedes a lone auto prompt — replacing
+                    // would silently drop the pending auto-loop item the manual run
+                    // is jumping ahead of. Non-priority keeps the stale-prompt update.
+                    let replace_single_auto_prompt = !priority
+                        && crate::queue::has_auto_attr(&queue_component.attrs)
+                        && active_prompt_count == 1;
                     if replace_single_auto_prompt {
                         for entry in &mut entries {
                             if let crate::queue::QueueEntry::Prompt(prompt) = entry {
@@ -1937,12 +1949,24 @@ fn enqueue_route_dispatch_prompt(
                             }
                         }
                     } else {
-                        entries.push(crate::queue::QueueEntry::Prompt(
-                            crate::queue::QueuePrompt {
+                        let new_prompt =
+                            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
                                 multiline: prompt_text.contains('\n'),
                                 text: prompt_text.clone(),
-                            },
-                        ));
+                            });
+                        if priority {
+                            // Insert ahead of the first actionable prompt, preserving
+                            // any leading queue directives (preset / start fence).
+                            let insert_at = entries
+                                .iter()
+                                .position(|entry| {
+                                    matches!(entry, crate::queue::QueueEntry::Prompt(_))
+                                })
+                                .unwrap_or(entries.len());
+                            entries.insert(insert_at, new_prompt);
+                        } else {
+                            entries.push(new_prompt);
+                        }
                         appended = true;
                     }
                 }
@@ -2594,7 +2618,9 @@ fn dispatch_only_send_reopen(
         if let Some(source) = dispatch_active_turn_queue_source(harness, &reason)
             && let Some(prompt_text) = options.queue_prompt_text
         {
-            let queued = enqueue_route_dispatch_prompt(file, prompt_text, source)?;
+            // #jb-run-preempt-autoloop-priority: manual Run Agent Doc into a busy
+            // active turn preempts pending auto items (head-insert).
+            let queued = enqueue_route_dispatch_prompt(file, prompt_text, source, true)?;
             eprintln!(
                 "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
                 harness.binary,
@@ -4023,10 +4049,12 @@ fn route_via_authoritative_actor(
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
             if let Some(context) = prompt_context {
+                // #jb-run-preempt-autoloop-priority: manual reroute prompt preempts.
                 let queued = enqueue_route_dispatch_prompt(
                     file,
                     &context.prompt_text,
                     "open_closeout_blocked",
+                    true,
                 )?;
                 eprintln!(
                     "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={})",
@@ -4554,7 +4582,9 @@ fn route_via_authoritative_actor(
                 RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
             );
             if let Some(context) = prompt_context {
-                let queued = enqueue_route_dispatch_prompt(file, &context.prompt_text, reason)?;
+                // #jb-run-preempt-autoloop-priority: busy-actor Run Agent Doc preempts.
+                let queued =
+                    enqueue_route_dispatch_prompt(file, &context.prompt_text, reason, true)?;
                 eprintln!(
                     "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
                     actor.record.generation,

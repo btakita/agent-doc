@@ -578,6 +578,7 @@ fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
         &doc,
         "❯ do [#qipc]. #spec-test-build-install-commit-push",
         "test_busy_actor",
+        false,
     )
     .expect("route should persist a queued dispatch prompt");
 
@@ -639,7 +640,7 @@ fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing
             .any(|e| matches!(e, crate::queue::QueueEntry::Freeform(_)))
     );
 
-    let outcome = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor")
+    let outcome = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
         .expect("route must not crash on a polluted agent:queue");
     assert!(outcome.appended);
 
@@ -651,7 +652,7 @@ fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing
     assert!(updated.contains("- do [#newitem]"));
 
     // Re-dispatching the same prompt into the still-polluted queue is idempotent.
-    let outcome2 = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor")
+    let outcome2 = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
         .expect("route must stay resilient on repeat dispatch");
     assert!(outcome2.already_present);
     let updated2 = std::fs::read_to_string(&doc).unwrap();
@@ -688,6 +689,7 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
         &doc,
         "do [#qipc]. #spec-test-build-install-commit-push",
         "test_busy_actor",
+        false,
     )
     .expect("route should activate an existing queued dispatch prompt");
 
@@ -961,7 +963,7 @@ fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
     crate::snapshot::save(&doc, content).unwrap();
 
     let outcome =
-        enqueue_route_dispatch_prompt(&doc, "do [#adoc-orch-shim-cleanup]", "test_busy_actor")
+        enqueue_route_dispatch_prompt(&doc, "do [#adoc-orch-shim-cleanup]", "test_busy_actor", true)
             .expect("route should treat the live head as already queued");
 
     let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1001,6 +1003,7 @@ fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
         &doc,
         "Run Agent Doc queued the edited prompt.",
         "test_busy_actor",
+        false,
     )
     .expect("route should update a stale single auto-queue prompt");
 
@@ -1048,7 +1051,7 @@ fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
     std::fs::write(&doc, content).unwrap();
     crate::snapshot::save(&doc, content).unwrap();
 
-    let outcome = enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor")
+    let outcome = enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
         .expect("route should append to user-style multi-prompt auto queues");
 
     assert!(outcome.appended);
@@ -1059,6 +1062,126 @@ fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(
         updated.contains("- first queued prompt\n- second queued prompt\n- third queued prompt")
+    );
+}
+
+#[test]
+fn route_enqueue_priority_dispatch_preempts_multi_prompt_auto_queue() {
+    // #jb-run-preempt-autoloop-priority: a manual operator Run Agent Doc into a
+    // busy pane must jump AHEAD of pending auto-loop items, not land at the tail.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- first queued prompt\n",
+        "- second queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+            .expect("priority route dispatch should preempt the pending auto queue");
+
+    assert!(outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(!outcome.superseded);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains(
+            "- manual preempt prompt\n- first queued prompt\n- second queued prompt"
+        ),
+        "priority dispatch must head-insert ahead of pending auto items:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(snapshot, updated, "priority preempt must sync the snapshot");
+}
+
+#[test]
+fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_auto_prompt() {
+    // #jb-run-preempt-autoloop-priority: a priority dispatch must NOT supersede a
+    // lone auto prompt — replacing it would silently drop the pending auto-loop
+    // item the manual run is preempting. Both prompts survive, manual first.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- pending auto-loop item\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+            .expect("priority route dispatch should insert ahead, not supersede");
+
+    assert!(outcome.appended);
+    assert!(!outcome.superseded, "priority dispatch must not supersede");
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- manual preempt prompt\n- pending auto-loop item"),
+        "priority dispatch must preserve the pending item and run ahead of it:\n{updated}"
+    );
+}
+
+#[test]
+fn route_enqueue_priority_dispatch_preserves_leading_queue_directives() {
+    // #jb-run-preempt-autoloop-priority: the head-insert must land after leading
+    // queue directives (preset / start fence), before the first actionable prompt.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "preset #spec-test-build-install-commit-push\n",
+        "- first queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+        .expect("priority route dispatch should insert after leading directives");
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    let preset_pos = updated.find("preset #spec").expect("preset directive preserved");
+    let preempt_pos = updated
+        .find("- manual preempt prompt")
+        .expect("preempt prompt inserted");
+    let first_pos = updated
+        .find("- first queued prompt")
+        .expect("first prompt preserved");
+    assert!(
+        preset_pos < preempt_pos && preempt_pos < first_pos,
+        "preempt prompt must sit after the preset directive and before the first prompt:\n{updated}"
     );
 }
 

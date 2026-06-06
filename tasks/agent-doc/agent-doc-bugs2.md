@@ -29,12 +29,11 @@ Draining queue (`queue: go`, 18 items). Head 1/18 answered: **queue↔backlog fr
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-023004.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-023008.md`*
 
 Compacted content:
-- Archived 5 response topic(s): JB `Run Agent Doc` on `queue: stop` + `agent:queue go` should start the queue; Queue stall / treadmill; Build on the main agent, not a subagent / no idle session while the previous turn runs; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1a673c96 -->
+<!-- agent:boundary:94c24739 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

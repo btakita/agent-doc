@@ -70,7 +70,41 @@ Flips a `draft` → `trusted` (preserving anchor/watermark/provenance), the prec
 - Remaining: **`#trt1p2b`** (fold findings into `search`/`explain` — the last hot-path sub-scope) → **`#trt1cfg`** (configure agent-loop to use the layer; its phase-2–4 gate is now satisfied, so it unblocks once p2b lands).
 
 Top of backlog (`#next-steps`): **`#trt1p2b`** — search/explain hot-path injection (same trusted/fresh/result-set contract as context-pack).
-<!-- agent:boundary:824d8e36 -->
+
+### Re: [#trt1p2b] — hot-path injection for search + explain — opus-4-8
+
+> **Queue prompt:**
+>
+> [#trt1p2b]
+
+
+Shipped `#trt1p2b`, completing Phase 2 hot-path injection across all three agent surfaces. Clean queue drain.
+
+#### What changed
+
+- **`tsift explain <symbol>`** now folds trusted, fresh findings concerning its result set — the focused symbol, displayed callers/callees, and community members — into the JSON/envelope output (budget + non-budget paths) and a non-JSON `Findings` section.
+- **`tsift search <query>`** does the same for matched symbol names and their files.
+
+Both reuse the Phase 2 trusted+fresh contract via a new `collect_result_set_finding_previews` helper: `findings` array capped at 10, body-truncated, omit-when-empty, fail-open. Each preview carries `id`/`kind`/`title`/`about`/`anchor_kind`/optional `confidence`/`body` and an `expand` command back to the full anchored set.
+
+#### Verification
+
+- **Tests** — 3 new CLI tests in `tests/finding.rs` (explain injection, search injection, draft exclusion for both); full finding suite 21/21.
+- **`make check` + clippy** — green on **rustc 1.96.0**.
+- **Live smoke** — `cargo install --path .` (both binaries); confirmed live `tsift explain`/`search --json` carry the `findings` array, and a draft about a matched symbol is excluded.
+- **Shipped** — `tsift@d7aff19` (pushed), superproject pointer `agent-loop@fc846a3`. CI monitoring in progress.
+
+#### Findings Graph Layer status — injection complete
+
+Authored "why" now rides every agent navigation surface: `context-pack`, `search`, `explain`, and the `graph-db map` overview.
+
+#### Queue / backlog
+
+- `#trt1p2b` → **done**.
+- **One item remains: `#trt1cfg`** — configure agent-loop's own tsift config to use the findings layer. Its gate (phases 2–4 shipped) is now fully satisfied, so it's unblocked.
+
+Top of backlog (`#next-steps`): **`#trt1cfg`** — the final queue item.
+<!-- agent:boundary:0ad4f816 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +118,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#trt1p2]~
 - ~[#trt1p3]~
 - ~[#trt1p4]~
-- [#trt1p2b]
+- ~[#trt1p2b]~
 - [#trt1cfg]
 - ~Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.~
 <!-- /agent:queue -->
@@ -92,7 +126,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#trt1p2b] Findings Graph Layer Phase 2b — fold trusted, fresh findings into `search` and `explain` output, reusing the trusted/fresh/result-set injection contract from context-pack (#trt1p2). Plan: src/tsift/specs/graph.md § Hot-path injection (Phase 2).
 - [ ] [#trt1cfg] After #trt1 phases 2-4 ship (findings hot-path injection), configure agent-loop's tsift config to use the findings graph layer. Gated on #trt1 completion.
 <!-- /agent:backlog -->
 

@@ -114,7 +114,22 @@ Already implemented + tested — verified and marking done.
 The fix is in `preflight.rs:3433` (`run_queue_maintenance`, decision B/C): while the queue is **persisted-active** (auto-loop running), the backlog→queue sync no longer promotes freshly-added backlog items into the live queue — it restricts the sync to ids already present as queue heads, so captured `--pending-add` follow-ups wait for the **next activation** instead of joining mid-loop. That's exactly the decoupling the item asked for: capture no longer amplifies the active queue or trips `pending_done_guard` each finalize. A fresh activation (queue not yet active) still mirrors the full backlog. Covered by `run_queue_maintenance_holds_fresh_backlog_item_out_of_active_queue`.
 
 You actually saw it fire this session — preflight logged "held N freshly-added backlog id(s) out of the active auto-loop". Marking `#backlog-queue-sync-pending-add-amplification` **done**.
-<!-- agent:boundary:14f6198f -->
+
+### Re: [#free-text-head-answer-match-too-literal] do — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#free-text-head-answer-match-too-literal]
+
+
+Already addressed — verified and marking done. The literal heading-resemblance match the item describes was replaced by a **positional** match.
+
+In `write.rs:3012` (`queue_consumption_allowed_for_response`), a free-text head is consumed when: there's a captured response this cycle AND the cycle did **not** answer a *foreign* exchange prompt (`cycle_answered_foreign_exchange_prompt`). It no longer requires the `### Re:` heading to textually resemble the head — the cycle's response *positionally* answers the head unless a genuinely new, unrelated `❯` prompt diverted it. That's the plan's exact fix direction ("looser/positional match instead of literal topic similarity"). Covered by `consume_decision_strikes_answered_free_text_head` + `free_text_head_kept_only_when_cycle_answered_foreign_prompt`.
+
+(What looked like the bug this session was the *correct* keep behavior: you were adding new prompts to the queue concurrently, so the cycle legitimately saw a foreign prompt and held the head. Heading wording was never the cause.)
+
+Marking `#free-text-head-answer-match-too-literal` **done**.
+<!-- agent:boundary:d053e2b0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -122,7 +137,7 @@ You actually saw it fire this session — preflight logged "held N freshly-added
 - ~Fix IPC/CRDT + snapshot issues~
 - ~do [#backlog-queue-sync-pending-add-amplification]~
 - ~do [#finalize-divergence-orphans-committed-head]~
-- do [#free-text-head-answer-match-too-literal]
+- ~do [#free-text-head-answer-match-too-literal]~
 - Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
 - Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard? Create a comprehensive plan.
 <!-- /agent:queue -->
@@ -158,7 +173,6 @@ What are #next-steps to fix bugs?
 6. [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
 7. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
 8. [ ] [#queue-dedup-destroys-intentional-duplicates] #agent-doc-bug: queue dedup destroys intentional duplicate prompts. dedup_live_prompts (queue.rs:631, run every preflight at preflight.rs:3562) collapses all same-text live prompts, assuming duplicates are always IPC-drift merge artifacts — but users legitimately queue a command twice (user's two `- deploy` items; the 2nd was dropped mid-run). At preflight, user-added vs merge-created duplicates are structurally identical (provenance lost); snapshot-count / adjacency / 3+-copy heuristics all fail the uncommitted-2nd-deploy case. Fix at the merge source (provenance-aware) or gate dedup on a proven IPC-drift state — do NOT delete dedup (reintroduces #adoc-queue-ipc-drift growth). Plan: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md
-9. [ ] [#free-text-head-answer-match-too-literal] #agent-doc-bug: free-text queue-head consume requires the answering `### Re:` heading to textually resemble the head wording; a semantically-correct response with a differently-worded heading does not strike the head (observed: head "I asked to create backlog #next-steps..." vs heading "Backlog id must not collide..."). Use a looser/positional match (the cycle response that targets this head position) instead of literal topic similarity.
 <!-- /agent:backlog -->
 
 ## Review

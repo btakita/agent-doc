@@ -34,11 +34,34 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 3 response topic(s): do [#per-cycle-protocol-output-overhead]; Clear Session Context blocked while autolooping; do [#skill-md-token-footprint-reduce]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:bdd4a191 -->
+
+### Re: Would the autoloop → Run Agent Doc → pause → unpause pipeline work? — opus-4-8
+
+> **Queue prompt:**
+>
+> On monsterrodholders.md, the auto loop may have been running on an empty queue. As I was typing into the queue, nothing seemed to happen. I ran JB `Run Agent Doc` nothing happend for 60s. JB `Run Agent Doc` should have paused the autoloop and ran the document then unpause the autoloop. It should have been autoloop->`Run Agent Doc`->pause autoloop->`Run Agent Doc` starts autoloop->loop finishes->unpause autoloop. Would this pipeline work? Now I see "Error: recursive direct invocation would deadlock" after the 60s delay. The autoloop is deadlocked right now it seems...so the "recursive direct invocation would deadlock" is in effect not true...since we are already in deadlock.
+
+
+Short version: the **goal** is right and is already ~80% built, but the literal **pause/unpause** framing doesn't match how the autoloop actually exists, and your monsterrodholders stall is a different failure than "pause didn't fire."
+
+**Why pause/unpause doesn't map cleanly.** There is no autoloop *daemon* to pause. In Claude the autoloop is the `/loop` skill self-pacing **inside the Claude session** — nothing external (least of all the JB action) can send it a "pause" signal. In Codex the autoloop is the `Stop` hook draining on turn-end — event-driven, not a running loop. So "pause autoloop → run → unpause" assumes a controllable background process that isn't there.
+
+**What already does your intent.** The pane *is* the serializer. Both the autoloop and `Run Agent Doc` inject the same `agent-doc <FILE>` trigger into the **same pane**, and preflight serializes on the document/queue — two turns physically can't run at once. When `Run Agent Doc` hits a busy pane, `route.rs` (`DispatchOnlyBusyQueue`) enqueues the prompt to `agent:queue auto`, flips `queue_active: true`, and the supervisor's **idle-queue watch** thread drains it on the first busy→idle transition (`specs/supervisor.md`, `#jb-run-agent-doc-busy-queue-dispatch-deadlock`). That *is* "run it as soon as the loop frees up, then carry on" — just without a pause handshake.
+
+**So what bit you on monsterrodholders.** Three real gaps, none of which a pause primitive fixes:
+
+1. **Tail, not head.** The busy-pane enqueue *appends* — your manual run lands **behind** the auto items, so it doesn't preempt. The fix is a priority **head-insert**, not a pause.
+2. **Empty-queue autoloop.** If `/loop` was spinning on an empty queue it keeps the pane looking Busy and starves the manual run. That's the actual bug behind "typing did nothing" — related to `#post-clear-auto-queue-suppress` / `plan-backlog-queue-sync-no-populate.md`.
+3. **The 60s.** That's literally `--wait-for-ready 60`. The route only waits when there's **no queue fallback** and no live active-turn cue; an autoloop-between-iterations Busy projection can hit that path and stall silently before enqueuing.
+
+**Recommended shape instead of pause/unpause:** (a) busy-pane `Run Agent Doc` head-inserts with priority, (b) keep the existing idle-queue-watch drain, (c) make the empty-queue autoloop actually go idle so the drain can fire. That gets you "manual run jumps the queue, then the loop resumes" without inventing a pause control surface.
+
+Captured as `[#jb-run-preempt-autoloop-priority]` (recommended) with `plan-jb-run-preempt-autoloop-priority.md`. Want me to `do` it, or keep diagnosing the monsterrodholders empty-queue state first?
+<!-- agent:boundary:88044d12 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- On monsterrodholders.md, the auto loop may have been running on an empty queue. As I was typing into the queue, nothing seemed to happen. I ran JB `Run Agent Doc` nothing happend for 60s. JB `Run Agent Doc` should have paused the autoloop and ran the document then unpause the autoloop. It should have been autoloop->`Run Agent Doc`->pause autoloop->`Run Agent Doc` starts autoloop->loop finishes->unpause autoloop. Would this pipeline work?
+- ~On monsterrodholders.md, the auto loop may have been running on an empty queue. As I was typing into the queue, nothing seemed to happen. I ran JB `Run Agent Doc` nothing happend for 60s. JB `Run Agent Doc` should have paused the autoloop and ran the document then unpause the autoloop. It should have been autoloop->`Run Agent Doc`->pause autoloop->`Run Agent Doc` starts autoloop->loop finishes->unpause autoloop. Would this pipeline work? Now I see "Error: recursive direct invocation would deadlock" after the 60s delay. The autoloop is deadlocked right now it seems...so the "recursive direct invocation would deadlock" is in effect not true...since we are already in deadlock.~
 - [#skill-md-token-footprint-reduce]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
@@ -73,6 +96,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#jb-run-preempt-autoloop-priority] [recommended] Busy-pane Run Agent Doc should head-insert (priority preempt) into agent:queue, not tail-append; verify empty-queue autoloop suppression + 60s stall path — tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
 - [ ] [#autoloop-command-preemption] [recommended] #agent-doc-bug feature: operator commands (JB Clear Session Context / interrupt-clear, etc.) must be able to preempt an active agent:queue auto loop — pause the loop, run the command, then resume — instead of being hard-blocked while the pane is busy (currently session_clear_live_busy_guard_blocked / 'Wait for the turn to finish'). Self-driving loops never leave a quiet window, so the command is effectively unrunnable. Design: command sets durable queue:stop (record prior state) -> non-interrupt Clear defers to next inter-iteration idle gap (don't kill in-flight work), explicit 'Interrupt and Clear' stays the destructive path -> supervisor resumes queue:start after the pane returns dispatch-ready. Honor #codex-interrupt-clear-ctrl-g-opens-editor. Live-verify on a busy auto-looping Codex pane. Related #clear-stops-running-process. Plan: tasks/agent-doc/plan-autoloop-command-preemption.md
 - [ ] [#monsterrod-writeback-post-contamination-confirm] [recommended] Confirm monsterrodholders.md responses now write to the document reliably after the 1-pane-1-document eviction fix (25ff1116). Evidence it resolved: post-fix commits f1ae73a (00:35) + a53ecee (00:25) landed real response content; only out_of_band_write in ops.log is ~51 days old. If responses still go missing AFTER the contamination fix, capture the specific signature (Codex final-gate vs IPC merge drop vs closeout) — that is a DIFFERENT cause than contamination and routes to existing gated items #codex-final-response-repeat / #codex-final-response-live-verify (plan-codex-final-response-not-written.md).
 - [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.

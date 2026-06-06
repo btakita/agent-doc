@@ -142,7 +142,34 @@ To build it, give an explicit go-ahead. Options:
 - **Phase 1 first (recommended)** — `finding`/`decision`/`note` nodes + `concerns`/`scopes`/`relates_to` edges + watermark staleness + `tsift finding add/list`. Note `GraphStore` already stores arbitrary typed nodes/edges, so this is mostly a new CLI subcommand + persistence, not a schema change. Review before Phases 2–4 (hot-path injection → graph-menu/exports → passive harvest).
 
 I've drained the `[#trt1]` queue reference so we stop auto-looping on it; `#trt1` remains in the backlog for you to trigger when ready.
-<!-- agent:boundary:75fa904b -->
+### Re: Split up SPEC.md into separated specs/*.md files — opus-4-8
+
+> **Queue prompt:**
+>
+> Split up SPEC.md into separated specs/*.md files.
+
+
+Done. Split the 1960-line `src/tsift/SPEC.md` monolith into behavior-bounded sibling specs under [`src/tsift/specs/`](../../src/tsift/specs/), following the agent-doc `split-spec-files` runbook. `SPEC.md` is now a stable **index** (Goal + a command/spec map); external links and the `packages/tsift-cli/SPEC.md` symlink keep working.
+
+| Sibling | Owns |
+|---|---|
+| `specs/architecture.md` | Architecture, Per-Submodule Isolation, Multiplicity, Storage Layout, Multi-Language Architecture, Development Phases, Graph>Vector decision |
+| `specs/graph.md` | Provider-Neutral Graph Substrate (+ perf/token gates, cycle-packet cache, libsql, surrealdb), Findings Graph Layer, Graph Traversal Handles (lazily-rs), Semantic Similarity, Community Detection, Graph Path Queries, Graph CLI E2E |
+| `specs/search-navigation.md` | New Subcommands, Search Stale Precheck, Bounded Source Reads, Handle-Preserving Workflow, Index Quiet Mode, Init, Code Navigation, Status, Summarize |
+| `specs/output-formats.md` | Compact/Terse/Ultra-Terse/Tabular/Schema output, Budget Profiles, Structured Envelopes, Relative Paths, Output Caps, Output Contract |
+| `specs/digests-sessions.md` | Diff/Test/Metric/Log/Session digests, DCI Benchmark, Deterministic SimWorld, Session Cost, Session Review |
+| `specs/release-integration.md` | Release Workflow, Skill Audit, Markdown Lint, Hook Integration, Tagpath integration, What NOT to build |
+
+**Lossless:** the split was a scripted line-range extraction — every original line 7–1960 assigned to exactly one sibling, content moved verbatim (no reflow, no dropped behavior).
+
+**Coupling updated:** the two `exit_code.rs` tests that asserted spec content (release-publish gate; lazily-rs cache contracts) now read the sibling specs; the `packaged == workspace` SPEC.md index check stays (symlink). Repointed `cycle_packet_cache` / `token_gate` / `perf_gate` doc-comments at `specs/graph.md`. Added a `#specsplit` VERSIONS.md entry.
+
+**Verification:** `cargo test --workspace` → **1223 passed (50 suites), 0 failed** (unchanged count — nothing broke); `cargo clippy --workspace --all-targets -D warnings` → **clean**. No binary behavior changed (only docs, doc-comments, and a test file), so the installed tsift 0.1.62 is current.
+
+**Commit/push:** tsift pushed — `83b8f72` on `btakita/tsift`. Superproject `src/tsift` pointer committed locally (`1a64cd8af`); push still deferred — the shared agent-loop superproject remains many concurrent-session commits ahead of origin with submodule conflicts in unrelated areas, so I'm not force-reconciling other sessions' work. The tsift deliverable is pushed and CI-green.
+
+`#trt1` (findings-layer implementation) remains OPEN in the backlog — design-stage, awaiting your explicit go-ahead.
+<!-- agent:boundary:4f6effdc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,6 +180,9 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.~
+- ~Split up SPEC.md into separated specs/*.md files.~
+- Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.
+- Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.
 - [#trt1]
 <!-- /agent:queue -->
 

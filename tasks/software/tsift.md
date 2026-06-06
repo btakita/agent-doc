@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,7 +71,42 @@ If you wanted to actually *implement* it, the key distinction is **advise vs. en
 So: would it be in the skill-harness? The skill can only document it; if you want it enforced, it's a harness `Read` hook. Right now neither exists — it's discipline, and the cheaper backstop is that context compaction reclaims the duplicate anyway, which is why nobody has felt the need to code it.
 
 Worth noting: a hard read-once hook has a real failure mode — if a runbook was edited mid-session, or its earlier copy was already compacted away, blocking the re-read would starve the model of content it legitimately needs. Any enforcement should key on (path + content-hash) and exempt post-compaction re-fetches, which is exactly the kind of nuance that makes the soft-discipline approach attractive enough to leave as-is.
-<!-- agent:boundary:d7596d46 -->
+
+### Re: Is the soft-discipline effective at reducing redundant runbook reads? — opus-4-8
+
+> **Queue prompt:**
+>
+> Please look through Claude Code, Codex, and Opencode sessions logs to measure whether the soft-discipline approach is effective in reducing redundant runbook reads.
+
+
+I measured it against real session logs. Verdict: **yes, the soft discipline is mostly effective** — redundancy sits at 5–13% of all runbook reads, and the one place the discipline can actually act (within a single live context), it's working at ~100%. The residual re-reads are almost entirely *cross-turn*, which in-context discipline can't prevent and which are often legitimate (new turn, or content already compacted away).
+
+**Data**
+
+| Harness | Sessions w/ ≥1 read | Total reads | Distinct | Redundant | Redundancy rate |
+|---|---|---|---|---|---|
+| Claude Code | 32 | 44 | 39 | 5 | **11.4%** |
+| Codex | 322 | 709 | 620 | 89 | **12.6%** |
+| OpenCode | 29 | 75 | 71 | 4 | **5.3%** |
+
+"Redundant" = same runbook path read 2+ times within one session.
+
+**The decisive cut — when do the re-reads happen?** For Claude (the only harness where I can cleanly bucket reads by turn): of the 5 redundant reads, **same-turn (true waste) = 0**, cross-turn = 5. So inside a single context window the model never re-opens a runbook it already has — exactly what the discipline asks. The re-reads only happen on later turns, where the earlier copy may already be compacted out and the re-read is legitimately needed. The discipline is effective; the leftover isn't really waste.
+
+**Where the redundancy concentrates** (re-read counts):
+- **Codex** — `harness-invocation.md` ×22, `commit.md` ×16, `pending-ops.md` ×15. These are the hot-path runbooks hit nearly every cycle.
+- **Claude** — `transfer-extract.md` ×3, plus one each of `pending-ops.md`, `model-tier-gate.md`.
+- **OpenCode** — `harness-invocation.md` ×3, `document-format.md` ×1.
+
+**Why Codex is worst:** it's structural, not a discipline failure. Codex reads runbooks by shelling out (`cat`/`sed` a `runbooks/*.md`), and each cycle is a fresh process — so the hot-path runbooks get re-`cat`'d every cycle because nothing carries them across cycles the way a single Claude context does. That's precisely the case the backlog read-once item targets, and it argues the enforcement (or a Codex-side runbook cache) would pay off most on Codex, least on Claude/OpenCode where the rate is already low.
+
+**Methodology / confidence:**
+- Claude (`Read` tool, `file_path`) and OpenCode (`read` tool in `opencode.db`, `state.input.filePath`) are **clean, explicit** signals — high confidence.
+- Codex is a **heuristic**: a runbook path passed to a read utility (`cat`/`bat`/`sed`/`head`/`tail`/`less`/`nl`) or `tsift source-read`; I excluded `rg`/`grep`/`ls` (searches, not reads). Medium confidence — could under/over-count.
+- Scope: Claude = the agent-loop project transcripts (284 sessions); Codex = all 2026 rollout sessions (~2,866); OpenCode = full DB.
+
+Bottom line for the discipline-vs-enforcement question from the prior turn: the soft discipline already eliminates in-context waste, so a hard read-once hook would only reclaim the cross-turn tail — and that tail is dominated by Codex's per-cycle shell re-reads, which is the targeted, high-value case rather than a broad win.
+<!-- agent:boundary:dc8eb2bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,8 +115,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Please look through Claude Code, Codex, and Opencode sessions logs to measure whether the soft-discipline approach is effective in reducing redundant runbook reads.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

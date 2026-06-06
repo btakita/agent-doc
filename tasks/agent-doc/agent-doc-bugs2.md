@@ -60,14 +60,38 @@ Fixed the highest-impact piece and it's now live (built + installed + pushed). *
 **Fix** (`write.rs`): the same-head proof still gates the strike, but the remaining-queue difference *is* the concurrent edit the merge already resolved — so consume now **reconciles** (merged document wins): head strikes, snapshot adopts it, both converge, and concurrently-added queue items are **preserved** (also helps `#queue-edit-lost`). Divergence is logged for forensics, not failed. Regression test added, FlowCore budget audited, `make check` green. (This very response committing cleanly through the new logic is the live proof.)
 
 **What remains of the broader IPC/CRDT ask** (separate, larger): the architecture redesign — fewer IPC disk writes / File-Cache-Conflicts, a non-blocking main loop, and per-document queues. That's a design+build effort I'd take on as a focused piece; this divergence fix removes the single worst symptom (the constant finalize blocking) now.
-<!-- agent:boundary:674dfaa1 -->
+
+### Re: [#auto-dag-first-class] — opus-4-8
+
+> **Queue prompt:**
+>
+> #auto-dag-first-class
+
+
+Done — shipped the 1st-class auto-dag as a real `agent-doc` command. **`agent-doc auto-dag <FILE>`** is now installed and works on this very document.
+
+It's the harness-agnostic analogue of Claude Code `/goal`: it parses `agent:backlog` + `agent:review`, classifies each open item into a completion lane via text heuristics, and emits a Mermaid work-graph + a priority-ordered nested list (`--json` for machine use). Pure read, re-runnable, so the graph stays current as items close.
+
+**Live output on agent-doc-bugs2.md (84 open items):**
+- **Path C — implementable now** (no live pane): 25
+- **Path A — operator live-verify session**: 37
+- **Path B — operator IPC/typing-capture session**: 11
+- **Blocked on a design decision**: 2
+- **Likely done — verify + reap**: 9
+
+That confirms the earlier hand analysis quantitatively: ~37 are operator-live-verify-bound (Path A) — the real lever to cut the count is your verification passes, not more code. The 25 Path C are mine to drain.
+
+New `auto_dag` module + CLI subcommand, unit tests, `make check` green; submodule `99c935ab` pushed (CI running), superproject `3409bcb43`, installed.
+
+**Next refinements (future):** infer explicit dependency edges from `Related/overlaps/Plan:` markers (currently lane-grouping only), and an `admin`-dashboard view. Marking `#auto-dag-first-class` done.
+<!-- agent:boundary:9afdbe1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- #auto-dag-first-class
+- ~#auto-dag-first-class~
 - Fix IPC/CRDT + snapshot issues
 - do [#backlog-queue-sync-pending-add-amplification]
-- do [#finalize-divergence-orphans-committed-head]
+- ~do [#finalize-divergence-orphans-committed-head]~
 - do [#free-text-head-answer-match-too-literal]
 - Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
 - Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard? Create a comprehensive plan.

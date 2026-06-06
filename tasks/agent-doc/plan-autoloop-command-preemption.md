@@ -26,6 +26,40 @@ Related but distinct: `#clear-stops-running-process` (Clear fails to stop/repair
 a busy projection). This item is about *preempting the auto-loop* for an operator
 command, not the busy-projection repair.
 
+## Status
+
+- **Decision (2026-06-06):** non-interrupt `Clear Session Context` on a busy
+  auto-looping doc **defers** (pause → finish current turn → run → resume); the
+  destructive immediate path stays behind explicit "Interrupt and Clear".
+  (Operator did not object to the recommended default across two re-invokes.)
+- **Phase 1 SHIPPED** — pure decision + durable pause/resume transforms in
+  `agent-doc-orchestration/src/queue_preemption.rs`
+  (`plan_operator_queue_preemption`, `pause_queue_for_operator_command`,
+  `resume_queue_after_operator_command`), 7 unit tests, non-destructive, no
+  command-path wiring yet.
+- **Phase 2a SHIPPED** — wired into the `session clear` command path
+  (`session_actor_cmd.rs`). The `reconcile_idle_projection_before_clear` busy
+  branch now consults `queue_continuation::detect` + the new pure
+  `queue_preemption::plan_busy_clear`: when a non-interrupting clear hits a busy
+  pane driven by an active `agent:queue auto` loop it **pauses the loop** via the
+  durable clear cooldown the idle-queue watch already honors, logs
+  `session_clear_queue_preempt_deferred`, prints a "deferred until the turn
+  finishes" message, and returns a new `ClearPreflightOutcome::DeferredPreempt`
+  so `clear()` short-circuits *before* delivering the clear into the in-flight
+  turn (no destructive mid-turn `/clear`). A busy pane with **no** active loop
+  keeps the old fail-closed `session_clear_live_busy_guard_blocked` hard block.
+  2 new pure unit tests on `plan_busy_clear`; `make check` green; both binaries
+  rebuilt + installed. Net effect: the operator gets the quiet window the paused
+  cooldown opens (retry `session clear` at the idle prompt) instead of an
+  unrunnable hard block.
+- **Phase 2b GATED** — auto-deliver the deferred clear from the supervisor
+  idle-queue watch on the next idle gap (instead of the operator re-running it),
+  then resume by restoring `queue: start`; and change the JB plugin message from
+  "blocked" to "deferred until the turn finishes" (JB build + version bump).
+  Touches the live supervisor watch thread + JB plugin. Honor
+  `#codex-interrupt-clear-ctrl-g-opens-editor`.
+- **Phase 3 GATED** — operator live-verify on a busy auto-looping Codex pane.
+
 ## Design
 
 Pause → run → resume, coordinated through the supervisor + queue state:

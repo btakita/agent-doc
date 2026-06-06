@@ -133,7 +133,7 @@ The asymmetry you're pointing at is real and correct: **scope any intervention t
 **Recommendation:** Yes to Codex-only scope; no to building the hook yet. Do (a) inline the 3 hot-path runbooks for Codex first, re-measure, and only build an enforcement mechanism if the 12.6% doesn't drop. I've re-scoped #7qky to reflect this (Codex-targeted, cheap-fix-first, hook as fallback) so it doesn't get picked up as a blanket all-harness hook.
 
 If you'd rather I just implement (a) now — inline the three runbooks into the Codex AGENTS.md closeout surface — say the word and I'll do it as its own cycle.
-<!-- agent:boundary:71eebe2a -->
+<!-- agent:boundary:53dfbd83 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,7 +148,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#7qky] [recommended] Optional read-once enforcement for runbooks: PreToolUse hook on Read keyed on (path + content-hash) that returns a pointer/stub on repeat reads within a session, exempting post-compaction re-fetches and mid-session edits. Currently retain-don't-reread is model discipline only; harness hook is the only real enforcement layer.
+- [ ] [#7qky] [recommended] Reduce Codex redundant runbook reads (12.6%, concentrated in harness-invocation/commit/pending-ops re-cat'd each cycle). Codex-scoped ONLY — Claude (11.4%, all cross-turn/post-compaction) and OpenCode (5.3%) do not justify any mechanism and a hard block would starve post-compaction re-reads. Cheap fix FIRST: (a) inline the 3 hot-path runbooks into Codex AGENTS.md closeout surface so re-reads become zero-cost; (b) strengthen retain-don't-reread nudge in Codex AGENTS.md/Stop-hook. Re-measure; only build a read-once enforcement hook (path+content-hash, exempt post-compaction/mid-session edits) as a fallback if 12.6% doesn't drop. NOT a Claude PreToolUse Read hook — Codex reads via shell cat, not a Read tool.
 <!-- /agent:backlog -->
 
 ## Review

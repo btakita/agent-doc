@@ -10,7 +10,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -598,11 +598,12 @@ Done.
 **Important — this is a code push, not a submission.** I did **not** click the SnapCode "completed" link, so your access is intact and nothing is final. Marking complete remains gated behind an explicit, separate **"submit"** from you.
 
 (Next I'll commit the submodule-pointer bump in the agent-loop superrepo so it references this pushed commit.)
-<!-- agent:boundary:782c3d68 -->
+<!-- agent:boundary:d2149f1f -->
 <!-- /agent:exchange -->
 
 ## Queue
-<!-- agent:queue go -->
+<!-- agent:queue auto go -->
+- Create a private gh repo btakita/equal-experts-neat-exhilarating-friendly-inspiration from the local repo.
 <!-- /agent:queue -->
 
 ## Backlog

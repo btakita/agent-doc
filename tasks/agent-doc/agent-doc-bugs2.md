@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -76,10 +76,19 @@ Triaged: **working-as-designed + the escape hatch is already shipped.** Not a co
 I held off auto-running `queue sync` because it would push 9 substantial backlog tasks into this autonomous loop at once and could make the loop non-terminating — that's a call for you to make explicitly.
 
 **Captured:** `#backlog-queue-empty-active-repopulate` (new backlog head) — the one genuine refinement: when the live queue is *empty* (0 un-struck prompts), the amplification rationale doesn't apply, so the hold could be skipped to let an empty active queue repopulate. It's a design decision (continuous-backlog-loop vs drain-then-stop), which the plan deliberately left as a non-goal, so it needs a steer before implementing rather than an autonomous change.
-<!-- agent:boundary:e895b81c -->
+<!-- agent:boundary:438ab620 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#backlog-queue-empty-active-repopulate]
+- do [#free-text-head-consume-genuine-not-struck]
+- do [#monsterrod-writeback-post-contamination-confirm]
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
+- do [#test-submodule-worktree-git-identity]
+- do [#multi-session-shared-build-isolation]
+- do [#sync-fast-pane-hotpath]
+- do [#queue-dedup-destroys-intentional-duplicates]
 <!-- /agent:queue -->
 ###
 <!--

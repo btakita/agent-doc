@@ -157,7 +157,26 @@ The editor buffer reconciled (live buffer back to the clean 62933 = HEAD), so I 
 **`#autoloop-command-preemption` Phase 1** — shipped `51d7e174`: new `queue_preemption` module (defer policy + durable pause/resume transforms, 7 tests). Gating the item now: Phase 1 code-complete; Phase 2 (wire into `session clear`/`interrupt-clear` + supervisor resume + JB "deferred" message) and Phase 3 (live-verify) remain in `plan-autoloop-command-preemption.md`.
 
 Next drainable head is the **light-models / blocking-sub-agent question** — I'll take that next. Continuing the queue.
-<!-- agent:boundary:58f3ce36 -->
+### Re: Light sub-agent to watch the build and block the main agent — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
+
+
+Not worth it for build/test watching — keep it simple. Here's the actual math, because the premise (light sub-agent saves tokens) is mostly already solved by something cheaper.
+
+**The token cost you're trying to avoid is reading verbose build output into the Opus context.** Three ways to handle it:
+1. **Raw in main agent:** Opus reads the full `cargo build` stream (thousands of tokens at Opus rate). Expensive — the thing to avoid.
+2. **Light blocking sub-agent (your idea):** a haiku sub-agent reads the full output (cheap-per-token but still nonzero), returns a pass/fail summary; main reads ~300 tokens. Saves vs. (1), but adds orchestration + the visibility problem you flagged (main looks idle while blocked), and you still pay haiku to read every line.
+3. **`tsift __digest-runner` (already in this repo):** a deterministic Rust tool runs the build and emits a bounded, artifact-backed digest (pass/fail + just the failure lines). Main reads ~200–500 tokens. Compression costs **zero model tokens** — no haiku, no sub-agent, no blocking machinery.
+
+(3) strictly dominates (2) for builds/tests: same bounded result, but the compression is free and deterministic instead of paying a model to summarize, and there's no idle-looking blocked main agent. That's exactly why the project's own CLAUDE.md routes `cargo test`/build through digest-runner.
+
+**So:** keep the build in the main agent, piped through digest-runner (already the default here) — that captures the token savings without a sub-agent. A light **blocking** sub-agent only makes sense when the work needs *model judgment* on the output (not just pass/fail extraction) **and** you'd otherwise idle anyway — rare for builds. Reserve sub-agents for genuinely *parallel independent* work (fan-out), where the win is wall-clock + isolation, not token savings on a serial blocking step.
+
+The visibility gap (idle-looking session during a long blocking task) is real and already tracked as `#claude-busy-status-during-active-turn` — a status-surfacing fix, not a reason to add a sub-agent. No new follow-up to capture. Continuing the queue.
+<!-- agent:boundary:9bb6f243 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -165,7 +184,7 @@ Next drainable head is the **light-models / blocking-sub-agent question** — I'
 - ~[#jb-run-preempt-autoloop-priority]~
 - ~[#autoloop-command-preemption]~
 - ~Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"~
-- Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
+- ~Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.~
 - do [#ci-per-test-timeout-guard]
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]

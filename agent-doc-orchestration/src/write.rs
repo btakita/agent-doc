@@ -7496,8 +7496,17 @@ pub fn run_stream(
             } else {
                 Some(normalize_prefix_lines.as_slice())
             };
-            let ipc_patches =
-                build_ipc_patches_json(file, &patches, &unmatched, norm_lines_for_timeout)?;
+            // Reuse the same boundary seed (patch_id) as the try_ipc build so the
+            // fallback patch carries an IDENTICAL boundary, not a fresh random one
+            // — the plugin then dedups/replaces instead of appending a second copy
+            // (#finalize-visible-buffer-ipc-timeout-race).
+            let ipc_patches = build_ipc_patches_json(
+                file,
+                &patches,
+                &unmatched,
+                norm_lines_for_timeout,
+                Some(&ipc_result.patch_id),
+            )?;
 
             // Same dedup guard as try_ipc: don't send unmatched when it was synthesized into a patch.
             let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -8060,8 +8069,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let patch_file = patches_dir.join(format!("{}.json", hash));
     let patch_id = uuid::Uuid::new_v4().to_string();
 
-    // Use shared helper for boundary-aware synthesis (matches try_ipc socket + file paths)
-    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None)?;
+    // Use shared helper for boundary-aware synthesis (matches try_ipc socket + file paths).
+    // Seed the boundary from patch_id for deterministic, dedup-friendly rebuilds
+    // (#finalize-visible-buffer-ipc-timeout-race).
+    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None, Some(&patch_id))?;
 
     // Same dedup guard: don't send unmatched when it was synthesized into a patch.
     let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -10229,8 +10240,12 @@ pub fn try_ipc(
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
+        // Seed the boundary from patch_id so the socket patch and any later file /
+        // run_stream fallback rebuild share an IDENTICAL boundary — otherwise a
+        // late socket apply + file apply land the response twice
+        // (#finalize-visible-buffer-ipc-timeout-race).
         let ipc_patches_json =
-            build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
+            build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines, Some(&patch_id))?;
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
         let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
@@ -10652,8 +10667,11 @@ pub fn try_ipc(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Build patches using shared helper (same logic as socket path)
-    let ipc_patches = build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
+    // Build patches using shared helper (same logic as socket path). Seed the
+    // boundary from patch_id so a later file/fallback rebuild reuses the same
+    // boundary (#finalize-visible-buffer-ipc-timeout-race).
+    let ipc_patches =
+        build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines, Some(&patch_id))?;
 
     // Same dedup guard as socket path: don't send unmatched when it was synthesized into a patch.
     let effective_unmatched_file = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -11602,12 +11620,26 @@ fn build_ipc_patches_json(
     patches: &[crate::template::PatchBlock],
     unmatched: &str,
     normalize_prefix_lines: Option<&[String]>,
+    boundary_seed: Option<&str>,
 ) -> Result<Vec<serde_json::Value>> {
     let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc = template::reposition_boundary_to_end_clean_with_summary(
-        &raw_doc,
-        file.file_stem().and_then(|s| s.to_str()),
-    );
+    let summary = file.file_stem().and_then(|s| s.to_str());
+    // #finalize-visible-buffer-ipc-timeout-race: when a stable seed (the IPC
+    // patch_id) is supplied, derive a deterministic boundary so this write's
+    // socket / file / fallback rebuilds all carry the SAME boundary. Without it,
+    // each rebuild minted a fresh random boundary and the plugin appended the
+    // response a second time, doubling the editor buffer.
+    let current_doc = match boundary_seed {
+        Some(seed) => {
+            let bid = agent_doc_core::id::boundary_id_from_seed_with_summary(seed, summary);
+            template::reposition_boundary_to_end_clean_with_summary_and_id(
+                &raw_doc,
+                Some(&bid),
+                summary,
+            )
+        }
+        None => template::reposition_boundary_to_end_clean_with_summary(&raw_doc, summary),
+    };
 
     let mut ipc_patches: Vec<serde_json::Value> = patches
         .iter()
@@ -15261,7 +15293,7 @@ scratch
         // No explicit patches (simulates skill sending raw content)
         let patches: Vec<crate::template::PatchBlock> = vec![];
         // Unmatched content is identical to what's already in the exchange
-        let result = build_ipc_patches_json(&doc, &patches, existing, None).unwrap();
+        let result = build_ipc_patches_json(&doc, &patches, existing, None, None).unwrap();
 
         assert!(
             result.is_empty(),
@@ -15284,7 +15316,7 @@ scratch
 
         let patches: Vec<crate::template::PatchBlock> = vec![];
         let new_content = "Completely new agent response.";
-        let result = build_ipc_patches_json(&doc, &patches, new_content, None).unwrap();
+        let result = build_ipc_patches_json(&doc, &patches, new_content, None, None).unwrap();
 
         assert_eq!(
             result.len(),
@@ -15319,7 +15351,7 @@ scratch
         let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
         let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
         let result =
-            build_ipc_patches_json(&doc, &patches, unmatched, Some(prefix_lines.as_slice()))
+            build_ipc_patches_json(&doc, &patches, unmatched, Some(prefix_lines.as_slice()), None)
                 .unwrap();
 
         assert_eq!(
@@ -15336,6 +15368,53 @@ scratch
             result[0]["content"].as_str().unwrap(),
             "❯ do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.",
             "synthesized unmatched exchange content must carry the prefixed prompt line"
+        );
+    }
+
+    #[test]
+    fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
+        // #finalize-visible-buffer-ipc-timeout-race ROOT-CAUSE REGRESSION:
+        // a single write builds its IPC patches more than once (socket attempt →
+        // file-IPC fallback → run_stream timeout re-write). Each rebuild used to
+        // mint a FRESH random boundary, so the plugin saw the same response under
+        // two different boundary IDs and appended it twice — doubling the editor
+        // buffer (live repro: 57970 → 107235 bytes). Seeding the boundary from the
+        // stable patch_id must make every rebuild carry an IDENTICAL boundary.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("agent-doc-bugs2.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nPrior response.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: fix\n\nNew response body.",
+        )];
+        let seed = "2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a";
+
+        // Two rebuilds of the SAME write (same seed) → identical boundary.
+        let build_a = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
+        let build_b = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
+        let bid_a = build_a[0]["boundary_id"].as_str();
+        let bid_b = build_b[0]["boundary_id"].as_str();
+        assert!(bid_a.is_some(), "patch should carry a boundary_id: {build_a:?}");
+        assert_eq!(
+            bid_a, bid_b,
+            "same patch_id seed must yield the SAME boundary across rebuilds (no double-apply)"
+        );
+        assert_eq!(
+            bid_a,
+            Some("2ffa57c0:agent-doc-bugs2"),
+            "boundary must derive from the patch_id hex prefix + doc-stem slug"
+        );
+
+        // A different write (different seed) must NOT collide on one boundary.
+        let other_seed = "99887766-1111-2222-3333-444455556666";
+        let build_c = build_ipc_patches_json(&doc, &patches, "", None, Some(other_seed)).unwrap();
+        assert_ne!(
+            build_c[0]["boundary_id"].as_str(),
+            bid_a,
+            "distinct writes must derive distinct boundaries"
         );
     }
 

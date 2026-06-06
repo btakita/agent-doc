@@ -25,7 +25,41 @@ pub fn new_boundary_id() -> String {
 /// Format: `a0cfeb34` or `a0cfeb34:boundary-fix` (with summary).
 /// The summary is slugified (lowercase, non-alphanumeric → `-`, max 20 chars).
 pub fn new_boundary_id_with_summary(summary: Option<&str>) -> String {
-    let id = new_boundary_id();
+    with_summary_slug(new_boundary_id(), summary)
+}
+
+/// Derive a *deterministic* boundary ID from a stable seed (for example the IPC
+/// `patch_id`), optionally suffixed with a summary slug. Same seed → same ID.
+///
+/// This is the key to `#finalize-visible-buffer-ipc-timeout-race` corruption:
+/// a single logical write can build its IPC patches more than once (socket
+/// attempt, then file-IPC fallback, then the `run_stream` timeout re-write).
+/// When each build minted a fresh random boundary, the plugin received the same
+/// response under different boundary IDs and, unable to match an already-applied
+/// boundary, appended it a second time — doubling the editor buffer. Seeding the
+/// boundary from the stable `patch_id` makes every rebuild carry an identical
+/// boundary the plugin can dedup/replace instead of appending.
+pub fn boundary_id_from_seed_with_summary(seed: &str, summary: Option<&str>) -> String {
+    let hex: String = seed
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    let id = if hex.len() >= BOUNDARY_ID_LEN {
+        hex[..BOUNDARY_ID_LEN].to_string()
+    } else {
+        // Seed without enough hex digits (shouldn't happen for a UUID patch_id):
+        // fold to a stable 8-hex value so the result is still deterministic.
+        let folded = seed
+            .bytes()
+            .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+        format!("{folded:08x}")
+    };
+    with_summary_slug(id, summary)
+}
+
+/// Append a slugified summary suffix to a boundary ID, if `summary` is non-empty.
+fn with_summary_slug(id: String, summary: Option<&str>) -> String {
     match summary {
         Some(s) if !s.is_empty() => {
             let slug: String = s
@@ -93,5 +127,43 @@ mod tests {
             format_boundary_marker("abc123"),
             "<!-- agent:boundary:abc123 -->"
         );
+    }
+
+    #[test]
+    fn boundary_id_from_seed_is_deterministic() {
+        // #finalize-visible-buffer-ipc-timeout-race: the same patch_id seed must
+        // always derive the same boundary so socket/file/fallback rebuilds carry
+        // an identical boundary the plugin dedups instead of appending.
+        let patch_id = "2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a";
+        let a = boundary_id_from_seed_with_summary(patch_id, None);
+        let b = boundary_id_from_seed_with_summary(patch_id, None);
+        assert_eq!(a, b, "same seed must yield the same boundary id");
+        assert_eq!(a.len(), BOUNDARY_ID_LEN);
+        assert_eq!(a, "2ffa57c0", "boundary derives from the seed's hex prefix");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn boundary_id_from_seed_differs_across_seeds() {
+        let a = boundary_id_from_seed_with_summary("2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a", None);
+        let b = boundary_id_from_seed_with_summary("99887766-1111-2222-3333-444455556666", None);
+        assert_ne!(a, b, "different writes must not collide on one boundary");
+    }
+
+    #[test]
+    fn boundary_id_from_seed_keeps_summary_slug() {
+        let id = boundary_id_from_seed_with_summary(
+            "2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a",
+            Some("Agent Doc Bugs"),
+        );
+        assert_eq!(id, "2ffa57c0:agent-doc-bugs");
+    }
+
+    #[test]
+    fn boundary_id_from_seed_without_hex_is_still_deterministic() {
+        let a = boundary_id_from_seed_with_summary("zzzz-non-hex-seed", None);
+        let b = boundary_id_from_seed_with_summary("zzzz-non-hex-seed", None);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), BOUNDARY_ID_LEN);
     }
 }

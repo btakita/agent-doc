@@ -2460,6 +2460,19 @@ pub fn reposition_boundary_to_end_clean_with_summary(doc: &str, summary: Option<
     reposition_boundary_to_end_clean_internal(doc, None, summary)
 }
 
+/// Like [`reposition_boundary_to_end_clean_with_summary`] but pins an explicit
+/// (deterministic) boundary ID instead of minting a fresh random one. The IPC
+/// patch builder seeds this from the stable `patch_id` so a single write's
+/// socket / file / fallback rebuilds all carry the same boundary, preventing the
+/// plugin from appending the response twice (#finalize-visible-buffer-ipc-timeout-race).
+pub fn reposition_boundary_to_end_clean_with_summary_and_id(
+    doc: &str,
+    boundary_id: Option<&str>,
+    summary: Option<&str>,
+) -> String {
+    reposition_boundary_to_end_clean_internal(doc, boundary_id, summary)
+}
+
 fn reposition_boundary_to_end_clean_internal(
     doc: &str,
     boundary_id: Option<&str>,

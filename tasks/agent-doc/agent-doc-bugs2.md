@@ -343,7 +343,7 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 - ~do [#ci-per-test-timeout-guard]~
 - ~Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?~
 - ~After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.~
-- When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact.
+- When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact. I expected this queue to run overnight, not stall before completing the first task.
 - [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]

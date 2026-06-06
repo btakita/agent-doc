@@ -115,6 +115,7 @@ pub fn run(file: &Path) -> Result<()> {
 /// paths cannot send a final answer past a stalled queue.
 /// (#codex-auto-queue-stalled-final-gate)
 pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
+    self_heal_late_ipc_overapplication(file)?;
     let report = inspect_with_warnings(file)?;
     for warning in &report.warnings {
         eprintln!("{}", warning);
@@ -1420,7 +1421,44 @@ fn check_backlog_replay_guard(file: &Path, rc: &crate::graph::RunContext) -> Res
     Ok(GuardResult::None)
 }
 
+/// #late-ipc-patch-response-uncommitted: self-heal a late-IPC committed-response
+/// over-application in place so a mutating session-check path does not stall the
+/// `agent:queue` auto-loop on an unrecoverable interruption.
+///
+/// A wedged/slow IPC listener can apply a stale queued patch minutes late —
+/// after the cycle already committed — re-adding a duplicate `### Re:` block to
+/// the working tree. The real response is in HEAD, so the surplus block is pure
+/// drift. `detect_late_ipc_response_overapplication` only returns `Some` when
+/// restoring HEAD is provably safe (scaffold matches HEAD, every committed
+/// response present unchanged, no new user directive introduced), so restoring
+/// the committed HEAD only drops the duplicate — the identical remediation
+/// `preflight` applies. Returns `true` when it healed.
+///
+/// Kept out of the read-only `inspect*` path on purpose: only the mutating
+/// command entrypoints (`enforce_clean_closeout` on the finalize boundary,
+/// `run_with_options` for direct-exec `agent-doc session-check`) repair in place.
+fn self_heal_late_ipc_overapplication(file: &Path) -> Result<bool> {
+    let Some(overapplication) = detect_late_ipc_response_overapplication(file)? else {
+        return Ok(false);
+    };
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "late_ipc_response_overapplication_self_healed file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[session-check] late_ipc_overapplication: self-healing — restoring committed HEAD over the re-added duplicate response for {}",
+        file.display()
+    );
+    crate::write::atomic_write_pub(file, &overapplication.remediated_content)?;
+    crate::snapshot::save(file, &overapplication.remediated_content)?;
+    Ok(true)
+}
+
 pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
+    self_heal_late_ipc_overapplication(file)?;
     let report = inspect_with_warnings(file)?;
     for warning in report.warnings {
         eprintln!("{}", warning);
@@ -1454,7 +1492,11 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     // response (possibly boundary-wrapped and non-adjacent) into the working
     // tree after it already reached HEAD. Recognize it as an over-application
     // before the generic `detect_bypassed_response_write` guard accuses the
-    // operator of a manual patchback; preflight auto-repairs by restoring HEAD.
+    // operator of a manual patchback. The mutating entrypoints
+    // (`enforce_clean_closeout`, `run_with_options`) self-heal this in place via
+    // `self_heal_late_ipc_overapplication` before reaching here, and `preflight`
+    // auto-repairs by restoring HEAD; this Interrupted return is the fallback for
+    // read-only inspectors (#late-ipc-patch-response-uncommitted).
     if detect_late_ipc_response_overapplication(file)?.is_some() {
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: found late-IPC committed-response over-application at `{}`; the working tree re-adds a response already in HEAD. Run `agent-doc preflight {}` to auto-repair (restores the committed HEAD), or `agent-doc write --commit {}` to recover through the normal closeout boundary.",
@@ -4754,6 +4796,86 @@ Body\n\
             }
             other => panic!("expected prompt-only closeout interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn enforce_clean_closeout_self_heals_late_ipc_overapplication() {
+        // #late-ipc-patch-response-uncommitted: a late-IPC stale-patch replay
+        // re-adds a duplicate `### Re:` block to the working tree after the cycle
+        // committed. enforce_clean_closeout (the finalize boundary) must self-heal
+        // by restoring committed HEAD instead of bailing — otherwise the
+        // interruption stalls the agent:queue auto-loop.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\n\n",
+            "Answer A.\n",
+            "### Re: second — opus-4-8\n\n",
+            "Answer B.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+
+        // Late stale-patch replay re-inserts an earlier committed response (A) at
+        // the tail (non-adjacent over-application), leaving the real responses in
+        // HEAD untouched.
+        let overapplied = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: first — opus-4-8\n\nAnswer A.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &overapplied).unwrap();
+        assert!(
+            detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "precondition: late-IPC over-application present"
+        );
+
+        // The finalize boundary must NOT bail — it self-heals.
+        enforce_clean_closeout(&doc).expect("enforce_clean_closeout should self-heal, not bail");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            committed,
+            "working tree restored to committed HEAD (duplicate dropped)"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().unwrap(),
+            committed,
+            "snapshot restored to committed HEAD"
+        );
     }
 
     #[test]

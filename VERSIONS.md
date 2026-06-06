@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Session-check self-heals a late-IPC committed-response over-application
+  (`#late-ipc-patch-response-uncommitted`).** When a wedged/slow IPC listener
+  applies a stale queued patch after the cycle already committed, it re-adds a
+  duplicate `### Re:` block to the working tree even though the real response is
+  in HEAD — and session-check previously reported an unrecoverable interruption
+  that stalled the `agent:queue` auto-loop. The mutating session-check
+  entrypoints (`enforce_clean_closeout` on the `finalize` boundary,
+  `run_with_options` for direct-exec `agent-doc session-check`) now restore the
+  committed HEAD in place via `self_heal_late_ipc_overapplication` (logs
+  `late_ipc_response_overapplication_self_healed`) instead of bailing — the same
+  remediation `preflight` applies, taken only when `detect_late_ipc_response_overapplication`
+  proves it safe. The read-only `inspect*` family stays non-mutating. Test
+  `enforce_clean_closeout_self_heals_late_ipc_overapplication`. Spec
+  `specs/07-closeout-commands.md`.
+
 - **Queued IPC fallback patches carry a generation token for late-apply fencing
   (`#late-ipc-patch-duplicate-stall`).** A boundary-reposition IPC that times out
   queues a durable fallback patch file; a wedged/slow applier could apply it

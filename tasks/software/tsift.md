@@ -15,6 +15,7 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: stop
+queue_active: false
 ---
 
 ## Status
@@ -260,7 +261,13 @@ A full sweep (incl. hidden `.claude`/`.codex`) confirms zero `__digest-runner` r
 **Push hurdle (resolved).** The superproject push was initially rejected (remote +9). Those 9 commits touched **only** `src/boost-client` (a submodule pointer a parallel monsterrodholders session advanced), and all three differing submodules (`agent-doc`, `boost-client`, `tsift`) were verified local-ahead — remote pointers are ancestors of local. Reconciled with a merge, resolved the lone `boost-client` gitlink conflict to the local committed pointer (`97aac84d`, a descendant of remote `292c4dcb` — loses nothing), preserved the unrelated in-flight working-tree changes via stash, and pushed. Confirmed my doc commit `2993b8448` is reachable from `origin/main` and all four files are clean on HEAD.
 
 **Commit.** `2993b8448` (+ merge `964194c72`) → pushed to `btakita/agent-loop main`.
-<!-- agent:boundary:5f90b0b6 -->
+
+### Re: Queue stopped — opus-4-8
+
+Acknowledged — the queue is now inactive (`queue: stop`, `queue_active: false`, `go` removed from the queue block) with no items pending, so there's nothing to drain and the auto-loop stays off. No repo work this cycle.
+
+The backlog/review still hold the 13 gated items (e.g. `#7qky`, `#trt1*`, the SurrealDB substrate threads) if you want to pick one up next — just add it to the queue or say the word.
+<!-- agent:boundary:e83680bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -269,7 +276,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

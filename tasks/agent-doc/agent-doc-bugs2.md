@@ -29,78 +29,12 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-222126.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-225013.md`*
 
 Compacted content:
-- Archived 1 response topic(s): monsterrodholders "truly stuck" busy flag
+- Archived 5 response topic(s): make the busy flag reentrant-friendly / never get "truly stuck"; how to recover your stuck Codex session right now; can't clear monsterrodholders.md; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: make the busy flag reentrant-friendly / never get "truly stuck" — opus-4-8
-
-Shipped the durable "never get into this state" fix (agent-doc `7b60fcdc`, pushed to `origin/main`, CI running; both binaries rebuilt + installed locally).
-
-**Root cause of the wedge.** The supervisor flips the actor `busy → ready` on its pty→stdout thread, but that transition is *edge-triggered on the latest output chunk* (`start.rs`, the `current_child_prompt_visible` check). When an injected turn's composer redraw lands split so the **final** chunk carries no detectable prompt — e.g. an `auto_trigger_inject` recursive `agent-doc <FILE>` that hit the recursion guard and returned — the actor is left `busy` with **no further bytes** to retrigger ready. The pane sits idle at the composer, but the actor (what dispatch checks) is wedged `busy` forever. That is exactly why a pane kill + restart re-entered the state: nothing was re-deriving ready from the *live pane*, only from the missed output edge.
-
-**Why the existing repairs missed it.** `route.rs` already promotes a stale-busy projection to ready from `tmux capture-pane` + `has_busy_cue` evidence (three paths: ready-prompt, timeout-idle, eager busy-cue). But none of those run for the **supervisor's own** `auto_trigger_inject` loop — that loop *is* the wedge engine, and route is never in the path.
-
-**The fix.** The long-lived idle-queue watch now carries a polling backstop. Every tick, if the in-memory actor is `busy`/`starting`, a *fresh* `tmux capture-pane` shows no harness busy cue (the same direct evidence route trusts — not the edge-triggered pty buffer that missed the redraw), no clear cooldown is pausing the loop, and the idle-over-busy condition has held for `STALE_BUSY_RECONCILE_TICKS` (~2s debounce, so a turn still spinning up is never cut short), it transitions the actor back to `ready` (`reason=idle_pane_reconcile`, persisted via `mark_lifecycle`), resets the prompt latch + dispatch dedup, logs `idle_queue_watch_stale_busy_reconciled`, and resumes draining. No pane kill, no `session clear`, no operator action.
-
-This is a true reentrant-friendly path: the supervisor that already owns and polls the pane now owns recovering its own wedge. Pure decision gate `stale_busy_idle_reconcile_decision` + 5 deterministic unit tests; `specs/supervisor.md` updated; full `make check` green.
-
-I gated `#stale-busy-after-auto-inject-no-clear` (code-complete, awaiting a live wedge repro to ungate) and queued `#stale-busy-self-heal-live-verify`. The discoverability half (`#admin-recover-stale-busy-no-pane-kill`) already shipped earlier in `be7f5f06`.
-
-### Re: how to recover your stuck Codex session right now — opus-4-8
-
-Two paths — the running session does not need this fix to recover (the manual reconcile already exists; this fix automates it):
-
-1. **No pane kill (preferred).** From any shell *outside* the stuck pane:
-   ```
-   agent-doc session status src/boost-client/tasks/monsterrodholders.md
-   ```
-   This calls `reconcile_idle_projection_from_live_pane` — it sees the idle composer footer and repairs the actor `busy → ready` against the SQLite actor store. `agent-doc session clear <FILE>` does the same plus drops queue residue. (Editing `session-actors.json` does nothing — it is only a projection; the actor lives in the state DB.)
-
-2. **If it still presents busy after that**, the supervisor lease can lag — restart just the supervisor (keeps the live Codex turn):
-   ```
-   agent-doc session restart-supervisor src/boost-client/tasks/monsterrodholders.md
-   ```
-
-Once recovered, with the new binary installed the wedge self-heals: the idle-queue watch reconciles within ~2s of the pane going idle, so you should not need step 1 again. `cargo install` + `cargo build --release` already ran, so `~/.cargo/bin/agent-doc` (tmux) and `.bin/agent-doc` (release symlink) are both on `7b60fcdc`; new tmux panes pick it up immediately, an already-running supervisor needs the `restart-supervisor` above to load the new code.
-
-### Re: can't clear monsterrodholders.md — session clear blocked by its own drafted command — opus-4-8
-
-You're not actually stuck — the error message names the escape hatch:
-
-```
-agent-doc session interrupt-clear src/boost-client/tasks/monsterrodholders.md
-```
-
-That intentionally interrupts the pane and clears context, bypassing the protected-prompt guard.
-
-But you're right that the plain `clear` UX is broken, and it's a real bug. The guard that protects an unsaved *drafted prompt* from being discarded is matching your **own clear command text** echoed in the composer (`tail="❯ agent-doc session clear ..."`). So the only drafted line blocking the clear is the clear command you just typed — self-defeating. The fix is to exclude agent-doc control commands (`session clear` / `interrupt-clear` / `stop`) from the "protected drafted input" set so a plain `clear` proceeds, while still protecting genuine in-progress prompt content. Captured as `#clear-blocked-by-own-drafted-clear-command` with a plan; it needs its own focused cycle (and lines up with the `#clear-stops-running-process` / `#autoloop-command-preemption` family).
-
-### Re: blank tmux status during a turn — opus-4-8
-
-> **Queue prompt:**
->
-> The busy flag behavior needs to change. Since we are in the middle of a session, we should send a command that bypasses the busy flag or clear the busy flag or have a reentrant-friendly solution instead of the busy flag. The busy flag is brittle for reentrant commands, so we need to find a solution to this. Once you fix this, give me instructions on how to recover my codex session.
-
-
-Agreed — while a turn is running the status line should read `agent-doc: turn in progress`, not blank. The supervisor already owns the `busy ↔ ready` transitions (and now self-heals a stale-busy actor via the idle-queue-watch fix shipped this turn), so the right design is to drive the status-line indicator from those same transition points — one source of truth, so the indicator can't diverge from the actor state and can't linger after the turn ends. Captured as `#tmux-status-turn-in-progress` with a plan; it overlaps `#claude-busy-status-during-active-turn` and `#jb-stale-busy-idle-footer`, so I'll coordinate them in one busy-status cycle.
-
-Both are queued, not implemented this turn — I just shipped + committed the stale-busy self-heal (`7b60fcdc`) and stay off starting more heavy supervisor work past that commit boundary. Next focused cycle takes these two.
-
-### Re: turn summary — stale-busy self-heal shipped; new bugs captured; pausing the loop — opus-4-8
-
-**Shipped this turn (agent-doc `7b60fcdc`, pushed to `origin/main`, CI running, both binaries installed):** the durable `#stale-busy-after-auto-inject-no-clear` fix — the supervisor's idle-queue watch now self-heals a stale-busy actor wedged over an idle pane (poll-based reconcile from fresh `tmux capture-pane` evidence, ~2s debounce, persisted via `mark_lifecycle`), so the session never gets "truly stuck" needing a pane kill or `session clear`. 5 unit tests + spec; `make check` green. Recovery instructions for your live Codex session are in the earlier response (`session status` / `session clear` / `restart-supervisor`).
-
-**Your two new prompts (answered + captured for focused cycles):**
-- `#clear-blocked-by-own-drafted-clear-command` — `session clear` is refused by its own drafted command text in the composer. Immediate workaround: `agent-doc session interrupt-clear <FILE>`. Plan: `tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md`.
-- `#tmux-status-turn-in-progress` — drive a `agent-doc: turn in progress` status line off the supervisor busy↔ready transitions. Plan: `tasks/agent-doc/plan-tmux-status-turn-in-progress.md`.
-
-**Why I'm pausing the auto-loop instead of draining further:** the binary's free-text strike only consumes one head per finalize, so the "I cannot clear" and "tmux status" heads are answered-but-unstruck and would be re-served. Continuing would re-answer them and produce the duplicate-response churn you've flagged before. I captured that gap as `#multi-head-consume-one-per-finalize`. The remaining queue is answered free-text heads + bracket-id items for work that's already done/captured (`#admin-recover-stale-busy-no-pane-kill` shipped `be7f5f06`, `#stale-busy-after-auto-inject-no-clear` shipped `7b60fcdc`).
-
-Say the word and I'll (a) fix the multi-head consume so the queue drains cleanly, (b) take the `session clear` / tmux-status bugs in a focused cycle, or (c) clear the answered heads. I did not push the superproject `src/agent-doc` pointer (left for a clean cycle per the deferred-pointer pattern).
-<!-- agent:boundary:ab1ee147 -->
+<!-- agent:boundary:b61b0612 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

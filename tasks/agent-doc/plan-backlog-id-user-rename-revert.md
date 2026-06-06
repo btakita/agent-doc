@@ -21,6 +21,29 @@ Root-cause candidates (need a repro to pin):
 
 **Fix direction:** treat an operator's explicit-id rename of an existing item as authoritative — when a backlog line's leading `[#id]` changed on disk vs snapshot, the body text is otherwise stable, and the new id does not collide (`identity_collision_for_new_id` is None), adopt the new id into the snapshot/CRDT state instead of reverting. Re-key the CRDT item identity and any `do [#old]` queue reference to the new id in the same cycle.
 
+## Investigation findings (2026-06-06, autonomous pass)
+
+Reproduced the simple path on a temp template doc: add a backlog item (got
+`[#b1hv]`), manually rename the leading id to a custom `[#b1hv-2]` on disk, then
+run `agent-doc preflight` + `agent-doc write --pending-add`. **The renamed id
+survived — no revert.** Two concrete results:
+
+- **Candidate #2 (backfill / `find_valid_hash_id` re-derivation) is RULED OUT.**
+  A custom, non-hash id (`b1hv-2`) is NOT treated as "missing" / reassigned by
+  the pending/backfill path. The revert does not happen there.
+- **`write --pending-add` does not create `.agent-doc/crdt/<hash>.yrs`.** The
+  CRDT state only exists after a stream/finalize merge cycle, so the simple repro
+  never exercised candidate #1. Pinning #1 vs #3 REQUIRES a git-backed doc with
+  populated CRDT state and a real finalize-merge cycle (snapshot/CRDT carrying the
+  old id vs disk carrying the renamed id) — the elaborate repro below, not the
+  quick path.
+
+So the live revert is in the **CRDT identity merge (#1, still most likely)** or
+the **backlog→queue-sync reconcile (#3)**, both deeper than the pending layer.
+Stays GATED: the fix re-keys core CRDT item identity / queue-sync, sensitive
+enough to land in an attended pass with the full repro green, not unattended
+during a queue drain.
+
 ## Repro (required before the fix)
 1. Template doc with `agent:backlog priority queue`, add an item (gets `[#abcd]` or a custom id).
 2. Manually edit the visible id to `[#abcd-2]` on disk, leave body unchanged, save.

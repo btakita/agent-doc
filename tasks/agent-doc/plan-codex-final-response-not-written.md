@@ -36,6 +36,34 @@ The same failure recurred after the PDP fit-guide spacing task in
 This cycle only records the repro and manual document repair. Do not implement
 the agent-doc fix here.
 
+## Additional Repro - 2026-06-06 (systematic queue-drain, strongest evidence)
+
+User: *"monsterrodholders.md is running through the queue but I don't see any
+responses."* Non-disruptive inspection of `src/boost-client/tasks/monsterrodholders.md`
+(`agent: codex`, `agent_doc_format: template`, `agent_doc_write: crdt`,
+queue-driven) confirmed the symptom directly:
+
+- The exchange contains **zero `### Re:` blocks** — only a compacted
+  `### Session Summary`. Every assistant response since the last compaction is
+  missing.
+- The queue is actively draining: `agent:status` advances
+  (`Completed … #pacific-mountain-proof-audit`, `Gated … #regional-draft-pipeline`)
+  and recent commits (`bc51baf`, `54e493d`, `65e339a`, …) land real deliverables
+  (e.g. `bc51baf` bumps the `src/monsterrodholders-dev` submodule pointer).
+- But every one of those commits mutates **only** the `agent:status` / `agent:queue`
+  / backlog components — `git show <c> -- tasks/monsterrodholders.md` shows **0**
+  added `### Re:` lines across the last three commits.
+
+So this is not the one-off owned-pane manual-fallback shape of the earlier repros:
+it is the **systematic auto-loop case** where each `do [#id]` Codex cycle does the
+work, commits status/queue/code, and advances the queue, yet **never writes an
+assistant response body into `agent:exchange`**. The user only sees the queue
+moving (status changes), never a response — which is exactly the reported
+experience. This is the highest-value reproduction for the proposed fix: the
+binary-owned continuation/closeout must require the `### Re:` response body in
+`agent:exchange` (Goal/Proposed-Fix #2 and #4) for queue-drain cycles, not only
+for the recursive-fallback path. Captured as `#codex-queue-drain-no-response-body`.
+
 ## Goals
 
 - A Codex final answer for an owned-pane/manual fallback path must either be

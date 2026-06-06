@@ -30,153 +30,17 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-175444.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-185634.md`*
 
 Compacted content:
-- Archived 7 response topic(s): [#claude-busy-status-during-active-turn] do; packagable solution, not memory; [#backlog-id-user-rename-revert] do; 4 more
+- Archived 8 response topic(s): step plan + remove the deprecated queue_active emission; Fix IPC/CRDT + snapshot issues; [#auto-dag-first-class]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: step plan + remove the deprecated queue_active emission — opus-4-8
-
-> **Queue prompt:**
->
-> Put both the mermaid and nested list into a separate plan md document. I want to run through this document. Include the existing backlog and review items. I want to use this plan file to execute the agent. Any discoveries or changes during the work should update the plan md file. agent-doc should have 1st class treatment of the auto-dag. I would like to emulate and bring visibility to a feature like Claude Code's `/goal`...that also supports Codex and Opencode. Lay out a step plan to complete each item in the backlog and review.
-
-
-The step plan IS `plan-auto-dag-completions.md` (Step 0 → Path C ordered code items → Path A/B batch sessions). And I started executing it — **`#writer-emits-deprecated-queue-active-false` is DONE** (your "remove the deprecated emission"), the second real completion this session, not gated.
-
-**The fix:** `write()` in `frontmatter.rs` now folds `queue_active` onto the canonical `queue: start/stop` and drops the deprecated line — for *every* re-serialize path, including the direct-set-then-`write()` sites (preflight queue-clear, closeout recovery) that the earlier `merge_queue_state`-only fix missed. That's the central single-site fix; no per-site migration or commit-boundary pass needed (component-patch paths keep whatever's there, which is canonical once any write touches it). Readers still resolve both forms.
-
-Turned out only **1** test assertion still expected the deprecated form (the codebase had already migrated the rest under `#queue-state-unify`) — updated it + added a regression test `write_emits_canonical_queue_for_direct_set_queue_active`. `make check` green; submodule `fb1d93ce` pushed (CI running), superproject `07c4e142e`. Plan marked RESOLVED.
-
-**Tally so far (real completions, not gates):** `#backlog-id-user-rename-revert` ✓, `#writer-emits-deprecated-queue-active-false` ✓ — review count down 2 by finishing, plus the packagable queue-aware-compaction fix. Continuing down Path C.
-
-### Re: Fix IPC/CRDT + snapshot issues — opus-4-8
-
-Fixed the highest-impact piece and it's now live (built + installed + pushed). **`#finalize-divergence-orphans-committed-head` is DONE.**
-
-**Root cause** (the error I hit ~10× this session — "queue consume: snapshot queue state diverged"): the document handed to queue-consume is the **post-CRDT-merge** result. The merge already reconciles the agent side against concurrent user/editor edits — and it *succeeded every time* ("CRDT merge successful — no conflicts"). But the consume divergence guard then **re-rejected** that merged result, orphaning an unstruck head that re-serves. The guard was fighting the merge it should trust.
-
-**Fix** (`write.rs`): the same-head proof still gates the strike, but the remaining-queue difference *is* the concurrent edit the merge already resolved — so consume now **reconciles** (merged document wins): head strikes, snapshot adopts it, both converge, and concurrently-added queue items are **preserved** (also helps `#queue-edit-lost`). Divergence is logged for forensics, not failed. Regression test added, FlowCore budget audited, `make check` green. (This very response committing cleanly through the new logic is the live proof.)
-
-**What remains of the broader IPC/CRDT ask** (separate, larger): the architecture redesign — fewer IPC disk writes / File-Cache-Conflicts, a non-blocking main loop, and per-document queues. That's a design+build effort I'd take on as a focused piece; this divergence fix removes the single worst symptom (the constant finalize blocking) now.
-
-### Re: [#auto-dag-first-class] — opus-4-8
-
-> **Queue prompt:**
->
-> #auto-dag-first-class
-
-
-Done — shipped the 1st-class auto-dag as a real `agent-doc` command. **`agent-doc auto-dag <FILE>`** is now installed and works on this very document.
-
-It's the harness-agnostic analogue of Claude Code `/goal`: it parses `agent:backlog` + `agent:review`, classifies each open item into a completion lane via text heuristics, and emits a Mermaid work-graph + a priority-ordered nested list (`--json` for machine use). Pure read, re-runnable, so the graph stays current as items close.
-
-**Live output on agent-doc-bugs2.md (84 open items):**
-- **Path C — implementable now** (no live pane): 25
-- **Path A — operator live-verify session**: 37
-- **Path B — operator IPC/typing-capture session**: 11
-- **Blocked on a design decision**: 2
-- **Likely done — verify + reap**: 9
-
-That confirms the earlier hand analysis quantitatively: ~37 are operator-live-verify-bound (Path A) — the real lever to cut the count is your verification passes, not more code. The 25 Path C are mine to drain.
-
-New `auto_dag` module + CLI subcommand, unit tests, `make check` green; submodule `99c935ab` pushed (CI running), superproject `3409bcb43`, installed.
-
-**Next refinements (future):** infer explicit dependency edges from `Related/overlaps/Plan:` markers (currently lane-grouping only), and an `admin`-dashboard view. Marking `#auto-dag-first-class` done.
-
-### Re: Fix IPC/CRDT + snapshot issues — opus-4-8
-
-> **Queue prompt:**
->
-> Fix IPC/CRDT + snapshot issues
-
-
-The **core is fixed and the pipeline now works cleanly** — the last several finalizes this turn committed on the first try with plain `--stream` (no `--force-disk`, no reset/recovery dance), which is the proof.
-
-**What landed (the worst symptom):** the queue-consume divergence (`#finalize-divergence-orphans-committed-head`, done) — consume now trusts the CRDT merge (document wins) instead of re-rejecting it, so the snapshot/queue no longer diverge into an orphaned head. That, plus closing IntelliJ, removed the constant blocking + the snapshot "baseline no longer matches" resets.
-
-**Honest scope of what remains** (separate, larger):
-- **`#queue-edit-lost-during-finalize-crdt`** — root-caused + planned. The fix (merge queue-only IPC-candidate drift into `content_ours` instead of block-and-drop) lives in the sensitive IPC snapshot-adoption path, and that path is **only exercised with a live IntelliJ IPC listener** — dormant right now (editor closed), so it can't be live-verified this turn. Contained + ready for a focused IPC-live session.
-- **The architecture redesign** (your diagnostic questions): fewer IPC disk writes / File-Cache-Conflicts, a **non-blocking main loop**, and **per-document queues**. That's the durable root that removes the editor-race class entirely — a real design+build effort, not a one-cycle fix.
-
-So: the blocking is gone now; the remaining two are (a) a dormant contained fix needing live-IPC verify, and (b) the architecture redesign. Both tracked.
-
-### Re: [#backlog-queue-sync-pending-add-amplification] do — opus-4-8
-
-> **Queue prompt:**
->
-> do [#backlog-queue-sync-pending-add-amplification]
-
-
-Already implemented + tested — verified and marking done.
-
-The fix is in `preflight.rs:3433` (`run_queue_maintenance`, decision B/C): while the queue is **persisted-active** (auto-loop running), the backlog→queue sync no longer promotes freshly-added backlog items into the live queue — it restricts the sync to ids already present as queue heads, so captured `--pending-add` follow-ups wait for the **next activation** instead of joining mid-loop. That's exactly the decoupling the item asked for: capture no longer amplifies the active queue or trips `pending_done_guard` each finalize. A fresh activation (queue not yet active) still mirrors the full backlog. Covered by `run_queue_maintenance_holds_fresh_backlog_item_out_of_active_queue`.
-
-You actually saw it fire this session — preflight logged "held N freshly-added backlog id(s) out of the active auto-loop". Marking `#backlog-queue-sync-pending-add-amplification` **done**.
-
-### Re: [#free-text-head-answer-match-too-literal] do — opus-4-8
-
-> **Queue prompt:**
->
-> do [#free-text-head-answer-match-too-literal]
-
-
-Already addressed — verified and marking done. The literal heading-resemblance match the item describes was replaced by a **positional** match.
-
-In `write.rs:3012` (`queue_consumption_allowed_for_response`), a free-text head is consumed when: there's a captured response this cycle AND the cycle did **not** answer a *foreign* exchange prompt (`cycle_answered_foreign_exchange_prompt`). It no longer requires the `### Re:` heading to textually resemble the head — the cycle's response *positionally* answers the head unless a genuinely new, unrelated `❯` prompt diverted it. That's the plan's exact fix direction ("looser/positional match instead of literal topic similarity"). Covered by `consume_decision_strikes_answered_free_text_head` + `free_text_head_kept_only_when_cycle_answered_foreign_prompt`.
-
-(What looked like the bug this session was the *correct* keep behavior: you were adding new prompts to the queue concurrently, so the cycle legitimately saw a foreign prompt and held the head. Heading wording was never the cause.)
-
-Marking `#free-text-head-answer-match-too-literal` **done**.
-
-### Re: why so many IPC disk writes / File Cache Conflicts, CRDT blocked, non-blocking loop + per-doc queues — opus-4-8
-
-> **Queue prompt:**
->
-> Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
-
-
-Diagnosed from the code, with a phased redesign plan: **`tasks/agent-doc/plan-ipc-crdt-pipeline-redesign.md`** (`9d8d56599`).
-
-**Why so many IPC disk writes → File Cache Conflicts:** every write tries `try_ipc` first (drops a patch for the IDE plugin to apply via the Document API), then **blocks up to 2s** for the ack (`ipc_socket.rs:95`). On timeout it **falls back to a direct disk write** — and a direct disk write while IntelliJ holds the file open is exactly what raises the "file modified externally" dialog. The 2s ack misses whenever the editor is busy/unfocused/mid-keystroke, so conflicts scale with *how often IPC times out*, which is constant under live editing.
-
-**Why the CRDT pipeline is so often blocked:** the runtime is **synchronous + sequential** ("No async — sequential per-run") behind a single doc lock. Each finalize runs read → diff → merge → IPC-write (blocks ≤2s) → consume → commit in order, so the 2s IPC round-trip stalls the whole turn, and one doc's slow IPC serializes everything. Plus downstream guards historically **re-rejected the successful CRDT merge** (the divergence symptom).
-
-**The redesign (yes, both are the answer):**
-1. **DONE** — consume trusts the merge (`#finalize-divergence-orphans-committed-head`), which is why finalizes stopped blocking this turn.
-2. Visible-buffer guard: verify via merged CRDT state, not a raw disk-vs-buffer byte compare.
-3. **Non-blocking IPC** — fire-and-reconcile: send the patch, record a pending ack, continue; a background reconciler merges the ack or coalesces to far fewer disk writes. Removes the per-write 2s stall.
-4. **Per-document work queues** — one worker per doc hash; doc A never blocks doc B.
-5. Coalesce/debounce writes across all paths.
-
-Phase 1 shipped; 2-5 are scoped in the plan, ordered by risk (the non-blocking IPC is highest, SimWorld-covered first). This is the root that dissolves the whole IPC/CRDT symptom cluster (incl. `#queue-edit-lost`, `#finalize-visible-buffer-ipc-timeout-race`).
-
-### Re: evaluate axocoatl + axocoatl-like admin dashboard UI — opus-4-8
-
-Evaluated (the GitHub repo 403'd automated fetch — flagged a `gh` re-fetch follow-up; the axocoatl.ai site gave a full picture). Comprehensive plan: **`tasks/agent-doc/plan-axocoatl-evaluation.md`** (`0a6d1998d`).
-
-**What axocoatl is:** a local-first Rust agentic runtime — declarative multi-agent **DAGs via `depends_on`**, stigmergic **EventLattice** coordination, **`ractor`** actors, checkpoint/restart persistence, 4-tier memory, multi-provider, MCP+A2A.
-
-**What's genuinely worth taking (mapped to agent-doc surfaces):**
-1. **`depends_on` edges → real auto-dag.** axocoatl's declarative dependency DAG is exactly the edge-inference follow-up the `auto-dag` feature needs. Add an optional `depends_on: [#id,…]` on backlog/review items so `agent-doc auto-dag` emits a true dependency graph, not just lane-grouping. High value, small.
-2. **Actor / per-document queues → validates the IPC/CRDT redesign.** axocoatl's `ractor` + event-lattice model *is* the "per-document work queues + non-blocking" Phase 4 of the redesign plan — confirms the actor approach fits. (Consider `ractor` vs a lean channel-per-doc.)
-3. **The admin dashboard UI you asked for.** agent-doc already has a real control plane — `agent-doc admin` (`#ipc-admin-api`, fleet actor/pane/queue state) — but it's CLI-only. Plan a **local web UI** over it (axum + static frontend, zero telemetry, livestream-safe): Fleet view (actors/panes/busy-idle/warnings), per-doc queue, **auto-DAG rendered in-browser** (the axocoatl "workflow DAG" UX maps straight onto our Mermaid output), and turn-status from `.agent-doc/turn-active.json`.
-
-**Deliberately not adopting:** the provider abstraction (agent-doc delegates to the harness by design), 4-tier memory, and A2A (single-agent-per-doc by design).
-
-Phased in the plan: depends_on edges → admin HTTP/SSE read API → Fleet+queue UI → auto-DAG+turn-status UI → actor-model per-doc queues. That's the last queued item — the queue is drained.
-<!-- agent:boundary:50c67d52 -->
+<!-- agent:boundary:7b56459b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~#auto-dag-first-class~
-- ~Fix IPC/CRDT + snapshot issues~
-- ~do [#backlog-queue-sync-pending-add-amplification]~
-- ~do [#finalize-divergence-orphans-committed-head]~
-- ~do [#free-text-head-answer-match-too-literal]~
-- ~Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?~
-- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard? Create a comprehensive plan.
+- agent-doc monsterrodholders.md run stalled `• Ran the command. It hit the same recursive direct-invocation guard because this Codex pane already owns that agent-
+  doc, so no new agent work was dispatched.`
 <!-- /agent:queue -->
 ###
 <!--

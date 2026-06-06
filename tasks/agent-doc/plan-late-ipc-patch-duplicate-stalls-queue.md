@@ -36,3 +36,15 @@ That uncommitted duplicate block:
 - A late-applied patch whose baseline is superseded is dropped (logged), not appended.
 - `session-check` self-heals a HEAD-duplicate uncommitted response instead of stalling the queue.
 - Deterministic SimWorld/integration coverage for the timed-out-reposition → late-patch → duplicate path.
+
+## Implementation status (2026-06-06)
+
+**Shipped (binary side):**
+- **Write-side generation-fence — DONE (pre-existing).** `try_ipc` (`write.rs:10251`) rejects a fresh patch send when `cycle_already_committed(file)` is set (logs `late_fallback_patch_rejected reason=already_committed` + `cleanup_fallback_patch_files`), with the `#adoc-compact-during-turn-response-loss` mid-turn-rotation exception. `run_stream`/run IPC-timeout fallbacks (`write.rs:7535`, `8292`) skip the fallback re-write when the cycle already committed.
+- **Reposition-only patches carry no response body — DONE (pre-existing).** `queue_file_ipc_reposition_boundary` emits `patches: []`, `unmatched: ""`, `preserve_head: true`; `existing_patch_is_reposition_only` enforces the no-body shape on the deferred-existing path.
+- **Queued file patch now carries a generation token — DONE (this cycle).** `queue_file_ipc_reposition_boundary` tags the durable `.agent-doc/patches/<hash>.json` with `cycle_id` (from `cycle_state`) + `baseline_hash` (`debounce::content_hash` of the live doc it targets) so an asynchronous applier has the same generation token the write-side guard uses. Test: `queued_file_reposition_patch_carries_generation_token`.
+
+**Remaining (needs a focused, live-verifiable cycle — gated):**
+- **Apply-side fence in the JetBrains plugin (`PatchWatcher.kt`).** The plugin has **zero** cycle awareness today (no `cycleId`/`already_committed` check). It must read the new `cycle_id`/`baseline_hash` and DROP a queued patch whose cycle already committed or whose `baseline_hash` no longer matches the live doc, instead of applying it late. This is Kotlin work + a plugin version bump + `signPlugin`/`buildPlugin` + **live IntelliJ verification** (manual-testing gate), so it cannot be completed in an unattended auto-loop tail. New backlog item `#late-ipc-patch-plugin-apply-fence`.
+- **`session-check` self-heal (companion `#late-ipc-patch-response-uncommitted`).** Binary-side and deterministically testable; reap a HEAD-duplicate uncommitted `### Re:` block instead of reporting an unrecoverable interruption. Tracked by item 2; next queue head.
+- **Listener de-wedge.** Detect a wedged/slow IPC listener (repeated 2s ack timeouts) and move the doc to direct-disk writes for the rest of the session. New backlog item `#ipc-listener-dewedge-direct-disk`.

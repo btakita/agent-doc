@@ -71,7 +71,7 @@ If you wanted to actually *implement* it, the key distinction is **advise vs. en
 So: would it be in the skill-harness? The skill can only document it; if you want it enforced, it's a harness `Read` hook. Right now neither exists — it's discipline, and the cheaper backstop is that context compaction reclaims the duplicate anyway, which is why nobody has felt the need to code it.
 
 Worth noting: a hard read-once hook has a real failure mode — if a runbook was edited mid-session, or its earlier copy was already compacted away, blocking the re-read would starve the model of content it legitimately needs. Any enforcement should key on (path + content-hash) and exempt post-compaction re-fetches, which is exactly the kind of nuance that makes the soft-discipline approach attractive enough to leave as-is.
-<!-- agent:boundary:35de80ad -->
+<!-- agent:boundary:d21d3d41 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,6 +86,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#7qky] [recommended] Optional read-once enforcement for runbooks: PreToolUse hook on Read keyed on (path + content-hash) that returns a pointer/stub on repeat reads within a session, exempting post-compaction re-fetches and mid-session edits. Currently retain-don't-reread is model discipline only; harness hook is the only real enforcement layer.
 <!-- /agent:backlog -->
 
 ## Review

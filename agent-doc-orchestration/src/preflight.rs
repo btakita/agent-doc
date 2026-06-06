@@ -3441,7 +3441,30 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         let persisted_active_incoming = frontmatter::parse(&content)
             .map(|(fm, _)| fm.queue_active.unwrap_or(false))
             .unwrap_or(false);
-        if persisted_active_incoming {
+        // `#backlog-queue-empty-active-repopulate`: gate the empty-active-queue
+        // repopulation on the queue's `go` control. `go` (frontmatter `queue: go`
+        // or a marker-side `go`/`start` token, both → `QueueControl::Start`) opts
+        // into continuous-backlog-loop: when the live queue is fully drained (0
+        // un-struck prompts), repopulate from the full active backlog instead of
+        // holding. Without `go` (a plain persisted-active queue), keep the
+        // drain-then-stop hold. Amplification can't occur with 0 live prompts, and
+        // `active_item_ids` returns only Open `[ ]` items, so processed items
+        // (marked `[/]`/`[x]` per the `do #id` closeout rule) drop out and the
+        // loop converges when no Open backlog item remains.
+        let queue_go_mode = matches!(
+            crate::queue::marker_control(&comp.attrs),
+            Some(agent_doc_core::frontmatter::QueueControl::Start)
+        ) || frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm.queue)
+            .and_then(|q| agent_doc_core::frontmatter::QueueControl::parse(&q))
+            .map(|c| matches!(c, agent_doc_core::frontmatter::QueueControl::Start))
+            .unwrap_or(false);
+        let live_prompt_count = entries
+            .iter()
+            .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+            .count();
+        if persisted_active_incoming && !(queue_go_mode && live_prompt_count == 0) {
             let existing_queue_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter_map(queue_entry_do_id)
@@ -3456,6 +3479,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                      (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)"
                 );
             }
+        } else if persisted_active_incoming && queue_go_mode && live_prompt_count == 0 {
+            eprintln!(
+                "[preflight] queue: go-mode drained active queue — repopulating {} active backlog id(s) \
+                 (continuous-backlog-loop; #backlog-queue-empty-active-repopulate)",
+                backlog_ids.len()
+            );
         }
         if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
             let pre_sync_ids = entries
@@ -5824,6 +5853,96 @@ mod tests {
         assert!(
             !state.synced_queue_ids.contains(&"beta".to_string()),
             "beta must not be a newly-synced queue id while the loop is active: {:?}",
+            state.synced_queue_ids
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_go_mode_repopulates_drained_active_queue() {
+        // #backlog-queue-empty-active-repopulate: with the `go` control
+        // (`queue: go`, continuous-backlog-loop) and a fully drained live queue
+        // (0 un-struck prompts), the amplification hold is skipped and the full
+        // active backlog repopulates the queue so the loop keeps working it.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] first\n",
+            "- [ ] [#beta] second\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            updated.contains("- do [#alpha]"),
+            "go-mode must repopulate a drained active queue:\n{updated}"
+        );
+        assert!(
+            updated.contains("- do [#beta]"),
+            "go-mode must repopulate ALL open backlog ids:\n{updated}"
+        );
+        assert!(
+            state.synced_queue_ids.contains(&"alpha".to_string())
+                && state.synced_queue_ids.contains(&"beta".to_string()),
+            "both ids must be newly synced under go-mode repopulation: {:?}",
+            state.synced_queue_ids
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_no_go_keeps_drain_then_stop_on_empty_active_queue() {
+        // #backlog-queue-empty-active-repopulate: WITHOUT the `go` control, a
+        // drained persisted-active queue stays drained (drain-then-stop). The
+        // amplification hold drops every backlog id because none are already
+        // live queue heads, so nothing repopulates.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] first\n",
+            "- [ ] [#beta] second\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            !updated.contains("- do [#alpha]") && !updated.contains("- do [#beta]"),
+            "without `go`, a drained active queue must stay drained:\n{updated}"
+        );
+        assert!(
+            state.synced_queue_ids.is_empty(),
+            "no ids may be synced into a drained active queue without `go`: {:?}",
             state.synced_queue_ids
         );
     }

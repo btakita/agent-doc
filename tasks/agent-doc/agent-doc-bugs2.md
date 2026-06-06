@@ -34,7 +34,19 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 5 response topic(s): make the busy flag reentrant-friendly / never get "truly stuck"; how to recover your stuck Codex session right now; can't clear monsterrodholders.md; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b2d0f703 -->
+
+### Re: (a) fix the multi-head consume so the queue drains cleanly — opus-4-8
+
+Done — shipped + pushed (agent-doc `1e24239a`, CI running, both binaries installed) and used it to drain the two answered stragglers from this queue (remaining: 11; head is now the id-backed `[#admin-recover-stale-busy-no-pane-kill]`, already fixed in `be7f5f06`).
+
+**What I found:** there's no safe way to *retroactively guess* which extra heads a response answered — a fuzzy head↔response matcher would risk striking (deleting) a genuinely unanswered prompt, which is worse than the churn. So the fix is an **explicit** primitive, mirroring how `--done <id>` explicitly completes an id-backed head.
+
+**New command:** `agent-doc queue consume <FILE> [--count N]` strikes the leading N (default 1) free-text head(s) — the agent asserting they're already answered. It's scoped to free-text heads via the canonical detector (`queue_head_is_free_text_prompt`, which correctly resolves bare `[#id]` / `#id` / `#preset` heads as id-backed through `topic_resolves_to_exact_id` — I caught and fixed a first-cut bug where a bare `[#id]` head would have been misclassified as free-text and struck). A leading id-backed head bails with `--done` guidance; a mid-run id-backed head stops the drain cleanly. So a head can never be silently desynced from its still-open backlog item. 4 unit tests + spec; `make check` green.
+
+The root behavior gap (`#multi-head-consume-one-per-finalize`) stays in the backlog for the deeper "strike all answered leading heads automatically at finalize" work, but that needs the answer-tracking ledger to be safe; the explicit command covers the operational need now.
+
+The queue head is now id-backed work that's already shipped/captured, so I'm not auto-draining further — say the word for the `session clear` / tmux-status bugs (`#clear-blocked-by-own-drafted-clear-command`, `#tmux-status-turn-in-progress`) or anything else.
+<!-- agent:boundary:fad9a0b8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

@@ -16,7 +16,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
-queue_active: true
 ---
 
 ## Status
@@ -183,29 +182,28 @@ Hardened the deterministic core and gated the live-verify (the end-to-end part c
 **What I verified/added:** the `#recguard-wedge-escape` hatch (`8627ad1b`) is implemented in `recguard_wedge.rs` + wired into `run.rs` (halt at `WEDGE_THRESHOLD=3`) and `write.rs` (clears on consume), with unit tests for the counter (count/reset/clear/threshold). The gap was the **escalated diagnostic contract**, so I added `owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries` (`214141f0`) asserting it states the queue was HALTED (`queue: stop`), the head stays live with no drift, names BOTH recovery actions (answer+`finalize`+`queue: go`, or `agent-doc start` from OUTSIDE the owner pane), and warns against re-running the same direct command. `make check` green.
 
 **Why gated, not done:** the item is a *live-verify on a real wedged Codex auto-loop* — drive a busy owner pane that re-invokes `agent-doc <FILE>` mid-turn 3× and confirm the binary halts the auto-queue, logs `recursive_self_invocation_wedge_halt`, and emits the escalated diagnostic. That needs an operator-driven live Codex session, which this unattended loop can't safely perform. The deterministic contract is now covered; the live confirmation remains.
-<!-- agent:boundary:b5ef5b34 -->
+<!-- agent:boundary:ba31a322 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~#late-ipc-patch-duplicate-stall~
-- ~#late-ipc-patch-response-uncommitted~
-- ~[#recguard-wedge-escape-live-verify]~
-- ~rebase main into this branch~
-~~~done
-I'm confused by this monsterrodholders.md run. Please fix the root cause and help me to fix this particular bind.
-```
-• The command hit the recursion guard again because this pane already owns tasks/monsterrodholders.md.
-
-  agent-doc session-check confirms the cycle is cleanly abandoned:
-
-  queue_continuation_required=false
-
-  No agent-doc cancel is needed. To actually start a new managed run, run this from outside this owning Codex pane:
-
-  agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-```
-~~~
 - do [#free-text-head-consume-genuine-not-struck]
+- I still see `queue_active: true`. I thought this was fixed. Why did you lie to me? Fix it. No punting. I'm sick of your punting and weasel words to avoid doing work. This `queue_active: true` issue is as easy as it gets to fix. Yet you failed. I thought you were the best that Anthropic has. Very disappointing.
+---
+Fix this already. I'm tired of your ex
+```
+• I ran agent-doc tasks/monsterrodholders.md, but it was blocked by the recursion guard because this Codex pane already
+  owns that task doc. agent-doc session-check tasks/monsterrodholders.md confirms the failed cycle is terminal/
+  abandoned, no cancel is needed, and queue_continuation_required=false.
+
+  Recovery path: run this from outside this managed Codex pane, or restart the owner session:
+
+  agent-doc start tasks/monsterrodholders.md
+
+  Also noted: #pp-images is already marked complete in tasks/monsterrodholders.md, with site commit bf5d9fb6. I did not
+  stage or commit anything. Current dirty state remains tasks/monsterrodholders.md plus submodule src/
+  monsterrodholders-dev/AGENTS.md.
+```
+---
 - do [#monsterrod-writeback-post-contamination-confirm]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

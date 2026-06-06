@@ -160,15 +160,39 @@ graph TD
 1. **One real root:** the IPC/CRDT pipeline redesign (non-blocking main loop + per-doc queues) — fixing it collapses the finalize cluster (`#queue-edit-lost`, `#finalize-divergence`, `#finalize-visible-buffer-ipc-timeout-race`), which is also the editor-race churn source this session.
 2. **One design gate:** `#subagent-blocks-session` — the only item blocking others.
 3. **~50+ are independent**, overwhelmingly gated on *live-verify / operator action*, not code — so the lever to cut the count is operator verification passes, not more implementation.
-<!-- agent:boundary:30cf277c -->
+
+### Re: nested-list auto-dag + put it in an executable plan doc — opus-4-8
+
+> **Queue prompt:**
+>
+> Show a nested list representation of the auto-dag plan for backlog and review item completions in this document.
+
+
+Created the executable plan doc you asked for: **`tasks/agent-doc/plan-auto-dag-completions.md`** (`d43451817`). It has both the **mermaid** and a **nested list**, includes all backlog/review items, and is structured to run the agent through.
+
+**The work-graph isn't deep — it's 3 lanes after one prerequisite.** The items already carry a Path A/B/C grouping (items 44-49), so I formalized that:
+
+- **Step 0 (prereq):** stabilize the finalize pipeline — root is the IPC/CRDT redesign (non-blocking main loop + per-doc queues). Clears `#queue-edit-lost`, `#finalize-divergence`, `#finalize-visible-buffer-ipc-timeout-race` *and* the editor-race churn fighting every finalize this session.
+- **Path C — agent-executable now** (no live pane): the pure code/test items I can complete + reap autonomously (`#writer-emits-deprecated-queue-active-false`, `#backlog-queue-sync-...`, `#free-text-head-match`, `#pending-bare-hash-id`, `#backlog-priority-attribute`, the `#lr-*` wiring, etc.). **This is the lane I should drive.**
+- **Path A — one live busy-pane session** (operator): batch-closes ~20 JB/route/codex/opencode live-verifies.
+- **Path B — one IPC/typing-corruption capture session** (operator): the IPC-dup cluster.
+- **Blocked:** `#subagent-blocks-session` (design decision) → unblocks the hard busy-lease + two Phase-3s.
+
+The big finding (same as the mermaid): **most of the 75 are code-complete awaiting *operator live-verify*** — so Path A/B are the real count-reducers, and they're yours to run; Path C is mine.
+
+**On the `/goal`-style feature:** I captured `#auto-dag-first-class` in the plan doc — promote this hand-built graph to an `agent-doc auto-dag <FILE>` command (parses items, infers edges from Related/overlaps/Path/plan markers + live-verify-vs-implementable classification, emits mermaid + nested list, harness-agnostic, re-runnable). That's the durable feature behind this request.
+
+**Next, unless you redirect:** start draining **Path C** (the agent-executable lane) to actually cut the count, updating the plan doc as items close.
+<!-- agent:boundary:358b47d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Finish plan-backlog-id-user-rename-revert.md. We have way too many gated review items. We need to start doing real work...not punting. Do the prerequisite tasks first. Do the work to reduce the review item count. Do it. I am here. We need to get the review items completed. The review items are growing instead.~
 - ~agent-doc should think holistically about the backlog and review items. The `/goal` is to complete all presently actionable review items. Some review items legitimately have dated gates, such as in monsterrodholders.md, but this file does not. There are only work gates. The problem is I don't know what the order of work is. This is auto-dag territory. Please utilize the auto-dag feature of agent-doc. Make auto-dag able to plan the work graph. Release an auto-dag capable of planning all backlog and review item completions in a mermaid.~
 - ~Show a mermaid representation of the auto-dag plan for backlog and review item completions in this document.~
-- Show a nested list representation of the auto-dag plan for backlog and review item completions in this document.
-- Put both the mermaid and nested list into a separate plan md document. I want to run through this document. Include the existing backlog and review items. I want to use this plan file to execute the agent. Any discoveries or changes during the work should update the plan md file. agent-doc should have 1st class treatment of the auto-dag. I would like to emulate and bring visibility to a feature like C
+- ~Show a nested list representation of the auto-dag plan for backlog and review item completions in this document.~
+- Put both the mermaid and nested list into a separate plan md document. I want to run through this document. Include the existing backlog and review items. I want to use this plan file to execute the agent. Any discoveries or changes during the work should update the plan md file. agent-doc should have 1st class treatment of the auto-dag. I would like to emulate and bring visibility to a feature like Claude Code's `/goal`...that also supports Codex and Opencode. Lay out a step plan to complete each item in the backlog and review.
+- Remove the deprecated `queue_active: true` emission.
 - do [#writer-emits-deprecated-queue-active-false]
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]

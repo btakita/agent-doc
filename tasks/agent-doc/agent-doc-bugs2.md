@@ -190,7 +190,13 @@ Verified locally before switching the runner: `cargo nextest run --workspace --a
 Done (`743251c9`, pushed). The per-test deadlock guard already existed in `.config/nextest.toml` (60s × 3 = 180s, then the hung test is killed and named) but never reached CI, because CI ran `make check` through the plain `cargo test` fallback (cargo-nextest wasn't installed) — so a lock/IPC deadlock would hang to the 60-min job cap with no named test.
 
 Fix: added a `taiki-e/install-action` nextest step before `make check`, so CI takes the Makefile's nextest path and every test inherits the 180s per-test guard — a deadlock now fails fast with the offending test named. The job-level `timeout-minutes` stays as a backstop for non-test hangs (compile, doc tests, tmux-ci). Verified locally before switching the runner: `cargo nextest run --workspace --all-targets` → **3765 passed, 233 skipped, 0 failed** (clean under per-process isolation). Continuing the queue.
-<!-- agent:boundary:f44c3e9b -->
+
+### Re: `__` prefix in `tsift __digest-runner` + the queue item that vanished during finalize — opus-4-8
+
+**The `__` prefix:** it marks an **internal/plumbing** command. `__digest-runner` is **hidden from `tsift --help`** — the `__` (dunder, from Python's "internal" convention) signals "not part of the public CLI contract." It *is* directly callable (it has `--help` and runs), but you normally never invoke it by hand: the public entrypoints are the PreToolUse/rewrite hooks and `tsift rewrite --run '<cmd>'`, which call `__digest-runner` under the hood to turn noisy test/build output into a bounded, artifact-backed digest.
+
+**The queue item that vanished:** real bug, captured as `#queue-edit-lost-during-finalize-crdt`. You typed into the queue *while a finalize was mid-write* (the "File was modified during response generation. CRDT merging…" path churning on the editor-buffer block); the CRDT merge transiently dropped the item, then it recovered on the next preflight. It shouldn't visibly disappear — the merge should preserve a user-added queue item cleanly. Same family as the editor-buffer race dominating this session. Continuing.
+<!-- agent:boundary:8b575143 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

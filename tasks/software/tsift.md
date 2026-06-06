@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -238,7 +238,29 @@ Done — shipped, built, installed, committed, and pushed.
 **Commits.** tsift submodule `3a69aed` → pushed to `btakita/tsift main`; superproject pointer bump `acf6cf87f`. tsift CI for `3a69aed` is **in progress** (prior commit green); local full suite is green.
 
 **Note on naming.** I kept the legacy `__digest-runner` working rather than hard-removing it, since hooks and installed instruction files in other projects still call it — a clean break would break those mid-flight. Queued **#rx4x** to regenerate the agent-loop superproject's own instruction surfaces (CLAUDE.md, SKILL.md, runbooks) onto the public name; they still work via the alias, so it's non-breaking cleanup, not urgent.
-<!-- agent:boundary:080fa467 -->
+
+### Re: [#rx4x] — sync agent-loop instruction surfaces to public `digest-runner` — opus-4-8
+
+> **Queue prompt:**
+>
+> [#rx4x]
+
+
+Done — `#rx4x` executed, committed, and pushed.
+
+**What changed.** Swept every agent-loop superproject instruction surface that still named the old hidden `__digest-runner` onto the public `tsift digest-runner`:
+
+- `AGENTS.md` (→ `CLAUDE.md` symlink) Code Navigation block + the `.opencode` `tsift-test-digest`/`tsift-log-digest` shortcuts — refreshed via `tsift init --opencode` (which also added newer `tsift-explain`/`tsift-symbol-read`/`tsift-graph` shortcuts; left untracked, out of this commit's scope).
+- `CLAUDE.local.md`, `runbooks/code-navigation.md`, and the tsift skill's `runbooks/hook-integration.md` — these aren't `tsift init` targets, so updated in place.
+
+A full sweep (incl. hidden `.claude`/`.codex`) confirms zero `__digest-runner` references remain in the superproject. Non-breaking regardless: the old name still resolves via the hidden clap alias shipped last cycle.
+
+**Note — preset scope.** The queue carried `#spec-test-build-install-commit-push`, but `#rx4x` is pure instruction-file content sync — no tsift source/spec/test/binary change — so "update spec + tests / build + install" didn't apply this cycle (those landed with the promotion itself). Only commit + push were relevant.
+
+**Push hurdle (resolved).** The superproject push was initially rejected (remote +9). Those 9 commits touched **only** `src/boost-client` (a submodule pointer a parallel monsterrodholders session advanced), and all three differing submodules (`agent-doc`, `boost-client`, `tsift`) were verified local-ahead — remote pointers are ancestors of local. Reconciled with a merge, resolved the lone `boost-client` gitlink conflict to the local committed pointer (`97aac84d`, a descendant of remote `292c4dcb` — loses nothing), preserved the unrelated in-flight working-tree changes via stash, and pushed. Confirmed my doc commit `2993b8448` is reachable from `origin/main` and all four files are clean on HEAD.
+
+**Commit.** `2993b8448` (+ merge `964194c72`) → pushed to `btakita/agent-loop main`.
+<!-- agent:boundary:5f90b0b6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,14 +269,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- [#rx4x]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rx4x] Regenerate agent-loop superproject instruction surfaces (CLAUDE.md, CLAUDE.local.md, .claude/skills/tsift/SKILL.md + runbooks) to emit the public `tsift digest-runner` instead of `__digest-runner`. They still work via the hidden alias, so this is non-breaking cleanup — run `tsift init` (+ --opencode) to refresh the managed Code Navigation block and command shortcuts. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

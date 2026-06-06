@@ -35,12 +35,32 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 8 response topic(s): step plan + remove the deprecated queue_active emission; Fix IPC/CRDT + snapshot issues; [#auto-dag-first-class]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7b56459b -->
+
+### Re: monsterrodholders.md "run stalled" — recursive direct-invocation guard — opus-4-8
+
+> **Queue prompt:**
+>
+> agent-doc monsterrodholders.md run stalled `• Ran the command. It hit the same recursive direct-invocation guard because this Codex pane already owns that agent-
+
+
+Triaged as **working-as-designed, already captured** — no code change. Struck as a duplicate.
+
+**What happened.** `agent-doc monsterrodholders.md` was run *inside the Codex pane that already owns monsterrodholders.md*. That is owned-pane self-invocation, so the `#recguard-abandon` guard fired: `recursive_codex_direct_invocation_diagnostic` (run.rs:1056) abandons the empty preflight cycle to avoid a deadlock. "No new agent work was dispatched" is the guard succeeding, not a hang — `session-check` accepts the abandoned cycle, no `agent-doc cancel` needed.
+
+**Recovery is already surfaced.** The diagnostic (run.rs:1063) names the fix in-line: run the work in *this* owner turn, or "retry from outside the managed pane or restart the owner with `agent-doc start monsterrodholders.md`." The specialized variants (`owned_pane_prompt_miss_diagnostic` `#codex-owned-pane-prompt-miss`, `owned_pane_queue_handoff_diagnostic` `#codex-owned-pane-auto-queue-stuck`) name the pending prompt / queue head too. Shipped + spec'd: VERSIONS.md `#recguard-abandon`, specs/07-core-commands.md, session_check.rs:8392 regression test.
+
+**Durable improvements are already queued — not re-filed:**
+- backlog #2 `#jb-run-preempt-followups` sub-part 4 — recursion-guard *escape hatch* for a wedged loop (the one Run Agent Doc that could break a stall being blocked).
+- review #10 `#codex-mcp-server` — Option A root-cause fix (drive Codex via MCP against a persistent session instead of re-shelling into the owner pane), superseding the shipped Option B interim `#codex-self-reinvoke-prevent`.
+
+So the `#spec-test-build-install-commit-push` preset is N/A this cycle: the spec/tests/behavior already exist and are CI-green; adding code here would re-implement shipped guard logic. The only open work is the escape-hatch / MCP root fix, both already prioritized in backlog/review.
+<!-- agent:boundary:a8d611e9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- agent-doc monsterrodholders.md run stalled `• Ran the command. It hit the same recursive direct-invocation guard because this Codex pane already owns that agent-
+- ~agent-doc monsterrodholders.md run stalled `• Ran the command. It hit the same recursive direct-invocation guard because this Codex pane already owns that agent-~
   doc, so no new agent work was dispatched.`
+- The queue is not auto-populating from backlog which has `queue` attribute set.
 <!-- /agent:queue -->
 ###
 <!--

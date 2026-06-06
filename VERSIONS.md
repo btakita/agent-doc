@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Retain-don't-reread runbook nudge in the shared SKILL source.** The
+  `## Runbooks` section now instructs agents to read each runbook at most once
+  per session and reuse the in-context copy instead of re-reading, re-opening
+  only after a content change or compaction. Targets measured redundant runbook
+  reads (heaviest on per-cycle shell harnesses such as Codex re-`cat`ing
+  closeout runbooks every cycle); renders to all harness surfaces via
+  `skill.rs`. Contract-safe (no per-harness divergence). Re-measure Codex's
+  redundant-read rate before considering harness-level read-once enforcement.
+
 - **No-change short-circuit detects committed no-response repair cycles
   (`#jb-codex-nochange-after-repair`).** When `agent-doc run` finds no
   document/snapshot diff but the latest cycle was a `Committed` no-response

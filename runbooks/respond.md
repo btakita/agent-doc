@@ -75,3 +75,12 @@ outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if
 code-complete but awaiting review/external validation, or explain concretely why
 it stays open. `session-check` enforces the `pending_done_guard`; projects may opt
 into `review_done_guard` when review must precede done.
+
+**Complete over gate.** Default to `--done` — finish the work this cycle. Gating
+to `agent:review` is exceptional, only for work genuinely blocked on something the
+turn cannot do (live editor/pane verify, external approval, CI outage), and the
+item must name what unblocks it. Unblocked follow-up goes to `agent:backlog` as an
+actionable item, not `agent:review`. Keep `agent:review` small (target < 10);
+convert stale/satisfied gated items to `--done` or actionable backlog items rather
+than letting them accumulate. See [pending-ops.md](pending-ops.md) for the full
+review-discipline rule.

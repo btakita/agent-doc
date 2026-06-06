@@ -49,17 +49,35 @@ The concrete code piece shipped last cycle (the readable `.agent-doc/turn-active
 - **Hard busy-lease (gated).** Wire route/supervisor to read `turn_active(base)` and fail-closed; still gated on the `#subagent-blocks-session` scope decision.
 
 Gating `#claude-busy-status-during-active-turn` — code-complete for the unblocked part, remainder is a release-cycle item + a gated design decision. Continuing the drain.
-<!-- agent:boundary:97155a8c -->
+
+### Re: packagable solution, not memory — opus-4-8
+
+> **Queue prompt:**
+>
+> "Saved to memory as durable cross-session feedback (`feedback_no_compact_prompt_during_queue_drain`).". Since I am the auhthor of agent-doc, I don't want memory solutions. I want durable and packagable solutions so other people don't run into the same issue. Please remove the memory entry and create a different way to solve this. Update AGENTS.md with the CLAUDE.md symlink with these agent-doc development instructions.
+
+
+Done, and the right call — a memory only helps me; you ship agent-doc to others. Replaced it with a product fix.
+
+- **Removed** the memory entry (`feedback_no_compact_prompt_during_queue_drain` + its MEMORY.md index line).
+- **Packagable binary fix** (`session_accretion.rs`): the "ask the user before compacting" accretion guidance is now **queue-aware**. While an `agent:queue` is actively draining (`queue_active: true`), the binary no longer tells the agent to ask about compacting — a self-driving queue is meant to run unattended, so that question is what stalled your overnight run. It now surfaces *don't-stall* guidance and compacts only on an explicit `agent_doc_auto_compact` opt-in; off the queue it still asks. Centralized in one `compaction_guidance()` helper (both `inspect_at` paths call it). This ships to every agent-doc user.
+- **AGENTS.md** (+ `CLAUDE.md` symlink) gained two dev conventions: (1) **behavioral fixes are packagable, not per-user agent memory** — correct shipped agent-doc behavior in the binary/skill/docs, never in a memory note; (2) the queue-aware accretion-guidance rule, with `compaction_guidance` named as the single source.
+
+2 new unit tests; `make check` green; both binaries rebuilt + installed; submodule `782bf4c9` pushed (CI running), superproject `706a9614b`.
+
+Going forward I'll treat agent-doc behavior problems as product fixes. (One related note: the supervisor-self-race / finalize-divergence *recovery recipe* I also have in memory is arguably the same category — want me to fold that into AGENTS.md / a runbook as a packagable troubleshooting doc too? I'll do it on the next pass unless you say otherwise.)
+<!-- agent:boundary:edf07aa3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#claude-busy-status-during-active-turn]~
-- "Saved to memory as durable cross-session feedback (`feedback_no_compact_prompt_during_queue_drain`).". Since I am the auhthor of agent-doc, I don't want memory solutions. I want durable and packagable solutions so other people don't run into the same issue. Please remove the memory entry and create a different way to solve this. Update AGENTS.md with the CLAUDE.md symlink with these agent-doc development instructions.
+- ~"Saved to memory as durable cross-session feedback (`feedback_no_compact_prompt_during_queue_drain`).". Since I am the auhthor of agent-doc, I don't want memory solutions. I want durable and packagable solutions so other people don't run into the same issue. Please remove the memory entry and create a different way to solve this. Update AGENTS.md with the CLAUDE.md symlink with these agent-doc development instructions.~
 - do [#backlog-id-user-rename-revert]
 - do [#writer-emits-deprecated-queue-active-false]
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]
 - do [#free-text-head-answer-match-too-literal]
+- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities?
 <!-- /agent:queue -->
 ###
 <!--

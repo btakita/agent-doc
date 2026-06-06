@@ -141,12 +141,17 @@ pub struct PreflightOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PreflightWarning>,
     /// Tmux layout issues found (empty = healthy).
+    /// #per-cycle-protocol-output-overhead: omit when empty so a healthy cycle
+    /// does not spend per-cycle context bytes on `"layout_issues": []`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layout_issues: Vec<String>,
     /// Whether an orphaned pending response was recovered and applied.
     pub recovered: bool,
     /// Whether a git commit was made for the previous cycle.
     pub committed: bool,
     /// Lines from `.agent-doc/claims.log` (truncated after read).
+    /// #per-cycle-protocol-output-overhead: omit when empty (the common case).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claims: Vec<String>,
     /// Unified diff text, or `null` if there are no changes.
     pub diff: Option<String>,
@@ -4921,6 +4926,40 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    // #per-cycle-protocol-output-overhead: empty Vec fields must not spend
+    // per-cycle context bytes. A healthy/default PreflightOutput omits the empty
+    // `claims` and `layout_issues` arrays from its JSON, and still round-trips
+    // back to empty Vecs (serde default) so consumers reading the struct are safe.
+    #[test]
+    fn preflight_output_omits_empty_claims_and_layout_issues() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(
+            !json.contains("\"claims\""),
+            "empty claims must be omitted from per-cycle output: {json}"
+        );
+        assert!(
+            !json.contains("\"layout_issues\""),
+            "empty layout_issues must be omitted from per-cycle output: {json}"
+        );
+        let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
+        assert!(round_trip.claims.is_empty());
+        assert!(round_trip.layout_issues.is_empty());
+
+        // Non-empty values are still emitted and round-trip intact.
+        let populated = PreflightOutput {
+            claims: vec!["claimed pane %1".to_string()],
+            layout_issues: vec!["stash overflow".to_string()],
+            ..PreflightOutput::default()
+        };
+        let json = serde_json::to_string(&populated).unwrap();
+        assert!(json.contains("\"claims\""), "{json}");
+        assert!(json.contains("\"layout_issues\""), "{json}");
+        let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip.claims, vec!["claimed pane %1".to_string()]);
+        assert_eq!(round_trip.layout_issues, vec!["stash overflow".to_string()]);
+    }
 
     #[test]
     fn detect_identity_collisions_flags_preset_vs_backlog_id() {

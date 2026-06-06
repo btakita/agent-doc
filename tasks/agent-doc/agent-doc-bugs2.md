@@ -21,7 +21,7 @@ queue: go
 ## Status
 
  <!-- agent:status patch=replace -->
-Queue draining (`queue: go`). Head 3 (sync pipeline blocks on file switch) root-caused: the fast pane-focus is gated behind the 3s sync-lock wait + stacked reconcile budgets, so showing an already-known claiming pane is serialized behind heavy reconcile. Plan + capture `#sync-fast-pane-hotpath` (pre-lock fast select + deferred reconcile, race-safe). Deferred the code change — it's an architecture split of a 12K-line sensitive hot path where moving the select before the lock races the concurrent reconciler the lock guards; needs incremental SimWorld-covered design. Prior heads: 2 fixes shipped (CI green) + `#queue-dedup-destroys-intentional-duplicates`.
+Queue draining (`queue: go`). Head 4 (`#next-steps` id-collision + rename-revert) — already addressed in a prior (archived) cycle and verified this cycle: the no-collision rule is live (`reject_colliding_explicit_id`, pending_cmd.rs:190, `#preset-item-id-collision-enforce`); the rename-revert + the retroactive-preset-collision warning gap are captured as `#backlog-id-user-rename-revert` (plan exists, queued as `do [#backlog-id-user-rename-revert]` later in this queue). Struck as a duplicate of captured work. Prior heads: 2 fixes shipped (CI green) + 2 plans captured.
 <!-- /agent:status -->
 
 ## Exchange
@@ -78,7 +78,18 @@ Root-caused the blocking. The fast pane-focus already exists (`safe_passive_focu
 Your proposed shape is the right one, and I've turned it into a concrete design rather than a blind edit: **pre-lock fast pane resolution + `select_pane`** (lock-free cached projection, ≤300ms target), **create-on-miss without blocking** (fire-and-forget `route::auto_start`), and **defer prune / router-reconcile / ownership-proof / layout-repair to a background pass** that no longer gates the editor's return.
 
 The reason it's a plan and not a same-cycle patch: the sync lock exists precisely to stop concurrent reconciles from racing while they stash/swap/reparent panes. Moving the `select_pane` before the lock naively would let the fast path grab a pane a concurrent reconcile is mid-stashing — reintroducing the visible-layout races the passive-sync invariants were built to prevent. So the fast select must be made **idempotent with the reconciler's final placement** (generation/epoch check; reconcile re-selects if it relocates). That's a careful, incrementally-tested split of a 12K-line hot path, captured as `#sync-fast-pane-hotpath` with the blocking points, design steps, acceptance, and race-safety requirements in `tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md`.
-<!-- agent:boundary:21e13881 -->
+
+### Re: Backlog id must not collide with prompt_presets / stop reverting my id rename (re-raised) — opus-4-8
+
+> **Queue prompt:** The agent added `[#next-steps]` colliding with the `#next-steps` prompt preset; I renamed it to `[#next-steps-2]` and agent-doc kept reverting it. Ensure the no-conflict rule is in place.
+
+Already addressed + captured (a prior cycle's full response was archived during the compact). Verified live this cycle:
+
+- **No-collision rule is in place.** `reject_colliding_explicit_id` (`pending_cmd.rs:190`, `#preset-item-id-collision-enforce`) fails any `--pending-add` whose explicit `id=`/`[#id]` collides with a `prompt_presets` key or an existing active `agent:backlog`/`agent:review`/`agent:icebox` id, at the mutation boundary. Your case slipped through only because `#next-steps` became a preset *after* the item existed (no collision at add-time).
+- **The retroactive gap** (a preset key added later that now matches an existing backlog id → should warn) and **agent-doc reverting your `[#next-steps-2]` rename** (the real bug — body-unchanged id renames get re-imposed from CRDT/snapshot identity) are both captured as `#backlog-id-user-rename-revert`, with a plan at `tasks/agent-doc/plan-backlog-id-user-rename-revert.md`. That item is **queued as `do [#backlog-id-user-rename-revert]` later in this same queue**, so the actual fix lands when that head is processed (it needs a real repro before touching core id logic, since rushing it risks every backlog id).
+
+Striking this free-text head as a duplicate of that captured + queued work rather than re-capturing.
+<!-- agent:boundary:c375b304 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

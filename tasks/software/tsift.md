@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -50,7 +50,28 @@ What changes that:
 - **Retain-don't-reread discipline** — the practical mitigation: read a runbook once, keep the relevant facts in working memory, and don't re-open it on a later turn unless the content actually changed or was summarized away.
 
 So: duplicated in the raw transcript = yes; permanently duplicated = no (compaction reclaims it); avoidable = yes (read once, retain). The SKILL/runbook split exists precisely so a turn that doesn't need a given runbook never pays for it at all.
-<!-- agent:boundary:380552ba -->
+
+### Re: Would "retain-don't-reread" be implemented in the skill-harness? — opus-4-8
+
+> **Queue prompt:**
+>
+> Would "Retain-don't-reread discipline" be implemented in skill-harness?
+
+
+Today it isn't implemented anywhere — it's pure model discipline. Nothing in the agent-doc binary, the SKILL.md, or the Claude Code harness tracks "you already read `runbooks/commit.md` this session, don't read it again." It relies entirely on the model choosing not to re-open a file it already has in context.
+
+If you wanted to actually *implement* it, the key distinction is **advise vs. enforce**, and they live in different layers:
+
+- **Skill layer (advisory only).** SKILL.md is prompt text. It could add a line like "do not re-read a runbook already read this session," but that's still a nudge the model can ignore — same category as the discipline itself. It raises compliance, it doesn't guarantee it. So putting it in the skill doesn't really make it "implemented," just "documented."
+
+- **Harness layer (real enforcement).** The only place you can *enforce* it is a `PreToolUse` hook on `Read`. The hook keeps a per-session set of already-read runbook paths; on a repeat `Read` of the same path it either (a) blocks the call and returns "already read this turn — reuse prior content," or (b) returns a short pointer/stub instead of the full file body. That's deterministic — code, not vibes — and it's where this kind of rule belongs, because the harness controls tool execution and the skill can't.
+
+- **Binary layer (mostly N/A).** `agent-doc` owns the document/commit lifecycle, not your `Read` calls, so it's not the natural home. The one adjacent thing it could do is surface in `preflight` which runbooks a turn is *likely* to need, so you fetch deliberately rather than reactively — but that's guidance, not dedup.
+
+So: would it be in the skill-harness? The skill can only document it; if you want it enforced, it's a harness `Read` hook. Right now neither exists — it's discipline, and the cheaper backstop is that context compaction reclaims the duplicate anyway, which is why nobody has felt the need to code it.
+
+Worth noting: a hard read-once hook has a real failure mode — if a runbook was edited mid-session, or its earlier copy was already compacted away, blocking the re-read would starve the model of content it legitimately needs. Any enforcement should key on (path + content-hash) and exempt post-compaction re-fetches, which is exactly the kind of nuance that makes the soft-discipline approach attractive enough to leave as-is.
+<!-- agent:boundary:35de80ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,8 +80,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Would "Retain-don't-reread discipline" be implemented in skill-harness?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

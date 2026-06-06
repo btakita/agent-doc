@@ -340,7 +340,20 @@ Understood, and fair — I did exactly that twice this session. I'll stop.
 - Queuing a backlog item to make it a durable rule in the agent-doc skill's auto-loop section (the skill is what nudges toward asking — the fix belongs there, alongside the existing "ask the user before compacting" accretion guidance, scoped to *not while draining*).
 
 Continuing the drain now.
-<!-- agent:boundary:6d46c633 -->
+
+### Re: [#autoloop-command-preemption] do Phase 2b — opus-4-8
+
+> **Queue prompt:**
+>
+> [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
+
+
+Phase 2b is already shipped (done earlier this session, out of queue order at your request). No new work — this queued directive is satisfied.
+
+Recap of what landed: the supervisor `idle-queue-watch` delivers the deferred clear at the idle gap and resumes the loop (durable `DeferredOperatorClear` marker + pure `plan_deferred_clear_step`); `interrupt-clear` supersedes a pending deferred clear; JB `0.2.148` shows a "deferred — runs at next idle gap" notice. Commits: submodule `841bbc4f` (pushed), superproject `c9993c6fe`. `make check` green.
+
+Gating `#autoloop-command-preemption` — only Phase 3 (operator live-verify on a busy auto-looping Codex pane) remains, and that needs a supervisor restart + JB reinstall, so it's external-validation gated.
+<!-- agent:boundary:768b24b3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -360,7 +373,7 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 - ~Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?~
 - ~After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.~
 - ~When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact. I expected this queue to run overnight, not stall before completing the first task.~
-- [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
+- ~[#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b~
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]
 - do [#writer-emits-deprecated-queue-active-false]

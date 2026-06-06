@@ -34,19 +34,18 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 5 response topic(s): make the busy flag reentrant-friendly / never get "truly stuck"; how to recover your stuck Codex session right now; can't clear monsterrodholders.md; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b61b0612 -->
+<!-- agent:boundary:b2d0f703 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~The busy flag behavior needs to change. Since we are in the middle of a session, we should send a command that bypasses the busy flag or clear the busy flag or have a reentrant-friendly solution instead of the busy flag. The busy flag is brittle for reentrant commands, so we need to find a solution to this. Once you fix this, give me instructions on how to recover my codex session.~
----
+~~~done
 I cannot clear the monsterrodholders.md session after stopping the Codex session. The supervisor is still running. The  supervisor needs to be more "intelligent".
 ```
 ❯ agent-doc session clear tasks/monsterrodholders.md
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %29 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="❯ agent-doc session clear tasks/monsterrodholders.md"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to intentionally interrupt the pane and clear context.
 ```
----
-- I'm running a turn on monsterrodholders.md. The tmux status is blank. I should be "agent-doc: turn in progress".
+~~~
+- ~I'm running a turn on monsterrodholders.md. The tmux status is blank. I should be "agent-doc: turn in progress".~
 - [#admin-recover-stale-busy-no-pane-kill]
 - [#stale-busy-after-auto-inject-no-clear]
 - do [#monsterrod-writeback-post-contamination-confirm]

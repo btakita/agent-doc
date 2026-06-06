@@ -57,12 +57,27 @@ Short version: the **goal** is right and is already ~80% built, but the literal 
 **Recommended shape instead of pause/unpause:** (a) busy-pane `Run Agent Doc` head-inserts with priority, (b) keep the existing idle-queue-watch drain, (c) make the empty-queue autoloop actually go idle so the drain can fire. That gets you "manual run jumps the queue, then the loop resumes" without inventing a pause control surface.
 
 Captured as `[#jb-run-preempt-autoloop-priority]` (recommended) with `plan-jb-run-preempt-autoloop-priority.md`. Want me to `do` it, or keep diagnosing the monsterrodholders empty-queue state first?
-<!-- agent:boundary:88044d12 -->
+
+### Re: Queued #jb-run-preempt-autoloop-priority + #autoloop-command-preemption under `go` — opus-4-8
+
+Registered both. `[#autoloop-command-preemption]` already has a backlog def + `plan-autoloop-command-preemption.md`; my `[#jb-run-preempt-autoloop-priority]` has `plan-jb-run-preempt-autoloop-priority.md`. Before I drain the `go` queue with commit+push per item, two forks need your call — both are decisions `go` doesn't resolve, and I'd rather not guess on a stable contract:
+
+**1. The queue head `#skill-md-token-footprint-reduce` is blocked by design.** Its own note: further SKILL.md extraction fails the guard tests that pin invariant prose *verbatim*; getting under the 8–10KB target needs a **deliberate test-contract redesign** (guards verify each invariant ships in *bundled* content, not verbatim-in-spine). I won't rewrite those guards unasked. Options:
+- **(rec)** Close it at Phase-1's shipped ~15% (db4b664a) — accept current footprint, drop the 8–10KB target.
+- Authorize the guard redesign and I'll do the deeper extraction.
+
+**2. Which preemption item first — they're distinct, not redundant:**
+- `#jb-run-preempt-autoloop-priority` = narrow `route.rs` change: busy-pane Run Agent Doc **head-inserts** into `agent:queue` so a manual run jumps ahead of pending auto items. **(rec: do this first — smallest, ships fast.)** One real sub-choice: today the busy path *replaces* a lone auto prompt (`replace_single_auto_prompt`); priority-preempt should **insert ahead** of it instead, not replace. I'll go insert-ahead unless you object.
+- `#autoloop-command-preemption` = broader supervisor feature: a command (Clear Session Context / interrupt-clear) **pauses** the auto-loop, runs, then resumes — the durable form of your pause/unpause idea, since the loop never leaves a quiet window.
+
+Say "go with your recs" and I'll: close #1 at Phase-1, then implement #jb-run-preempt-autoloop-priority (insert-ahead + tests + docs aligned), then #autoloop-command-preemption, draining the rest in order. Or steer either fork.
+<!-- agent:boundary:6d293a1c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~On monsterrodholders.md, the auto loop may have been running on an empty queue. As I was typing into the queue, nothing seemed to happen. I ran JB `Run Agent Doc` nothing happend for 60s. JB `Run Agent Doc` should have paused the autoloop and ran the document then unpause the autoloop. It should have been autoloop->`Run Agent Doc`->pause autoloop->`Run Agent Doc` starts autoloop->loop finishes->unpause autoloop. Would this pipeline work? Now I see "Error: recursive direct invocation would deadlock" after the 60s delay. The autoloop is deadlocked right now it seems...so the "recursive direct invocation would deadlock" is in effect not true...since we are already in deadlock.~
 - [#skill-md-token-footprint-reduce]
+- [#jb-run-preempt-autoloop-priority]
+- [#autoloop-command-preemption]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
 - do [#claude-busy-status-during-active-turn]

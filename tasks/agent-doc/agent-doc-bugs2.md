@@ -82,12 +82,27 @@ Say "go with your recs" and I'll: close #1 at Phase-1, then implement #jb-run-pr
 Done per your rec. Phase 1 (db4b664a) shipped the SKILL.md reduction — extracted non-pinned Workflow prose into `respond.md` + `persist-closeout.md`, 16927→14311 bytes (~15%), all `skill::tests` + `test_cli` guards green, mirrors regenerated. Accepting that footprint and **dropping the 8–10KB stretch target**: getting there requires rewriting the guard tests that pin invariant prose verbatim (a deliberate test-contract change you opted not to take on now). Reaped to `agent:done`.
 
 Advancing the `go` queue to `#jb-run-preempt-autoloop-priority` next (route.rs busy-pane head-insert, insert-ahead semantics + tests + aligned docs).
-<!-- agent:boundary:45546528 -->
+
+### Re: Shipped #jb-run-preempt-autoloop-priority (busy-pane Run Agent Doc head-insert) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#jb-run-preempt-autoloop-priority]
+
+
+Done + pushed. Busy-pane `Run Agent Doc` now **preempts** the auto-loop: `enqueue_route_dispatch_prompt` gains a `priority` flag (true at all three operator-dispatch sites) that inserts the manual prompt **ahead of pending auto items** in `agent:queue auto`, after any leading directive (preset/start fence), and **without** superseding a lone auto prompt — so the pending auto-loop item is preserved (manual runs first, then it), not replaced. That retires the legacy single-prompt supersede on the operator path (you approved insert-ahead over replace); the supersede path stays for non-priority callers with its existing tests.
+
+- **Tests:** 3 new (preempt multi-prompt queue, insert-ahead of lone auto prompt without supersede, preserve leading directives). `make check` green (2298-test suite + clippy, 0 failed).
+- **Docs aligned:** `specs/supervisor.md`, `specs/08-session-routing.md`, `README.md`, `SPEC.md`. `audit-docs` clean.
+- **Shipped:** built release + `cargo install`, committed `79e0406d`, pushed to `20260422/codex-agent-backend`. CI run `27054575701` in progress.
+
+Remaining plan sub-parts 2–4 (empty-queue suppression, 60s stall audit, recursion-guard escape hatch) gated as `#jb-run-preempt-followups` — they overlap `#autoloop-command-preemption` (up next) and `#post-clear-auto-queue-suppress`. Advancing the queue to `#autoloop-command-preemption`.
+<!-- agent:boundary:02d1ea72 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~[#skill-md-token-footprint-reduce]~
-- [#jb-run-preempt-autoloop-priority]
+- ~[#jb-run-preempt-autoloop-priority]~
 - [#autoloop-command-preemption]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
 - do [#ci-per-test-timeout-guard]
@@ -122,7 +137,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#jb-run-preempt-autoloop-priority] [recommended] Busy-pane Run Agent Doc should head-insert (priority preempt) into agent:queue, not tail-append; verify empty-queue autoloop suppression + 60s stall path — tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
+- [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
 - [ ] [#autoloop-command-preemption] [recommended] #agent-doc-bug feature: operator commands (JB Clear Session Context / interrupt-clear, etc.) must be able to preempt an active agent:queue auto loop — pause the loop, run the command, then resume — instead of being hard-blocked while the pane is busy (currently session_clear_live_busy_guard_blocked / 'Wait for the turn to finish'). Self-driving loops never leave a quiet window, so the command is effectively unrunnable. Design: command sets durable queue:stop (record prior state) -> non-interrupt Clear defers to next inter-iteration idle gap (don't kill in-flight work), explicit 'Interrupt and Clear' stays the destructive path -> supervisor resumes queue:start after the pane returns dispatch-ready. Honor #codex-interrupt-clear-ctrl-g-opens-editor. Live-verify on a busy auto-looping Codex pane. Related #clear-stops-running-process. Plan: tasks/agent-doc/plan-autoloop-command-preemption.md
 - [ ] [#monsterrod-writeback-post-contamination-confirm] [recommended] Confirm monsterrodholders.md responses now write to the document reliably after the 1-pane-1-document eviction fix (25ff1116). Evidence it resolved: post-fix commits f1ae73a (00:35) + a53ecee (00:25) landed real response content; only out_of_band_write in ops.log is ~51 days old. If responses still go missing AFTER the contamination fix, capture the specific signature (Codex final-gate vs IPC merge drop vs closeout) — that is a DIFFERENT cause than contamination and routes to existing gated items #codex-final-response-repeat / #codex-final-response-live-verify (plan-codex-final-response-not-written.md).
 - [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.

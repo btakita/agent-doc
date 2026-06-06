@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -104,7 +104,43 @@ Authored "why" now rides every agent navigation surface: `context-pack`, `search
 - **One item remains: `#trt1cfg`** — configure agent-loop's own tsift config to use the findings layer. Its gate (phases 2–4 shipped) is now fully satisfied, so it's unblocked.
 
 Top of backlog (`#next-steps`): **`#trt1cfg`** — the final queue item.
-<!-- agent:boundary:0ad4f816 -->
+
+### Re: [#trt1cfg] — configure agent-loop to use the findings layer — opus-4-8
+
+> **Queue prompt:**
+>
+> [#trt1cfg]
+
+
+Done — the **final queue item**. The Findings Graph Layer (`#trt1`) is now both feature-complete *and* in use by agent-loop.
+
+#### What "configure" means here
+
+Findings **injection** (context-pack / search / explain / `graph-db map`) is automatic and needs no config. The only config-gated capability is passive harvest, so configuration =
+
+- **`.tsift/config.toml`** (local, `.tsift/` is gitignored) → `[findings] passive_harvest = true`.
+- **`runbooks/findings-layer.md`** (committed) documenting authoring, harvest+promotion, and the automatic injection surfaces.
+
+#### Verification
+
+Enabling the gate and running `tsift finding harvest` against agent-loop's real history confirmed the layer is active: **994 archives scanned, 100 draft candidates captured** (capped), all `draft` so none reach the hot path until promoted with `tsift finding promote <id>`.
+
+#### Closeout caveat — superproject push deferred
+
+The runbook is committed locally (`agent-loop@05ad1fd5e`), but the agent-loop **superproject has diverged** from origin (origin advanced with unrelated monsterrodholders / boost-client commits while local main carries many concurrent-session commits). I did **not** force a rebase/merge — with 20+ dirty instruction files and many submodules, that's the dirty-tree submodule hazard, and it's a multi-session coordination concern. The push should be integrated deliberately. **All tsift code is already pushed to the tsift remote and CI-green; only the superproject pointer/doc push is pending.**
+
+#### Findings Graph Layer — complete
+
+| Phase | Item | Surface |
+| --- | --- | --- |
+| 1 | `#trt1p1` | capture (`finding add`/`list`) |
+| 2 | `#trt1p2` + `#trt1p2b` | injection into context-pack, search, explain |
+| 3 | `#trt1p3` | `graph-db map` annotation + md/html exports |
+| 4 | `#trt1p4` | config-gated passive harvest + draft→trusted promotion |
+| cfg | `#trt1cfg` | agent-loop opted in + documented |
+
+Queue drained — `/loop` terminates. `#next-steps`: backlog is empty of `#trt1*` items; the one open follow-up is the deferred superproject push (coordinate when the concurrent sessions settle).
+<!-- agent:boundary:036104c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,19 +150,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~[#trt1]~
-- ~[#trt1p2]~
-- ~[#trt1p3]~
-- ~[#trt1p4]~
-- ~[#trt1p2b]~
-- [#trt1cfg]
-- ~Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#trt1cfg] After #trt1 phases 2-4 ship (findings hot-path injection), configure agent-loop's tsift config to use the findings graph layer. Gated on #trt1 completion.
 <!-- /agent:backlog -->
 
 ## Review

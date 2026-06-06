@@ -151,7 +151,22 @@ Diagnosed from the code, with a phased redesign plan: **`tasks/agent-doc/plan-ip
 5. Coalesce/debounce writes across all paths.
 
 Phase 1 shipped; 2-5 are scoped in the plan, ordered by risk (the non-blocking IPC is highest, SimWorld-covered first). This is the root that dissolves the whole IPC/CRDT symptom cluster (incl. `#queue-edit-lost`, `#finalize-visible-buffer-ipc-timeout-race`).
-<!-- agent:boundary:061a9810 -->
+
+### Re: evaluate axocoatl + axocoatl-like admin dashboard UI — opus-4-8
+
+Evaluated (the GitHub repo 403'd automated fetch — flagged a `gh` re-fetch follow-up; the axocoatl.ai site gave a full picture). Comprehensive plan: **`tasks/agent-doc/plan-axocoatl-evaluation.md`** (`0a6d1998d`).
+
+**What axocoatl is:** a local-first Rust agentic runtime — declarative multi-agent **DAGs via `depends_on`**, stigmergic **EventLattice** coordination, **`ractor`** actors, checkpoint/restart persistence, 4-tier memory, multi-provider, MCP+A2A.
+
+**What's genuinely worth taking (mapped to agent-doc surfaces):**
+1. **`depends_on` edges → real auto-dag.** axocoatl's declarative dependency DAG is exactly the edge-inference follow-up the `auto-dag` feature needs. Add an optional `depends_on: [#id,…]` on backlog/review items so `agent-doc auto-dag` emits a true dependency graph, not just lane-grouping. High value, small.
+2. **Actor / per-document queues → validates the IPC/CRDT redesign.** axocoatl's `ractor` + event-lattice model *is* the "per-document work queues + non-blocking" Phase 4 of the redesign plan — confirms the actor approach fits. (Consider `ractor` vs a lean channel-per-doc.)
+3. **The admin dashboard UI you asked for.** agent-doc already has a real control plane — `agent-doc admin` (`#ipc-admin-api`, fleet actor/pane/queue state) — but it's CLI-only. Plan a **local web UI** over it (axum + static frontend, zero telemetry, livestream-safe): Fleet view (actors/panes/busy-idle/warnings), per-doc queue, **auto-DAG rendered in-browser** (the axocoatl "workflow DAG" UX maps straight onto our Mermaid output), and turn-status from `.agent-doc/turn-active.json`.
+
+**Deliberately not adopting:** the provider abstraction (agent-doc delegates to the harness by design), 4-tier memory, and A2A (single-agent-per-doc by design).
+
+Phased in the plan: depends_on edges → admin HTTP/SSE read API → Fleet+queue UI → auto-DAG+turn-status UI → actor-model per-doc queues. That's the last queued item — the queue is drained.
+<!-- agent:boundary:965c0794 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

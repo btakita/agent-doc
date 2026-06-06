@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -152,7 +152,7 @@ I implemented the **nudge** in the **skill-harness** this turn (per your "nudge-
 - So: **nudge in skill-harness (done); enforcement, if re-measurement proves it's needed, in tsift** — fitting, since this is the tsift backlog. I'd spec it as a `tsift runbook` fetch with per-session dedup rather than scatter hooks across harnesses.
 
 **#7qky status:** moved to Review, **gated** on re-measurement — re-run the 3-harness redundant-read analysis after Codex sessions accumulate with the nudge live, compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). Build the tsift enforcement only if Codex's rate doesn't drop.
-<!-- agent:boundary:379cd051 -->
+<!-- agent:boundary:fad1afa7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,8 +161,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Should [#7qky] be implemented in tsift or skill-harness?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

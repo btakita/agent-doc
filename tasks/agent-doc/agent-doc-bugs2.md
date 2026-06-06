@@ -206,7 +206,34 @@ So the bound Codex pane is busy, and route's refusal is technically correct (it 
 **But I did find a real bug underneath this** (`#monsterrod-pane-cross-doc-contamination`): pane %1 is **cross-bound to two documents** — `astro-listings.md [claude-code]` *and* `monsterrodholders.md [codex]`. `admin detect` flags `cross_document_pane`. The astro-listings binding is stale junk (it claims a claude-code session on a pane that actually runs codex), and that registry contamination is exactly the kind of thing that makes "which session is idle/busy" ambiguous. The durable fix is a fail-closed cross-doc binding guard in route/claim plus a `resync --fix`/`admin` cleanup that drops a binding whose recorded harness doesn't match the pane's live process. I did **not** mutate the live boost-client bindings (it touches a running session) — say the word and I'll clear the stale astro-listings binding so monsterrodholders is the sole owner of %1.
 
 (Housekeeping: my earlier finalize retries raced your live edits and double-added three backlog ids — that's the tracked `#backlog-queue-sync-pending-add-amplification` churn; I left them rather than compound the churn this cycle.)
-<!-- agent:boundary:d415f22b -->
+
+### Re: "You're missing the evidence" — found it: %1 is auto-looping — opus-4-8
+
+> **Queue prompt:**
+>
+> "evidence does **not** show monsterrodholders idle" You don't have the right evidence. You are missing the evidence. I saw Codex idle with my own eyes and I can manually run agent-doc from Codex. Something is missing. I'm tired of arguing with you about this. You need to look deeper. Stop punting with gibberish and lies.
+
+
+> **Queue prompt:** "evidence does **not** show monsterrodholders idle" — You don't have the right evidence. You are missing the evidence. I saw Codex idle with my own eyes and I can manually run agent-doc from Codex. Something is missing.
+
+You're right, I was missing it. Here's what I found by digging into the process tree and frontmatter instead of just capturing the pane:
+
+**Pane %1 is a route-owned codex in an agent-doc auto-loop.** Process tree: `zsh → agent-doc start --route-owned monsterrodholders.md → node → codex (pid 1924566)`. And `monsterrodholders.md` frontmatter is `queue: start` with `&lt;!-- agent:queue auto preset="#spec-test-commit-push" go --&gt;`. So that codex is **autonomously draining its own queue** (it's mid "regional articles" work). Proof it's *re-looping*, not one stuck turn: across three captures the elapsed timer reset — `Working 7m29s` → a fresh `Working 2m37s` → `Working 9m55s` — i.e. a turn ended and the loop immediately started the next one.
+
+**That reconciles everything you reported:**
+- "I saw Codex idle" — you caught a brief gap *between* auto-loop iterations.
+- "I can manually run agent-doc from Codex" — in that gap, your manual input lands and runs.
+- JB `Run Agent Doc` stalls — it **races the auto-loop and loses**: the loop grabs the idle gap first, so by the time route checks, the next iteration is already busy → refusal. It's not a 60s problem at heart (that's fixed); it's a race against a self-driving loop.
+
+**So the real fix for your scenario is the deferred-drain** (`#jb-busy-reopen-auto-drain-when-idle`): a JB Run Agent Doc against an auto-looping/busy pane should **queue the reopen as the next loop iteration** instead of racing-and-refusing — generalizing `#jbstalldrain` to the no-existing-head case. Then your click always "wins" by being enqueued, and runs the moment the current iteration ends. The snappy-refusal fix I shipped (`b93b3c3c`) is the right interim (no 60s stall), but the deferred-drain is what makes the click actually take effect.
+
+**What I still can't see from here:** there is only *one* monsterrodholders codex pane (%1, auto-looping) — I can't find a *separately* idle one. Two honest possibilities, and your answer changes the fix:
+
+1. The idle Codex you see and manually use **is** %1, in its inter-iteration gap → the fix is the deferred-drain (queue the reopen into the loop). I can implement it; I just can't live-verify until %1's pane is idle (it's mid 9m55s turn — I won't disrupt it).
+2. The idle Codex you use is a **different pane/session** than %1 → then route is binding to the wrong pane and I need its pane id to trace the mis-binding (this would tie into the `astro-listings`/`monsterrodholders` cross-binding on %1 that `admin detect` already flags).
+
+Which is it — same pane %1 in a loop gap, or a different idle Codex pane? And do you want me to implement the deferred-drain now (gating live-verify until the pane idles), and/or halt the %1 auto-loop so you can drive it manually?
+<!-- agent:boundary:9deebfd5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -224,6 +251,7 @@ JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. F
 Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
 ```
 ~~~
+- ~"evidence does **not** show monsterrodholders idle" You don't have the right evidence. You are missing the evidence. I saw Codex idle with my own eyes and I can manually run agent-doc from Codex. Something is missing. I'm tired of arguing with you about this. You need to look deeper. Stop punting with gibberish and lies.~
 - do [#queue-consume-ipc-timeout-live-verify]
 - agent-doc monsterrodholders.md response are not being written into the document.
 - do [#per-cycle-protocol-output-overhead]

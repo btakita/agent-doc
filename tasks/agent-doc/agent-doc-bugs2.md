@@ -34,11 +34,32 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 18 response topic(s): Head 1 re-served after compact; agent-doc dropped my 2nd `- deploy` queue item during a run; Make the main sync pipeline fast / responsive on file switch; 15 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b3ffcc36 -->
+
+### Re: monsterrodholders responses not being written — likely the same contamination, now resolving — opus-4-8
+
+> **Queue prompt:**
+>
+> agent-doc monsterrodholders.md response are not being written into the document.
+
+
+> **Queue prompt:** agent-doc monsterrodholders.md response are not being written into the document.
+
+I checked the live evidence, and this looks like **the same root cause** as the 1-pane-1-document issue — and it's resolving now that the contamination is fixed.
+
+**Evidence responses are landing again (post-fix):**
+- `f1ae73a` (00:35) "agent-doc response: clear regional hero queue" and `a53ecee` (00:25) "agent-doc response: expose next regional queue" — both committed real response content into `monsterrodholders.md`.
+- The only `out_of_band_write` for monsterrodholders in `ops.log` is ~51 days old; there is no recent missing-writeback signature.
+
+**Why contamination caused it:** while pane %1 was bound to two documents (`monsterrodholders [codex]` + stale `astro-listings [claude-code]`), there was no single authoritative actor, so monsterrodholders' closeout/writeback had an ambiguous target — responses didn't reliably land (and your queue adds didn't process). After the bind-time eviction (`25ff1116`) made %1 single-owner, both queue processing and response writebacks resumed (the two response commits above).
+
+**Honest caveat:** "response not written" is a bug *class* with more than one cause. The contamination explains the recent monsterrodholders case, but the direct-chat/Codex final-gate variant and the IPC-merge-drop variant are separate signatures tracked by `#codex-final-response-repeat` / `#codex-final-response-live-verify` (plan `plan-codex-final-response-not-written.md`), still gated pending a live repro of *their* path. I'm not closing those — only attributing the recent monsterrodholders symptom to the contamination.
+
+Captured `#monsterrod-writeback-post-contamination-confirm` to verify on your side: if monsterrodholders responses still go missing *after* the fix, tell me and I'll capture the exact signature. Right now the commit record says they're writing.
+<!-- agent:boundary:b587a7b3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- agent-doc monsterrodholders.md response are not being written into the document.
+- ~agent-doc monsterrodholders.md response are not being written into the document.~
 - do [#per-cycle-protocol-output-overhead]
 - do [#skill-md-token-footprint-reduce]
 - Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.
@@ -74,6 +95,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#monsterrod-writeback-post-contamination-confirm] [recommended] Confirm monsterrodholders.md responses now write to the document reliably after the 1-pane-1-document eviction fix (25ff1116). Evidence it resolved: post-fix commits f1ae73a (00:35) + a53ecee (00:25) landed real response content; only out_of_band_write in ops.log is ~51 days old. If responses still go missing AFTER the contamination fix, capture the specific signature (Codex final-gate vs IPC merge drop vs closeout) — that is a DIFFERENT cause than contamination and routes to existing gated items #codex-final-response-repeat / #codex-final-response-live-verify (plan-codex-final-response-not-written.md).
 - [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.
 - [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.
 - [ ] [#test-submodule-worktree-git-identity] #agent-doc-bug: agent-doc tests that git-commit inside a checked-out submodule worktree (super/.git/modules/<sub>) don't set user.email/user.name there, so they pass locally (dev has global identity) but fail CI exit-128 — a green-local/red-CI flake. Fix at the test level: set the two config lines in the submodule worktree before the commit. Live example: flow::closeout::tests::classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent (closeout.rs ~1383). Same class as the codex_final_gate test-bin-PATH flake fixed this session (0f7607a2). Replaces the deleted feedback_submodule_worktree_test_git_identity memory workaround.

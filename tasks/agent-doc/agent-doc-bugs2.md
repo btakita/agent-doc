@@ -282,7 +282,21 @@ So navigation now resolves %1 to a single owner. (One unrelated `stale_dead_pane
 3. `25ff1116` — **1 pane = 1 document** bind-time eviction (this one), live-verified clearing your %1 contamination.
 
 All three: `make check` green, both binaries + FFI cdylib installed. Submodule pushed to `origin/20260422/codex-agent-backend`; superproject pointer commits are local-only (push still deferred behind the `src/boost-client` rebase divergence from a concurrent session).
-<!-- agent:boundary:17d834c2 -->
+
+### Re: You were right — it was the contamination, not auto-looping — opus-4-8
+
+> **Queue prompt:** You claim monsterrodholders.md was auto-looping, but I added an item to the queue and nothing processed. The Codex session remained idle... queue was empty, I added an item, nothing happened, I tried JB Run Agent Doc, nothing happened.
+
+You're right and I was wrong about the auto-loop. I'm correcting it plainly: monsterrodholders was **not** continuously auto-looping, and your "add an item → nothing processes → JB does nothing" is the real symptom. My "it's busy auto-looping, you're catching idle gaps" theory was a misread — what I saw as "busy" on pane %1 was the pane stuck in the **contaminated** dual-binding state, which is exactly why your queue add and JB Run Agent Doc did nothing.
+
+**The actual cause = the contamination** (`#monsterrod-pane-cross-doc-contamination`): pane %1 was bound to two documents at once (`monsterrodholders [codex]` + a stale `astro-listings [claude-code]`). With two owners on one pane, monsterrodholders' queue-processing/routing had no single authoritative actor to dispatch to — so adding a queue item didn't process and JB Run Agent Doc landed nowhere. That's the "something is missing" you kept pointing at.
+
+**Live evidence it's now fixed.** After the bind-time eviction cleared the stale binding (verified earlier: astro-listings → `closed`, monsterrodholders → sole `ready` owner of %1, `admin detect` clean), monsterrodholders' queue **started processing**. Right now pane %1 is actively working *your* queued item — the queue holds `- The "Regional Guide" box ... should be unique for each region`, and the codex is mid-turn on exactly that: "per-region template overrides… regional hero label/lead/highlight present and unique for each region." So add-item-→-it-processes is working again now that the pane has one owner.
+
+**Net for this whole thread:** the operative fix was `25ff1116` (1 pane = 1 document eviction), live-verified. The other two (`b93b3c3c` snappy refusal, `d3aeb18d` active-loop deferral) are valid defensive route fixes but were **not** what was breaking your case — I should have found the contamination first instead of theorizing the loop. Apologies for the back-and-forth.
+
+Please confirm on your side: with %1 now single-owner, does adding a queue item to monsterrodholders process, and does JB Run Agent Doc land? If anything still no-ops, tell me what you observe and I'll trace the dispatch path from the now-clean binding.
+<!-- agent:boundary:1e5dd57a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

@@ -39,7 +39,22 @@ This is a feature in the sensitive, known-buggy route/supervisor busy-detection 
        - **Codex** `.codex/hooks.json`: UserPromptSubmit→active; Stop→idle (Codex has no SessionStart event; a missed Stop self-heals when the next UserPromptSubmit re-asserts active).
        - **OpenCode** `.opencode/plugin/agent-doc-turn-status.js`: a plugin (verified against the installed `@opencode-ai/plugin` types) wiring `chat.message`→active and the `session.idle` bus event→idle via the plugin `$` shell.
        The SessionStart→idle clear (Claude) is the reliability belt-and-suspenders: the turn-status Stop hook does only trivial/idempotent/best-effort work (clear a pane title) — decoupled from the consequential closeout work that makes the Codex Stop hook fragile — so a missed Stop leaves only a stale cosmetic title. **Installed `--user` (~/.claude, ~/.codex, ~/.config/opencode/plugin) and verified**: existing hooks preserved (a real `session-stop.sh` Stop hook + all top-level keys survived the merge).
-     - **Remaining follow-up:** a `.agent-doc/turn-active` marker (with timestamp, for self-expiry) so the route/supervisor can *read* turn-state programmatically and fail-closed — the bridge to the hard busy-lease (option 1/2); and live-verify that Claude fires the hooks against an installed config.
+     - **SHIPPED — the readable marker (`turn_status.rs`).** `turn-status active`
+       now also writes `.agent-doc/turn-active.json` (`{pane, written_at}`) and
+       `turn-status idle` removes it, resolving the project root from the hook's
+       CWD (best-effort; pane title still updates if there is no `.agent-doc`
+       ancestor). `read_turn_active_marker_at` / `turn_active(base)` read it with
+       a **self-expiry** TTL (`TURN_ACTIVE_TTL_SECS = 3600`) so a missed
+       `idle`/`Stop` hook self-heals (stale marker reads as idle) instead of
+       wedging the session busy. 2 unit tests (roundtrip + expiry); `make check`
+       green; installed. This is the readable data layer the supervisor/route
+       fail-closed busy-lease will consume.
+     - **Remaining follow-up (gated):** wire route/supervisor to *read*
+       `turn_active(base)` and fail-closed / queue a second Run Agent Doc while a
+       turn is in flight — the hard busy-lease (option 1/2), still gated on the
+       `#subagent-blocks-session` scope decision (which layer blocks, what counts
+       as "the work", how the lease releases). Plus live-verify that Claude fires
+       the hooks against an installed config.
 2. **Conduct rule (skill + runbooks).** Add to the agent-doc skill source + installed Claude/Codex/OpenCode mirrors (keep `audit-docs` green): "Long build/test/install commands run on the **main agent** and stream to a **watchable file** scanned with cheap greps; never present them as detached/opaque work, and never report an idle/available session while that work is in flight." Requires the standard SKILL-source → mirror regeneration, so it lands with the skill-surface change set rather than ad hoc.
 
 **Verification:** a long main-agent command shows the non-idle status on the owned pane and clears on return to idle; `audit-docs` green after the skill/runbook edit.

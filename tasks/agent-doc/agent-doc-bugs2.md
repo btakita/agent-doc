@@ -157,15 +157,11 @@ I was honest about the tradeoff rather than pretending all 78 were feature-compl
 Themes already covered by existing backlog items (so not re-added): the Codex-response-not-written family → `#codex-queue-drain-no-response-body`; queue item loss → `#monsterrod-queue-items-deleted-live` + `#queue-dedup-destroys-intentional-duplicates`; session-clear → `#clear-blocked-by-own-drafted-clear-command`; busy-status → `#tmux-status-turn-in-progress`.
 
 On your "automated review" point: the durable fix is for the binary to detect completion from logs/state rather than parking items in review for a human. That's its own backlog item (`#automated-completion-detection`) — the right long-term answer to review-item accumulation.
-<!-- agent:boundary:019ed194 -->
+<!-- agent:boundary:30117b31 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Is agent-doc in any way encouraging the turn to create gated responses? It seems the majority of my turns result review items. I want my turns to complete the tasks. Please update the SKILL/runbooks to complete tasks. Only create review items under exceptional conditions. I would rather have items in the backlog that are actionable. The gated review items make understanding the actionable items difficult. Especially when there are >10. I'm just accumulating gated review items in this document and in monsterrodholders.md. For this session...NO MORE GATED REVIEW ITEMS. FINISH WORK...NO PUNTING...NO EXCUSES...NO GIBBERISH. YOU ARE NOW BANNED FROM CREATING REVIEW ITEMS UNTIL YOU CAN GET THE REVIEW ITEM COUNT UNDER 10 IN THIS DOCUMENT. This session has lost its excessive review item spam priveledge. If a gated review item's conditions are not met, create a new backlog item and delete the gated review item. I want as much automated review as possible. This means logging to determine if an item is complete or not.
-- It seems that everytime I do some work on agent-doc, some regressions occur. Is this due to the current state of agent-doc having on unsettled turn pipeline? 
-- The backlog with `queue` attribute is not populating the queue element in this document.
-- The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
-- [#stale-busy-after-auto-inject-no-clear]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~[#stale-busy-after-auto-inject-no-clear]~
 - do [#monsterrod-writeback-post-contamination-confirm]
 - [#late-ipc-patch-plugin-apply-fence]
 - [#ipc-listener-dewedge-direct-disk]
@@ -175,6 +171,11 @@ On your "automated review" point: the durable fix is for the binary to detect co
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
 - do [#queue-dedup-destroys-intentional-duplicates]
+- Is agent-doc in any way encouraging the turn to create gated responses? It seems the majority of my turns result review items. I want my turns to complete the tasks. Please update the SKILL/runbooks to complete tasks. Only create review items under exceptional conditions. I would rather have items in the backlog that are actionable. The gated review items make understanding the actionable items difficult. Especially when there are >10. I'm just accumulating gated review items in this document and in monsterrodholders.md. For this session...NO MORE GATED REVIEW ITEMS. FINISH WORK...NO PUNTING...NO EXCUSES...NO GIBBERISH. YOU ARE NOW BANNED FROM CREATING REVIEW ITEMS UNTIL YOU CAN GET THE REVIEW ITEM COUNT UNDER 10 IN THIS DOCUMENT. This session has lost its excessive review item spam priveledge. If a gated review item's conditions are not met, create a new backlog item and delete the gated review item. I want as much automated review as possible. This means logging to determine if an item is complete or not.
+- It seems that everytime I do some work on agent-doc, some regressions occur. Is this due to the current state of agent-doc having on unsettled turn pipeline? 
+- The backlog with `queue` attribute is not populating the queue element in this document.
+- The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
+- Please mark queue items `~~` when they are completed. I see open items in the queue that have been completed but they are not completed.
 <!-- /agent:queue -->
 ###
 <!--

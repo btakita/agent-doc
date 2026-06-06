@@ -627,6 +627,17 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Plan the completion work-graph (auto-dag) for a document's backlog +
+    /// review items: classify each (implementable / live-verify / IPC-capture /
+    /// blocked / done) and emit a Mermaid diagram + nested list
+    /// (`#auto-dag-first-class`, the agent-doc analogue of `/goal`)
+    AutoDag {
+        /// Path to the markdown document
+        file: PathBuf,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Validate sessions.json against live tmux panes, remove stale entries
     Resync {
         /// Limit checks/fixes to a single session document
@@ -1997,6 +2008,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Outline { file, json } => outline::run(&file, json),
+        Commands::AutoDag { file, json } => {
+            agent_doc_orchestration::auto_dag::run(&file, json)
+        }
         Commands::Resync { file, fix, session } => {
             if fix {
                 agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())

@@ -91,6 +91,7 @@ pub mod hooks;
 // Relocated to `agent-doc-core` (#ipcfullprompt-recur2 — pure, zero-dep forensic
 // detector). Re-exported so `crate::ipc_corruption::*` call sites resolve.
 pub use agent_doc_core::ipc_corruption;
+pub mod auto_dag;
 pub mod lint_gate;
 pub mod pending;
 pub mod pending_cmd;

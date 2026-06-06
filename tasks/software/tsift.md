@@ -101,7 +101,37 @@ The failure mode to avoid is a graph that fills with confident-sounding, unverif
 ### Net recommendation
 
 It's a strong fit and a low-risk extension because it reuses the substrate. I've queued it as a `[recommended]` backlog item (findings graph layer) rather than starting implementation, since the active queue was inactive and this is a design question. If you want to proceed, the first concrete slice I'd spec is: the `Finding` node + anchored edge schema in `GraphStore`, watermark-based staleness, and injection into `context-pack` — the menu command and md/html export build cleanly on top of that. The one thing to watch is staleness/rot; anchoring to handles + watermark gating is the mitigation, not an afterthought.
-<!-- agent:boundary:aa18e0dc -->
+
+### Re: Add a documentation section for the findings graph layer — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.
+
+
+Added a `## Findings Graph Layer` section to [`src/tsift/SPEC.md`](../../src/tsift/SPEC.md), placed right after the Provider-Neutral Graph Substrate it builds on. It's marked **design-stage (`#trt1`)** and "updated as we implement," with subsections tagging what already exists vs. what's proposed so the spec never overstates shipped behavior. It covers:
+
+- **Motivation** — derived vs. authored knowledge, and why authored "why" needs a durable home.
+- **Existing primitives it reuses** — `GraphStore` nodes/edges (already carry provenance + freshness), the `community_graph_watermark` staleness discipline, `graph-db map`, the `summaries.db` semantic adapter, and stable symbol/`ast_span` handles.
+- **Data model** — `finding`/`decision`/`note` nodes; `concerns`/`scopes`/`relates_to` edges; anchor-to-handle (not line numbers); watermark staleness (stale-but-visible over wrong-and-confident).
+- **Capture policy** — opt-in by default; explicit `tsift finding add` + config-gated passive draft harvest.
+- **Retrieval/visibility** — hot-path injection into `context-pack`/`search`/`explain`; graph-menu via `graph-db map`; graph store as source of truth with on-demand md/html projections.
+- **Benefits** and a **4-phase implementation plan**.
+
+`#trt1` stays open in the backlog — this cycle documented the design; implementation is the next step.
+
+#### Build/test journey — three pre-existing failures surfaced and fixed
+
+The `#spec-test-build-install-commit-push` preset ran `make check`, which revealed that **main was already red in CI** — independent of this doc work:
+
+1. **Rust 1.94 clippy gate (the actual CI blocker).** CI (`dtolnay/rust-toolchain@stable`) was failing to *compile* on `derivable_impls` in `tsift-core` (confirmed: last 5 CI runs all failed here, never reaching tests). Fixed the cascade across `tsift-core`, `tsift-sqlite`, `tsift-cli`, `tsift-quality` (`unnecessary_map_or`→`is_none_or`, `explicit_auto_deref`, `collapsible_if`; `#[allow(too_many_arguments)]` on two existing wide fns per repo convention). All behavior-preserving.
+2. **backend-eval metric drift (latent).** Once clippy unblocked the suite, `graph_db_backend_eval_..._against_sqlite` failed: the full-projection required-metric list + conformance test referenced phase `sqlite_edge_staging`, which commit `1145dfc` merged into `sqlite_node_staging`. Renamed the two stale references (mirrors what that commit did for the sqlite-side test).
+3. **surrealdb multi-process sidecar coherence (latent).** `surrealdb_store_multi_process_reader_writer_lock` deterministically lost the writer's node on reopen: incremental mutators never invalidated the on-disk index sidecar, and a plain `open()` rewrote a sidecar from a (possibly stale) DB scan, re-poisoning the cross-process cache. Mutators now drop the sidecar; `open()` no longer persists one (only the explicit `from_rows_file_backed`/`open_or_refresh` paths do, atomically pairing rows with `stored_row_hash`).
+
+**Verification:** `cargo test --workspace` → **1223 passed (50 suites), 0 failed**; `cargo clippy --workspace --all-targets -D warnings` → **clean**. `cargo install --path .` → tsift 0.1.62 installed.
+
+**Commit/push:** tsift committed + pushed — `678672f` on `btakita/tsift`. Superproject `src/tsift` pointer committed locally (`cf5df5f7f`); its push is deferred because the shared agent-loop superproject is 34 concurrent-session commits ahead of origin with submodule conflicts in unrelated areas (boost-client/monsterrodholders) — I did not force-reconcile other sessions' work. The tsift deliverable itself is pushed and CI-green.
+<!-- agent:boundary:ea0cbb12 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +141,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.
+- ~Add a documentation section for the findings graph layer, detailing its design, implementation, and benefits. Update as we implement.~
 - [#trt1]
 <!-- /agent:queue -->
 

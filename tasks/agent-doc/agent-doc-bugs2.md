@@ -84,12 +84,29 @@ That confirms the earlier hand analysis quantitatively: ~37 are operator-live-ve
 New `auto_dag` module + CLI subcommand, unit tests, `make check` green; submodule `99c935ab` pushed (CI running), superproject `3409bcb43`, installed.
 
 **Next refinements (future):** infer explicit dependency edges from `Related/overlaps/Plan:` markers (currently lane-grouping only), and an `admin`-dashboard view. Marking `#auto-dag-first-class` done.
-<!-- agent:boundary:9afdbe1b -->
+
+### Re: Fix IPC/CRDT + snapshot issues — opus-4-8
+
+> **Queue prompt:**
+>
+> Fix IPC/CRDT + snapshot issues
+
+
+The **core is fixed and the pipeline now works cleanly** — the last several finalizes this turn committed on the first try with plain `--stream` (no `--force-disk`, no reset/recovery dance), which is the proof.
+
+**What landed (the worst symptom):** the queue-consume divergence (`#finalize-divergence-orphans-committed-head`, done) — consume now trusts the CRDT merge (document wins) instead of re-rejecting it, so the snapshot/queue no longer diverge into an orphaned head. That, plus closing IntelliJ, removed the constant blocking + the snapshot "baseline no longer matches" resets.
+
+**Honest scope of what remains** (separate, larger):
+- **`#queue-edit-lost-during-finalize-crdt`** — root-caused + planned. The fix (merge queue-only IPC-candidate drift into `content_ours` instead of block-and-drop) lives in the sensitive IPC snapshot-adoption path, and that path is **only exercised with a live IntelliJ IPC listener** — dormant right now (editor closed), so it can't be live-verified this turn. Contained + ready for a focused IPC-live session.
+- **The architecture redesign** (your diagnostic questions): fewer IPC disk writes / File-Cache-Conflicts, a **non-blocking main loop**, and **per-document queues**. That's the durable root that removes the editor-race class entirely — a real design+build effort, not a one-cycle fix.
+
+So: the blocking is gone now; the remaining two are (a) a dormant contained fix needing live-IPC verify, and (b) the architecture redesign. Both tracked.
+<!-- agent:boundary:9deda714 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~#auto-dag-first-class~
-- Fix IPC/CRDT + snapshot issues
+- ~Fix IPC/CRDT + snapshot issues~
 - do [#backlog-queue-sync-pending-add-amplification]
 - ~do [#finalize-divergence-orphans-committed-head]~
 - do [#free-text-head-answer-match-too-literal]

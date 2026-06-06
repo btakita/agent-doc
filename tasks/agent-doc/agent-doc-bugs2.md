@@ -81,7 +81,21 @@ The head stays live; no snapshot/queue drift is committed. A healthy loop that s
 **Verification:** 3 new unit tests + FlowCore budget audit; `make check` green (clippy + full suite); both binaries rebuilt + installed; spec `specs/07-core-commands.md`.
 
 **Scope honesty:** this is the *interim* — it stops the dead-loop from burning cycles but does **not** remove the CLI-drives-Codex re-entry. The structural root fix remains Option A (MCP server, `#codex-mcp-server`). Live-verify follow-up `#recguard-wedge-escape-live-verify` already queued (this cycle adds no further backlog items).
-<!-- agent:boundary:1643a355 -->
+
+### Re: queue stalled + last response not committed — 2 agent-doc bugs — opus-4-8
+
+Recovered the live session and captured both bugs. **Root cause: a late-applied IPC patch.**
+
+**What happened.** My prior finalize committed cleanly (HEAD 890486b54, monsterrod head consumed), but its boundary-reposition IPC timed out and queued a fallback patch. The route-owned supervisor's wedged IPC listener then applied a STALE earlier patch LATE, appending a DUPLICATE `### Re:` block (an older draft of the same response) to the working tree. That uncommitted duplicate made `session-check` report INTERRUPTED ("direct patchback") and left the cycle open, so the `agent:queue auto` loop never advanced — the stall you saw. `git diff HEAD` showed exactly +17 lines = one duplicate block; HEAD had the correct single copy.
+
+**Recovery (done):** discarded the duplicate (`git checkout HEAD -- <file>`), reconciled the snapshot; queue is un-stalled at 8 items, head `do [#free-text-head-consume-genuine-not-struck]` live.
+
+**Both bugs captured** (plan `tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md`):
+1. `#late-ipc-patch-duplicate-stall` — the late/stale IPC patch re-application duplicates the response and stalls the auto-queue. Fix: generation/baseline-fence queued patches (drop superseded ones); a reposition-only patch must never carry a full response body.
+2. `#late-ipc-patch-response-uncommitted` — the duplicate is uncommitted, so the response looks not-committed and session-check reports an unrecoverable interruption. Fix: session-check should self-heal by reaping a HEAD-duplicate uncommitted `### Re:` block instead of stalling.
+
+Contributing factor this session: a 40-min-hung background `agent-doc write` left the IPC listener/live-buffer state wedged (separate, already noted).
+<!-- agent:boundary:4746063f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

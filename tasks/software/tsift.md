@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: start
 ---
 
 ## Status
@@ -50,7 +50,7 @@ What changes that:
 - **Retain-don't-reread discipline** — the practical mitigation: read a runbook once, keep the relevant facts in working memory, and don't re-open it on a later turn unless the content actually changed or was summarized away.
 
 So: duplicated in the raw transcript = yes; permanently duplicated = no (compaction reclaims it); avoidable = yes (read once, retain). The SKILL/runbook split exists precisely so a turn that doesn't need a given runbook never pays for it at all.
-<!-- agent:boundary:329e9e65 -->
+<!-- agent:boundary:380552ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,8 +59,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- If a runbook is called multiple times in a session on separate turns, will the context from the runbook be duplicated?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Would "Retain-don't-reread discipline" be implemented in skill-harness?
 <!-- /agent:queue -->
 
 ## Backlog

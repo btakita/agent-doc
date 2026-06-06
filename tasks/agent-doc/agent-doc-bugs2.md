@@ -88,7 +88,19 @@ But you're right that the plain `clear` UX is broken, and it's a real bug. The g
 Agreed — while a turn is running the status line should read `agent-doc: turn in progress`, not blank. The supervisor already owns the `busy ↔ ready` transitions (and now self-heals a stale-busy actor via the idle-queue-watch fix shipped this turn), so the right design is to drive the status-line indicator from those same transition points — one source of truth, so the indicator can't diverge from the actor state and can't linger after the turn ends. Captured as `#tmux-status-turn-in-progress` with a plan; it overlaps `#claude-busy-status-during-active-turn` and `#jb-stale-busy-idle-footer`, so I'll coordinate them in one busy-status cycle.
 
 Both are queued, not implemented this turn — I just shipped + committed the stale-busy self-heal (`7b60fcdc`) and stay off starting more heavy supervisor work past that commit boundary. Next focused cycle takes these two.
-<!-- agent:boundary:311f13a8 -->
+
+### Re: turn summary — stale-busy self-heal shipped; new bugs captured; pausing the loop — opus-4-8
+
+**Shipped this turn (agent-doc `7b60fcdc`, pushed to `origin/main`, CI running, both binaries installed):** the durable `#stale-busy-after-auto-inject-no-clear` fix — the supervisor's idle-queue watch now self-heals a stale-busy actor wedged over an idle pane (poll-based reconcile from fresh `tmux capture-pane` evidence, ~2s debounce, persisted via `mark_lifecycle`), so the session never gets "truly stuck" needing a pane kill or `session clear`. 5 unit tests + spec; `make check` green. Recovery instructions for your live Codex session are in the earlier response (`session status` / `session clear` / `restart-supervisor`).
+
+**Your two new prompts (answered + captured for focused cycles):**
+- `#clear-blocked-by-own-drafted-clear-command` — `session clear` is refused by its own drafted command text in the composer. Immediate workaround: `agent-doc session interrupt-clear <FILE>`. Plan: `tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md`.
+- `#tmux-status-turn-in-progress` — drive a `agent-doc: turn in progress` status line off the supervisor busy↔ready transitions. Plan: `tasks/agent-doc/plan-tmux-status-turn-in-progress.md`.
+
+**Why I'm pausing the auto-loop instead of draining further:** the binary's free-text strike only consumes one head per finalize, so the "I cannot clear" and "tmux status" heads are answered-but-unstruck and would be re-served. Continuing would re-answer them and produce the duplicate-response churn you've flagged before. I captured that gap as `#multi-head-consume-one-per-finalize`. The remaining queue is answered free-text heads + bracket-id items for work that's already done/captured (`#admin-recover-stale-busy-no-pane-kill` shipped `be7f5f06`, `#stale-busy-after-auto-inject-no-clear` shipped `7b60fcdc`).
+
+Say the word and I'll (a) fix the multi-head consume so the queue drains cleanly, (b) take the `session clear` / tmux-status bugs in a focused cycle, or (c) clear the answered heads. I did not push the superproject `src/agent-doc` pointer (left for a clean cycle per the deferred-pointer pattern).
+<!-- agent:boundary:ab1ee147 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

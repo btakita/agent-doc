@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -106,7 +106,7 @@ I measured it against real session logs. Verdict: **yes, the soft discipline is 
 - Scope: Claude = the agent-loop project transcripts (284 sessions); Codex = all 2026 rollout sessions (~2,866); OpenCode = full DB.
 
 Bottom line for the discipline-vs-enforcement question from the prior turn: the soft discipline already eliminates in-context waste, so a hard read-once hook would only reclaim the cross-turn tail — and that tail is dominated by Codex's per-cycle shell re-reads, which is the targeted, high-value case rather than a broad win.
-<!-- agent:boundary:dc8eb2bc -->
+<!-- agent:boundary:309062ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +115,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Should we implement [#7qky] for Codex based on the last response? But not on Claude/OpenCode?
 <!-- /agent:queue -->
 
 ## Backlog

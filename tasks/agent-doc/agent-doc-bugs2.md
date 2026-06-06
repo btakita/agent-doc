@@ -21,7 +21,7 @@ queue: go
 ## Status
 
  <!-- agent:status patch=replace -->
-Queue draining (`queue: go`). Head 5 (clear agent-doc-workaround memories, treat as bugs) done: evaluated 47 memories, found 2 that mask fixable agent-doc bugs — deleted `feedback_submodule_worktree_test_git_identity` + `feedback_verify_via_worktree_inside_src` (and their MEMORY.md pointers), captured the underlying bugs as `#test-submodule-worktree-git-identity` + `#multi-session-shared-build-isolation`. Kept `feedback_rtk_masks_make_check_exit` (RTK, not agent-doc; valid caveat used this session). Prior heads: 2 fixes shipped (CI green) + 3 plans/captures.
+Queue draining (`queue: go`). Head 6 (deprecated `queue_active: false` still written) — duplicate of the captured `#writer-emits-deprecated-queue-active-false`, which carries the detailed finding (prior fix attempt reverted; complete fix = a commit-boundary normalization pass OR migrate each verbatim/direct-set site, then update ~15 deprecated-form test assertions across preflight/write/closeout/route) and is queued as `do [#writer-emits-deprecated-queue-active-false]`. Deferring the involved 30-site change to that `do` head rather than cramming a previously-reverted fix into a churn-prone loop cycle; it's cosmetic (both forms parse). Struck as duplicate. Memory cleanup (head 5) persisted.
 <!-- /agent:status -->
 
 ## Exchange
@@ -115,7 +115,15 @@ Done. Evaluated all 47 memory files with one discriminator: **does this memory m
 **Kept:** `feedback_rtk_masks_make_check_exit` — that's an **RTK** bug (a different tool wrapping the commands), not agent-doc, and it's a live verification safeguard I used *this very session* to catch an RTK-masked test failure. Out of scope for dogfooding agent-doc; tell me if you want it gone too.
 
 No crdt/queue-revert workaround memory exists (the `crdt-backlog-id-revert-treadmill` note referenced earlier is already absent). So memory no longer papers over these two — they'll surface as the captured bugs until fixed at the test/binary level.
-<!-- agent:boundary:c0aeedcd -->
+
+### Re: Deprecated `queue_active: false` still written instead of `queue: stop` (re-raised) — opus-4-8
+
+> **Queue prompt:** The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.
+
+Already captured with a full root-cause finding as `#writer-emits-deprecated-queue-active-false`, and queued as `do [#writer-emits-deprecated-queue-active-false]` later in this same queue. Verified the scope this cycle: ~30 `queue_active: false` sites (17 in `preflight.rs` alone, plus `write.rs`/`closeout.rs`/`repair.rs`/`git.rs`/`route/tests.rs`/`plan.rs`), and the captured finding notes a **prior fix attempt was reverted** — the `write()`-level migrate-on-write only reaches parse+rewrite paths, while finalize, preflight queue-clear, closeout recovery, and the codex_hook Stop-repair set `queue_active` directly or preserve the line verbatim, bypassing it.
+
+The complete fix is a **single normalization pass at the commit boundary** (rewrite `queue_active: X` → `queue: start/stop` for every path) plus updating the ~15 deprecated-form test assertions. That's an involved, regression-sensitive change with a revert in its history — it belongs to the explicit `do [#writer-emits-deprecated-queue-active-false]` head, not a previously-reverted re-attempt squeezed into this churn-disrupted loop. It's also **cosmetic**: both `queue_active:` and `queue:` parse correctly, so this is deprecated-form hygiene, not a functional break. Striking this free-text head as a duplicate of that queued work.
+<!-- agent:boundary:8ba4d1aa -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

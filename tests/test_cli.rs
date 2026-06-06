@@ -317,7 +317,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 26,
+        // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
+        // ops_log diagnostic: when the post-CRDT-merge document queue diverges from
+        // the snapshot, consume reconciles (document wins) instead of bailing
+        // (#finalize-divergence-orphans-committed-head / IPC-CRDT resilience).
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 27,
         _ => 0,
     }
 }

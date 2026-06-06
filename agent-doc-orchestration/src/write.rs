@@ -3387,8 +3387,30 @@ fn plan_queue_prompt_consumption(
         snap_completed_entries
     };
     if snap_new_entries != new_entries {
-        anyhow::bail!(
-            "queue consume: snapshot queue state diverged from document queue after completing head prompt"
+        // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: the
+        // document `content` here is the post-CRDT-merge result — the merge has
+        // already reconciled the agent (snapshot) side against concurrent
+        // user/editor edits on the disk side. The same-head proof above
+        // (`snapshot_consumed_texts == consumed_texts`) already confirmed we
+        // consumed the right head; this remaining-queue difference is exactly the
+        // concurrent edit the CRDT merge resolved. Hard-bailing here re-rejected
+        // the merge the pipeline just succeeded at, leaving an orphaned unstruck
+        // head that re-serves (the divergence error hit repeatedly under live
+        // editor races). Reconcile instead: the merged document queue is
+        // authoritative, and the snapshot below adopts the document's `new_body`,
+        // so both sides converge on the head-struck merged state. Record the
+        // reconciliation for forensics rather than failing the cycle.
+        let snap_remaining_prompts = crate::queue::prompts(&snap_new_entries).len();
+        let doc_remaining_prompts = crate::queue::prompts(&new_entries).len();
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_divergence_reconciled file={} reason=crdt_merge_authoritative consumed={} snap_remaining={} doc_remaining={}",
+                file.display(),
+                consume_count,
+                snap_remaining_prompts,
+                doc_remaining_prompts
+            ),
         );
     }
 
@@ -12777,6 +12799,53 @@ mod tests {
     // strict closeout and the stream IPC-timeout `exit(75)` closeout. Mirrors the
     // exact scenario that treadmilled the auto-loop: a free-text head answered by
     // a finalize response whose write fell back to direct disk on IPC timeout.
+    #[test]
+    fn queue_consume_reconciles_diverged_snapshot_instead_of_bailing() {
+        // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: when
+        // the post-merge document queue diverges from the snapshot queue (a
+        // concurrent user/editor edit the CRDT merge already reconciled), consume
+        // must RECONCILE (the merged document wins) and strike the head — not
+        // hard-bail and orphan the unstruck head. Regression for the divergence
+        // error hit repeatedly under live editor races.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do the thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do the thing\n",
+            "- user added later\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // Snapshot diverges: same head, but missing the concurrently-added item.
+        let snap = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do the thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do the thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        snapshot::save(&doc, snap).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("consume must not bail on a reconcilable divergence");
+        assert!(outcome.is_some(), "the answered head should be consumed");
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~do the thing~"),
+            "head must be struck after reconcile:\n{result}"
+        );
+        assert!(
+            result.contains("- user added later"),
+            "the concurrently-added item must be preserved (document wins):\n{result}"
+        );
+    }
+
     #[test]
     fn consume_decision_strikes_answered_free_text_head() {
         let dir = tempfile::tempdir().unwrap();

@@ -176,7 +176,15 @@ Not worth it for build/test watching — keep it simple. Here's the actual math,
 **So:** keep the build in the main agent, piped through digest-runner (already the default here) — that captures the token savings without a sub-agent. A light **blocking** sub-agent only makes sense when the work needs *model judgment* on the output (not just pass/fail extraction) **and** you'd otherwise idle anyway — rare for builds. Reserve sub-agents for genuinely *parallel independent* work (fan-out), where the win is wall-clock + isolation, not token savings on a serial blocking step.
 
 The visibility gap (idle-looking session during a long blocking task) is real and already tracked as `#claude-busy-status-during-active-turn` — a status-surfacing fix, not a reason to add a sub-agent. No new follow-up to capture. Continuing the queue.
-<!-- agent:boundary:9bb6f243 -->
+
+### Re: do #ci-per-test-timeout-guard — opus-4-8
+
+Done (`743251c9`, pushed). The per-test deadlock guard already existed in `.config/nextest.toml` (60s × 3 = 180s, then the hung test is killed and named) — but it never reached CI, because CI ran `make check` through the plain `cargo test` fallback (cargo-nextest wasn't installed). So a lock/IPC deadlock would hang to the 60-min job cap with no named test.
+
+Fix: added a `taiki-e/install-action` nextest step before `make check`, so CI takes the Makefile's nextest path and every test inherits the 180s per-test guard — a deadlock now fails fast with the offending test named, instead of a silent hang. The job-level `timeout-minutes` stays as a backstop for non-test hangs (compile, doc tests, tmux-ci).
+
+Verified locally before switching the runner: `cargo nextest run --workspace --all-targets` → **3765 passed, 233 skipped, 0 failed** in 13.9s, so the suite is clean under nextest's per-process isolation (no shared-state failures from the switch). Continuing the queue.
+<!-- agent:boundary:02de1a14 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -186,6 +194,8 @@ The visibility gap (idle-looking session during a long blocking task) is real an
 - ~Please fix the root cause of this corruption: "  1. Reload the IntelliJ editor buffer for agent-doc-bugs2.md from disk. During finalize, the editor buffer corrupted to 107K (2× duplicated) vs the clean 60K on disk — a live repro of the gated"~
 - ~Can we use light models for appropriate tasks, such as watching the build...and block the main agent until the sub-agent completes? The issue I'm having with the subagent with idle Claude session is lack of visibility. So it would be great to save tokens with a light sub-agent but also block the main agent until the subagent is complete? Such as using a monitor and blocking the main agent with the monitor? Is this even worthwhile? Are tokens really being saved with this approach? Only do this if it would be worthwhile to save tokens. Otherwise, keep it simple by running the build and other blocking task in the main agent.~
 - do [#ci-per-test-timeout-guard]
+- Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
+- After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]
 - do [#writer-emits-deprecated-queue-active-false]

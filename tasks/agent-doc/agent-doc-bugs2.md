@@ -97,7 +97,25 @@ Done + pushed. Busy-pane `Run Agent Doc` now **preempts** the auto-loop: `enqueu
 - **Shipped:** built release + `cargo install`, committed `79e0406d`, pushed to `20260422/codex-agent-backend`. CI run `27054575701` in progress.
 
 Remaining plan sub-parts 2–4 (empty-queue suppression, 60s stall audit, recursion-guard escape hatch) gated as `#jb-run-preempt-followups` — they overlap `#autoloop-command-preemption` (up next) and `#post-clear-auto-queue-suppress`. Advancing the queue to `#autoloop-command-preemption`.
-<!-- agent:boundary:02d1ea72 -->
+### Re: #autoloop-command-preemption needs a design call before I implement — opus-4-8
+
+Pausing the queue drain here — this item is **not** done. Unlike the last two items, this one is **destructive + design-open + live-gated**, so I won't auto-implement it without your call. (Session so far: closed `#skill-md-token-footprint-reduce` at Phase-1; shipped `#jb-run-preempt-autoloop-priority` — committed `79e0406d`, pushed, built + installed, CI `27054575701` running.)
+
+`plan-autoloop-command-preemption.md` carries three open design questions; one is genuinely yours:
+
+**Fork — what should a non-interrupt `Clear Session Context` do on a busy auto-looping doc?**
+- **(rec) Defer:** set durable `queue: stop`, let the *current* turn finish (don't kill in-flight work), run the clear in the inter-iteration gap, then restore `queue: start` so the loop resumes. Non-destructive; matches the plan. Cost: the clear happens a few seconds later, not instantly.
+- **Interrupt now:** keep `Clear Session Context` immediate — but that means killing the in-flight turn, which today is the explicit "Interrupt and Clear" path. Folding it into plain Clear makes Clear destructive.
+
+The other two questions I'd decide as implementation detail (tell me if you disagree): **where it lives** — the command path sets durable `queue: stop` + records prior state, the supervisor idle-queue watch resumes on restored `queue: start` (reuses existing arch); **concurrency** — a generation/state guard so a stale watcher can't resume mid-command.
+
+**Proposed phasing if you pick Defer:**
+1. Queue-state pause/resume mechanism (operator command on active auto-queue → durable `queue: stop` + record prior; supervisor resumes on `queue: start`) — unit-testable, non-destructive. I can do this now.
+2. Defer semantics + JB message change ("blocked → deferred until the turn finishes") — needs this fork settled.
+3. Operator live-verify on the monsterrodholders busy Codex pane (gating; only you can run it).
+
+Say **"defer, go"** and I'll implement phases 1–2 and gate 3 for your live-verify. Or steer the fork. The remaining queue (`#autoloop-command-preemption` + 8 more) stays put until you call it.
+<!-- agent:boundary:6c61edf5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

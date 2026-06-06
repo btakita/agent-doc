@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -179,7 +179,7 @@ tsift decides "this fetch is a runbook, emit a stub with a re-fetch hint"; agent
 One nuance worth keeping: agent-doc already owns session/cycle state (`cycle_state.rs`), so it's the natural place to *provide the session-identity adapter* (layer 2) — but the ledger itself (layer 1) still belongs in the leaf crate that agent-doc depends on, not inside agent-doc.
 
 **Caveat (unchanged):** don't build any of this until re-measurement proves the nudge didn't already close the gap — #7qky stays gated. But designing the **seam** now is free and worth it: have `tsift runbook <name>` and agent-doc's runbook references both call the same ledger interface from day one, so the enforcement can drop in later without reworking either consumer. I've recorded this placement decision on the gated #7qky item.
-<!-- agent:boundary:a12e06c7 -->
+<!-- agent:boundary:9e53529b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -188,7 +188,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Please look at the monsterrodholders.md session. Is the nudge in effect? If yes, how successful was it?
 <!-- /agent:queue -->
 
 ## Backlog

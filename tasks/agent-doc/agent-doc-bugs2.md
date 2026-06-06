@@ -182,7 +182,7 @@ You're right — and my earlier "it's just a feedback problem" framing was wrong
 Agreed, and that's exactly what shipped: the 60s silent wait is gone for this case. When the pane proves an active turn, route now refuses **immediately** (no ready-wait) — `b93b3c3c`, verified by unit tests and live-installed.
 
 One honest distinction on "start right away": while a turn is genuinely in flight (your live pane is mid 7m29s turn), route still must **not** inject a second turn into it — that invariant prevents scrambling the running work. So "snappy" today means *instant feedback* ("session still running"), not starting a competing turn. The natural next step so you don't have to re-click — auto-queue the reopen and **start it the instant the turn ends** (generalizing the `#jbstalldrain` deferred-drain to the prompt-drift-while-busy case) — is captured as `#jb-busy-reopen-auto-drain-when-idle`. That gives you the full "start right away [the moment it can]" behavior without a busy-turn collision.
-<!-- agent:boundary:b33e1a3d -->
+<!-- agent:boundary:39c95051 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -194,7 +194,7 @@ Error: authoritative actor generation 281 for tasks/monsterrodholders.md owns pa
 ```
 ~~~
 ---
-JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it. 60s its way too long. It should be snappy and start right away. There is no active turn.
+JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it. 60s its way too long. It should be snappy and start right away. There is no active turn. The Codex console is idle.
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.

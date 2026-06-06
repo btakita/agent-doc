@@ -16,6 +16,7 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
+queue_active: true
 ---
 
 ## Status
@@ -29,58 +30,16 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-185634.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-191050.md`*
 
 Compacted content:
-- Archived 8 response topic(s): step plan + remove the deprecated queue_active emission; Fix IPC/CRDT + snapshot issues; [#auto-dag-first-class]; 5 more
+- Archived 2 response topic(s): monsterrodholders.md "run stalled"; queue not auto-populating from backlog `queue` attribute
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: monsterrodholders.md "run stalled" — recursive direct-invocation guard — opus-4-8
-
-> **Queue prompt:**
->
-> agent-doc monsterrodholders.md run stalled `• Ran the command. It hit the same recursive direct-invocation guard because this Codex pane already owns that agent-
-
-
-Triaged as **working-as-designed, already captured** — no code change. Struck as a duplicate.
-
-**What happened.** `agent-doc monsterrodholders.md` was run *inside the Codex pane that already owns monsterrodholders.md*. That is owned-pane self-invocation, so the `#recguard-abandon` guard fired: `recursive_codex_direct_invocation_diagnostic` (run.rs:1056) abandons the empty preflight cycle to avoid a deadlock. "No new agent work was dispatched" is the guard succeeding, not a hang — `session-check` accepts the abandoned cycle, no `agent-doc cancel` needed.
-
-**Recovery is already surfaced.** The diagnostic (run.rs:1063) names the fix in-line: run the work in *this* owner turn, or "retry from outside the managed pane or restart the owner with `agent-doc start monsterrodholders.md`." The specialized variants (`owned_pane_prompt_miss_diagnostic` `#codex-owned-pane-prompt-miss`, `owned_pane_queue_handoff_diagnostic` `#codex-owned-pane-auto-queue-stuck`) name the pending prompt / queue head too. Shipped + spec'd: VERSIONS.md `#recguard-abandon`, specs/07-core-commands.md, session_check.rs:8392 regression test.
-
-**Durable improvements are already queued — not re-filed:**
-- backlog #2 `#jb-run-preempt-followups` sub-part 4 — recursion-guard *escape hatch* for a wedged loop (the one Run Agent Doc that could break a stall being blocked).
-- review #10 `#codex-mcp-server` — Option A root-cause fix (drive Codex via MCP against a persistent session instead of re-shelling into the owner pane), superseding the shipped Option B interim `#codex-self-reinvoke-prevent`.
-
-So the `#spec-test-build-install-commit-push` preset is N/A this cycle: the spec/tests/behavior already exist and are CI-green; adding code here would re-implement shipped guard logic. The only open work is the escape-hatch / MCP root fix, both already prioritized in backlog/review.
-
-### Re: queue not auto-populating from backlog `queue` attribute — opus-4-8
-
-> **Queue prompt:**
->
-> The queue is not auto-populating from backlog which has `queue` attribute set.
-
-
-Triaged: **working-as-designed + the escape hatch is already shipped.** Not a code defect this cycle.
-
-**Why it doesn't auto-populate.** This doc's backlog carries `queue` (line 68) and `queue_active: true`. While a queue is *already active*, `#backlog-queue-sync-pending-add-amplification` (preflight.rs:3444) deliberately holds every backlog id that isn't already a live queue head out of the loop — exactly what this session's preflight logged: *"held 8 freshly-added backlog id(s) out of the active auto-loop."* With an empty live queue, that hold drops all 9 backlog ids, so nothing syncs. The guard exists to stop each new `--pending-add` from re-mirroring as a `do [#id]` head and growing the queue unboundedly (tripping `pending_done_guard` every finalize). Full backlog mirroring happens only on a **fresh** activation (queue not yet active).
-
-**Option C is already implemented** (the plan file is stale):
-- `backlog_queue_sync_pending` preflight warning — preflight.rs:3489, tests at 5777/5833/5862.
-- `agent-doc queue sync <FILE>` — queue_cmd.rs:16, a one-shot full sync that *bypasses* the amplification hold (it ignores active state and mirrors all active backlog ids).
-
-**Recovery (your choice — I did not auto-run it):**
-- Populate now: `agent-doc queue sync tasks/agent-doc/agent-doc-bugs2.md` — injects `do [#id]` for all 9 active backlog items into the live loop.
-- Or fresh re-activation: flip `queue_active: true → false → true`, which mirrors the full backlog on activation.
-
-I held off auto-running `queue sync` because it would push 9 substantial backlog tasks into this autonomous loop at once and could make the loop non-terminating — that's a call for you to make explicitly.
-
-**Captured:** `#backlog-queue-empty-active-repopulate` (new backlog head) — the one genuine refinement: when the live queue is *empty* (0 un-struck prompts), the amplification rationale doesn't apply, so the hold could be skipped to let an empty active queue repopulate. It's a design decision (continuous-backlog-loop vs drain-then-stop), which the plan deliberately left as a non-goal, so it needs a steer before implementing rather than an autonomous change.
-<!-- agent:boundary:438ab620 -->
+<!-- agent:boundary:537400b4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#backlog-queue-empty-active-repopulate]
+- do [#backlog-queue-empty-active-repopulate]. "Decide continuous-backlog-loop vs drain-then-stop before implementing.": Make this dependent on whether or not queue has `go` as an attribute. If `go` is set, continuous-backlog-loop. If not, drain-then-stop.
 - do [#free-text-head-consume-genuine-not-struck]
 - do [#monsterrod-writeback-post-contamination-confirm]
 - do [#jb-busy-active-turn-stall-live-verify]

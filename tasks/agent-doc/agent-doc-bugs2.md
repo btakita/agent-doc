@@ -21,7 +21,7 @@ queue: go
 ## Status
 
  <!-- agent:status patch=replace -->
-Queue draining (`queue: go`). Head 6 (deprecated `queue_active: false` still written) — duplicate of the captured `#writer-emits-deprecated-queue-active-false`, which carries the detailed finding (prior fix attempt reverted; complete fix = a commit-boundary normalization pass OR migrate each verbatim/direct-set site, then update ~15 deprecated-form test assertions across preflight/write/closeout/route) and is queued as `do [#writer-emits-deprecated-queue-active-false]`. Deferring the involved 30-site change to that `do` head rather than cramming a previously-reverted fix into a churn-prone loop cycle; it's cosmetic (both forms parse). Struck as duplicate. Memory cleanup (head 5) persisted.
+Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) — matches captured review `#jb-monsterrod-route-ready-wait-stall`: the `[route]` error is the dispatch-only busy ready-wait (gen 281 owns pane %1, busy actor didn't reach a dispatch-ready prompt within 60s). It's **fail-open-after-wait, not a hang** — the route waited then declined to inject into a busy turn. Fix (surface a "waiting for pane (60s)" status in JB so it doesn't look like a stall) is captured in `#jb-monsterrod-route-ready-wait-stall` + `#jb-run-agent-doc-busy-feedback-live-verify`. Struck as duplicate. Heads 1-6 done (2 fixes CI-green + plans/captures).
 <!-- /agent:status -->
 
 ## Exchange
@@ -131,7 +131,15 @@ Closing orphaned head 6 — its answer is committed just above. It re-served bec
 > **Queue prompt:**
 >
 > The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.
-<!-- agent:boundary:14b53806 -->
+
+### Re: JB Run Agent Doc on monsterrodholders.md stalled (route busy ready-wait) — opus-4-8
+
+> **Queue prompt:** JB Run Agent Doc on monsterrodholders.md stalled, no feedback; I manually started it. `[route] ... authoritative actor generation 281 owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s.`
+
+That error is the **dispatch-only busy ready-wait** path, already captured as review item `#jb-monsterrod-route-ready-wait-stall`. What happened: the monsterrodholders pane (gen 281, pane %1) had an **active turn in flight**, so `route --dispatch-only` correctly refused to inject a new trigger into a busy actor; it waited 60s for the pane to return to a dispatch-ready prompt, then **failed open** (declined, didn't hang) — which is why your manual start then worked. This is the no-inject-into-active-turn invariant doing its job, not a deadlock.
+
+The real defect is **feedback, not behavior**: a 60s silent ready-wait *looks* like a stall. The fix — surface a visible "waiting for pane (up to 60s)…" status in the JB plugin during that wait, and a clear "session still running, try again when idle" notification on the fail-open — is captured across `#jb-monsterrod-route-ready-wait-stall` (review) and `#jb-run-agent-doc-busy-feedback-live-verify` (the busy-feedback live-verify item), overlapping `#route-starting-timeout-poll-recovery`. It's a JB-plugin UX change gated on a live install + repro, so it lives in those review items rather than a fresh capture. Striking this free-text head as a duplicate.
+<!-- agent:boundary:88979da5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Deprecated `queue_active:` frontmatter line no longer gets stuck in a
+  document (`#queue-active-deprecated-line-stuck`).** `merge_queue_state`/`write`
+  already drop the legacy `queue_active:` line when they re-serialize, but a doc
+  whose hot path preserves frontmatter byte-precisely never re-serializes it, and
+  the diff layer classifies any `queue_active:` line as managed state — so its
+  removal reads as a no-op and is never committed. The legacy line stayed in the
+  file forever even after the canonical `queue:` control took over (operators saw
+  a persistent `queue_active: true` that "couldn't be removed"). Preflight repair
+  now drops it once, byte-precisely, directly on disk + snapshot via
+  `strip_deprecated_queue_active_line` — but ONLY when the canonical `queue:`
+  control is present, so no queue state is lost. Idempotent; legacy-only docs
+  (no `queue:`) keep their line. Tests
+  `strip_deprecated_queue_active_line_drops_legacy_when_canonical_present` +
+  `..._keeps_legacy_without_canonical`.
+
 - **Session-check self-heals a late-IPC committed-response over-application
   (`#late-ipc-patch-response-uncommitted`).** When a wedged/slow IPC listener
   applies a stale queued patch after the cycle already committed, it re-adds a

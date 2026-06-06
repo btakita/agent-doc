@@ -941,6 +941,54 @@ pub fn clear_pipeline_state(content: &str) -> Result<String> {
     write(&fm, body)
 }
 
+/// `#queue-active-deprecated-line-stuck`: byte-precise removal of the deprecated
+/// top-level `queue_active:` line from the leading `--- ... ---` frontmatter
+/// region, but ONLY when the canonical `queue:` control is also present (so the
+/// queue state is never lost). Every other byte is preserved verbatim.
+///
+/// This is the migration counterpart to [`merge_queue_state`]/[`write`], which
+/// drop `queue_active` when they re-serialize. Those never fire on a doc whose
+/// hot path preserves frontmatter byte-precisely, and the diff layer classifies
+/// any `queue_active:` line as managed state (so its removal reads as a no-op and
+/// is never committed) — leaving a legacy `queue_active: true|false` line stuck
+/// in the file forever. Preflight repair calls this once to drop it directly on
+/// disk + snapshot so the canonical `queue:` becomes the sole queue control.
+/// Returns the input unchanged when there is no leading frontmatter region, no
+/// `queue:` line, or no deprecated `queue_active:` line.
+pub fn strip_deprecated_queue_active_line(content: &str) -> String {
+    let lines: Vec<&str> = content.split('\n').collect();
+    if lines.first().map(|l| l.trim_end()) != Some("---") {
+        return content.to_string();
+    }
+    let Some(close_idx) = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, l)| l.trim_end() == "---")
+        .map(|(i, _)| i)
+    else {
+        return content.to_string();
+    };
+    let fm_lines = &lines[1..close_idx];
+    let has_canonical_queue = fm_lines.iter().any(|l| l.trim_start().starts_with("queue:"));
+    let has_deprecated = fm_lines
+        .iter()
+        .any(|l| l.trim_start().starts_with("queue_active:"));
+    if !has_canonical_queue || !has_deprecated {
+        return content.to_string();
+    }
+    let out: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| {
+            // Only drop the deprecated line inside the frontmatter region.
+            !(*i > 0 && *i < close_idx && line.trim_start().starts_with("queue_active:"))
+        })
+        .map(|(_, line)| *line)
+        .collect();
+    out.join("\n")
+}
+
 /// #22a8 (Phase 5b write-side): byte-precise removal of the `agent_doc_pipeline:`
 /// block (its key line plus indented children) from the leading `--- ... ---`
 /// frontmatter region. Every other byte is preserved verbatim — unlike
@@ -1584,6 +1632,35 @@ mod tests {
         assert_eq!(fm.queue_active, Some(true));
         let (fm, _) = parse(&stopped).unwrap();
         assert_eq!(fm.queue_active, Some(false));
+    }
+
+    #[test]
+    fn strip_deprecated_queue_active_line_drops_legacy_when_canonical_present() {
+        // #queue-active-deprecated-line-stuck: a doc carrying BOTH `queue:` and the
+        // deprecated `queue_active:` (the stuck shape the diff layer never lets a
+        // normal write remove) has the legacy line dropped byte-precisely, leaving
+        // every other field untouched.
+        let stuck = "---\nagent: claude\nqueue: start\nqueue_active: true\n---\n\nbody\n";
+        let out = strip_deprecated_queue_active_line(stuck);
+        assert_eq!(
+            out, "---\nagent: claude\nqueue: start\n---\n\nbody\n",
+            "legacy line dropped, canonical queue + other fields preserved"
+        );
+        // Idempotent.
+        assert_eq!(strip_deprecated_queue_active_line(&out), out);
+    }
+
+    #[test]
+    fn strip_deprecated_queue_active_line_keeps_legacy_without_canonical() {
+        // Without a canonical `queue:` the legacy line is the only state — never
+        // drop it (that would lose the queue state).
+        let legacy_only = "---\nqueue_active: true\n---\n\nbody\n";
+        assert_eq!(strip_deprecated_queue_active_line(legacy_only), legacy_only);
+        // No frontmatter at all → unchanged.
+        assert_eq!(
+            strip_deprecated_queue_active_line("no frontmatter\nqueue_active: true\n"),
+            "no frontmatter\nqueue_active: true\n"
+        );
     }
 
     #[test]

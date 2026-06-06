@@ -1986,6 +1986,44 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
+    // #queue-active-deprecated-line-stuck: drop a legacy `queue_active:` line that
+    // is stuck in the document because the diff layer classifies it as managed
+    // state (so its removal never reads as a diff and is never committed) and the
+    // byte-precise hot path never re-serializes frontmatter through `write()`
+    // (which would drop it). Strip it directly on disk + snapshot, but ONLY when
+    // the canonical `queue:` control is present so no queue state is lost. Idempotent.
+    if let Ok(current) = std::fs::read_to_string(file) {
+        let migrated = frontmatter::strip_deprecated_queue_active_line(&current);
+        if migrated != current {
+            match crate::write::atomic_write_pub(file, &migrated) {
+                Ok(()) => {
+                    if let Err(err) = crate::snapshot::save(file, &migrated) {
+                        eprintln!(
+                            "[preflight] warning: dropped deprecated queue_active line but failed to update snapshot for {}: {err}",
+                            file.display()
+                        );
+                    }
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "deprecated_queue_active_line_dropped file={}",
+                            file.display()
+                        ),
+                    );
+                    eprintln!(
+                        "[preflight] dropped deprecated `queue_active:` line (canonical `queue:` retained) for {}",
+                        file.display()
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[preflight] warning: failed to drop deprecated queue_active line for {}: {err}",
+                        file.display()
+                    );
+                }
+            }
+        }
+    }
     // Detect the stuck-captured-cycle wedge: cycle_state advanced to Committed
     // while the active capture body never landed in HEAD. Emit as a non-blocking
     // warning so the harness can take a recovery path (e.g. force write --commit)

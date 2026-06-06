@@ -34,12 +34,33 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 8 response topic(s): do [#backlog-queue-empty-active-repopulate]; monsterrodholders.md recursive-deadlock; queue stalled + last response not committed; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:846c8715 -->
+
+### Re: monsterrodholders "truly stuck" busy flag — diagnosed, recovered live, fix shipped — opus-4-8
+
+**Your session is recovered.** `monsterrodholders.md` is back to `ready` (no pane kill, no lost work) — verify with `agent-doc admin list` from `src/boost-client`.
+
+**What the admin api said.** `admin list` (boost-client root): pane `%29` alive, `[codex]`, gen 292, **busy**. `admin detect`: *no anomalies* — it has no finding for "actor busy while the pane sits idle." The live pane was actually idle at the composer ("Worked for 3m 05s", recursion-guard message shown). The cycle was `abandoned` by the recursion guard, then `last_transition: caller=dispatch reason=auto_trigger_inject` flipped the actor busy — the auto-queue injected a prompt, the Codex turn completed, but **no busy→ready transition ever fired**. That is the stuck state.
+
+**Why it survives a pane kill.** The actor store is a SQLite DB (`session-actors.json` is only a projection — editing it does nothing). A wedged `busy` record there is re-read on restart, so kill+restart re-inherits it.
+
+**Recovery already existed — it was just hidden.** `agent-doc session status <FILE>` (and `session clear`) reconciles a stale busy actor back to `ready` from idle pane evidence. I ran it on your doc and it fixed it instantly:
+
+    # from src/boost-client
+    agent-doc session status tasks/monsterrodholders.md     # busy -> ready, no pane kill
+
+The recursion-guard diagnostics never mentioned this — they only pointed at the heavy `agent-doc start` restart, so you reached for kill+restart (which can't clear it). That is the real defect.
+
+**Shipped this cycle** (`be7f5f06`, both binaries rebuilt+installed):
+- The recursion-block diagnostics (`run.rs` no-change verdict + `session_check.rs` INTERRUPTED) now surface `agent-doc session status/clear <FILE>` (idle-reconcile, no pane kill) ahead of the restart, with a regression test. `make check` green.
+
+**On "make recursion work without the deadlock" / before the MCP.** Kept honest: the recursion guard stays (running `agent-doc <FILE>` inside its own owning pane genuinely would deadlock), but the *stuck state it could leave* is now self-recoverable today, and the durable "never get into this state" fix is queued — make the supervisor idle-queue watch auto-run the same idle-reconcile so the doc heals itself the moment the pane goes idle. That removes the brittleness without needing the MCP. Queued as `#stale-busy-after-auto-inject-no-clear` (durable) + `#admin-recover-stale-busy-no-pane-kill` (detect-finding follow-up). Plan: `tasks/agent-doc/plan-stale-busy-actor-no-recovery-without-pane-kill.md`.
+
+Note: after the reconcile, `session status` still shows `controller_lease runtime_state=busy` lagging the now-ready actor — flagged in the plan to confirm the lease also clears so it cannot re-wedge.
+<!-- agent:boundary:b664b610 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#free-text-head-consume-genuine-not-struck]
-- I still see `queue_active: true`. I thought this was fixed. Why did you lie to me? Fix it. No punting. I'm sick of your punting and weasel words to avoid doing work. This `queue_active: true` issue is as easy as it gets to fix. Yet you failed. I thought you were the best that Anthropic has. Very disappointing.
 ---
 Yet another stall with monsterrodholders.md on a fresh session. Fix the behavior so I can continue with my work. What does the admin api say? We should be able to recover without having to kill the tmux pane. Better yet, never get into this state. Right now, even if I kill the tmux pane and restart, I still get into the state. monsterrodholders.md is truly stuck. `agent-doc tasks/monsterrodholders.md` should pass the command back to the session to avoid the recursion or make recursion work without the deadlock. I want this issue fixed before moving on to a mcp.
 ```
@@ -54,6 +75,8 @@ Yet another stall with monsterrodholders.md on a fresh session. Fix the behavior
 ```
 ---
 - The busy flag behavior needs to change. Since we are in the middle of a session, we should send a command that bypasses the busy flag or clear the busy flag or have a reentrant-friendly solution instead of the busy flag. The busy flag is brittle for reentrant commands, so we need to find a solution to this. Once you fix this, give me instructions on how to recover my codex session.
+- [#admin-recover-stale-busy-no-pane-kill]
+- [#stale-busy-after-auto-inject-no-clear]
 - do [#monsterrod-writeback-post-contamination-confirm]
 - [#late-ipc-patch-plugin-apply-fence]
 - [#ipc-listener-dewedge-direct-disk]
@@ -88,8 +111,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#admin-recover-stale-busy-no-pane-kill] #agent-doc-bug recover a stale busy actor WITHOUT a pane kill. admin api is read-only (list/detect/dashboard); repair no-ops; editing session-actors.json persists but admin/dispatch still read the live supervisors in-memory busy over #ipc-admin-api (verified: file=ready/gen293 but admin=busy/gen292); reset would orphan the Codex session. Add agent-doc admin recover <FILE>/--clear-busy that signals the live supervisor over IPC to re-probe + clear stale busy when the footer is idle, plus an admin detect busy_actor_idle_pane finding. Plan: tasks/agent-doc/plan-stale-busy-actor-no-recovery-without-pane-kill.md
-2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug actor wedged busy forever after auto_trigger_inject. Live 2026-06-06 monsterrodholders.md: cycle abandoned by recursion guard (actor_state=ready), then last_transition caller=dispatch reason=auto_trigger_inject flipped actor busy; the injected Codex turn completed (pane idle at composer) but no busy->ready completion transition fired. Fix: terminating an injected/abandoned turn must restore the actor to ready; a cold supervisor restart must re-derive state from a live pane probe instead of trusting persisted busy. Plan: tasks/agent-doc/plan-stale-busy-actor-no-recovery-without-pane-kill.md
+1. [ ] [#admin-recover-stale-busy-no-pane-kill] #agent-doc-bug DISCOVERABILITY FIXED (be7f5f06): the recursion-block diagnostics now surface agent-doc session status/clear <FILE> (idle-reconcile, no pane kill) ahead of the heavy restart. Recovery already EXISTED via session status/clear (reconcile_idle_projection_from_live_pane repairs stale busy->ready from idle pane evidence; actor store is SQLite, session-actors.json is only a projection so file edits do nothing). Remaining (optional): add an admin detect busy_actor_idle_pane finding. A new admin recover command is NOT needed. Plan: tasks/agent-doc/plan-stale-busy-actor-no-recovery-without-pane-kill.md
+2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DURABLE never-get-stuck fix (open): actor wedged busy after auto_trigger_inject completes. monsterrodholders.md live 2026-06-06: recursion guard abandoned the cycle, auto_trigger_inject flipped actor busy, the injected Codex turn completed (pane idle) but no busy->ready transition fired; idle_queue_watch_drain ran but did NOT auto-reconcile. Fix: make the supervisor idle-queue watch (start::spawn_idle_queue_watch_thread) auto-run reconcile_idle_projection_from_live_pane on a stale-busy idle pane (cross-crate: reconcile fn is in main crate src/session_actor_cmd.rs); also clear the lagging controller_lease runtime_state=busy. Plan: tasks/agent-doc/plan-stale-busy-actor-no-recovery-without-pane-kill.md
 3. [ ] [#late-ipc-patch-plugin-apply-fence] #agent-doc-bug apply-side generation fence: the JetBrains PatchWatcher has ZERO cycle awareness today; it must read the new cycle_id/baseline_hash on queued .agent-doc/patches/<hash>.json and DROP a patch whose cycle already committed or whose baseline_hash no longer matches the live doc, instead of applying it late and re-materializing a duplicate Re block. Kotlin work + plugin version bump + buildPlugin/signPlugin + LIVE IntelliJ verify (manual-testing gate) — needs its own focused cycle, not an unattended auto-loop tail. Producer token shipped 18d6e7b9. Plan: tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md
 4. [ ] [#ipc-listener-dewedge-direct-disk] #agent-doc-bug detect a wedged/slow IPC listener (repeated 2s ack timeouts) and move the doc to direct-disk writes for the rest of the session so it cannot apply patches minutes late. Relates to the hung-write stale-live-buffer family. Plan: tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md
 5. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md

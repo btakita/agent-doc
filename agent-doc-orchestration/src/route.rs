@@ -4455,6 +4455,40 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
+                // #jb-busy-reopen-auto-drain-when-idle: there is no INACTIVE queue
+                // head to activate, but the document may already have an ACTIVE
+                // auto-loop continuation (`queue: start` + `agent:queue auto`). When
+                // it does, the running loop will continue this document on its own —
+                // a bare dispatch-only reopen (IDE `Run Agent Doc`) has nothing to
+                // add. Failing closed with the busy-not-ready error mis-reports a
+                // self-driving session that IS making progress as a failure (the
+                // operator clicks Run Agent Doc on an auto-looping doc, catches a
+                // brief inter-iteration gap by eye, and gets an error even though the
+                // loop is alive). Report deferred success so the IDE surfaces an
+                // "auto-loop active, will continue" acknowledgment instead of an
+                // error, mirroring the existing `*_busy_existing_queue_deferred` path.
+                if let Some(continuation) = crate::queue_continuation::detect(file)? {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_busy_active_auto_loop_deferred file={} pane={} harness={} generation={} actor_state={} head={:?}",
+                            file.display(),
+                            dispatch_pane,
+                            harness.binary,
+                            actor.record.generation,
+                            actor_state.as_str(),
+                            continuation.head_prompt
+                        ),
+                    );
+                    eprintln!(
+                        "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue auto loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                        actor.record.generation,
+                        file.display(),
+                        dispatch_pane,
+                        continuation.head_prompt
+                    );
+                    return Ok(dispatch_pane);
+                }
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -4530,6 +4564,30 @@ fn route_via_authoritative_actor(
                     queued.appended,
                     queued.already_present,
                     queued.superseded
+                );
+                Ok(dispatch_pane)
+            } else if let Some(continuation) = crate::queue_continuation::detect(file)? {
+                // #jb-busy-reopen-auto-drain-when-idle: a bare reopen (no prompt to
+                // queue) against a busy actor whose document already has an active
+                // auto-loop continuation defers to that loop instead of erroring.
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_busy_active_auto_loop_deferred file={} pane={} harness={} generation={} actor_state={} head={:?}",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        actor.record.generation,
+                        actor_state.as_str(),
+                        continuation.head_prompt
+                    ),
+                );
+                eprintln!(
+                    "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue auto loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                    actor.record.generation,
+                    file.display(),
+                    dispatch_pane,
+                    continuation.head_prompt
                 );
                 Ok(dispatch_pane)
             } else {

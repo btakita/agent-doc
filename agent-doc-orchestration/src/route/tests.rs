@@ -797,6 +797,52 @@ fn route_does_not_activate_plain_inactive_queue_head() {
     assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), content);
 }
 
+// #jb-busy-reopen-auto-drain-when-idle: when a document's queue is ALREADY
+// auto-looping, there is no INACTIVE head to activate, so
+// activate_existing_route_queue_head returns None — but queue_continuation::detect
+// still returns Some because the active loop is continuing the document. The busy
+// FocusOnly / DispatchOnlyBusyQueue route paths key off exactly this signal to
+// report deferred success (the loop will continue) instead of a busy refusal,
+// so JB `Run Agent Doc` on an auto-looping pane no longer errors.
+#[test]
+fn busy_route_defers_to_active_auto_loop_instead_of_refusing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#regional]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    // No INACTIVE head — the queue is already active, so the activate path no-ops.
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap(),
+        None,
+        "an already-active auto-queue exposes no inactive head to activate"
+    );
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "activate path returns None when the queue is already auto-looping"
+    );
+    // But the active-loop continuation signal IS present — this is what the busy
+    // route path uses to defer (report success) instead of failing closed.
+    let continuation = crate::queue_continuation::detect(&doc)
+        .unwrap()
+        .expect("active auto-loop must expose a continuation head for busy deferral");
+    assert_eq!(continuation.head_prompt, "do [#regional]");
+}
+
 #[test]
 fn route_activates_queue_stop_with_marker_go_head() {
     // #queue-state-unify: a `queue: stop` document carrying the marker-side

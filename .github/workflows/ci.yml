@@ -9,12 +9,14 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # #ci-per-test-timeout-guard backstop: CI runs `make check` via the plain
-    # `cargo test` fallback (cargo-nextest is not installed here), which has no
-    # per-test timeout, so a lock/IPC deadlock would otherwise hang until
-    # GitHub's 6-hour default. Cap the job well above a legitimate cold run
-    # (~25-40 min incl. compile + tmux-ci) but far below that ceiling. Precise
-    # per-test termination lives in .config/nextest.toml for the nextest path.
+    # #ci-per-test-timeout-guard: CI installs cargo-nextest (step below) so
+    # `make check` takes the nextest path and every individual test inherits the
+    # per-test deadlock guard in .config/nextest.toml (60s x 3 = 180s, then the
+    # hung test is killed and named). A lock/IPC deadlock now fails fast with a
+    # backtrace instead of silently hanging. The job-level cap stays as a
+    # backstop for NON-test hangs the per-test guard can't see (compile, doc
+    # tests, tmux-ci): well above a legitimate cold run (~25-40 min) yet far
+    # below GitHub's 6-hour default.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      # #ci-per-test-timeout-guard: install nextest so `make check` uses the
+      # nextest path, activating the per-test slow-timeout deadlock guard in
+      # .config/nextest.toml. Without this, CI falls back to plain `cargo test`,
+      # which has no per-test timeout.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
 
       - name: Run make check
         run: make check

@@ -856,8 +856,34 @@ pub fn ensure_session_with_ssh_resolver(
 }
 
 /// Write frontmatter back into a document, preserving the body.
+///
+/// `#writer-emits-deprecated-queue-active-false`: emit the canonical `queue:`
+/// control, never the deprecated `queue_active:` line — regardless of which path
+/// set the queue state. Any caller that set `queue_active` directly (then called
+/// `write()`) has it folded onto `queue` here, and a `queue_active` carried over
+/// from a parse (where `normalize_queue_control` mirrors `queue:` onto it) is
+/// dropped so it is not double-emitted alongside the canonical key. Readers still
+/// resolve both forms (`normalize_queue_control` folds `queue:` back onto
+/// `queue_active` on parse), and a doc with no queue state writes neither.
 pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
-    let yaml = serde_yaml::to_string(fm)?;
+    let fm = if fm.queue_active.is_some() {
+        let mut canonical = fm.clone();
+        if canonical.queue.is_none() {
+            canonical.queue = Some(
+                if fm.queue_active == Some(true) {
+                    "start"
+                } else {
+                    "stop"
+                }
+                .to_string(),
+            );
+        }
+        canonical.queue_active = None;
+        std::borrow::Cow::Owned(canonical)
+    } else {
+        std::borrow::Cow::Borrowed(fm)
+    };
+    let yaml = serde_yaml::to_string(fm.as_ref())?;
     Ok(format!("---\n{}---\n{}", yaml, body))
 }
 
@@ -1506,6 +1532,38 @@ mod tests {
         assert_eq!(fm.queue_active, Some(true));
         let (fm, _) = parse("---\nqueue: bogus\n---\n\n").unwrap();
         assert_eq!(fm.queue_active, None);
+    }
+
+    #[test]
+    fn write_emits_canonical_queue_for_direct_set_queue_active() {
+        // #writer-emits-deprecated-queue-active-false: a path that sets
+        // `queue_active` directly on the struct (bypassing merge_queue_state) and
+        // then calls write() must still emit the canonical `queue:` control, never
+        // the deprecated `queue_active:` line.
+        let mut fm = Frontmatter {
+            queue_active: Some(true),
+            ..Default::default()
+        };
+        let out = write(&fm, "body\n").unwrap();
+        assert!(out.contains("queue: start"), "{out}");
+        assert!(!out.contains("queue_active:"), "{out}");
+
+        fm.queue_active = Some(false);
+        let out = write(&fm, "body\n").unwrap();
+        assert!(out.contains("queue: stop"), "{out}");
+        assert!(!out.contains("queue_active:"), "{out}");
+
+        // A doc parsed from canonical `queue:` (queue_active mirrored on) must
+        // not double-emit the deprecated line on re-serialize.
+        let (fm, body) = parse("---\nagent_doc_format: template\nqueue: start\n---\n\nx\n").unwrap();
+        let out = write(&fm, &body).unwrap();
+        assert!(out.contains("queue: start"), "{out}");
+        assert!(!out.contains("queue_active:"), "{out}");
+
+        // No queue state → neither key is emitted.
+        let fm = Frontmatter::default();
+        let out = write(&fm, "body\n").unwrap();
+        assert!(!out.contains("queue_active:") && !out.contains("queue:"), "{out}");
     }
 
     #[test]

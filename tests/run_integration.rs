@@ -506,8 +506,8 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     assert!(content.contains("--- stop"));
     assert!(content.contains("- do #fix2"));
     assert!(
-        content.contains("queue_active: true"),
-        "queue remains active but halted by the stop fence"
+        content.contains("queue: start"),
+        "queue remains active (canonical `queue: start`) but halted by the stop fence"
     );
     assert_eq!(fs::read_to_string(counter).unwrap(), "1");
 }

@@ -59,12 +59,34 @@ Implemented your decision: **`go` → continuous-backlog-loop, no `go` → drain
 - CI run 27071524465 in flight (prior two runs green); the change is pure preflight queue logic with no tmux surface. I'll confirm the run before treating the whole turn as closed.
 
 Marked `--done`. Note: this doc's own `queue: go` means once the live queue drains, the binary will now repopulate from the 8 remaining open backlog items — i.e. this loop is now genuinely continuous until the backlog itself drains.
-<!-- agent:boundary:40d6b481 -->
+
+### Re: monsterrodholders.md recursive-deadlock — fast-track root-cause fix — opus-4-8
+
+> **Queue prompt:**
+>
+> monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix the root cause of this deadlock immediately. Fast track the auto-dag to fix this reoccuring issue.
+
+
+You picked **targeted fix now**, and it's shipped: `8627ad1b` → `origin/20260422/codex-agent-backend`.
+
+**Traced the live trigger.** ops.log shows the recurrence is `current_pane == actor_pane`, `actor_state=busy` — the running Codex agent re-invokes `agent-doc <FILE>` from inside its **own busy owner pane, mid-turn**. Option B (`#codex-self-reinvoke-prevent`) only redirects the *Stop-hook* continuation, so a mid-turn re-run still trips the `#codex-owned-pane-auto-queue-stuck` guard. The guard bails correctly, but in a self-driving `agent:queue auto` loop with no operator watching, the same head trips it every cycle — the dead-loop you kept hitting.
+
+**Escape hatch (`#recguard-wedge-escape`).** New `recguard_wedge` module tracks *consecutive* owner-pane self-invocation guard fires for the same head (keyed on head text; a new head resets, consuming a head clears it). On the 3rd consecutive fire — a proven dead-loop — `run.rs`:
+1. halts the runaway auto-queue (`queue: stop`) so it stops re-firing,
+2. logs `recursive_self_invocation_wedge_halt` (file, head id, count),
+3. bails with an escalated diagnostic naming the one recovery that advances the head: answer in the owner turn + `finalize` then re-enable `queue: go`, or `agent-doc start <FILE>` and trigger from outside the owner pane.
+
+The head stays live; no snapshot/queue drift is committed. A healthy loop that self-invokes ≤2× in a row never escalates.
+
+**Verification:** 3 new unit tests + FlowCore budget audit; `make check` green (clippy + full suite); both binaries rebuilt + installed; spec `specs/07-core-commands.md`.
+
+**Scope honesty:** this is the *interim* — it stops the dead-loop from burning cycles but does **not** remove the CLI-drives-Codex re-entry. The structural root fix remains Option A (MCP server, `#codex-mcp-server`). Live-verify follow-up `#recguard-wedge-escape-live-verify` already queued (this cycle adds no further backlog items).
+<!-- agent:boundary:0e5d603b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#backlog-queue-empty-active-repopulate]. "Decide continuous-backlog-loop vs drain-then-stop before implementing.": Make this dependent on whether or not queue has `go` as an attribute. If `go` is set, continuous-backlog-loop. If not, drain-then-stop.~
-- monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix the root cause of this deadlock immediately. Fast track the auto-dag to fix this reoccuring issue.
+- ~monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix the root cause of this deadlock immediately. Fast track the auto-dag to fix this reoccuring issue.~
 - do [#free-text-head-consume-genuine-not-struck]
 - do [#monsterrod-writeback-post-contamination-confirm]
 - do [#jb-busy-active-turn-stall-live-verify]

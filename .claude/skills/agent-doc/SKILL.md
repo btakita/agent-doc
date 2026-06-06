@@ -75,64 +75,55 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 - Address the user's changes naturally in the console; that response is the document response.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; answer or group each unresolved prompt in that tail and each unresolved `prompt_target`; treat `content_edit` items as user corrections.
-- If session-accretion supplies bounded context, use the included `### Re:` blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
-**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
+**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings.
 
-**Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
+**Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null; otherwise use your own model identity. Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
 
-**Streaming checkpoints:** for long responses, flush partial content at natural breakpoints; see [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md). Prefer `<!-- patch:exchange -->`.
-
-**`#agent-doc-bug` plan proof:** if the prompt contract requires a plan, create the plan file before closeout and cite every plan path. If `execution_scope=plan_backlog_only`, create plan/backlog items and explain the deferred implementation boundary instead of editing code.
+Full detail (session-accretion anchors, streaming checkpoints, `#agent-doc-bug` plan proof): [runbooks/respond.md](runbooks/respond.md).
 
 ### 1b. Update pending (template mode)
 
-If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`, `--review-add`, `--review-edit`. Full-replace via `<!-- patch:backlog -->` / `<!-- patch:review -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
-
-Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
+Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-gate`, `--pending-ungate`, `--pending-reorder`, `--review-add`/`--review-edit`); full-replace via `patch:backlog`/`patch:review` is rejected.
 
 **Pending capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`; if you are extending an ordered batch already in pending, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
 
-**Cross-document pending rule:** if a prompt preset or user instruction names another backlog file, add the item to that target with `--pending-add-to <target-file> "<item>"` on the final `agent-doc finalize` command. Do not satisfy an explicit target by running `--pending-add` against the current session document. If the target is missing or lacks a backlog component, stop on the binary error and report the blocker.
-
 **Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--pending-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but awaiting review/external validation, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`; projects may opt into `review_done_guard` when review must precede done.
+**`do #id` closeout rule:** record `--done` (completed), `--pending-gate` (code-complete, awaiting review/external validation), or explain concretely why it stays open — `session-check` enforces `pending_done_guard`.
+
+Full detail (cross-document rule, icebox, `agent:done`): [runbooks/respond.md](runbooks/respond.md) and [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
 ### 2. Persist the response (MANDATORY — never skip)
 
-Complete requested implementation, verification, build/install, and local inspection **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
+Complete requested implementation, verification, build/install, and local inspection **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint. For the normal cycle, pipe the response through `agent-doc finalize --stream` so write+commit happen in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as "unrelated" or "flaky".
 
-**Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test, build, or instruction surfaces, inspect the latest CI tmux-test result for this repo. If the tmux leg is red after runner startup, run `make tmux-ci` locally, fix the failure, and add or update deterministic SimWorld coverage for the regression class when the behavior can be modeled without live tmux. If GitHub reports an empty-step job with no logs because the job was not started (for example billing/spending-limit exhaustion or other runner-allocation failure), classify it as an external CI-start blocker instead of a code/tmux regression; record the annotation and continue with local verification evidence. Record CI and local tmux evidence in closeout.
-
-**Session document staging rule:** for ordinary repo `commit + push`, keep the session document out of that manual git commit. Resolve the exact intended non-session path set first, stage only that set, stop on any stage failure, verify `git diff --cached --name-only` still matches the intended set, commit only that validated set, then let `finalize` / `write --commit` close the session document before push.
-
-For the normal cycle, pipe the response through `agent-doc finalize --stream` so write+commit happen in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
-
-```bash
-cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
-<your response — patch blocks for template mode, or plain text for inline mode>
-RESPONSE
-```
-
-`finalize` requires the cycle to reach `committed` and the post-commit `session-check` guard to pass before success, including prompt-only exchange-tail checks. `agent-doc write --commit <FILE>` shares that fail-closed boundary for repair writes. If `finalize`, `write --commit`, or `repair` surfaces a `session-check` interruption, continue recovery instead of reporting success. `session-check` also enforces pending capture / `pending_done_guard`. Use [runbooks/commit.md](runbooks/commit.md) and [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for the full closeout contract.
+**Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test/build/instruction surfaces, inspect the latest CI tmux-test result. If the tmux leg is red after runner startup, run `make tmux-ci` locally, fix it, and add deterministic SimWorld coverage for the regression class. An empty-step job with no logs because GitHub never started a runner (for example billing/spending-limit exhaustion) is an external CI-start blocker, not a code/tmux regression; record the annotation and continue with local evidence.
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for explicit closeout.
 
-**IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
+```bash
+cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+<template mode: wrap response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers); inline mode: plain text, no markers>
+RESPONSE
+```
 
-**IMPORTANT: The response content MUST include `<!-- patch:exchange -->` blocks for template-mode documents.** If the heredoc is empty or contains only raw text without patch markers, the binary will warn (`0 template patches found`) and the response can be lost.
+**IMPORTANT — patch markers:** template-mode responses MUST include both the opening AND closing `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` markers, or the write is rejected (`malformed template patchback`) / lost (`0 template patches found`). **Do NOT use the Edit tool for write-back** (concurrent-edit "file modified" errors).
+
+`finalize` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `write --commit` shares that fail-closed boundary for repair writes.
 
 **Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists.
 
-Document format, frontmatter, component naming, and commit-boundary exceptions: [runbooks/document-format.md](runbooks/document-format.md), [runbooks/commit.md](runbooks/commit.md).
+Full detail (ordering, full-suite + tmux-CI review, session-doc staging rule): [runbooks/persist-closeout.md](runbooks/persist-closeout.md), [runbooks/commit.md](runbooks/commit.md).
 
 ## Runbooks
 
 Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`.
+
+**Read each runbook at most once per session.** If you already opened a runbook earlier this session, its content is still in context — reuse it instead of re-reading. Re-open the same runbook only when its content changed or your earlier copy was compacted away. Redundant re-reads waste context tokens and are heaviest on per-cycle shell harnesses (for example Codex re-`cat`ing closeout runbooks every cycle).
 ## Auto-loop while queue is active (Claude Code)
 
 After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose `agent-doc session-check` returns OK, check preflight's queue fields:

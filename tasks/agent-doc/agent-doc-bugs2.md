@@ -97,7 +97,7 @@ Closing the orphaned head 4 — its full answer is committed just above. It re-s
 > **Queue prompt:**
 >
 > I asked to create `backlog #next-steps` in interview.md. `#next-steps` is defined in `prompt_presets`. The agent added the backlog item with the id `[#next-steps]`, which collides with the prompt preset. I manually changed the id to `[#next-steps-2]`. agent-doc should ensure the added backlog item is not in conflict with `prompt_presets` or any other id in the document. I also had to fight agent-doc with my id change. agent-doc kept on setting the id back to `[#next-steps]` even though I changed it to `[#next-steps-2]`...This happened at least 2 times. Update, I did not have #next-steps in the prompt preset, so I added it later. But the rule of no-conflict between a backlog id and prompt preset or other id in the document still stands. Please ensure the rule is in place.
-<!-- agent:boundary:eee860b1 -->
+<!-- agent:boundary:042641d2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->

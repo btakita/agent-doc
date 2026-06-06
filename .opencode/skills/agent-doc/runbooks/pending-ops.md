@@ -242,6 +242,22 @@ cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline> --stream --
 RESPONSE
 ```
 
+## Review triage (`#review-list-query`)
+
+When a long-running document's `agent:review` grows unmanageable, triage it
+token-efficiently instead of reading the whole component:
+
+- `agent-doc review list <FILE>` — one compact line per gated item: `#id [gate-type]
+  summary #tags`, plus a `→ NEXT: …` line when the item carries a `NEXT:` annotation.
+- Filters: `--gate-type <t>`, `--tag <#foo>` (bare `foo` accepted), `--has-next`
+  (only actionable, NEXT-annotated items), `--no-next` (the stale set to split or
+  drop), `--json` (structured output for programmatic triage).
+- `agent-doc review ungate-tasks <FILE>` — drive gated items back into the backlog
+  pipeline by adding one ungate follow-up task per gated review item (idempotent).
+
+Annotate gated items with a token-efficient `[<gate-type|blocked:reason>] <summary>.
+NEXT: (1)… (2)…` so `review list --has-next` surfaces exactly what is actionable.
+
 ## Escape hatch
 
 `--allow-replace-pending` (hidden flag, or `AGENT_DOC_ALLOW_REPLACE_PENDING=1`) permits

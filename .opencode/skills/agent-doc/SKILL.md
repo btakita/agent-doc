@@ -93,6 +93,8 @@ Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`
 
 **`do #id` closeout rule:** record `--done` (completed), `--pending-gate` (code-complete, awaiting review/external validation), or explain concretely why it stays open — `session-check` enforces `pending_done_guard`.
 
+**Complete over gate (default to finishing the work).** A turn's job is to **complete** its task, not to file a tracking item. Strongly prefer `--done`: do the implementation, tests, build/install, and verification this cycle and close the item. Use `--pending-gate` / `agent:review` (a gated `[/]` item) **only under exceptional conditions** — work that is genuinely blocked on something this turn cannot do (a required live editor/pane verification, an external approval, a CI/billing outage), and say exactly what unblocks it. Do **not** gate to avoid effort, to "track for later" what you could finish now, or to record a hypothesis. When follow-up work is real but not blocked, put it in `agent:backlog` as an **actionable** item, not in `agent:review`. If a gated review item's blocking condition is not actually met or is stale, convert it to an actionable backlog item (or `--done` it if already satisfied) and remove the review item — keep `agent:review` small (target < 10) so the actionable list stays legible. Prefer automated completion detection (log/state checks the binary can evaluate) over a human-gated review item wherever possible.
+
 Full detail (cross-document rule, icebox, `agent:done`): [runbooks/respond.md](runbooks/respond.md) and [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
 ### 2. Persist the response (MANDATORY — never skip)

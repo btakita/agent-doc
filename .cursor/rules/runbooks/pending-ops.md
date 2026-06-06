@@ -54,6 +54,22 @@ Combine any number of flags in one `agent-doc write` call:
 | `--review-add "text"` | Add a new `[/]` item directly to `agent:review`; usually prefer `--pending-gate`. |
 | `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 
+**Complete over gate — keep `agent:review` small (target < 10).** The default
+outcome of a turn is `--done`: finish the implementation, tests, build/install,
+and verification this cycle and reap the item. `agent:review` (gated `[/]`) and
+`--pending-gate` / `--review-add` are for **exceptional** work only — genuinely
+blocked on something this turn cannot do (a required live editor/pane verify, an
+external approval, a CI/billing outage) — and the item text must name exactly
+what unblocks it. Do not gate to "track for later" what you could finish now, to
+record a hypothesis, or to avoid effort; that is what produces an unreadable
+50-item review backlog. Real-but-unblocked follow-up goes to `agent:backlog` as
+an **actionable** item, never to `agent:review`. When a gated review item's
+blocking condition is stale or already satisfied, resolve it: `--done <id>` if
+the work is in fact complete, otherwise `--pending-ungate <id>` (or capture a
+fresh actionable backlog item) and `--done` the stale review entry so it leaves
+`agent:review`. Prefer automated completion detection (a log/state check the
+binary can evaluate) over a human-gated review item wherever the signal exists.
+
 `--pending-done <id>` and `--backlog-done <id>` are deprecated aliases for
 `--done <id>`; new guidance, plans, and recovery hints must emit `--done`.
 
@@ -220,6 +236,7 @@ plan path into another `.md` file.
   `agent:queue`, repeating `--done <id>` for each completed id lets closeout
   consume that done-backed queue batch in the same commit. The queue still stops
   before the first unresolved queued prompt.
+- **Multiple free-text heads answered in one cycle → `agent-doc queue consume <FILE> --count <N>` (`#multi-head-consume-one-per-finalize`).** The free-text strike consumes only ONE head per finalize (the head current at that cycle's preflight). When a single cycle answers several free-text heads — most often because the operator added queue items mid-turn and your response addressed all of them — the trailing answered heads stay queued and re-serve on the next auto-loop, producing duplicate-response churn. Drain them explicitly with `queue consume --count <N>` (you assert the leading N free-text heads are answered, the same explicit contract `--done <id>` gives an id-backed head), then close out normally. There is intentionally no automatic head→response matcher: an answered free-text head the operator added this cycle is structurally identical to an unanswered one they added, so auto-striking would risk deleting a genuinely unanswered prompt. **Prefer prevention:** in a normal drain, answer only the current head per cycle and let the auto-loop drain subsequent heads one at a time; reach for `queue consume` only after an unavoidable batch answer. `queue consume` is scoped to free-text heads — a leading id-backed (`do [#id]` / `[#id]` / `#id` / `#preset`) head bails with `--done` guidance so it is never desynced from its backlog item.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step
   option in the same cycle unless the options are explicitly mutually exclusive and

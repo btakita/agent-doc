@@ -31,47 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-041407.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-043708.md`*
 
 Compacted content:
-- Archived 1 response topic(s): [#trt1cfg]
+- Archived 1 response topic(s): [#trt1p3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: [#trt1p3] — Findings Graph Layer Phase 3 (graph menu + exports) — opus-4-8
-
-> **Queue prompt:**
->
-> [#trt1p3]
-
-
-Shipped Phase 3. The queue head matched the work this cycle (clean drain, no divergence).
-
-#### Map findings annotation
-
-`tsift graph-db map` now annotates each **community, hub, and `--focus` node** with the trusted, fresh findings that `concern` its displayed members / label / symbol. Reuses the Phase 2 `collect_injectable_findings` contract, so `draft`, stale (anchor past watermark), and no-watermark findings never appear. Matching is bounded to displayed names (not a full-store scan) and deduped by finding id per node. The JSON `overview` communities/hubs and the `focus` report each gain an omit-when-empty `findings` array (`id`, `kind`, `title`, `about`, `anchor_kind`, optional `confidence`); fails open to none when `findings.db` is absent.
-
-#### On-demand md/html projection
-
-New `tsift graph-db map --format md|html` renders the same overview + findings:
-- **`md`** — greppable / commit-friendly; one `📌 <kind>: <title> (about <anchor>)` bullet under each annotated node.
-- **`html`** — self-contained, escaped, styled page for an interactive human view.
-
-Both are pure projections — the graph store / JSON stays the single source of truth, same pattern session/diff digests use. Without `--format`, the command keeps its JSON/text output.
-
-#### Verification
-
-- **Tests** — 3 new CLI tests in `packages/tsift-cli/tests/graph_db_conformance.rs` (hub annotation, md+html rendering, draft exclusion), all green.
-- **`make check` + clippy** — full suite green on **rustc 1.96.0** (matched CI's rolled toolchain this time; clippy `-D warnings` clean — no repeat of the 1.94/1.96 drift that bit last cycle).
-- **Live smoke** — `cargo install --path .` (both binaries); confirmed the live `tsift graph-db map --format md` emits the 📌 finding lines.
-- **Shipped** — `tsift@e054da0` (pushed), superproject pointer `agent-loop@044f960`. CI monitoring in progress.
-
-#### Queue / backlog
-
-- `#trt1p3` → **done**.
-- Remaining, in order: **`#trt1p4`** (passive harvest) → `#trt1p2b` (search/explain injection) → `#trt1cfg` (configure agent-loop, still blocked until p4 + p2b ship).
-
-Top of backlog (`#next-steps`): **`#trt1p4`** — Phase 4 (config-gated passive harvest of draft findings from agent-doc session archives, with draft→trusted promotion).
-<!-- agent:boundary:959161ac -->
+<!-- agent:boundary:f4fafd21 -->
 <!-- /agent:exchange -->
 ###
 <!--

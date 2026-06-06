@@ -240,7 +240,12 @@ The queued **"configure agent-loop tsift config to use findings graph layer"** s
 Gated `#trt1` (the umbrella item): Phase 1 (`#trt1p1`) is shipped and verified; the remaining work is tracked as backlog items `#trt1p2` (hot-path injection), `#trt1p3` (graph-menu/exports), and `#trt1p4` (passive harvest). It stays **not-done** on purpose so the queued *"once #trt1 is complete, configure agent-loop tsift config"* item correctly waits until the layer is fully built.
 
 Queue now holds only that gated config item. Nothing else is actionable without your go-ahead on the next phase.
-<!-- agent:boundary:b13a03d5 -->
+### Re: Once #trt1 is complete, configure agent-loop tsift config to use findings graph layer — opus-4-8
+
+Deferred to the backlog as `#trt1cfg` — its precondition ("once `#trt1` is complete") isn't met: only Phase 1 (`#trt1p1`) has shipped; phases 2–4 (`#trt1p2/p3/p4`, esp. hot-path injection) are still pending. Configuring agent-loop to *use* the layer is only meaningful once findings actually ride the retrieval path (Phase 2). So I've moved it out of the active queue into the backlog, gated on #trt1 completion, and drained the queue.
+
+Nothing else is queued. When you want to continue, point me at the next phase (`do #trt1p2`) and I'll pick it up.
+<!-- agent:boundary:9446b12c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -259,6 +264,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#trt1cfg] After #trt1 phases 2-4 ship (findings hot-path injection), configure agent-loop's tsift config to use the findings graph layer. Gated on #trt1 completion.
 - [ ] [#trt1p2] Findings Graph Layer Phase 2 — hot-path injection: fold trusted, fresh findings into context-pack (then search/explain) for nodes already in the result set. Plan: src/tsift/specs/graph.md § Findings Graph Layer.
 - [ ] [#trt1p3] Findings Graph Layer Phase 3 — graph menu + exports: annotate graph-db map with attached findings, and on-demand md/html projection (tsift map --format md|html). Plan: src/tsift/specs/graph.md.
 - [ ] [#trt1p4] Findings Graph Layer Phase 4 — passive harvest: config-gated draft extraction of candidate findings from agent-doc session archives/summaries, with draft→trusted promotion. Plan: src/tsift/specs/graph.md.

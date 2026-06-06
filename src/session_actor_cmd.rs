@@ -478,7 +478,15 @@ pub fn clear(file: &Path) -> Result<()> {
     )?;
     let tmux = Tmux::default_server();
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
-    reconcile_idle_projection_before_clear(&ctx, &tmux)?;
+    if reconcile_idle_projection_before_clear(&ctx, &tmux)?
+        == ClearPreflightOutcome::DeferredPreempt
+    {
+        // A non-interrupting clear hit a busy pane driven by an active auto-queue
+        // loop. The loop is paused (clear cooldown) and the clear is deferred to
+        // the next idle gap; do NOT deliver it into the in-flight turn.
+        // (`#autoloop-command-preemption` Phase 2.)
+        return Ok(());
+    }
     if supervisor_clear_inject_available(&ctx) {
         match send_clear_via_supervisor(&ctx)? {
             SupervisorClearDelivery::Sent => {
@@ -672,7 +680,21 @@ fn send_clear_to_resolved_pane(
     Ok(true)
 }
 
-fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> Result<()> {
+/// Outcome of the pre-delivery clear projection reconcile. `Proceed` means the
+/// caller should deliver the clear normally; `DeferredPreempt` means a
+/// non-interrupting clear hit a busy pane driven by an active auto-queue loop,
+/// the loop has been paused, and the clear must NOT be delivered into the
+/// in-flight turn (`#autoloop-command-preemption` Phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClearPreflightOutcome {
+    Proceed,
+    DeferredPreempt,
+}
+
+fn reconcile_idle_projection_before_clear(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+) -> Result<ClearPreflightOutcome> {
     let evidence = resolve_direct_submit_pane(ctx, tmux)
         .map(|(pane, source)| live_pane_evidence_for_pane(ctx, tmux, pane, source.as_str()))
         .unwrap_or_else(|| live_pane_evidence(ctx, tmux));
@@ -727,25 +749,79 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
         }
         OperatorClearInputState::Busy => {
             let busy_reason = busy_reason.unwrap_or_else(|| "busy cue".to_string());
-            agent_doc_orchestration::ops_log::log_op(
+            // `#autoloop-command-preemption` Phase 2: a non-interrupting clear on
+            // a doc whose pane is busy *because an `agent:queue auto` loop keeps
+            // dispatching* never finds a quiet window, so the old hard block made
+            // the command unrunnable. When such a loop is active, pause it (the
+            // durable clear cooldown the idle-queue watch already honors) and
+            // defer the clear to the next inter-iteration idle gap instead of
+            // killing the in-flight turn. A busy pane with no active loop keeps
+            // the existing fail-closed block — there is nothing to preempt.
+            let queue_active = agent_doc_orchestration::queue_continuation::detect(
                 &ctx.canonical_file,
-                &format!(
-                    "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
-                    ctx.canonical_file.display(),
-                    evidence.pane_id.as_deref().unwrap_or("unknown"),
-                    evidence.source,
-                    busy_reason.replace(char::is_whitespace, "_"),
-                    evidence.current_command.as_deref().unwrap_or("unknown"),
-                    evidence.tail.as_deref().unwrap_or("unknown")
-                ),
-            );
-            anyhow::bail!(
-                "{}",
-                busy_clear_refusal_message(&ctx.canonical_file, &evidence, &busy_reason)
-            );
+            )
+            .unwrap_or(None)
+            .is_some();
+            match agent_doc_orchestration::queue_preemption::plan_busy_clear(queue_active) {
+                agent_doc_orchestration::queue_preemption::BusyClearOutcome::PauseAndDefer => {
+                    agent_doc_orchestration::queue_continuation::write_clear_cooldown(
+                        &ctx.canonical_file,
+                    )?;
+                    agent_doc_orchestration::ops_log::log_op(
+                        &ctx.canonical_file,
+                        &format!(
+                            "session_clear_queue_preempt_deferred file={} pane={} source={} reason={} current_command={} tail={:?}",
+                            ctx.canonical_file.display(),
+                            evidence.pane_id.as_deref().unwrap_or("unknown"),
+                            evidence.source,
+                            busy_reason.replace(char::is_whitespace, "_"),
+                            evidence.current_command.as_deref().unwrap_or("unknown"),
+                            evidence.tail.as_deref().unwrap_or("unknown")
+                        ),
+                    );
+                    eprintln!(
+                        "{}",
+                        busy_clear_deferred_message(&ctx.canonical_file, &evidence)
+                    );
+                    return Ok(ClearPreflightOutcome::DeferredPreempt);
+                }
+                agent_doc_orchestration::queue_preemption::BusyClearOutcome::HardBlock => {
+                    agent_doc_orchestration::ops_log::log_op(
+                        &ctx.canonical_file,
+                        &format!(
+                            "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
+                            ctx.canonical_file.display(),
+                            evidence.pane_id.as_deref().unwrap_or("unknown"),
+                            evidence.source,
+                            busy_reason.replace(char::is_whitespace, "_"),
+                            evidence.current_command.as_deref().unwrap_or("unknown"),
+                            evidence.tail.as_deref().unwrap_or("unknown")
+                        ),
+                    );
+                    anyhow::bail!(
+                        "{}",
+                        busy_clear_refusal_message(&ctx.canonical_file, &evidence, &busy_reason)
+                    );
+                }
+            }
         }
     }
-    Ok(())
+    Ok(ClearPreflightOutcome::Proceed)
+}
+
+/// User-facing message when a non-interrupting clear pauses an active auto-loop
+/// and defers (`#autoloop-command-preemption` Phase 2). The loop is paused via
+/// the clear cooldown so the pane reaches an idle gap; the operator can re-run
+/// `session clear` there, and the destructive path stays explicit.
+fn busy_clear_deferred_message(file: &Path, evidence: &LivePaneEvidence) -> String {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    format!(
+        "session_clear deferred for {} — pane {} is alive-busy under an active `agent:queue auto` loop, so the clear cannot run mid-turn without discarding in-flight work. Paused the loop (clear cooldown); retry `agent-doc session clear {}` once the pane reaches an idle prompt, or run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
+        file.display(),
+        pane,
+        file.display(),
+        file.display()
+    )
 }
 
 fn operator_clear_input_state_for_evidence(

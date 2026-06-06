@@ -54,6 +54,35 @@ pub fn plan_operator_queue_preemption(
     }
 }
 
+/// What a non-interrupting operator `clear` should do when it meets an
+/// `alive-busy` pane (`#autoloop-command-preemption` Phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusyClearOutcome {
+    /// No active auto-queue loop to preempt: keep the existing fail-closed hard
+    /// block (`session_clear_live_busy_guard_blocked`). A bare busy pane with no
+    /// self-driving loop still leaves the operator a quiet window once the turn
+    /// ends, so blocking is correct — there is nothing to preempt.
+    HardBlock,
+    /// An auto-queue loop is active, so the pane is busy ~continuously and the
+    /// operator never gets a quiet window. Pause the loop (durable clear
+    /// cooldown) and defer the clear to the next inter-iteration idle gap
+    /// instead of hard-blocking, so the command becomes runnable without
+    /// silently killing the in-flight turn.
+    PauseAndDefer,
+}
+
+/// Decide what a non-interrupting `clear` does against a busy pane: a busy pane
+/// driven by an active auto-queue loop defers (pause → idle gap → run), while a
+/// busy pane with no loop keeps the existing hard block. The destructive
+/// "Interrupt and Clear" path never reaches here — it interrupts immediately.
+pub fn plan_busy_clear(queue_active: bool) -> BusyClearOutcome {
+    if queue_active {
+        BusyClearOutcome::PauseAndDefer
+    } else {
+        BusyClearOutcome::HardBlock
+    }
+}
+
 /// Durably pause an active auto-queue by writing canonical inactive queue state.
 /// Returns the rewritten content plus the control to restore on resume.
 ///
@@ -115,6 +144,24 @@ mod tests {
         assert_eq!(
             plan_operator_queue_preemption(false, true),
             OperatorQueuePreemption::RunImmediately
+        );
+    }
+
+    #[test]
+    fn busy_clear_on_active_loop_pauses_and_defers() {
+        assert_eq!(
+            plan_busy_clear(true),
+            BusyClearOutcome::PauseAndDefer,
+            "a busy pane driven by an active auto-loop must defer, not hard-block"
+        );
+    }
+
+    #[test]
+    fn busy_clear_without_active_loop_hard_blocks() {
+        assert_eq!(
+            plan_busy_clear(false),
+            BusyClearOutcome::HardBlock,
+            "a busy pane with no loop keeps the existing fail-closed block"
         );
     }
 

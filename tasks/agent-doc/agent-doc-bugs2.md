@@ -59,12 +59,12 @@ Implemented your decision: **`go` → continuous-backlog-loop, no `go` → drain
 - CI run 27071524465 in flight (prior two runs green); the change is pure preflight queue logic with no tmux surface. I'll confirm the run before treating the whole turn as closed.
 
 Marked `--done`. Note: this doc's own `queue: go` means once the live queue drains, the binary will now repopulate from the 8 remaining open backlog items — i.e. this loop is now genuinely continuous until the backlog itself drains.
-<!-- agent:boundary:d62e006f -->
+<!-- agent:boundary:40d6b481 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~do [#backlog-queue-empty-active-repopulate]. "Decide continuous-backlog-loop vs drain-then-stop before implementing.": Make this dependent on whether or not queue has `go` as an attribute. If `go` is set, continuous-backlog-loop. If not, drain-then-stop.~
-- monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix this deadlock immediately.
+- monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix the root cause of this deadlock immediately. Fast track the auto-dag to fix this reoccuring issue.
 - do [#free-text-head-consume-genuine-not-struck]
 - do [#monsterrod-writeback-post-contamination-confirm]
 - do [#jb-busy-active-turn-stall-live-verify]

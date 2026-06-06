@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -152,7 +152,34 @@ I implemented the **nudge** in the **skill-harness** this turn (per your "nudge-
 - So: **nudge in skill-harness (done); enforcement, if re-measurement proves it's needed, in tsift** — fitting, since this is the tsift backlog. I'd spec it as a `tsift runbook` fetch with per-session dedup rather than scatter hooks across harnesses.
 
 **#7qky status:** moved to Review, **gated** on re-measurement — re-run the 3-harness redundant-read analysis after Codex sessions accumulate with the nudge live, compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). Build the tsift enforcement only if Codex's rate doesn't drop.
-<!-- agent:boundary:fc511eff -->
+
+### Re: Should skill-harness own the enforcement library (shared)? — opus-4-8
+
+> **Queue prompt:**
+>
+> Should skill-harness contain the library for the enforcement fallback? agent-doc and other dependencies would likely need similar behavior.
+
+
+Yes — your DRY instinct is right. The dedup mechanism should be a **shared library**, not buried inside tsift. But "should skill-harness contain it" resolves on one constraint: the **dependency direction**. Let me separate the three layers, because only one of them is actually shareable.
+
+**1. The generic core (the shareable part) — a leaf library.**
+The reusable thing is a *session-scoped content ledger*: keyed by `(logical-id + content-hash)`, with an API like `register(id, hash)` and `should_deliver(id, hash) → Full | Stub{reason}`. Exemptions fall out of the key: a changed runbook has a new hash → delivered again; a compacted-away copy is re-requested → delivered again. This part is pure and depends on nothing.
+
+**2. Session identity — a harness-specific input, not owned by the library.**
+The ledger needs a session key to scope "this session." That key is harness-specific (Claude session id, Codex rollout id, OpenCode session id). The library should **take it as a parameter**, not detect it. Keep harness-awareness out of the leaf.
+
+**3. Consumer integration — thin, per tool.**
+tsift decides "this fetch is a runbook, emit a stub with a re-fetch hint"; agent-doc decides the same for its own runbook references. Thin adapters over the shared core.
+
+**So: should skill-harness contain it?** Yes *if* "skill-harness" means a **leaf crate that nothing else in the graph depends back into** — then tsift, agent-doc, and future consumers all depend on it. The thing to avoid is putting it inside either tsift *or* agent-doc:
+- Inside **tsift** → agent-doc would have to depend on tsift just to dedup its own runbooks. Wrong direction.
+- Inside **agent-doc** → tsift would depend on agent-doc. Also wrong (and agent-doc is a heavy dep to pull into a search tool).
+- A **shared leaf crate** → both depend *down* onto it; no cycle. This is exactly agent-doc's own documented **Shared Foundation pattern** ("shared logic at the broadest scope; consumers are thin"). Your "agent-doc and other dependencies would need similar behavior" is the textbook trigger for it.
+
+One nuance worth keeping: agent-doc already owns session/cycle state (`cycle_state.rs`), so it's the natural place to *provide the session-identity adapter* (layer 2) — but the ledger itself (layer 1) still belongs in the leaf crate that agent-doc depends on, not inside agent-doc.
+
+**Caveat (unchanged):** don't build any of this until re-measurement proves the nudge didn't already close the gap — #7qky stays gated. But designing the **seam** now is free and worth it: have `tsift runbook <name>` and agent-doc's runbook references both call the same ledger interface from day one, so the enforcement can drop in later without reworking either consumer. I've recorded this placement decision on the gated #7qky item.
+<!-- agent:boundary:4aa940df -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,8 +188,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Should skill-harness contain the library for the enforcement fallback? agent-doc and other dependencies would likely need similar behavior.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

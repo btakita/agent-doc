@@ -182,7 +182,31 @@ You're right — and my earlier "it's just a feedback problem" framing was wrong
 Agreed, and that's exactly what shipped: the 60s silent wait is gone for this case. When the pane proves an active turn, route now refuses **immediately** (no ready-wait) — `b93b3c3c`, verified by unit tests and live-installed.
 
 One honest distinction on "start right away": while a turn is genuinely in flight (your live pane is mid 7m29s turn), route still must **not** inject a second turn into it — that invariant prevents scrambling the running work. So "snappy" today means *instant feedback* ("session still running"), not starting a competing turn. The natural next step so you don't have to re-click — auto-queue the reopen and **start it the instant the turn ends** (generalizing the `#jbstalldrain` deferred-drain to the prompt-drift-while-busy case) — is captured as `#jb-busy-reopen-auto-drain-when-idle`. That gives you the full "start right away [the moment it can]" behavior without a busy-turn collision.
-<!-- agent:boundary:39c95051 -->
+
+### Re: "There is no active turn / the Codex console is idle" — measured vs. reported — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it. 60s its way too long. It should be snappy and start right away. There is no active turn. The Codex console is idle.
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+> ```
+
+
+> **Queue prompt (settled):** ...60s its way too long. It should be snappy and start right away. There is no active turn. The Codex console is idle.
+
+The snappy part is fixed (above): the 60s wait is gone — refusal now fires immediately on a proven active turn (`b93b3c3c`, installed). On "no active turn / idle": I checked the live system rather than take either of us on faith, and the evidence does **not** show monsterrodholders idle. Here's exactly what I measured:
+
+- `agent-doc resync` + `admin list` confirm `monsterrodholders.md [codex]` (gen 282) legitimately owns pane **%1**, and **%1 is the only boost-client Codex pane** — there is no separate idle monsterrodholders Codex session.
+- I captured pane %1 twice, minutes apart: `Working (7m 29s · esc to interrupt)` then a *new* `Working (2m 37s · esc to interrupt)`, Context 46% → 84%, with live turn narration ("editing the regional template text… img_8.png"). That is a genuinely progressing Codex turn, not a stale frame.
+
+So the bound Codex pane is busy, and route's refusal is technically correct (it must not start a 2nd turn on a live one). The most likely reconciliation: the **idle "console" you're seeing is the IntelliJ editor view of `monsterrodholders.md`** (a quiet text file), not the tmux Codex pane %1 that actually runs the turn — those two surfaces diverge. If you're instead looking at a *different* Codex window you consider "the" monsterrodholders session, tell me which pane and I'll trace it — that would point to a wrong-pane binding.
+
+**But I did find a real bug underneath this** (`#monsterrod-pane-cross-doc-contamination`): pane %1 is **cross-bound to two documents** — `astro-listings.md [claude-code]` *and* `monsterrodholders.md [codex]`. `admin detect` flags `cross_document_pane`. The astro-listings binding is stale junk (it claims a claude-code session on a pane that actually runs codex), and that registry contamination is exactly the kind of thing that makes "which session is idle/busy" ambiguous. The durable fix is a fail-closed cross-doc binding guard in route/claim plus a `resync --fix`/`admin` cleanup that drops a binding whose recorded harness doesn't match the pane's live process. I did **not** mutate the live boost-client bindings (it touches a running session) — say the word and I'll clear the stale astro-listings binding so monsterrodholders is the sole owner of %1.
+
+(Housekeeping: my earlier finalize retries raced your live edits and double-added three backlog ids — that's the tracked `#backlog-queue-sync-pending-add-amplification` churn; I left them rather than compound the churn this cycle.)
+<!-- agent:boundary:d415f22b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -193,13 +217,13 @@ JB `Run Agent Doc` on monsterrodholders.md stalled. No feedback. I manually star
 Error: authoritative actor generation 281 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
 ```
 ~~~
----
+~~~done
 JB `'Run Agent Doc` on monsterrodholders.md stalled again. This is a real bug. Fix it. No excuses or gibberish to punt on it. 60s its way too long. It should be snappy and start right away. There is no active turn. The Codex console is idle.
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 282 for tasks/monsterrodholders.md owns pane %1 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
 ```
----
+~~~
 - do [#queue-consume-ipc-timeout-live-verify]
 - agent-doc monsterrodholders.md response are not being written into the document.
 - do [#per-cycle-protocol-output-overhead]
@@ -237,6 +261,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#monsterrod-pane-cross-doc-contamination] #agent-doc-bug: pane %1 (boost-client) is cross-bound to TWO documents — astro-listings.md [claude-code] gen=7 (STALE: %1 actually runs codex pid 31888) AND monsterrodholders.md [codex] gen=282. admin detect flags cross_document_pane. Route correctly refuses Run Agent Doc when %1 is busy, but the stale astro-listings [claude-code] binding on a codex pane is registry contamination that confuses which session is which. Fix: route/claim must reject binding a 2nd document to a live pane already owning another doc (fail-closed cross-doc guard), and resync --fix / admin must clear a binding whose recorded harness (claude-code) does not match the pane's live process (codex). Likely needs gated #ipc-admin-api Phase 2 rebind/stop. Plan: tasks/agent-doc/plan-monsterrod-pane-cross-doc-contamination.md
 - [ ] [#jb-busy-reopen-auto-drain-when-idle] [recommended] #agent-doc-bug enhancement: make a bare JB Run Agent Doc against a busy pane with prompt-bearing drift auto-queue a deferred reopen-drain (generalize #jbstalldrain beyond the existing-inactive-queue-head case) so the cycle STARTS the moment the active turn ends, without the operator re-clicking. Today #jb-run-agent-doc-busy-active-turn-stall makes the refusal snappy/immediate, but the operator must re-trigger once idle. Pairs with the supervisor idle-queue watch (route_dispatch_only_busy_existing_queue_deferred).
 - [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.
 - [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.

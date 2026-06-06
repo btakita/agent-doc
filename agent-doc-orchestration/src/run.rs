@@ -1564,6 +1564,39 @@ mod tests {
     }
 
     #[test]
+    fn owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries() {
+        // #recguard-wedge-escape-live-verify (deterministic core): when the
+        // owner-pane self-invocation guard trips WEDGE_THRESHOLD times in a row,
+        // the escalated diagnostic must (a) state the auto-queue was HALTED
+        // (queue: stop), (b) state the head stays live / no drift committed,
+        // (c) name BOTH recovery actions (answer+finalize+queue:go, or
+        // agent-doc start from OUTSIDE the pane), and (d) warn against re-running
+        // the same direct command. The end-to-end verification on a real wedged
+        // Codex pane stays a recommended live-verify (#recguard-wedge-escape-live-verify).
+        let continuation = crate::queue_continuation::QueueContinuation {
+            head_prompt: "do [#recguard-wedge-escape]".to_string(),
+            head_id: Some("recguard-wedge-escape".to_string()),
+            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
+        };
+        let msg = owned_pane_queue_wedge_halt_diagnostic(
+            Path::new("tasks/x.md"),
+            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
+            &continuation,
+            crate::recguard_wedge::WEDGE_THRESHOLD,
+        );
+        assert!(msg.contains("WEDGE"));
+        assert!(msg.contains("HALTED (`queue: stop`)"));
+        assert!(msg.contains("do [#recguard-wedge-escape]"));
+        assert!(msg.contains("(id #recguard-wedge-escape)"));
+        assert!(msg.contains("stays live"));
+        assert!(msg.contains("agent-doc finalize tasks/x.md"));
+        assert!(msg.contains("queue: go"));
+        assert!(msg.contains("agent-doc start tasks/x.md"));
+        assert!(msg.contains("OUTSIDE this pane"));
+        assert!(msg.contains("Do NOT re-run"));
+    }
+
+    #[test]
     fn no_change_after_recursive_block_reports_typed_diagnostic() {
         // #nochange-after-stall: a direct run that finds no diff but whose latest
         // cycle was abandoned by the recursive-owner guard must surface the prior

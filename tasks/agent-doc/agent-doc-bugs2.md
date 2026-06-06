@@ -123,12 +123,20 @@ No crdt/queue-revert workaround memory exists (the `crdt-backlog-id-revert-tread
 Already captured with a full root-cause finding as `#writer-emits-deprecated-queue-active-false`, and queued as `do [#writer-emits-deprecated-queue-active-false]` later in this same queue. Verified the scope this cycle: ~30 `queue_active: false` sites (17 in `preflight.rs` alone, plus `write.rs`/`closeout.rs`/`repair.rs`/`git.rs`/`route/tests.rs`/`plan.rs`), and the captured finding notes a **prior fix attempt was reverted** — the `write()`-level migrate-on-write only reaches parse+rewrite paths, while finalize, preflight queue-clear, closeout recovery, and the codex_hook Stop-repair set `queue_active` directly or preserve the line verbatim, bypassing it.
 
 The complete fix is a **single normalization pass at the commit boundary** (rewrite `queue_active: X` → `queue: start/stop` for every path) plus updating the ~15 deprecated-form test assertions. That's an involved, regression-sensitive change with a revert in its history — it belongs to the explicit `do [#writer-emits-deprecated-queue-active-false]` head, not a previously-reverted re-attempt squeezed into this churn-disrupted loop. It's also **cosmetic**: both `queue_active:` and `queue:` parse correctly, so this is deprecated-form hygiene, not a functional break. Striking this free-text head as a duplicate of that queued work.
-<!-- agent:boundary:8ba4d1aa -->
+
+### Re: Head 6 strike (answered above) — opus-4-8
+
+Closing orphaned head 6 — its answer is committed just above. It re-served because the concurrent route-owned supervisor raced this finalize and staled the baseline (`#adoc-compact-during-turn-response-loss`). Deferred to `do [#writer-emits-deprecated-queue-active-false]` (cosmetic; prior fix reverted; involved 30-site change).
+
+> **Queue prompt:**
+>
+> The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.
+<!-- agent:boundary:14b53806 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~My agents are creating memory entries to get around various agent-doc churn issues. Please evaluate the memories and treat the workarounds as bugs. Please clear out any agent-doc workarounds from memory so I can dogfood any agent-doc issues. These issues should be fixed on the non-memory harness or binary level.~
-- The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.
+- ~The deprecated `queue_active: false` is still being written into the agent docs instead of the current `queue: stop`.~
 ---
 JB `Run Agent Doc` on monsterrodholders.md stalled. No feedback. I manually started the run.
 ```

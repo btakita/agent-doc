@@ -117,13 +117,58 @@ Ran the bug to ground across all three candidate layers:
 **The id-revert no longer reproduces in any binary path** — fixed by prior work. Locked it in with a regression test `crdt_merge_preserves_user_backlog_id_rename` (`merge.rs`). The plan's other deliverable — the retroactive preset-collision warning — is already implemented + wired (`preset_item_id_collision_warning`, `preflight.rs:2610`, tested).
 
 `make check` green; submodule `f1872c44` pushed, superproject `03941a0fd`. Marking `#backlog-id-user-rename-revert` **done** — count down by one, by finishing it. Continuing with the same standard: reproduce, fix-or-verify, test, close.
-<!-- agent:boundary:5b7cc081 -->
+
+### Re: mermaid auto-dag of backlog/review completions — opus-4-8
+
+> **Queue prompt:**
+>
+> Show a mermaid representation of the auto-dag plan for backlog and review item completions in this document.
+
+
+No `agent-doc dag` command exists, so this is hand-built from the items' explicit relationships. **Key finding: the 75 review items are mostly *independent* — each gated on its own external validation, not on each other.** The count grows because items pile up code-complete awaiting live-verify.
+
+```mermaid
+graph TD
+  subgraph done["Completed this session"]
+    IDREV["#backlog-id-user-rename-revert DONE"]
+    AUTOLOOP["#autoloop-command-preemption Ph1/2a/2b"]
+    COMPACT["queue-aware compaction DONE"]
+    TURNMARK["#claude-busy turn-active marker"]
+  end
+  ARCH["IPC/CRDT pipeline redesign<br/>non-blocking main loop + per-doc queues<br/>(your open architecture question)<br/>= ROOT of finalize-pipeline churn"]
+  subgraph fin["Finalize / CRDT pipeline (shared IPC-drift surface)"]
+    QEDIT["#queue-edit-lost-during-finalize-crdt"]
+    FDIV["#finalize-divergence-orphans-committed-head"]
+    FVIS["#finalize-visible-buffer-ipc-timeout-race"]
+    QDEDUP["#queue-dedup-destroys-intentional-duplicates"]
+  end
+  ARCH --> QEDIT & FDIV & FVIS
+  QEDIT -.shared fix.- FDIV
+  QEDIT -.related.- QDEDUP
+  subgraph q["Queue management (independent)"]
+    WRITERQ["#writer-emits-deprecated-queue-active-false"]
+    QSYNC["#backlog-queue-sync-pending-add-amplification"]
+    FREETEXT["#free-text-head-answer-match-too-literal"]
+  end
+  SUBAGENT["#subagent-blocks-session<br/>DESIGN DECISION (only true blocker)"]
+  SUBAGENT --> LEASE["#claude-busy hard busy-lease Ph3"]
+  SUBAGENT --> AL3["#autoloop Ph3 live-verify"]
+  VGATE["~50 leaf items<br/>each independently gated on its own<br/>live-verify / operator / external validation<br/>no inter-deps, completable in any order"]
+```
+
+**Completion order the DAG implies:**
+1. **One real root:** the IPC/CRDT pipeline redesign (non-blocking main loop + per-doc queues) — fixing it collapses the finalize cluster (`#queue-edit-lost`, `#finalize-divergence`, `#finalize-visible-buffer-ipc-timeout-race`), which is also the editor-race churn source this session.
+2. **One design gate:** `#subagent-blocks-session` — the only item blocking others.
+3. **~50+ are independent**, overwhelmingly gated on *live-verify / operator action*, not code — so the lever to cut the count is operator verification passes, not more implementation.
+<!-- agent:boundary:30cf277c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~Finish plan-backlog-id-user-rename-revert.md. We have way too many gated review items. We need to start doing real work...not punting. Do the prerequisite tasks first. Do the work to reduce the review item count. Do it. I am here. We need to get the review items completed. The review items are growing instead.~
 - ~agent-doc should think holistically about the backlog and review items. The `/goal` is to complete all presently actionable review items. Some review items legitimately have dated gates, such as in monsterrodholders.md, but this file does not. There are only work gates. The problem is I don't know what the order of work is. This is auto-dag territory. Please utilize the auto-dag feature of agent-doc. Make auto-dag able to plan the work graph. Release an auto-dag capable of planning all backlog and review item completions in a mermaid.~
-- Show a mermaid representation of the auto-dag plan for backlog and review item completions in this document.
+- ~Show a mermaid representation of the auto-dag plan for backlog and review item completions in this document.~
+- Show a nested list representation of the auto-dag plan for backlog and review item completions in this document.
+- Put both the mermaid and nested list into a separate plan md document. I want to run through this document. Include the existing backlog and review items. I want to use this plan file to execute the agent. Any discoveries or changes during the work should update the plan md file. agent-doc should have 1st class treatment of the auto-dag. I would like to emulate and bring visibility to a feature like C
 - do [#writer-emits-deprecated-queue-active-false]
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]

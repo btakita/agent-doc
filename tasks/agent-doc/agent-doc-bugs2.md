@@ -84,6 +84,11 @@ Per this doc's `#agent-doc-bug` convention I captured it as a plan rather than i
 
 > **Queue prompt:**
 >
+> agent-doc deleted a bunch of queue items that I added in monsterrodholders.md
+
+
+> **Queue prompt:**
+>
 > monsterrodholders.md is running through the queue but I don't see any responses.
 
 
@@ -98,14 +103,14 @@ This is the data-loss facet of two already-tracked items:
 I captured this live repro as `#monsterrod-queue-items-deleted-live` (recommended) referencing both. I deliberately did **not** assert the exact mechanism (dedup vs CRDT-merge-overwrite vs queue→backlog migration drop) — the commit proves the loss, but pinning which path requires the finalize IPC/merge trace from that cycle, which I won't disturb on your live session. The fix invariant is clear though: a closeout must **never silently remove an uncompleted user-added queue head** — dedup must be provenance-aware or gated on a proven IPC-drift state.
 
 Notably, this is the same churn class you flagged at the very start of this session ("deleting a queue item that I added"). It's now reproduced with a concrete commit. Want me to take the `#queue-dedup-destroys-intentional-duplicates` fix next — it's the highest-leverage one here (stops the data loss)?
-<!-- agent:boundary:38d601c4 -->
+<!-- agent:boundary:eb4f7be8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~monsterrodholders.md is running through the queue but I don't see any responses.~
-- agent-doc deleted a bunch of queue items that I added in monsterrodholders.md
+- ~agent-doc deleted a bunch of queue items that I added in monsterrodholders.md~
 - [#admin-recover-stale-busy-no-pane-kill]
-- Is agent-doc in any way encouraging the turn to create gated responses? It seems the majority of my turns result review items. I want my turns to complete the tasks. Please update the SKILL/runbooks to complete tasks. Only create review items under exceptional conditions. I would rather have items in the backlog that are actionable. The gated review items make understanding the actionable items difficult. Especially when there are >10. I'm just accumulating gated review items in this document and in monsterrodholders.md. For this session...NO MORE GATED REVIEW ITEMS. FINISH WORK...NO PUNTING...NO EXCUSES...NO GIBBERISH. YOU ARE NOW BANNED FROM CREATING REVIEW ITEMS UNTIL 
+- Is agent-doc in any way encouraging the turn to create gated responses? It seems the majority of my turns result review items. I want my turns to complete the tasks. Please update the SKILL/runbooks to complete tasks. Only create review items under exceptional conditions. I would rather have items in the backlog that are actionable. The gated review items make understanding the actionable items difficult. Especially when there are >10. I'm just accumulating gated review items in this document and in monsterrodholders.md. For this session...NO MORE GATED REVIEW ITEMS. FINISH WORK...NO PUNTING...NO EXCUSES...NO GIBBERISH. YOU ARE NOW BANNED FROM CREATING REVIEW ITEMS UNTIL YOU CAN GET THE COUNT UNDER 20 .
 - It seems that everytime I do some work on agent-doc, some regressions occur. Is this due to the current state of agent-doc having on unsettled turn pipeline? 
 - [#stale-busy-after-auto-inject-no-clear]
 - do [#monsterrod-writeback-post-contamination-confirm]

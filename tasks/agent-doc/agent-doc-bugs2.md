@@ -29,176 +29,19 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-191050.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260606-215450.md`*
 
 Compacted content:
-- Archived 2 response topic(s): monsterrodholders.md "run stalled"; queue not auto-populating from backlog `queue` attribute
+- Archived 8 response topic(s): do [#backlog-queue-empty-active-repopulate]; monsterrodholders.md recursive-deadlock; queue stalled + last response not committed; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#backlog-queue-empty-active-repopulate] — gate empty-active repopulation on `go` — opus-4-8
-
-> **Queue prompt:**
->
-> do [#backlog-queue-empty-active-repopulate]. "Decide continuous-backlog-loop vs drain-then-stop before implementing.": Make this dependent on whether or not queue has `go` as an attribute. If `go` is set, continuous-backlog-loop. If not, drain-then-stop.
-
-
-Implemented your decision: **`go` → continuous-backlog-loop, no `go` → drain-then-stop.** Shipped `f6d36a98` → `origin/20260422/codex-agent-backend`.
-
-**Change** (`preflight.rs` `run_queue_maintenance`, the `#backlog-queue-sync-pending-add-amplification` block): the empty-active repopulation is now gated on the queue's `go` control. When the queue carries `go` (frontmatter `queue: go` *or* a marker-side `go`/`start` token — both resolve to `QueueControl::Start`) **and** the live queue is fully drained (0 un-struck prompts), the amplification hold is skipped and the full active backlog repopulates. Without `go`, a drained persisted-active queue stays drained.
-
-**Safety:**
-- *Amplification-safe* — the hold only mattered to stop a growing queue; with 0 live prompts there's nothing to amplify.
-- *Self-terminating* — `active_item_ids` mirrors only `Open` (`[ ]`) backlog items. Items processed and marked `[/]` (gated) or `[x]`/`agent:done` per the `do #id` closeout rule drop out, so the loop ends when no `Open` backlog item remains. (This very item moving to `agent:done` is the pattern.)
-
-**Verification:**
-- `make check` green (exit 0, no failures) — clippy + full suite incl. SimWorld.
-- 2 new deterministic tests: `run_queue_maintenance_go_mode_repopulates_drained_active_queue`, `run_queue_maintenance_no_go_keeps_drain_then_stop_on_empty_active_queue`.
-- Spec updated: `specs/02-document-format.md`.
-- Both binaries rebuilt — `cargo build --release` + `cargo install --path .` (replaced `~/.cargo/bin/agent-doc`).
-- CI run 27071524465 in flight (prior two runs green); the change is pure preflight queue logic with no tmux surface. I'll confirm the run before treating the whole turn as closed.
-
-Marked `--done`. Note: this doc's own `queue: go` means once the live queue drains, the binary will now repopulate from the 8 remaining open backlog items — i.e. this loop is now genuinely continuous until the backlog itself drains.
-
-### Re: monsterrodholders.md recursive-deadlock — fast-track root-cause fix — opus-4-8
-
-> **Queue prompt:**
->
-> monsterrodholders.md "agent-doc tasks/monsterrodholders.md ran, but it refused to submit recursively because this Codex pane already owns that document.". We need to fix the root cause of this deadlock immediately. Fast track the auto-dag to fix this reoccuring issue.
-
-
-You picked **targeted fix now**, and it's shipped: `8627ad1b` → `origin/20260422/codex-agent-backend`.
-
-**Traced the live trigger.** ops.log shows the recurrence is `current_pane == actor_pane`, `actor_state=busy` — the running Codex agent re-invokes `agent-doc <FILE>` from inside its **own busy owner pane, mid-turn**. Option B (`#codex-self-reinvoke-prevent`) only redirects the *Stop-hook* continuation, so a mid-turn re-run still trips the `#codex-owned-pane-auto-queue-stuck` guard. The guard bails correctly, but in a self-driving `agent:queue auto` loop with no operator watching, the same head trips it every cycle — the dead-loop you kept hitting.
-
-**Escape hatch (`#recguard-wedge-escape`).** New `recguard_wedge` module tracks *consecutive* owner-pane self-invocation guard fires for the same head (keyed on head text; a new head resets, consuming a head clears it). On the 3rd consecutive fire — a proven dead-loop — `run.rs`:
-1. halts the runaway auto-queue (`queue: stop`) so it stops re-firing,
-2. logs `recursive_self_invocation_wedge_halt` (file, head id, count),
-3. bails with an escalated diagnostic naming the one recovery that advances the head: answer in the owner turn + `finalize` then re-enable `queue: go`, or `agent-doc start <FILE>` and trigger from outside the owner pane.
-
-The head stays live; no snapshot/queue drift is committed. A healthy loop that self-invokes ≤2× in a row never escalates.
-
-**Verification:** 3 new unit tests + FlowCore budget audit; `make check` green (clippy + full suite); both binaries rebuilt + installed; spec `specs/07-core-commands.md`.
-
-**Scope honesty:** this is the *interim* — it stops the dead-loop from burning cycles but does **not** remove the CLI-drives-Codex re-entry. The structural root fix remains Option A (MCP server, `#codex-mcp-server`). Live-verify follow-up `#recguard-wedge-escape-live-verify` already queued (this cycle adds no further backlog items).
-
-### Re: queue stalled + last response not committed — 2 agent-doc bugs — opus-4-8
-
-Recovered the live session and captured both bugs. **Root cause: a late-applied IPC patch.**
-
-**What happened.** My prior finalize committed cleanly (HEAD 890486b54, monsterrod head consumed), but its boundary-reposition IPC timed out and queued a fallback patch. The route-owned supervisor's wedged IPC listener then applied a STALE earlier patch LATE, appending a DUPLICATE `### Re:` block (an older draft of the same response) to the working tree. That uncommitted duplicate made `session-check` report INTERRUPTED ("direct patchback") and left the cycle open, so the `agent:queue auto` loop never advanced — the stall you saw. `git diff HEAD` showed exactly +17 lines = one duplicate block; HEAD had the correct single copy.
-
-**Recovery (done):** discarded the duplicate (`git checkout HEAD -- <file>`), reconciled the snapshot; queue is un-stalled at 8 items, head `do [#free-text-head-consume-genuine-not-struck]` live.
-
-**Both bugs captured** (plan `tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md`):
-1. `#late-ipc-patch-duplicate-stall` — the late/stale IPC patch re-application duplicates the response and stalls the auto-queue. Fix: generation/baseline-fence queued patches (drop superseded ones); a reposition-only patch must never carry a full response body.
-2. `#late-ipc-patch-response-uncommitted` — the duplicate is uncommitted, so the response looks not-committed and session-check reports an unrecoverable interruption. Fix: session-check should self-heal by reaping a HEAD-duplicate uncommitted `### Re:` block instead of stalling.
-
-Contributing factor this session: a 40-min-hung background `agent-doc write` left the IPC listener/live-buffer state wedged (separate, already noted).
-
-### Re: do [#free-text-head-consume-genuine-not-struck] — opus-4-8
-
-Fixed and shipped (`agent-doc` submodule `7d6ca4ac`, pushed to `origin/main`, CI running).
-
-**Root cause** — not the "literal topic match" the item originally suspected, but **prompt-prefix normalization**. `cycle_answered_foreign_exchange_prompt` (write.rs) diffs the *normalized snapshot* baseline against the *live* editor buffer (`current_content`, read pre-write at `write.rs:1389`). The buffer preserves `❯` prompt prefixes on already-answered prompts that the snapshot normalized to the bare form (the CLAUDE.md "committed exchange-only prompt-prefix normalization on already-answered prompts" rule). A pure `do x` → `❯ do x` prefix flip then surfaces as an added `+❯ …` diff line, and the old scan read *any* added `❯` line not matching the head as a **new foreign exchange prompt** → branch 4 returned `Ok(false)` → the free-text head was never struck → the auto-loop treadmilled.
-
-**Fix** — a `❯` added line counts as foreign only when its normalized text is **absent from the baseline entirely** (a genuinely new, unrelated prompt). A prefix flip on a prompt that already existed at baseline (in either `❯ X` or bare `X` form) is no longer foreign. Genuinely new unrelated `❯` prompts still keep the head queued, so the diverted-cycle guard is intact.
-
-**Verification**
-- Synthetic repro confirmed the false-positive (`prefix-flip foreign=true`) and the fix (`false`); a genuine new foreign prompt still returns `true`.
-- Against the real committed axocoatl baseline/current, `queue_consumption_allowed_for_response` already returns `Ok(true)` — i.e. the exact original live transient is **not recoverable from git/capture** (the capture stores only the response body, not the live pre-write buffer). I added `AGENT_DOC_DEBUG_QUEUE_CONSUME` env-gated instrumentation (exactly the eprintln the item requested) so the next live miss logs which added line it misreads.
-- New regression test `free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt`; existing `free_text_head_kept_only_when_cycle_answered_foreign_prompt` + `consume_decision_strikes_answered_free_text_head` still pass. `make check` green; both binaries rebuilt + installed. Spec `specs/07-closeout-commands.md` + `VERSIONS.md` updated.
-
-**Gated** (not closed): code-complete and shipped, but ungate only after CI is green and a live auto-loop confirms free-text heads no longer mis-skip — avoiding the premature-reap that reopened this item before.
-
-### Re: #late-ipc-patch-duplicate-stall — opus-4-8
-
-> **Queue prompt:**
->
-> #late-ipc-patch-duplicate-stall
-
-
-Investigated the full late-IPC-duplicate path and shipped the binary-side generation token (`agent-doc` `18d6e7b9`, pushed). Gating the head — the remaining prevention is plugin-side and needs live IntelliJ verification, which an unattended auto-loop tail can't do.
-
-**What was already implemented (binary side):**
-- **Write-side generation-fence** — `try_ipc` (`write.rs:10251`) already rejects a fresh patch send when the cycle is already committed (`late_fallback_patch_rejected reason=already_committed`), with the `#adoc-compact-during-turn-response-loss` mid-turn-rotation exception.
-- **Reposition-only patches carry no response body** — `queue_file_ipc_reposition_boundary` emits `patches: []` / `unmatched: ""` / `preserve_head: true`; `existing_patch_is_reposition_only` enforces it.
-
-**What I shipped this cycle (the plan's "tag queued patches with cycle id + baseline hash" primitive):**
-- `queue_file_ipc_reposition_boundary` now tags the durable `.agent-doc/patches/<hash>.json` with **`cycle_id`** (from cycle state) + **`baseline_hash`** (content hash of the live doc it targets), so an asynchronous applier has the same generation token the write-side guard uses. Regression test `queued_file_reposition_patch_carries_generation_token`. `make check` green; both binaries rebuilt + installed; spec + VERSIONS + plan updated.
-
-**Why gated, not closed** — the actual late-apply is done by the **JetBrains `PatchWatcher`**, which has **zero** cycle awareness today. The real apply-side drop (consume `cycle_id`/`baseline_hash`, discard a superseded patch) is Kotlin work + a plugin version bump + `signPlugin` + a **live IntelliJ repro/verify** (the manual-testing gate), so it belongs in a focused cycle, not this loop. Queued two concrete follow-ups: `#late-ipc-patch-plugin-apply-fence` (the apply fence) and `#ipc-listener-dewedge-direct-disk` (de-wedge). The companion `#late-ipc-patch-response-uncommitted` (session-check self-heal) is binary-side and is the next queue head.
-
-### Re: #late-ipc-patch-response-uncommitted — opus-4-8
-
-> **Queue prompt:**
->
-> [#recguard-wedge-escape-live-verify]
-
-
-> **Queue prompt:**
->
-> #late-ipc-patch-response-uncommitted
-
-
-Fixed + shipped (`agent-doc` `04fa4896`, CI green on the prior two pushes; this one running). This companion to `#late-ipc-patch-duplicate-stall` is fully binary-side, so it's **done**, not gated.
-
-**Root cause** — when a wedged/slow IPC listener applies a stale queued patch after the cycle already committed, it re-adds a duplicate `### Re:` block to the working tree even though the real response is already in HEAD. Session-check then reported an unrecoverable interruption (`late-IPC committed-response over-application`), which **stalls the `agent:queue` auto-loop** and makes the response look uncommitted to the operator.
-
-**Fix** — the two *mutating* session-check entrypoints now self-heal in place instead of bailing:
-- `enforce_clean_closeout` (the `finalize` post-commit boundary)
-- `run_with_options` (direct-exec `agent-doc session-check`, used by Codex/OpenCode)
-
-Both call `self_heal_late_ipc_overapplication`, which restores the committed HEAD over the working tree + snapshot (logging `late_ipc_response_overapplication_self_healed`) — the **same remediation `preflight` already applies**, taken only when `detect_late_ipc_response_overapplication` proves it safe (scaffold matches HEAD, every committed response present unchanged, no new user directive introduced). The read-only `inspect*` family stays non-mutating and keeps the Interrupted diagnostic as a fallback.
-
-**Verification** — regression test `enforce_clean_closeout_self_heals_late_ipc_overapplication` (git-backed fixture: a non-adjacent stale-replay duplicate is self-healed back to HEAD on the finalize boundary). `make check` green; both binaries rebuilt + installed; spec `specs/07-closeout-commands.md` + VERSIONS + plan updated.
-
-This closes the recover-from-duplicate half of the plan. The prevent-the-duplicate half (plugin-side apply fence + listener de-wedge) remains gated under `#late-ipc-patch-plugin-apply-fence` / `#ipc-listener-dewedge-direct-disk`.
-
-### Re: [#recguard-wedge-escape-live-verify] — opus-4-8
-
-> **Queue prompt:**
->
-> I'm confused by this monsterrodholders.md run. Please fix the root cause and help me to fix this particular bind.
-> ```
-> • The command hit the recursion guard again because this pane already owns tasks/monsterrodholders.md.
->
->   agent-doc session-check confirms the cycle is cleanly abandoned:
->
->   queue_continuation_required=false
->
->   No agent-doc cancel is needed. To actually start a new managed run, run this from outside this owning Codex pane:
->
->   agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-> ```
-
-
-> **Queue prompt:**
->
-> rebase main into this branch
-
-
-Hardened the deterministic core and gated the live-verify (the end-to-end part can't run from this unattended loop). Note: this cycle hit a wedged IPC listener (socket+file timeout, exit 75) mid-finalize; recovered via clean discard + `--force-disk` re-land — the test + gate + queue-strike had already committed (`214141f0`, `6b3f4244b`), only this response text needed re-landing.
-
-**What I verified/added:** the `#recguard-wedge-escape` hatch (`8627ad1b`) is implemented in `recguard_wedge.rs` + wired into `run.rs` (halt at `WEDGE_THRESHOLD=3`) and `write.rs` (clears on consume), with unit tests for the counter (count/reset/clear/threshold). The gap was the **escalated diagnostic contract**, so I added `owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries` (`214141f0`) asserting it states the queue was HALTED (`queue: stop`), the head stays live with no drift, names BOTH recovery actions (answer+`finalize`+`queue: go`, or `agent-doc start` from OUTSIDE the owner pane), and warns against re-running the same direct command. `make check` green.
-
-**Why gated, not done:** the item is a *live-verify on a real wedged Codex auto-loop* — drive a busy owner pane that re-invokes `agent-doc <FILE>` mid-turn 3× and confirm the binary halts the auto-queue, logs `recursive_self_invocation_wedge_halt`, and emits the escalated diagnostic. That needs an operator-driven live Codex session, which this unattended loop can't safely perform. The deterministic contract is now covered; the live confirmation remains.
-
-### Re: backlog reconciliation — #rebase-main-into-branch — opus-4-8
-
-Preflight blocked because `#rebase-main-into-branch` was an open backlog item in recent committed history (`b66ca2046`) but had dropped out of the live document without a closeout. Restored it to the backlog and confirmed it is moot:
-
-- superproject `agent-loop` is on `main`, **4 commits ahead of `origin/main`** (unpushed work, not a divergent branch)
-- `src/agent-doc` submodule is on `main`, **even with `origin/main`**
-
-There is no separate branch to rebase `main` into. The original queue item ("rebase main into this branch") was auto-consumed during a wedged-IPC closeout recovery (`dc892f1d1`) without ever being performed, but the work it described does not apply to the current repo state. Closing as not-applicable (`--done`).
-<!-- agent:boundary:9e366a3b -->
+<!-- agent:boundary:49269c09 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#free-text-head-consume-genuine-not-struck]
 - I still see `queue_active: true`. I thought this was fixed. Why did you lie to me? Fix it. No punting. I'm sick of your punting and weasel words to avoid doing work. This `queue_active: true` issue is as easy as it gets to fix. Yet you failed. I thought you were the best that Anthropic has. Very disappointing.
 ---
-Yet another stall with monsterrodholders.md on a fresh session. Fix the state so I can continue with my work. What does the admin api say? We should be able to recover without having to kill the tmux pane. Better yet, never get into this state. Right now, even if I kill the tmux pane and restart, I still get into the state. monsterrodholders.md is truly stuck. `agent-doc tasks/monsterrodholders.md` should 
+Yet another stall with monsterrodholders.md on a fresh session. Fix the behavior so I can continue with my work. What does the admin api say? We should be able to recover without having to kill the tmux pane. Better yet, never get into this state. Right now, even if I kill the tmux pane and restart, I still get into the state. monsterrodholders.md is truly stuck. `agent-doc tasks/monsterrodholders.md` should pass the command back to the session to avoid the recursion or make recursion work without the deadlock. I want this issue fixed before moving on to a mcp.
 ```
 • The absolute-path command hits the same guard: this Codex pane already owns that agent-doc document, so direct
   invocation would deadlock.
@@ -210,6 +53,7 @@ Yet another stall with monsterrodholders.md on a fresh session. Fix the state so
   agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
 ```
 ---
+- The busy flag behavior needs to change. Since we are in the middle of a session, we should send a command that bypasses the busy flag or clear the busy flag or have a reentrant-friendly solution instead of the busy flag. The busy flag is brittle for reentrant commands, so we need to find a solution to this. Once you fix this, give me instructions on how to recover my codex session.
 - do [#monsterrod-writeback-post-contamination-confirm]
 - [#late-ipc-patch-plugin-apply-fence]
 - [#ipc-listener-dewedge-direct-disk]

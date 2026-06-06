@@ -1,5 +1,22 @@
 # Plan: writer emits deprecated `queue_active:` instead of canonical `queue: start/stop`
 
+## RESOLVED (2026-06-06)
+
+Fixed centrally in `write()` (`agent-doc-core/src/frontmatter.rs`): every
+frontmatter write now folds `queue_active` onto the canonical `queue: start/stop`
+and drops the deprecated line — so the direct-set-then-`write()` paths
+(`preflight` queue-clear, closeout recovery, etc.) emit canonical form without
+migrating each site. `merge_queue_state` already did this; the `write()` fold
+generalizes it to ALL re-serialize paths. Only **1** test assertion needed
+updating (the codebase had already migrated the rest under `#queue-state-unify`),
+plus a new regression test `write_emits_canonical_queue_for_direct_set_queue_active`.
+`make check` green; installed. Component-patch/verbatim-preserve paths keep
+whatever the doc already has, which is canonical once any `write()` has touched
+it — so a commit-boundary normalization is no longer required. Closed **done**.
+
+---
+
+
 **Source:** agent-doc-bugs2.md backlog `#writer-emits-deprecated-queue-active-false`.
 
 ## Problem

@@ -386,6 +386,32 @@ User line 2.
     }
 
     #[test]
+    fn crdt_merge_preserves_user_backlog_id_rename() {
+        // #backlog-id-user-rename-revert regression: when the operator renames a
+        // backlog item's leading `[#id]` on disk (body unchanged), a CRDT merge
+        // of the agent/snapshot side (still the OLD id) against the disk side
+        // (the NEW id) must KEEP the user's renamed id — never revert it to the
+        // snapshot's id. (Confirms the merge layer does not cause the historical
+        // revert; the rename is authoritative.)
+        let base =
+            "<!-- agent:backlog -->\n- [ ] [#abcd] do the thing\n<!-- /agent:backlog -->\n";
+        let ours = base; // agent/snapshot side unchanged — still the old id
+        let theirs =
+            "<!-- agent:backlog -->\n- [ ] [#abcd-2] do the thing\n<!-- /agent:backlog -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("[#abcd-2] do the thing"),
+            "user's renamed id must survive the merge:\n{merged}"
+        );
+        assert!(
+            !merged.contains("[#abcd] do the thing"),
+            "merge must not revert to the snapshot-side old id:\n{merged}"
+        );
+    }
+
+    #[test]
     fn crdt_merge_concurrent_same_line() {
         let base = "Line 1\nLine 3\n";
         let ours = "Line 1\nAgent\nLine 3\n";

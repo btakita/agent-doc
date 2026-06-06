@@ -9995,14 +9995,41 @@ Body\n\
 
         // With final gate: must exit 2 (captured via child process since
         // run_with_options calls std::process::exit).
+        // Resolve the `agent-doc` binary robustly. `src/` unit tests do not get
+        // `CARGO_BIN_EXE_agent-doc`, so prefer an explicit `AGENT_DOC_TEST_BIN`,
+        // then the workspace `target/debug/agent-doc` that `cargo nextest
+        // --all-targets` builds (keeps CI coverage), then a bare PATH lookup.
+        // CI runs `make check` without installing the binary to PATH, so the old
+        // bare-`agent-doc` fallback spawned nothing and `.output().unwrap()`
+        // panicked — failing this test (and the whole branch CI) even though the
+        // codex-final-gate behavior was fine. Skip gracefully only when no
+        // binary is spawnable at all.
         let bin = std::env::var("AGENT_DOC_TEST_BIN")
-            .unwrap_or_else(|_| "agent-doc".to_string());
-        let output = Command::new(&bin)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .map(|root| root.join("target/debug/agent-doc"))
+                    .filter(|p| p.exists())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "agent-doc".to_string())
+            });
+        let output = match Command::new(&bin)
             .current_dir(root)
             .args(["session-check", "--codex-final-gate", doc.to_str().unwrap()])
             .env("AGENT_DOC_TEST_BIN", &bin)
             .output()
-            .unwrap();
+        {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!(
+                    "[test] skipping codex_final_gate_blocks_on_recursive_invocation_without_captured_response: \
+                     cannot spawn agent-doc binary `{bin}` ({err}); set AGENT_DOC_TEST_BIN to the built binary"
+                );
+                return;
+            }
+        };
         assert_eq!(
             output.status.code(),
             Some(2),

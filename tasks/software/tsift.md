@@ -194,7 +194,29 @@ Done — both queued instruction tasks, executed together as one coherent refact
 **Commit/push:** submodule pushed — `f935297` on `btakita/tsift` (AGENTS lean + CLAUDE symlink). Superproject skill + runbooks + pointer committed locally — `8931cd535`; push still deferred (shared superproject diverged from origin with unrelated-submodule conflicts).
 
 `#trt1` (findings-layer implementation) remains OPEN — still awaiting your explicit go-ahead.
-<!-- agent:boundary:51b67af0 -->
+### Re: Ensure SKILL.md has full tsift API access + dedup AGENTS/runbook content — opus-4-8
+
+> **Queue prompt:**
+>
+> Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.
+
+
+Already done — completed in the same cycle as the CLAUDE.md/AGENTS.md merge (prior response). To recap against this prompt specifically:
+
+- **SKILL.md has full tsift API access dispatching to runbooks** — `.claude/skills/tsift/SKILL.md` now carries the complete command surface + global flags + version/freshness checks, and dispatches to `runbooks/` (command-reference, conventions, hook-integration, internals, search-strategies) for efficient token usage.
+- **Redundant AGENTS.md content moved/replaced with SKILL + runbook content** — `src/tsift/AGENTS.md` no longer duplicates the command reference/conventions/hooks; it's a lean header deferring to the skill + runbooks, keeping only the `tsift init` code-nav block. `CLAUDE.md` → symlink → `AGENTS.md`.
+
+Committed: submodule `f935297` (pushed to `btakita/tsift`); superproject skill+runbooks+pointer `8931cd535` (local, push deferred — diverged shared superproject).
+
+### Queue is now blocked on your decision
+
+The two remaining queue items both depend on authorizing `#trt1`:
+
+- **`[#trt1]`** — findings-layer implementation. I've asked twice; still OPEN, no go-ahead. Options: `do #trt1` (full 4 phases), Phase 1 first (recommended), or drop it from the queue and keep it as a backlog item.
+- **"Once `[#trt1]` is complete, configure agent-loop tsift config to use findings graph layer"** — explicitly gated on `#trt1` shipping, so it can't run until the layer exists.
+
+I'm pausing the auto-loop here since the remaining work is blocked on that one decision. Tell me how to proceed on `#trt1` and I'll drain the rest.
+<!-- agent:boundary:1da5b3a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -205,7 +227,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~Combine the contents of CLAUDE.md and AGENTS.md into a single AGENTS.md source file with a CLAUDE.md symlink. Extract runbooks to save an load context. Ensure the agents have full access to the tsift api while only loading what is needed.~
-- Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.
+- ~Ensure SKILL.md has full access to the tsift api while dispatching to runbooks for efficient token usage. Move or replace redundant AGENTS.md + runbook content with the SKILL + runbook content.~
 - [#trt1]
 - Once [#trt1] is complete, configure agent-loop tsift config to use findings graph layer.
 <!-- /agent:queue -->

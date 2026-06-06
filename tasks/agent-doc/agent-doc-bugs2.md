@@ -292,7 +292,24 @@ This is the data layer a supervisor/route busy-lease will consume.
 **Still ahead (item stays open):**
 - **Hard busy-lease (gated)** — wire route/supervisor to read `turn_active(base)` and fail-closed / queue a second Run Agent Doc while a turn is in flight. Still gated on the `#subagent-blocks-session` scope decision (which layer blocks, what counts as "the work", how the lease releases).
 - **Conduct rule (skill change-set)** — add the "long build/test on the main agent, stream to a watchable file, never report idle while in flight" rule to the SKILL source + Claude/Codex/OpenCode mirrors (keep `audit-docs` green). Lands with a skill-surface regeneration, not folded in here.
-<!-- agent:boundary:b32fe1a8 -->
+
+### Re: the `__` prefix in `tsift __digest-runner` — opus-4-8
+
+> **Queue prompt:**
+>
+> Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
+
+
+**Short answer:** the `__` prefix marked it as an *internal plumbing* subcommand — hidden from `tsift --help`, invoked by the rewrite/hooks layer, not meant for direct human use. It has since been **promoted to the public `tsift digest-runner`** (this session's `acf6cf87f`), and the CLAUDE.md / instruction surfaces were updated to drop the `__`.
+
+Verified against the live CLI just now:
+- `tsift --help` lists **`digest-runner`** (public); `__digest-runner` does **not** appear.
+- Both `tsift digest-runner --help` and `tsift __digest-runner --help` resolve, and both print `Usage: tsift digest-runner …` — so `__digest-runner` is now a **hidden back-compat alias**, while `digest-runner` is the canonical public name.
+
+So: originally **not** a public command (the `__` was tsift's convention for hidden internal subcommands the hooks call automatically); **now yes** — it's the public `digest-runner`, with the `__` form kept only as a legacy alias. Prefer `tsift digest-runner` going forward.
+
+(Related: the next queued note — "after I added this question, agent-doc deleted it from the queue during finalize" — is the `#queue-edit-lost-during-finalize-crdt` bug I root-caused earlier this session: the IPC drift guard blocks the candidate that holds your concurrent queue add and falls back to a snapshot without it. Plan: `tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md`. The CRDT merge does preserve the add — it reappears on the next preflight — which is why your question survived to be answered here.)
+<!-- agent:boundary:7e718bea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -309,8 +326,9 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 - ~[#queue-edit-lost-during-finalize-crdt]~
 - ~[#claude-busy-status-during-active-turn]~
 - ~do [#ci-per-test-timeout-guard]~
-- Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
+- ~Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?~
 - After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.
+- When I'm running a queue, I don't want Claude to stall the queue to ask if I want to compact.
 - [#autoloop-command-preemption]: plan-autoloop-command-preemption.md: do Phase 2b
 - do [#claude-busy-status-during-active-turn]
 - do [#backlog-id-user-rename-revert]

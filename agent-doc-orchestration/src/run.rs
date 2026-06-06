@@ -428,13 +428,50 @@ fn run_once(
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
         && let Some(continuation) = crate::queue_continuation::detect(file)?
     {
+        // #recguard-wedge-escape: a busy owner pane re-invoking `agent-doc <FILE>`
+        // mid-turn trips this guard (Option B `#codex-self-reinvoke-prevent` only
+        // redirects the *Stop-hook* continuation, not a mid-turn re-run). One
+        // transient self-invoke is normal, but the SAME head tripping this guard
+        // `WEDGE_THRESHOLD` times in a row is a self-driving `agent:queue auto`
+        // dead-loop with no operator watching — it would re-fire forever. Break
+        // it: halt the runaway auto-queue (`queue: stop`) so the loop stops
+        // burning cycles, and hand the operator one clear recovery action.
+        let wedge_count = crate::recguard_wedge::record(file, &continuation.head_prompt)?;
+        if crate::recguard_wedge::is_wedged(wedge_count) {
+            if let Ok(content) = std::fs::read_to_string(file)
+                && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
+                && let Err(err) = std::fs::write(file, &stopped)
+            {
+                eprintln!(
+                    "[recguard-wedge] WARNING: failed to halt wedged auto-queue for {}: {}",
+                    file.display(),
+                    err
+                );
+            }
+            crate::recguard_wedge::clear(file)?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "recursive_self_invocation_wedge_halt file={} head_id={} count={} {}",
+                    file.display(),
+                    continuation.head_id.as_deref().unwrap_or("<none>"),
+                    wedge_count,
+                    detail
+                ),
+            );
+            anyhow::bail!(
+                "{}",
+                owned_pane_queue_wedge_halt_diagnostic(file, &detail, &continuation, wedge_count)
+            );
+        }
         let diagnostic = owned_pane_queue_handoff_diagnostic(file, &detail, &continuation);
         crate::ops_log::log_op(
             file,
             &format!(
-                "run_owned_pane_queue_handoff file={} head_id={} {}",
+                "run_owned_pane_queue_handoff file={} head_id={} self_invocation_count={} {}",
                 file.display(),
                 continuation.head_id.as_deref().unwrap_or("<none>"),
+                wedge_count,
                 detail
             ),
         );
@@ -1121,6 +1158,45 @@ fn owned_pane_queue_handoff_diagnostic(
         "owned-pane self-invocation with active auto-queue head: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and a ready queue head is still live: \"{}\"{}. The recursive same-pane guard refuses to dispatch a nested child here, so this request would baseline queue/boundary drift and leave the head unprocessed. No pre-commit, snapshot, or queue mutation was made — the head stays live. Recovery: run the queue head in THIS owner pane's current turn, then persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`) so the head is consumed and the next queue prompt is exposed. Do NOT re-run `agent-doc {}` from this same pane; that only re-triggers the recursive guard.",
         file.display(),
         detail,
+        head_excerpt,
+        id_note,
+        file.display(),
+        file.display(),
+        file.display()
+    )
+}
+
+/// `#recguard-wedge-escape`: escalated diagnostic when the SAME auto-queue head
+/// has tripped the owner-pane self-invocation guard `WEDGE_THRESHOLD` times in a
+/// row — a proven self-driving dead-loop. The runaway auto-queue has already been
+/// halted (`queue: stop`) by the caller so it stops re-firing; this names the
+/// wedge and the one recovery action that actually advances the head (it cannot
+/// be dispatched from the owner pane that re-entered itself).
+fn owned_pane_queue_wedge_halt_diagnostic(
+    file: &Path,
+    detail: &str,
+    continuation: &crate::queue_continuation::QueueContinuation,
+    count: u32,
+) -> String {
+    let head_excerpt: String = continuation
+        .head_prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(&continuation.head_prompt)
+        .trim()
+        .chars()
+        .take(200)
+        .collect();
+    let id_note = continuation
+        .head_id
+        .as_deref()
+        .map(|id| format!(" (id #{id})"))
+        .unwrap_or_default();
+    format!(
+        "owned-pane self-invocation WEDGE: `agent-doc {}` has re-entered the Codex pane that already owns this document ({}) {} times in a row for the same live queue head \"{}\"{} without it advancing — a self-driving `agent:queue auto` dead-loop. The auto-queue has been HALTED (`queue: stop`) so it stops re-firing. The head was NOT lost (it stays live) and no snapshot/queue drift was committed. Recovery: either (a) answer this head in the current owner turn and persist with `agent-doc finalize {}`, then re-enable with `queue: go`; or (b) re-establish a clean owner with `agent-doc start {}` and trigger the queue from OUTSIDE this pane. Do NOT re-run `agent-doc {}` from this same pane — that is exactly the re-entry that wedged the loop.",
+        file.display(),
+        detail,
+        count,
         head_excerpt,
         id_note,
         file.display(),

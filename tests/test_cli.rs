@@ -314,7 +314,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (#nochange-after-stall-breadth): the no-response active-queue-head
         // closeout check reuses pending_done_guard mode for strict/warn/off policy.
         ("agent-doc-orchestration/src/session_check.rs", "guard_") => 81,
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
+        // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
+        // #recguard-wedge-escape head-consumed reset path (substring `guard_`
+        // comes from the module name `recguard_wedge`, not a new flow guard).
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 71,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

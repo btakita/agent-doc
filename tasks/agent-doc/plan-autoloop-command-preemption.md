@@ -52,13 +52,30 @@ command, not the busy-projection repair.
   rebuilt + installed. Net effect: the operator gets the quiet window the paused
   cooldown opens (retry `session clear` at the idle prompt) instead of an
   unrunnable hard block.
-- **Phase 2b GATED** — auto-deliver the deferred clear from the supervisor
-  idle-queue watch on the next idle gap (instead of the operator re-running it),
-  then resume by restoring `queue: start`; and change the JB plugin message from
-  "blocked" to "deferred until the turn finishes" (JB build + version bump).
-  Touches the live supervisor watch thread + JB plugin. Honor
-  `#codex-interrupt-clear-ctrl-g-opens-editor`.
-- **Phase 3 GATED** — operator live-verify on a busy auto-looping Codex pane.
+- **Phase 2b SHIPPED** — full pause → deliver-on-idle → resume loop, plus the JB
+  message. Durable hand-off marker `DeferredOperatorClear` in
+  `queue_continuation.rs` (`write_/read_/clear_deferred_operator_clear`), written
+  by the Phase 2a defer branch alongside the clear cooldown. New pure
+  `queue_preemption::plan_deferred_clear_step(pending, prompt_ready)` →
+  `None`/`WaitForIdle`/`Deliver`. The supervisor `idle-queue-watch` thread
+  (`start.rs`) consults it each tick BEFORE the drain decision: on `Deliver` it
+  injects the recorded clear command via `auto_trigger_inject_command`, then
+  drops both the deferred-clear marker and the pause cooldown to resume; on
+  `WaitForIdle` it waits (no interrupt of in-flight work); on `None` it is a
+  complete no-op so the existing drain path is unchanged (zero regression risk
+  to the common auto-loop). `interrupt-clear` drops the deferred marker first so
+  the destructive path supersedes a pending deferred clear. JB plugin recognizes
+  the `session_clear deferred for …` outcome (`isDeferredQueuePreemptClear`) and
+  shows a "deferred, will run at the next idle gap" notice instead of
+  "Cleared"/"blocked"; plugin built `0.2.148` (both zips). 6 new unit tests
+  (`plan_busy_clear` ×2 from 2a, `plan_deferred_clear_step` ×3, marker roundtrip
+  ×1); `make check` green; both binaries rebuilt + installed.
+- **Phase 3 GATED** — operator live-verify on a busy auto-looping Codex pane:
+  start an auto-loop, run Clear Session Context, confirm the loop pauses, the
+  clear runs at the idle gap, and the loop resumes — without losing queue items.
+  Note: the live supervisor watch thread only picks up the new logic after the
+  running `agent-doc start` supervisor restarts (long-running process); install
+  alone does not hot-swap it.
 
 ## Design
 

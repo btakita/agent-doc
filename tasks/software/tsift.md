@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -133,7 +133,7 @@ The asymmetry you're pointing at is real and correct: **scope any intervention t
 **Recommendation:** Yes to Codex-only scope; no to building the hook yet. Do (a) inline the 3 hot-path runbooks for Codex first, re-measure, and only build an enforcement mechanism if the 12.6% doesn't drop. I've re-scoped #7qky to reflect this (Codex-targeted, cheap-fix-first, hook as fallback) so it doesn't get picked up as a blanket all-harness hook.
 
 If you'd rather I just implement (a) now — inline the three runbooks into the Codex AGENTS.md closeout surface — say the word and I'll do it as its own cycle.
-<!-- agent:boundary:53dfbd83 -->
+<!-- agent:boundary:d9ba1716 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,7 +142,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- [#7qky]
 <!-- /agent:queue -->
 
 ## Backlog

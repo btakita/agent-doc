@@ -235,7 +235,12 @@ I'm pausing the auto-loop here since the remaining work is blocked on that one d
 **Remaining phases → backlog** (`#trt1p2` injection, `#trt1p3` graph-menu/exports, `#trt1p4` passive harvest), each pointing at the `specs/graph.md` design.
 
 The queued **"configure agent-loop tsift config to use findings graph layer"** stays gated — its trigger is *"once `#trt1` is complete,"* and #trt1 is only Phase-1 complete (phases 2–4 pending in the backlog). Tell me when to pick up the next phase.
-<!-- agent:boundary:f8900647 -->
+### Re: #trt1 status after Phase 1 — opus-4-8
+
+Gated `#trt1` (the umbrella item): Phase 1 (`#trt1p1`) is shipped and verified; the remaining work is tracked as backlog items `#trt1p2` (hot-path injection), `#trt1p3` (graph-menu/exports), and `#trt1p4` (passive harvest). It stays **not-done** on purpose so the queued *"once #trt1 is complete, configure agent-loop tsift config"* item correctly waits until the layer is fully built.
+
+Queue now holds only that gated config item. Nothing else is actionable without your go-ahead on the next phase.
+<!-- agent:boundary:b13a03d5 -->
 <!-- /agent:exchange -->
 ###
 <!--

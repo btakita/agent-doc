@@ -50,19 +50,16 @@ The step plan IS `plan-auto-dag-completions.md` (Step 0 → Path C ordered code 
 Turned out only **1** test assertion still expected the deprecated form (the codebase had already migrated the rest under `#queue-state-unify`) — updated it + added a regression test `write_emits_canonical_queue_for_direct_set_queue_active`. `make check` green; submodule `fb1d93ce` pushed (CI running), superproject `07c4e142e`. Plan marked RESOLVED.
 
 **Tally so far (real completions, not gates):** `#backlog-id-user-rename-revert` ✓, `#writer-emits-deprecated-queue-active-false` ✓ — review count down 2 by finishing, plus the packagable queue-aware-compaction fix. Continuing down Path C.
-<!-- agent:boundary:428d0b6e -->
+<!-- agent:boundary:a473b836 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~Put both the mermaid and nested list into a separate plan md document. I want to run through this document. Include the existing backlog and review items. I want to use this plan file to execute the agent. Any discoveries or changes during the work should update the plan md file. agent-doc should have 1st class treatment of the auto-dag. I would like to emulate and bring visibility to a feature like Claude Code's `/goal`...that also supports Codex and Opencode. Lay out a step plan to complete each item in the backlog and review.~
-- Remove the deprecated `queue_active: true` emission.
 - #auto-dag-first-class
-- do [#writer-emits-deprecated-queue-active-false]
 - do [#backlog-queue-sync-pending-add-amplification]
 - do [#finalize-divergence-orphans-committed-head]
 - do [#free-text-head-answer-match-too-literal]
 - Why are there so many IPC disk write, causing File Cache Conflicts, occurrences? Why is the CRDT pipeline so often blocked? Can we make the main loop responsive + non-blocking and have per-document queues?
-- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard?
+- Evaluate https://axocoatl.ai/ + https://github.com/axocoatl/axocoatl. Is there anything in this tool that agent-doc can use to improve its development process or enhance its capabilities? Can we have an axocoatl-like UI into the admin dashboard? Create a comprehensive plan.
 <!-- /agent:queue -->
 ###
 <!--

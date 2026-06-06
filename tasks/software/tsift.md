@@ -179,7 +179,7 @@ tsift decides "this fetch is a runbook, emit a stub with a re-fetch hint"; agent
 One nuance worth keeping: agent-doc already owns session/cycle state (`cycle_state.rs`), so it's the natural place to *provide the session-identity adapter* (layer 2) — but the ledger itself (layer 1) still belongs in the leaf crate that agent-doc depends on, not inside agent-doc.
 
 **Caveat (unchanged):** don't build any of this until re-measurement proves the nudge didn't already close the gap — #7qky stays gated. But designing the **seam** now is free and worth it: have `tsift runbook <name>` and agent-doc's runbook references both call the same ledger interface from day one, so the enforcement can drop in later without reworking either consumer. I've recorded this placement decision on the gated #7qky item.
-<!-- agent:boundary:4aa940df -->
+<!-- agent:boundary:a12e06c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -199,7 +199,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Review
 
 <!-- agent:review -->
-- [/] [#7qky] [recommended] Reduce Codex redundant runbook reads. SHIPPED (v0.34.0 unreleased): retain-don't-reread nudge in shared SKILL `## Runbooks` source -> regenerated all harness surfaces; contract-safe, no per-harness divergence. GATED on re-measurement: re-run the 3-harness redundant-read analysis after Codex sessions accumulate with the nudge live, compare against baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). Only build a Codex read-once enforcement mechanism as a fallback if Codex's rate does not drop. NOT a Claude PreToolUse Read hook.
+- [/] [#7qky] [recommended] Reduce Codex redundant runbook reads. SHIPPED (v0.34.0 unreleased): retain-don't-reread nudge in shared SKILL Runbooks source -> regenerated all harness surfaces; contract-safe. GATED on re-measurement: re-run 3-harness redundant-read analysis after Codex sessions accumulate with nudge live, compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate doesn't drop, build enforcement as a session-scoped content-dedup LEDGER in a shared LEAF crate (depends on nothing in graph; tsift + agent-doc + others depend down onto it -- NOT inside tsift or agent-doc, avoids dependency cycle). Core = register(id,hash)/should_deliver(id,hash)->Full|Stub, exemptions via hash-change + compaction; session-id passed in by harness (agent-doc cycle_state.rs adapter); thin per-consumer integration. Design tsift-runbook + agent-doc seam to call this ledger from day one. NOT a Claude-only PreToolUse Read hook.
 - [/] [#trt1] [recommended] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), with provenance+confidence+freshness fields gated on community_graph_watermark for staleness; expose retrieval via context-pack/search injection and a / graph-menu command; opt-in/passive capture from agent-doc session archives; md/html as on-demand projection, graph store as source of truth. Spec in src/tsift/SPEC.md.
 - [/] [#0y9e] I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
 - [/] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)

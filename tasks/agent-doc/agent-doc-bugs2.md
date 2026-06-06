@@ -271,7 +271,28 @@ Done — shipped Phase 2b out of queue order as you asked. The preemption featur
 **Phase 3 (gated, your verify):** the live supervisor only picks up the new watch logic after the running `agent-doc start` restarts. To verify: start an auto-loop, run Clear Session Context, confirm the loop pauses → the clear runs at the idle gap → the loop resumes, with no queue items lost. Reinstall the JB plugin (`0.2.148`) to see the deferred notice.
 
 (Queue head `#claude-busy-status-during-active-turn` left untouched for a later cycle.)
-<!-- agent:boundary:a48adbc8 -->
+
+### Re: [#claude-busy-status-during-active-turn] — opus-4-8
+
+> **Queue prompt:**
+>
+> [#claude-busy-status-during-active-turn]
+
+
+Shipped the remaining concrete code piece: the **readable turn-active marker**. The item stays open — the conduct rule and the hard busy-lease are still ahead (there's also a `do [#claude-busy-status-during-active-turn]` queued for the execution push).
+
+This item already had a lot landed (pane-border `turn-status active|idle`, the multi-harness hook installer). The gap was that the turn-state was only *visible* (pane title), not *readable* by code. Now:
+
+- `turn-status active` also writes `.agent-doc/turn-active.json` (`{pane, written_at}`); `turn-status idle` removes it. Project root resolves from the hook's CWD; best-effort (pane title still updates without an `.agent-doc` ancestor, never fails the turn).
+- `read_turn_active_marker_at` / `turn_active(base)` read it with a **self-expiry TTL** (`TURN_ACTIVE_TTL_SECS = 3600`): a missed `idle`/`Stop` hook self-heals (stale marker reads as idle) instead of wedging the session perpetually busy — important since this is the bridge to a *fail-closed* lease.
+- 2 unit tests (roundtrip + expiry); `make check` green; both binaries rebuilt + installed; submodule `6a47e541` pushed (CI running).
+
+This is the data layer a supervisor/route busy-lease will consume.
+
+**Still ahead (item stays open):**
+- **Hard busy-lease (gated)** — wire route/supervisor to read `turn_active(base)` and fail-closed / queue a second Run Agent Doc while a turn is in flight. Still gated on the `#subagent-blocks-session` scope decision (which layer blocks, what counts as "the work", how the lease releases).
+- **Conduct rule (skill change-set)** — add the "long build/test on the main agent, stream to a watchable file, never report idle while in flight" rule to the SKILL source + Claude/Codex/OpenCode mirrors (keep `audit-docs` green). Lands with a skill-surface regeneration, not folded in here.
+<!-- agent:boundary:b32fe1a8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
@@ -286,7 +307,7 @@ Error: authoritative actor generation 237 for tasks/agent-doc/agent-doc-bugs2.md
 ~~~
 - ~[#autoloop-command-preemption]~
 - ~[#queue-edit-lost-during-finalize-crdt]~
-- [#claude-busy-status-during-active-turn]
+- ~[#claude-busy-status-during-active-turn]~
 - ~do [#ci-per-test-timeout-guard]~
 - Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?
 - After I added "Why is there a `__` prefix in `tsift __digest-runner`? Is this a public cli command?" to the queue, agent-doc deleted the task from the queue. This happened while in the agent-doc finalize stage.

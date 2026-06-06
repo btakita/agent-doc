@@ -2766,12 +2766,30 @@ fn cycle_answered_foreign_exchange_prompt(
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&base_norm, &current_norm) else {
         return false;
     };
-    // A foreign exchange prompt is a user-prompt line (`❯ …`) ADDED this cycle
-    // whose text is not the queue head. The bug shape is a foreign prompt that
-    // WAS answered this cycle, and `classify_prompt_bearing_changes` suppresses
-    // prompts already answered by an adjacent response — so scan the raw added
-    // lines for the canonical `❯` user-prompt marker instead of the suppressed
-    // classifier.
+    // A foreign exchange prompt is a user-prompt line (`❯ …`) genuinely NEW this
+    // cycle whose text is not the queue head. The bug shape is a foreign prompt
+    // that WAS answered this cycle, and `classify_prompt_bearing_changes`
+    // suppresses prompts already answered by an adjacent response — so scan the
+    // raw added lines for the canonical `❯` user-prompt marker instead of the
+    // suppressed classifier.
+    //
+    // #free-text-head-consume-genuine-not-struck: the unified diff is computed
+    // against the *normalized snapshot* baseline, but `current_content` is the
+    // *live* working-tree/editor buffer. The buffer preserves `❯` prompt
+    // prefixes on already-answered prompts that the snapshot normalized to the
+    // bare form (CLAUDE.md "committed exchange-only prompt-prefix normalization
+    // on already-answered prompts"). A pure `do x` → `❯ do x` prefix flip then
+    // shows as an added `+❯ …` line and was wrongly read as a NEW foreign
+    // prompt, blocking the free-text head strike and stalling the auto-loop. So
+    // a `❯` added line counts as foreign only when its normalized text is absent
+    // from the baseline entirely — a genuine new prompt, not a prefix flip on a
+    // prompt that already existed (in either `❯ X` or bare `X` form) at baseline.
+    let baseline_prompt_texts: std::collections::HashSet<String> = base_norm
+        .lines()
+        .map(|line| normalize_queue_prompt_text(line.trim().trim_start_matches('❯').trim()))
+        .filter(|text| !text.is_empty())
+        .collect();
+    let debug = std::env::var("AGENT_DOC_DEBUG_QUEUE_CONSUME").is_ok();
     diff_text.lines().any(|line| {
         let Some(added) = line.strip_prefix('+') else {
             return false;
@@ -2783,7 +2801,25 @@ fn cycle_answered_foreign_exchange_prompt(
             return false;
         };
         let prompt = prompt.trim();
-        !prompt.is_empty() && !queue_prompt_text_matches(prompt, queue_head)
+        if prompt.is_empty() || queue_prompt_text_matches(prompt, queue_head) {
+            return false;
+        }
+        // Skip prefix-normalization artifacts: the prompt text already existed in
+        // the baseline (bare or `❯`-prefixed), so it is not new this cycle.
+        if baseline_prompt_texts.contains(&normalize_queue_prompt_text(prompt)) {
+            if debug {
+                eprintln!(
+                    "[queue-consume] ❯ added line is a prefix-flip on an existing baseline prompt, not foreign: {prompt:?}"
+                );
+            }
+            return false;
+        }
+        if debug {
+            eprintln!(
+                "[queue-consume] foreign ❯ prompt added this cycle (blocks free-text head strike): {prompt:?} (head={queue_head:?})"
+            );
+        }
+        true
     })
 }
 
@@ -12622,6 +12658,66 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt() {
+        // #free-text-head-consume-genuine-not-struck: the consume decision diffs
+        // the normalized snapshot baseline against the LIVE editor buffer. The
+        // buffer preserves `❯` prefixes on already-answered prompts that the
+        // snapshot normalized to the bare form. A pure `do x` → `❯ do x`
+        // prefix flip then surfaces as an added `+❯ …` diff line. It must
+        // NOT be read as a new foreign prompt — that wrongly blocked the
+        // free-text head strike and stalled the auto-loop.
+        let head = "Evaluate axocoatl thing";
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Live buffer: the prior prompt regained its `❯` prefix; this cycle
+        // only added the `### Re: axocoatl` answer.
+        let prefix_flip = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "### Re: axocoatl\n",
+            "plan written.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), prefix_flip, head),
+            "a `❯` prefix flip on an already-answered baseline prompt is not new foreign work"
+        );
+
+        // A genuinely new `❯` prompt whose text never appeared at baseline still
+        // counts as foreign work, keeping the free-text head queued.
+        let genuine_foreign = concat!(
+            "<!-- agent:exchange -->\n",
+            "do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "❯ a brand new unrelated prompt\n",
+            "### Re: axocoatl\n",
+            "plan.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            cycle_answered_foreign_exchange_prompt(Some(baseline), genuine_foreign, head),
+            "a genuinely new unrelated `❯` prompt absent from baseline is foreign work"
+        );
+    }
 
     // #queue-strike-on-halt: queue head consumption requires an explicit
     // closeout flag, not a `### Re:` heading that merely names the head.

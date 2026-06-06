@@ -6,6 +6,24 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Free-text queue head consumed despite a prompt-prefix flip on an answered
+  prompt (`#free-text-head-consume-genuine-not-struck`).** The answered-free-text-head
+  decision (`cycle_answered_foreign_exchange_prompt`) diffs the *normalized
+  snapshot* baseline against the *live* editor buffer, and the buffer preserves
+  `❯` prompt prefixes on already-answered prompts that the snapshot normalized to
+  the bare form. A pure `do x` → `❯ do x` prefix flip surfaced as an added
+  `+❯ …` diff line and was wrongly read as a *new foreign* exchange prompt,
+  blocking the free-text head strike and treadmilling the auto-loop (live repro:
+  the axocoatl evaluation head answered by a committed `--stream` finalize yet
+  never struck). Fix: a `❯` added line counts as foreign only when its
+  normalized text is absent from the baseline entirely; a prefix flip on a
+  prompt that already existed (in `❯ X` or bare `X` form) is no longer foreign.
+  Genuinely new unrelated `❯` prompts still keep the head queued. Added
+  `AGENT_DOC_DEBUG_QUEUE_CONSUME` env-gated instrumentation that logs each `❯`
+  added line and its classification. Regression test
+  `free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt`. Spec:
+  `specs/07-closeout-commands.md`.
+
 - **Retain-don't-reread runbook nudge in the shared SKILL source.** The
   `## Runbooks` section now instructs agents to read each runbook at most once
   per session and reuse the in-context copy instead of re-reading, re-opening

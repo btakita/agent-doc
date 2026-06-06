@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -238,7 +238,7 @@ Done — shipped, built, installed, committed, and pushed.
 **Commits.** tsift submodule `3a69aed` → pushed to `btakita/tsift main`; superproject pointer bump `acf6cf87f`. tsift CI for `3a69aed` is **in progress** (prior commit green); local full suite is green.
 
 **Note on naming.** I kept the legacy `__digest-runner` working rather than hard-removing it, since hooks and installed instruction files in other projects still call it — a clean break would break those mid-flight. Queued **#rx4x** to regenerate the agent-loop superproject's own instruction surfaces (CLAUDE.md, SKILL.md, runbooks) onto the public name; they still work via the alias, so it's non-breaking cleanup, not urgent.
-<!-- agent:boundary:5739316a -->
+<!-- agent:boundary:080fa467 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,7 +247,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- [#rx4x]
 <!-- /agent:queue -->
 
 ## Backlog

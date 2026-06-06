@@ -3732,8 +3732,58 @@ fn busy_dispatch_only_should_wait_for_ready(
     dispatch_only: bool,
     actor_state: crate::session_actor::ActorState,
     has_queue_fallback: bool,
+    pane_active_turn_busy: bool,
 ) -> bool {
-    dispatch_only && actor_state == crate::session_actor::ActorState::Busy && !has_queue_fallback
+    dispatch_only
+        && actor_state == crate::session_actor::ActorState::Busy
+        && !has_queue_fallback
+        // #jb-run-agent-doc-busy-active-turn-stall: when the live pane proves a
+        // genuine active turn (working spinner / `esc to interrupt`), the actor
+        // will not return to a dispatch-ready prompt inside the busy ready-wait
+        // budget — a multi-minute turn just produces a silent 60s stall before
+        // the inevitable "session still running" refusal. Skip the wait so the
+        // refusal (and the IDE's session-still-running notification) fires
+        // immediately. A Busy projection WITHOUT a live active-turn cue
+        // (transient/stale) still waits, so a turn about to finish is picked up.
+        && !pane_active_turn_busy
+}
+
+/// Build the dispatch-only busy refusal message. When the live pane proved a
+/// genuine active turn (`active_turn_busy_cue`), the busy ready-wait was skipped
+/// (#jb-run-agent-doc-busy-active-turn-stall), so the "after waiting Ns" wording
+/// would be misleading — word it as a busy active turn instead. Otherwise keep
+/// the cold-start ready-wait wording.
+fn dispatch_only_busy_refusal_message(
+    harness: &HarnessConfig,
+    generation: u64,
+    file: &Path,
+    dispatch_pane: &str,
+    reason: &str,
+    active_turn_busy_cue: Option<&str>,
+    actor_state: crate::session_actor::ActorState,
+) -> String {
+    match active_turn_busy_cue {
+        Some(cue) => format!(
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because the pane is busy on an active {} turn ({}), not at a dispatch-ready prompt. {}",
+            generation,
+            file.display(),
+            dispatch_pane,
+            harness.binary,
+            cue,
+            authoritative_actor_dispatch_recovery_hint(actor_state, file)
+        ),
+        None => format!(
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
+            generation,
+            file.display(),
+            dispatch_pane,
+            reason,
+            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(
+                harness
+            ))),
+            authoritative_actor_dispatch_recovery_hint(actor_state, file)
+        ),
+    }
 }
 
 fn wait_for_authoritative_actor_ready(
@@ -4032,11 +4082,52 @@ fn route_via_authoritative_actor(
     } else {
         false
     };
+    // #jb-run-agent-doc-busy-active-turn-stall: probe the live pane once for a
+    // genuine active-turn busy cue (working spinner / `esc to interrupt`) when a
+    // bare dispatch-only reopen targets a busy actor with no queue/prompt
+    // fallback. A multi-minute active turn cannot reach a dispatch-ready prompt
+    // inside the busy ready-wait budget, so waiting only yields a silent stall
+    // before the inevitable refusal. Record the cue so the wait is skipped and
+    // the refusal message words it as an active turn (not a cold-start wait).
+    let active_turn_busy_cue: Option<String> = if dispatch_only
+        && actor_state == crate::session_actor::ActorState::Busy
+        && prompt_context.is_none()
+        && !has_existing_inactive_queue_fallback
+    {
+        tmux.capture_pane(&dispatch_pane, Some(80))
+            .ok()
+            .and_then(|content| harness.busy_proof_line(&content))
+    } else {
+        None
+    };
+    if let Some(cue) = active_turn_busy_cue.as_deref() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_busy_active_turn_skip_wait file={} pane={} harness={} generation={} cue={:?}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation,
+                cue
+            ),
+        );
+        eprintln!(
+            "[route] authoritative actor for {} is busy on an active {} turn ({}); skipping the busy ready-wait and refusing immediately so the IDE shows the session-still-running notification without a {}s stall",
+            file.display(),
+            harness.binary,
+            cue,
+            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(
+                harness
+            )))
+        );
+    }
     let mut waited_and_timed_out = false;
     if busy_dispatch_only_should_wait_for_ready(
         dispatch_only,
         actor_state,
         prompt_context.is_some() || has_existing_inactive_queue_fallback,
+        active_turn_busy_cue.is_some(),
     ) {
         if let Some(refreshed) =
             wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
@@ -4380,15 +4471,16 @@ fn route_via_authoritative_actor(
                     RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
                 );
                 anyhow::bail!(
-                    "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
-                    actor.record.generation,
-                    file.display(),
-                    dispatch_pane,
-                    reason,
-                    dispatch_only_busy_refusal_wait_secs(
-                        dispatch_only_starting_pane_recovery_timeout(Some(harness))
-                    ),
-                    authoritative_actor_dispatch_recovery_hint(actor_state, file)
+                    "{}",
+                    dispatch_only_busy_refusal_message(
+                        harness,
+                        actor.record.generation,
+                        file,
+                        &dispatch_pane,
+                        reason,
+                        active_turn_busy_cue.as_deref(),
+                        actor_state,
+                    )
                 );
             }
             eprintln!(
@@ -4442,15 +4534,16 @@ fn route_via_authoritative_actor(
                 Ok(dispatch_pane)
             } else {
                 anyhow::bail!(
-                    "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
-                    actor.record.generation,
-                    file.display(),
-                    dispatch_pane,
-                    reason,
-                    dispatch_only_busy_refusal_wait_secs(
-                        dispatch_only_starting_pane_recovery_timeout(Some(harness))
-                    ),
-                    authoritative_actor_dispatch_recovery_hint(actor_state, file)
+                    "{}",
+                    dispatch_only_busy_refusal_message(
+                        harness,
+                        actor.record.generation,
+                        file,
+                        &dispatch_pane,
+                        reason,
+                        active_turn_busy_cue.as_deref(),
+                        actor_state,
+                    )
                 )
             }
         }

@@ -2594,25 +2594,87 @@ fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
     use crate::session_actor::ActorState;
     // Busy + dispatch-only + a queue prompt available → do NOT wait (queue now).
     assert!(
-        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true),
+        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true, false),
         "a busy active turn with a queue fallback must skip the start-oriented ready wait"
     );
-    // Busy + dispatch-only + no queue fallback → still wait (would otherwise bail).
+    // Busy + dispatch-only + no queue fallback + no live active-turn cue → still
+    // wait (the actor may be a transient/stale busy projection about to clear).
     assert!(
-        busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false),
+        busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, false),
         "without a queue fallback the bounded ready wait is still the only recourse before bailing"
     );
     // Not dispatch-only, or not busy → the busy-wait guard does not apply.
     assert!(!busy_dispatch_only_should_wait_for_ready(
         false,
         ActorState::Busy,
+        false,
         false
     ));
     assert!(!busy_dispatch_only_should_wait_for_ready(
         true,
         ActorState::Ready,
+        false,
         false
     ));
+}
+
+// #jb-run-agent-doc-busy-active-turn-stall: a bare dispatch-only Run Agent Doc
+// against a pane proven busy on an active turn (working spinner / `esc to
+// interrupt`) must NOT honor the 60s busy ready-wait — a multi-minute turn
+// cannot reach a dispatch-ready prompt in that budget, so waiting only produces
+// a silent stall before the inevitable "session still running" refusal. Skip the
+// wait so the refusal/notification fires immediately.
+#[test]
+fn busy_dispatch_only_skips_ready_wait_on_proven_active_turn() {
+    use crate::session_actor::ActorState;
+    // Busy + dispatch-only + no queue fallback + a live active-turn cue → skip
+    // the wait (immediate refusal), instead of stalling for the full budget.
+    assert!(
+        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, true),
+        "a proven active turn must skip the busy ready-wait and refuse immediately"
+    );
+}
+
+// The refusal message must reflect whether the busy ready-wait was actually
+// served: an active-turn skip words it as a busy turn (no misleading "after
+// waiting Ns"), while the no-cue path keeps the cold-start ready-wait wording.
+#[test]
+fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
+    use crate::session_actor::ActorState;
+    let harness = HarnessConfig::claude();
+    let file = std::path::Path::new("/tmp/monsterrodholders.md");
+
+    let active = dispatch_only_busy_refusal_message(
+        &harness,
+        282,
+        file,
+        "%1",
+        "actor not ready",
+        Some("Working (7m 29s · esc to interrupt)"),
+        ActorState::Busy,
+    );
+    assert!(
+        active.contains("busy on an active") && active.contains("esc to interrupt"),
+        "active-turn refusal must name the busy turn cue: {active}"
+    );
+    assert!(
+        !active.contains("after waiting"),
+        "active-turn refusal must not claim a ready-wait that was skipped: {active}"
+    );
+
+    let cold = dispatch_only_busy_refusal_message(
+        &harness,
+        282,
+        file,
+        "%1",
+        "actor not ready",
+        None,
+        ActorState::Busy,
+    );
+    assert!(
+        cold.contains("after waiting") && cold.contains("dispatch-ready prompt"),
+        "no-cue refusal keeps the cold-start ready-wait wording: {cold}"
+    );
 }
 
 #[test]

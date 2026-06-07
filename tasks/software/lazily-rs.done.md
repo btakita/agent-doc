@@ -54,3 +54,68 @@
 - 2026-06-02 [#lazyperf15] Add loom/spec coverage for lazy invalidation cleanup, disposal, and dynamic dependency changes so stale edges cannot leak or rerun after disposal under races.
 - 2026-06-02 [#lazyperf12] Implement lazy invalidation for ThreadSafeContext propagation under parallel load: mark downstream nodes dirty/versioned during writes, defer derived recompute/effect scheduling until observed or batch flush, and preserve cleanup/disposal ordering.
 - 2026-06-02 [#lazyperf16] [recommended] Investigate the benchmark watch items from the lazy-invalidation run: cached ThreadSafeContext read latency regression and effect cleanup contention regression; rerun controlled A/B baselines before tuning.
+- 2026-06-03 [#zfam] #lazyperf17 Replace HashSet<SlotId> dependency/dependent edges with SmallVec<[SlotId;4]> — high impact: reduces per-node memory, eliminates hash overhead for typical small fan-out (1-3 deps), avoids HashSet→Vec temporary allocations in every refresh/clear/dirty hot path
+- 2026-06-03 [#f5jz] #lazyperf18 Pre-allocate or eliminate temporary Vec<SlotId> allocations in invalidation hot paths — refresh_slot, clear_slot_now, mark_slot_dirty, invalidate_cell_dependents_now all .iter().copied().collect() into temp Vecs; use SmallVec or pass iterator slices instead
+- 2026-06-03 [#rvjd] #lazyperf19 Consolidate Context RefCell fields into single RefCell<ContextInner> — reduces borrow-check overhead from 4-6 flag checks per get() to 1; single borrow scope eliminates re-entrant borrow risk
+- 2026-06-03 [#vftn] #lazyperf23 [recommended] Replace unsafe pointer-to-Box copies in recompute_slot_now/run_effect with Arc<ComputeFn> or safe restructuring
+- 2026-06-03 [#xsp1] #lazyperf20 Switch ThreadSafeState node storage from HashMap<SlotId, Node> to slot-id-indexed Vec<Option<Node>> matching single-threaded Context — eliminates hash lookup on every node access in thread-safe path
+- 2026-06-03 [#ktrs] #lazyperf22 Add slot ID reuse or vacant-entry compaction for long-lived contexts — SlotId is monotonically increasing, disposed effects leave None entries that grow Vec without bound
+- 2026-06-03 [#r0jv] #lazyperf21 Consolidate ThreadSafeSlotFastPath synchronization primitives — currently 4 mutexes + 2 Condvars + 3 atomics per slot (~400+ bytes overhead); restructure to 1-2 locks + atomics
+- 2026-06-03 [#r54f] #lazyperf24 [recommended] Benchmark SmallVec vs Vec for dependency edges — measure cache-line impact on fan-out benchmarks before committing to SmallVec
+- 2026-06-03 [#71yq] #lazyperf25 #lazyperf25 Convert ThreadSafeInner slot_fast_paths and cell_fast_paths from RwLock<HashMap> to RwLock<Vec<Option>> — eliminates hash on every thread-safe get/get_cell
+- 2026-06-03 [#hqmh] #lazyperf26 #lazyperf26 Convert ThreadSafeSlotFastPath.dependents and ThreadSafeCellFastPath.dependents from Mutex<HashMap> to Mutex<EdgeVec> — sidecar dependents are typically 1-5 nodes
+- 2026-06-03 [#xdq8] #lazyperf27 #lazyperf27 Replace scheduled_effects HashSet with Vec<bool> indexed by SlotId — zero-hash O(1) schedule/contains check
+- 2026-06-03 [#vk55] #lazyperf28 #lazyperf28 Replace batched_cells/cell_clears/slots HashSet with SmallVec — linear dedup faster for typical small batches
+- 2026-06-03 [#cffp] #lazyperf29 #lazyperf29 Replace ThreadSafeInvalidationPlan HashMaps with Vec<(SlotId, bool)> — transient plan structure, one-pass build/apply
+- 2026-06-03 [#vbcq] #lazyperf30 #lazyperf30 Dependent clone scratch buffer on ContextInner/ThreadSafeState — avoid SmallVec heap alloc on >4 fan-out in refresh/clear paths
+- 2026-06-03 [#vfr1] #lazyperf31 #lazyperf31 [recommended] parking_lot replacement for std::sync Mutex/RwLock — smaller locks, no poisoning, adaptive spinning
+- 2026-06-03 [#94gg] #lazyperf32 #lazyperf32 [recommended] Rc<dyn Any> values in single-threaded Context — get() returns pointer increment instead of deep clone
+- 2026-06-03 [#lazyperf33] [recommended] Hybrid InvalidationPlan: Vec for 16 or fewer nodes, HashMap above threshold — fixes fan_out/256, memo_equality, chain-pattern regressions
+- 2026-06-03 [#lazyperf34] [recommended] Fix finish_batch O(n2) dedup: replace edge_insert loop with extend+sort-dedup or small HashSet — fixes batched_write_bursts, batch_storms
+- 2026-06-03 [#lazyperf35] [recommended] Eliminate scratch buffer collect allocation on effect path: pass fill_dependent_scratch result as slice to invalidate_frontier_locked — fixes effect_flushing
+- 2026-06-03 [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
+- 2026-06-03 [#sye8] `#asyncctx1` Design spec — AsyncContext API surface, slot state machine, cancellation contract
+- 2026-06-03 [#kp7w] `#asyncctx2` AsyncSlotNode — pending/resolved/error states, JoinHandle tracking
+- 2026-06-04 [#8sqb] `#asyncctx3` AsyncContext core — computed_async, get_async (.await-based read), batch support
+- 2026-06-04 [#6z71] `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
+- 2026-06-04 [#cmt9] `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
+- 2026-06-04 [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
+- 2026-06-04 [#8kp8] #eek4 #asyncctx6 Async effects (completed, needs backlog entry)
+- 2026-06-04 [#lazyperf32] Rc<dyn Any> values in single-threaded Context — highest-impact for tsift: every get() avoids deep clone (high)
+- 2026-06-04 [#r25x] `#asyncctx7` Tokio feature gate and integration tests
+- 2026-06-04 [#35fc] `#asyncctx8` Benchmarks — async vs sync contention, cold resolve latency, cancellation throughput
+- 2026-06-04 [#lazyperf35] Eliminate scratch buffer collect on effect path — reduces per-scope allocation in tsift effect callbacks (medium)
+- 2026-06-04 [#61zg] #lazilyperf36 Add AsyncContext benchmark results to BENCHMARKS.md (run async_context bench, extend update script)
+- 2026-06-04 [#fk8p] #lazilyperf37 Add ThreadSafeContext-inside-Tokio Criterion benchmarks (benches/tokio_sync.rs)
+- 2026-06-04 [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
+- 2026-06-04 [#cttd] Please evaluate the items under review. Are these complete? Add backlog #next-steps to complete the review items.
+- 2026-06-04 [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
+- 2026-06-04 [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
+- 2026-06-04 [#139c] Implement typed cache fast-path to eliminate Rc<dyn Any> / Arc<dyn Any> boxing on Context and ThreadSafeContext cached reads (#lazilyperf38)
+- 2026-06-04 [#93dv] Add SPEC.md language and design for typed cache fast-path (#lazilyperf38)
+- 2026-06-04 [#ek24] Add typed cache benchmarks comparing dyn Any downcast vs typed access (#lazilyperf38)
+- 2026-06-04 [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads
+- 2026-06-04 [#mvbj] #ipc1 Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- 2026-06-04 [#4rxf] #ipc2 Design lazily-ipc snapshot + incremental update protocol
+- 2026-06-04 [#jwwc] #ipc3 Investigate CRDT vs Raft trade-offs for lazily-distributed
+- 2026-06-04 [#q5r1] #39c5 Implement RemoteOp enum + per-peer permission allowlist
+- 2026-06-04 [#4cn0] #yxjw Build Cloudflare Worker signaling server
+- 2026-06-04 [#mb9b] #vd5v Leverage typed cache for lock-free cached reads in ThreadSafeContext
+- 2026-06-04 [#xtwf] Run rigorous isolated-worktree Criterion A/B for #vd5v lock-free cached reads (cached_reads/thread_safe_context per SPEC benchmarking procedure) [recommended]
+- 2026-06-04 [#s0fc] The Cloudflare endpoint should be usable as a dependency for projects that want to leverage lazily-rs for distributed systems...such as is the plan for agent-doc.
+- 2026-06-05 [#vbyc] Phase 2 (#rdstrat2): inline small-Copy seqlock cached-read fast path for ThreadSafeContext (the SPEC's ErasedValue idea) — size+Copy conditional, needs a Loom/Shuttle model before landing. Plan: tasks/software/plan-lazily-0.10-read-strategy.md [recommended]
+- 2026-06-05 [#9mhz] Phase 3 (#rdstrat3): release lazily 0.10.0 (runtime-selectable read strategy + inline seqlock; default flips to LowConcurrency) — gate on user confirm for crates.io publish. Plan: tasks/software/plan-lazily-0.10-read-strategy.md [recommended]
+- 2026-06-05 [#k03k] [recommended] Fix pre-existing async_context.rs concurrency race surfaced by the async_concurrent_contention benchmark: 'get() already checked Resolved' unreachable (src/async_context.rs:765) + 'get_async: notifier dropped unexpectedly' (:774) under 4-worker contention. Blocks make benchmark-update (cargo bench --features instrumentation,async,tokio); 0.10.0 BENCHMARKS.md was regenerated via --no-run from non-async criterion data. Not a thread_safe/#rdstrat regression.
+- 2026-06-07 [#ipc4] Implement lazily-ipc pure protocol types (`Snapshot`, `Delta`, `DeltaOp`, `IpcSink`, `IpcSource`) behind `ipc = ["serde"]`, with serde round-trip tests, gap/resync tests, and permission-filtered snapshot/delta construction.
+- 2026-06-07 [#ipc5] [recommended] Define an IpcTransport adapter contract and benchmark matrix for agent-doc/tsift IPC: in-process, Unix socket/interprocess, mmap/shared-memory blob arena, FD/event wakeup paths; measure 4 KB, 64 KB, 1 MB, and 10 MB payloads before choosing defaults.
+- 2026-06-07 [#ipc6] [recommended] Add a real shared-memory backing adapter for ShmBlobArena using shared_memory or memmap2, with lifecycle cleanup, namespace rules, cross-process descriptor validation, stale-generation rejection, and fallback for oversized payloads.
+- 2026-06-07 [#ipc7] [recommended] Add a Unix FD/event transport adapter behind an optional feature: Unix-domain control socket, SCM_RIGHTS for shared-memory handles, eventfd on Linux or socketpair/pipe fallback elsewhere, descriptor-budget enforcement, and tests that core IPC messages stay transport-neutral.
+- 2026-06-07 [#ipc8] [recommended] Design the Windows transport parity layer for the same IPC capabilities using HANDLE duplication, named pipes, file mappings, and event objects, so FD concepts do not leak into the portable lazily-rs protocol surface.
+- 2026-06-07 [#ipc9] [recommended] Define the agent-doc/tsift process-state schema on top of lazily IPC Snapshot/Delta: authority domains, permission-filtered views, resync rules, large-blob thresholds, and passive regression telemetry for transport health.
+- 2026-06-07 [#ipc4] Define IPC transport feature matrix and API contracts (UNIX socket, TCP, loopback). Start with local-in-process channel as baseline and lock schema first.
+- 2026-06-07 [#ipc5] Implement transport lifecycle protocol: versioned envelope, per-op correlation IDs, feature negotiation, and symmetric teardown/reconnect semantics.
+- 2026-06-07 [#ipc6] Add reliability layer: bounded queues, flow-control/backpressure, heartbeat/liveness, and replay-safe idempotency for dropped peers.
+- 2026-06-07 [#ipc7] Build transport test harness (property + integration) for ordering guarantees, permissioned routing, and crash/reconnect recovery scenarios.
+- 2026-06-07 [#ipc8] Add benchmark suite: cross-process latency/throughput, fanout scaling, and end-to-end snapshot update time across transport variants.
+- 2026-06-07 [#ipc1] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- 2026-06-07 [#39c5] Implement RemoteOp enum + per-peer permission allowlist

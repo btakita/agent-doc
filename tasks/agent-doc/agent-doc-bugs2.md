@@ -180,7 +180,7 @@ Added regression coverage for Codex owner-continuation payloads and non-Codex tr
 Commits: `src/agent-doc` `9b6f4635` (`Avoid Codex idle queue self-invocation`), parent `9520d9a31` (`Update agent-doc submodule`).
 
 Verification: `cargo test -p agent-doc-orchestration idle_queue_drain` passed; `make check` passed after the final edit. CI was checked without waiting: latest `agent-doc` CI run `27099096431` was `in_progress`; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:5b434855 -->
+<!-- agent:boundary:362122f0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -201,7 +201,7 @@ JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc t
 ```
 ---
 - ~~monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.~~
-- Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
+- ~~Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.~~
 <!-- /agent:queue -->
 ###
 <!--

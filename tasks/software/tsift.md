@@ -36,7 +36,27 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): [#trt1inject]; incremental markdown reparse - gpt-5; release + publish; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5ea96292 -->
+
+### Re: lazily-rs IPC for tsift/agent-doc — gpt-5
+
+Yes, but mostly as a data-plane primitive, not as the main fix for tsift/agent-doc IPC correctness.
+
+A blob arena would help if lazily-rs exposes it as a shared leaf crate or small IPC substrate that agent-doc and tsift can use without coupling either project to lazily-rs internals. The useful shape is: control messages stay small and carry `blob_id`, byte length, content hash, producer epoch, TTL/lease, and fallback path; large payloads live in the arena. That would fit agent-doc/tsift surfaces that move large patch bodies, sidecar snapshots, context packs, digest-runner artifacts, session-review output, verbose test/build logs, and maybe editor preview payloads.
+
+A SHM ring buffer is less compelling as the first tsift/agent-doc adoption target. The current painful agent-doc IPC failures are not primarily throughput failures; they are ordering, proof, generation, and convergence failures: late IPC patches, stale live buffers, boundary reposition drift, and committed snapshot vs visible document mismatch. SHM can make those failures faster unless the protocol also has strict sequence numbers, actor/session generations, idempotent apply, ack proof tied to committed content hashes, and deterministic recovery.
+
+So the practical split I would use:
+
+- Keep the control plane boring: socket/file IPC with request ids, generations, content hashes, and explicit commit proof.
+- Add the blob arena as an optional payload plane for large bodies and artifacts.
+- Keep durable file fallback mandatory, because agent-doc closeout needs recoverability after crashes, editor restarts, and late patch delivery.
+- Treat SHM ring transport as a later optimization for sustained streaming paths only after metrics show copy or file IO dominates.
+- Do not let shared memory represent mutable markdown/session state directly; only pass immutable payload references plus verification metadata.
+
+For tsift specifically, the best early use would be artifact-heavy commands: `digest-runner`, `session-review`, `context-pack`, maybe large search/explain previews. For agent-doc, the best early use would be patch/sidecar payload indirection while preserving the existing commit-boundary invariants. That would improve payload handling without weakening the proof model.
+
+Bottom line: the blob arena likely benefits tsift IPC with agent-doc if it is designed as an immutable, content-addressed payload layer. SHM ring buffer should wait until correctness and recovery are locked down and measurement shows transport throughput is actually the limiting factor.
+<!-- agent:boundary:32cc4493 -->
 <!-- /agent:exchange -->
 ###
 <!--

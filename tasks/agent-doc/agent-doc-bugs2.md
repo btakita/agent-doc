@@ -36,7 +36,7 @@ Compacted content:
 - Archived 14 response topic(s): do [#recursion-guard-wedge-escape] -- gpt-5; do [#partial-staging-closeout-guard]; #codex-mcp-server-root-fix split; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
-### Re: do [#md-ast-document-model] — gpt-5 (HEAD)
+### Re: do [#md-ast-document-model] — gpt-5
 
 Shipped the editor/IPC `node_patches` apply path for `#md-ast-document-model`.
 
@@ -45,13 +45,15 @@ Implemented shared Rust markdown-AST node patch application for insert/remove/re
 Verification passed: `make check`, focused AST/FFI/static-guard tests, VS Code `npm test`, JetBrains `./gradlew test buildPlugin`, `make install`, and GitHub CI `27097245198`. Commits: `src/agent-doc` `a45121b0`; parent submodule pointer `3b59c9320`.
 
 Scheduled next steps under `#md-ast-document-model`: `#md-ast-realtime-watcher` and `#md-ast-crdt-merge-base`.
-<!-- agent:boundary:a4c3a85a -->
+<!-- agent:boundary:9a6773d3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- :round_pushpin: do [#md-ast-document-model]
 - There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?
+- Schedule #next-steps to finish [#md-ast-document-model].
 <!-- /agent:queue -->
 ###
 <!--

@@ -3016,15 +3016,15 @@ fn is_stash_window_name(window_name: &str) -> bool {
 
 /// Returns `true` when `pane_id` currently lives in a `stash` window.
 ///
-/// Editor-navigation focus (`focus::run_no_promote`, `no_stash_promote`) uses
-/// this to avoid selecting a stashed pane in place: selecting a pane that lives
-/// in the stash window surfaces editor focus *inside* the stash instead of in
-/// the working `agent-doc` window (`#jb-tsift-pane-sync`). When the target pane
-/// is stashed, the deferred sync reconciler's atomic SWAP owns surfacing and
-/// selecting it (it swaps the stashed pane into `agent-doc` and stashes the
-/// displaced pane in one operation, then selects the focus pane), so exactly one
-/// path performs the in/out transition. Best-effort: an unresolved window
-/// returns `false` so the caller falls back to selecting in place.
+/// Default focus uses this to avoid selecting a stashed pane in place:
+/// selecting a pane that lives in the stash window surfaces editor focus
+/// *inside* the stash instead of in the working `agent-doc` window
+/// (`#jb-tsift-pane-sync`). When the target pane is stashed, the deferred sync
+/// reconciler's atomic SWAP owns surfacing and selecting it (it swaps the
+/// stashed pane into `agent-doc` and stashes the displaced pane in one
+/// operation, then selects the focus pane), so exactly one path performs the
+/// in/out transition. Best-effort: an unresolved window returns `false` so the
+/// caller falls back to selecting in place.
 pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
     let Ok(window_id) = tmux.pane_window(pane_id) else {
         return false;

@@ -11,7 +11,7 @@ export interface TabChangeInput {
 }
 
 export type TabChangeCommand =
-    | { kind: 'focus'; args: ['focus', string, '--no-stash-promote'] }
+    | { kind: 'focus'; args: ['focus', string] }
     | { kind: 'sync'; args: string[] };
 
 export interface PlannedTabChange {
@@ -102,8 +102,8 @@ export function buildSyncCommandArgs(
     return args;
 }
 
-export function buildImmediateFocusCommandArgs(activeFile: string): ['focus', string, '--no-stash-promote'] {
-    return ['focus', activeFile, '--no-stash-promote'];
+export function buildImmediateFocusCommandArgs(activeFile: string): ['focus', string] {
+    return ['focus', activeFile];
 }
 
 export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange | null {

@@ -7,6 +7,8 @@
 //! ## Spec
 //! - `run(file, pane)`: entry point; delegates to `run_with_tmux` using the default
 //!   tmux server.
+//! - `run_blocking(file, pane)`: legacy synchronous path; performs best-effort
+//!   stash promotion before selecting the resolved pane.
 //! - `run_with_tmux(file, pane_override, tmux)`: if `pane_override` is `Some`, skips
 //!   frontmatter lookup and calls `tmux select-pane` on the supplied pane directly;
 //!   errors if the override pane is not alive.
@@ -25,7 +27,11 @@
 //!   resync repair the registry. This also recovers a dead-registered or
 //!   unregistered document whose session is still running in another pane, instead
 //!   of failing closed.
-//! - On success, calls `tmux select-pane` and logs the focused pane + file path to stderr.
+//! - On success, calls `tmux select-pane` when the resolved pane is already visible
+//!   in the agent-doc window and logs the focused pane + file path to stderr. If the
+//!   pane is parked in the stash window, default focus defers surfacing + selection
+//!   to the sync reconciler so the tmux pane switch stays fast and does not grow the
+//!   visible layout additively.
 //!
 //! ## Agentic Contracts
 //! - `run_with_tmux` never modifies `sessions.json` or the document on disk.
@@ -138,13 +144,17 @@ pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux(file, pane, &Tmux::default_server())
 }
 
-/// Like [`run`] but defers stash-pane reparenting to the sync reconciler
-/// (`#jb-nav-3pane-promote-swap`). Editor-navigation focus uses this so the
-/// additive `promote_pane_to_agent_doc_window` join does not race the reconcile
-/// and grow the window to an extra pane; the debounced `sync` that follows owns
-/// the atomic in/out transition. Standalone `agent-doc focus` keeps promotion.
+/// Legacy synchronous focus path. This preserves the old standalone `focus`
+/// behavior for operators that explicitly want focus to surface a stashed pane
+/// before returning.
+pub fn run_blocking(file: &Path, pane: Option<&str>) -> Result<()> {
+    run_with_tmux_blocking(file, pane, &Tmux::default_server())
+}
+
+/// Deprecated compatibility alias for older editor plugins that still pass
+/// `--no-stash-promote`. Default [`run`] now has this behavior.
 pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
-    run_with_tmux_opts(file, pane, &Tmux::default_server(), true)
+    run(file, pane)
 }
 
 /// Promote a live-owner pane out of the stash window (best-effort) and then
@@ -153,11 +163,10 @@ pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
 /// (`#stash-pane-promote-on-focus`). tmux preserves the pane id across the
 /// reparent, so we select the same pane id either way.
 ///
-/// When `no_stash_promote` is set the additive promote is skipped and we only
-/// select the pane, leaving any stash reparenting to the sync reconciler
-/// (`#jb-nav-3pane-promote-swap`).
-fn promote_and_select(tmux: &Tmux, pane: &str, no_stash_promote: bool) -> Result<()> {
-    if no_stash_promote {
+/// When `defer_stash_promote` is set the additive promote is skipped and stash
+/// surfacing is left to the sync reconciler (`#jb-nav-3pane-promote-swap`).
+fn promote_and_select(tmux: &Tmux, pane: &str, defer_stash_promote: bool) -> Result<()> {
+    if defer_stash_promote {
         // Editor-navigation focus defers stash reparenting to the sync
         // reconciler (`#jb-nav-3pane-promote-swap`) so the additive promote does
         // not race the reconcile and grow the window to an extra pane. The
@@ -182,6 +191,10 @@ fn promote_and_select(tmux: &Tmux, pane: &str, no_stash_promote: bool) -> Result
 }
 
 pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> Result<()> {
+    run_with_tmux_opts(file, pane_override, tmux, true)
+}
+
+pub fn run_with_tmux_blocking(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> Result<()> {
     run_with_tmux_opts(file, pane_override, tmux, false)
 }
 
@@ -189,7 +202,7 @@ pub fn run_with_tmux_opts(
     file: &Path,
     pane_override: Option<&str>,
     tmux: &Tmux,
-    no_stash_promote: bool,
+    defer_stash_promote: bool,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -198,7 +211,7 @@ pub fn run_with_tmux_opts(
     // If an explicit pane was provided, use it directly
     if let Some(p) = pane_override {
         if tmux.pane_alive(p) {
-            promote_and_select(tmux, p, no_stash_promote)?;
+            promote_and_select(tmux, p, defer_stash_promote)?;
             eprintln!("Focused pane {} ({})", p, file.display());
             return Ok(());
         } else {
@@ -222,7 +235,7 @@ pub fn run_with_tmux_opts(
         // it still owns this document. After a reroute / fresh-restart the
         // session may have moved; defer to the live owner when one exists.
         if let Some(owner) = live_owner_override(file, &session_id, &actor_pane, tmux) {
-            promote_and_select(tmux, &owner, no_stash_promote)?;
+            promote_and_select(tmux, &owner, defer_stash_promote)?;
             eprintln!(
                 "Focused live-owner pane {} (stale actor projection {}) ({})",
                 owner,
@@ -231,7 +244,7 @@ pub fn run_with_tmux_opts(
             );
             return Ok(());
         }
-        promote_and_select(tmux, &actor_pane, no_stash_promote)?;
+        promote_and_select(tmux, &actor_pane, defer_stash_promote)?;
         eprintln!("Focused pane {} ({})", actor_pane, file.display());
         return Ok(());
     }
@@ -243,7 +256,7 @@ pub fn run_with_tmux_opts(
             // owns the document — its owner process may be gone while the live
             // session runs in another pane. Prefer the provable live owner.
             if let Some(owner) = live_owner_override(file, &session_id, &pane_id, tmux) {
-                promote_and_select(tmux, &owner, no_stash_promote)?;
+                promote_and_select(tmux, &owner, defer_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (stale registry pane {}) ({})",
                     owner,
@@ -252,7 +265,7 @@ pub fn run_with_tmux_opts(
                 );
                 return Ok(());
             }
-            promote_and_select(tmux, &pane_id, no_stash_promote)?;
+            promote_and_select(tmux, &pane_id, defer_stash_promote)?;
             eprintln!("Focused pane {} ({})", pane_id, file.display());
             Ok(())
         }
@@ -262,7 +275,7 @@ pub fn run_with_tmux_opts(
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                promote_and_select(tmux, &owner, no_stash_promote)?;
+                promote_and_select(tmux, &owner, defer_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (registered pane {} is dead) ({})",
                     owner,
@@ -279,7 +292,7 @@ pub fn run_with_tmux_opts(
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                promote_and_select(tmux, &owner, no_stash_promote)?;
+                promote_and_select(tmux, &owner, defer_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (no registry entry) ({})",
                     owner,
@@ -483,12 +496,12 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn no_promote_focus_does_not_select_a_stashed_pane() {
-        // `#jb-tsift-pane-sync`: editor-navigation focus (`no_stash_promote`)
-        // must not select a pane that lives in the stash window — doing so
-        // surfaces editor focus inside the stash ("focus goes into the stash").
-        // Selection is deferred to the reconciler's atomic SWAP, so focus stays
-        // on the current agent-doc pane until the reconciler swaps the target in.
+    fn default_focus_does_not_select_a_stashed_pane() {
+        // `#jb-tsift-pane-sync`: default focus must not select a pane that
+        // lives in the stash window — doing so surfaces editor focus inside the
+        // stash ("focus goes into the stash"). Selection is deferred to the
+        // reconciler's atomic SWAP, so focus stays on the current agent-doc pane
+        // until the reconciler swaps the target in.
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -500,7 +513,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("focus-no-promote-stash");
+        let iso = IsolatedTmux::new("focus-default-stash");
         let pane0 = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let stashed = iso.split_window(&pane0, root, "-dh").unwrap();
@@ -511,7 +524,7 @@ mod tests {
 
         // Editor-navigation focus targets the stashed pane. With the fix it must
         // NOT pull focus into the stash window.
-        run_with_tmux_opts(&doc, Some(&stashed), &iso, true).unwrap();
+        run_with_tmux(&doc, Some(&stashed), &iso).unwrap();
 
         let selected = iso
             .raw_cmd(&["display-message", "-p", "#{pane_id}"])
@@ -520,17 +533,17 @@ mod tests {
             .to_string();
         assert_eq!(
             selected, pane0,
-            "no_stash_promote focus must stay on the agent-doc pane, not move into the stash"
+            "default focus must stay on the agent-doc pane, not move into the stash"
         );
         assert_ne!(
             selected, stashed,
-            "no_stash_promote focus must not select the stashed pane in place"
+            "default focus must not select the stashed pane in place"
         );
     }
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn no_promote_focus_selects_a_visible_non_stashed_pane() {
+    fn default_focus_selects_a_visible_non_stashed_pane() {
         // Contrast to the stash case: a target pane already in the agent-doc
         // window is selected in place (the deferral only applies to stashed
         // panes).
@@ -545,14 +558,14 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("focus-no-promote-visible");
+        let iso = IsolatedTmux::new("focus-default-visible");
         let pane0 = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let sibling = iso.split_window(&pane0, root, "-dh").unwrap();
         iso.select_pane(&pane0).unwrap();
 
         // Both panes are in the agent-doc window; focusing the sibling selects it.
-        run_with_tmux_opts(&doc, Some(&sibling), &iso, true).unwrap();
+        run_with_tmux(&doc, Some(&sibling), &iso).unwrap();
 
         let selected = iso
             .raw_cmd(&["display-message", "-p", "#{pane_id}"])
@@ -561,7 +574,7 @@ mod tests {
             .to_string();
         assert_eq!(
             selected, sibling,
-            "no_stash_promote focus must select a visible non-stashed target pane in place"
+            "default focus must select a visible non-stashed target pane in place"
         );
     }
 }

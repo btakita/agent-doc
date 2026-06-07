@@ -6,12 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
-- **Immediate editor focus handoff is bounded.** JetBrains and VS Code tab
-  selection now run the fast `agent-doc focus <file> --no-stash-promote`
-  handoff with a short editor-side timeout and leave slow/missing-pane work to
-  the debounced `sync --no-autostart` reconciler. This keeps navigation to
-  documents such as `lazily-rs.md` from letting a long-running CLI focus attempt
-  delay the UI handoff.
+- **`agent-doc focus` is the fast pane handoff by default.** The default focus
+  path now has the former editor fast-focus behavior: it selects an already
+  visible pane immediately, defers stash surfacing to `sync --no-autostart`, and
+  does not perform additive promotion work in the foreground. The previous
+  synchronous promote-and-select behavior is still available for manual use as
+  `agent-doc focus <file> --blocking` or `--synchronous`; the older
+  `--no-stash-promote` flag is retained as a hidden compatibility no-op. Current
+  JetBrains and VS Code tab selection now call plain `agent-doc focus <file>`
+  with a short editor-side timeout and leave slow/missing-pane work to the
+  debounced reconciler. This keeps navigation to documents such as
+  `lazily-rs.md` from letting a long-running CLI focus attempt delay the UI
+  handoff. Bumped the JetBrains plugin build version to `0.2.153` and the VS
+  Code extension version to `0.2.23`.
 
 - **Structured overlay CRDT is the merge-base authority
   (`#md-ast-crdt-merge-base`).** Template/CRDT merge paths now derive their

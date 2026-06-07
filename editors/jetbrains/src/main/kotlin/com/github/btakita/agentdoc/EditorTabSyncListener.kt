@@ -36,7 +36,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val DEFERRED_RETRY_BASE_MS = 750L
         private const val DEFERRED_RETRY_MAX_MS = 5_000L
         private const val SYNC_GUARD_RETRY_MS = 150L
-        private const val FOCUS_FAST_TIMEOUT_MS = 750L
+        private const val FOCUS_TIMEOUT_MS = 750L
         private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
@@ -222,7 +222,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         Thread {
             try {
                 if (!isCurrentGeneration(lib, generation)) {
-                    log("focus-fast: superseded gen=$generation")
+                    log("focus: superseded gen=$generation")
                     return@Thread
                 }
                 val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
@@ -233,20 +233,20 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 val result = SyncLayoutAction.runCommandWithTimeout(
                     cmd,
                     snapshot.focusedProjectRoot,
-                    timeoutMs = FOCUS_FAST_TIMEOUT_MS,
+                    timeoutMs = FOCUS_TIMEOUT_MS,
                 )
                 val output = result.output
                 val exitCode = result.exitCode
                 if (exitCode == 0) {
-                    log("focus-fast: applied ${snapshot.focusedRelativePath}")
+                    log("focus: applied ${snapshot.focusedRelativePath}")
                     TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
                 } else if (result.timedOut) {
-                    log("focus-fast: deferred ${snapshot.focusedRelativePath} timeout=${FOCUS_FAST_TIMEOUT_MS}ms output=${output.take(200)}")
+                    log("focus: deferred ${snapshot.focusedRelativePath} timeout=${FOCUS_TIMEOUT_MS}ms output=${output.take(200)}")
                 } else {
-                    log("focus-fast: skipped ${snapshot.focusedRelativePath} exit=$exitCode output=${output.take(200)}")
+                    log("focus: skipped ${snapshot.focusedRelativePath} exit=$exitCode output=${output.take(200)}")
                 }
             } catch (e: Exception) {
-                log("focus-fast: skipped ${snapshot.focusedRelativePath}: ${e.message}")
+                log("focus: skipped ${snapshot.focusedRelativePath}: ${e.message}")
             }
         }.apply {
             isDaemon = true

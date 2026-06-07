@@ -15,14 +15,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
 
  <!-- agent:status patch=replace -->
 
-Completed `#md-ast-crdt-merge-base` and the parent `#md-ast-document-model`: overlay CRDT projections now drive merge-base selection with guarded fallback to explicit baseline text. Submodule `5fd64b26` and parent pointer `960fab435` are pushed; CI `27097931595` passed.
+Completed default-fast focus behavior. agent-doc focus now uses the former fast handoff by default; --blocking / --synchronous preserves the old synchronous promote-and-select path for explicit manual use. Source commit 2f2e9327, parent pointer c8f7fd750; local verification passed. CI run 27098734151 was in progress when checked, and I did not wait.
 <!-- /agent:status -->
 
 ## Exchange
@@ -122,18 +122,60 @@ Verification passed:
 - `npm test`
 - `make check`
 - GitHub Actions CI run `27098225139` passed (`make check` + `make tmux-ci`).
-<!-- agent:boundary:e3a3c706 -->
+
+### Re: When I navigate to lazily-rs.md, the tmux pane switch was not responsive. We need this to be responsive. The main loop should defer any long-running operations to avoid blocking the UI. / `focus-fast` should be the `focus` behavior — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc tasks/monsterrodholders.md` not follow a deadlock path and do the work. Even if this means the invocation messages the current owner to continue to the next task and that's all. If we can detect `Codex pane already owns that agent-doc session`, we can message the owning supervisor or agent-doc session.
+> ```
+> • agent-doc tasks/monsterrodholders.md refused to run because this Codex pane already owns that agent-doc session, so a
+>   direct recursive invocation would deadlock.
+>
+>   agent-doc session status tasks/monsterrodholders.md reports the session is healthy and the actor is ready, with the
+>   last event recorded as recursive_direct_invocation_blocked. No agent-doc cancel is needed.
+>
+>   To run it as a new managed cycle, start it from outside this owned pane, or use:
+>
+>   agent-doc start tasks/monsterrodholders.md
+> ```
+
+
+> **Queue prompt:**
+>
+> `focus-fast` should be the `focus` behavior. So make `focus` have the same behavior as `focus-fast` and retire the blocking slow `focus` behavior. The idea of `focus` is to quickly switch to the next pane and let the rest of the UI operations to catch up in a concurrent or parallel task. The main thing is the tmux pane must switch fast. Is there is a good reason to keep the blocking `focus` behavior? If there is, add a `--blocking`, `--synchronous`, or another more appropriate attribute name to trigger this behavior
+
+
+> **Queue prompt:**
+>
+> When I navigate to lazily-rs.md, the tmux pane switch was not responsive. We need this to be responsive. The main loop should defer any long-running operations to avoid blocking the UI.
+
+
+This closes both focus queue heads, including the follow-up prompt: `focus-fast` should be the `focus` behavior. So make `focus` have the same behavior as `focus-fast` and retire the blocking slow `focus` behavior. The idea of `focus` is to quickly switch to the next pane and let the rest of the UI operations to catch up in a concurrent or parallel task. The main thing is the tmux pane must switch fast. Is there is a good reason to keep the blocking `focus` behavior? If there is, add a `--blocking`, `--synchronous`, or another more appropriate attribute name to trigger this behavior
+
+Implemented and pushed.
+
+`agent-doc focus` is now the fast/default handoff: it selects an already visible pane immediately, skips foreground stash promotion, and leaves stash surfacing to the follow-up `sync --no-autostart` reconciler. The old synchronous promote-and-select path is still available as `agent-doc focus <file> --blocking`; `--synchronous` is accepted as an alias. I kept that path because manual/operator flows may explicitly want a stashed pane surfaced before the command returns, but editor navigation should not pay that cost. The old `--no-stash-promote` flag remains accepted as a hidden compatibility no-op for older plugin builds.
+
+Updated JetBrains and VS Code to call plain `agent-doc focus <file>` for immediate focus, renamed JetBrains diagnostics from `focus-fast` to `focus`, bumped JetBrains to `0.2.153`, bumped VS Code to `0.2.23`, and updated the focus/editor specs.
+
+Verification:
+- `cargo test -p agent-doc-orchestration decide_focus_pane`
+- `target/debug/agent-doc focus /tmp/agent-doc-focus-missing.md --blocking`
+- `target/debug/agent-doc focus /tmp/agent-doc-focus-missing.md --synchronous`
+- `target/debug/agent-doc focus /tmp/agent-doc-focus-missing.md --no-stash-promote`
+- `target/debug/agent-doc focus --help`
+- `npm test` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
+- `make check`
+
+Commits: `src/agent-doc` `2f2e9327` (`Make focus default to fast handoff`), parent submodule pointer `c8f7fd750` (`Update agent-doc submodule`). CI check: `agent-doc` CI run `27098734151` was `in_progress` when checked; per instruction, I did not wait for completion. The parent repo has no workflow named `CI`.
+<!-- agent:boundary:734a0b91 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
-- ~~There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?~~
-- ~~[#md-ast-realtime-node-events]~~
-- ~~[#md-ast-crdt-merge-base]~~
-- ~~[#stale-busy-after-auto-inject-no-clear]~~
-- do [#md-ast-document-model]
-- When I navigate to lazily-rs.md, the tmux pane switch was not responsive. We need this to be responsive. The main loop should defer any long-running operations to avoid blocking the UI.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go=true -->
 <!-- /agent:queue -->
 ###
 <!--

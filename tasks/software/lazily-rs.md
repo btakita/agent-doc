@@ -38,7 +38,17 @@ queue: stop
 Compacted content:
 - Archived 3 response topic(s): IPC transport implementation; IPC implementation follow-through; remaining IPC items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:28331008 -->
+❯ What are #next-steps to implement the planned ipc features?
+
+### Re: What are #next-steps to implement the planned ipc features?
+
+1. [#ipc1] finalize the lazily-serde contract (type-erased vs trait-bound API) so message shapes are stable.
+2. [#39c5] implement `RemoteOp` plus per-peer permission allowlist on deserialization boundaries.
+3. [#ipc2] implement snapshot + incremental delta protocol and define reconnection/recovery behavior.
+4. [#yxjw] deliver the Cloudflare Worker signaling/rendezvous component for peers.
+5. [#ipc3] complete the consistency model ADR (CRDT vs Raft) and choose defaults.
+6. [#vd5v] add lock-free cached read path in `ThreadSafeContext` as a follow-up perf milestone.
+<!-- agent:boundary:45c1860e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +56,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

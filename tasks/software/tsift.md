@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,34 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): msgpack instead of JSON for serialization; #3dhp cache-encoding; Can tsift become a mem graph RAG? (arxiv 2606.00610); 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:20bec503 -->
+
+### Re: Run the gated backlog items — opus-4-8
+
+> **Queue prompt:**
+>
+> run the gated backlog items
+
+
+Both gated items are implemented, tested, built/installed, committed, and pushed (`btakita/tsift` `main` `188bd5b`). Marked `#memgraphrag1` and `#memgraphrag2` done.
+
+**`#memgraphrag1` — decay-weighted memory retrieval** (`packages/tsift-memory/src/lib.rs`)
+- `MemoryDecayConfig { half_life_secs, lexical_weight, recency_weight }` — default 1-week half-life, 0.6/0.4 lexical/recency blend.
+- `rank_memory_events(events, query, now_unix, config, limit) -> Vec<ScoredMemoryEvent>` — blends lexical overlap with exponential recency decay `0.5^(age/half_life)` over `observed_at_unix`; no-timestamp events keep lexical score, earn no recency; ties break toward recent. `ScoredMemoryEvent` exposes component scores.
+- `MemoryQueryPlan` now carries the `decay` contract (visible in `tsift memory query-plan --json`).
+- 4 unit tests (decay halves at half-life, recency tiebreak, strong-lexical-beats-recency + limit, plan carries config).
+
+**`#memgraphrag2` — one graph, not two** (`packages/tsift-cli/src/commands/memory.rs`)
+- New `tsift memory project-graph [PATH] [--graph-db <p>] [--limit N]` reads stored memory events, projects them (`memory_session`/`memory_event` nodes + `records_memory_event` edges), and upserts into the shared `.tsift/graph.db` via the existing `SqliteGraphStore::upsert_projection` — memory nodes are now queryable alongside code symbols.
+- Persistence round-trip test (insert events → project → reopen graph.db → assert `memory_event`/`memory_session` rows).
+
+**Verification:**
+- `make check`: clippy `-D warnings` clean, **all Rust tests pass** (incl. the 5 new ones). The single red is `opencode-tsift`'s `npm publish --dry-run` rejecting because `0.1.63` is **already published** — a pre-existing release-state condition in the npm package (untouched by this change), not a code regression; it fails identically at HEAD.
+- `cargo install --path .` done; live-verified both: `query-plan` reports the decay config, `project-graph` runs against the real graph store.
+
+**Scope notes:** staged only my 4 files (left the submodule's pre-existing dirty `AGENTS.md`/`.opencode/`/`BENCHMARKS.md` untouched). Did **not** bump the version or publish — the preset was build+install+commit+push, not release; a publish would need a coordinated version bump (which also clears the `publish:check` red). The agent-loop superproject's `src/tsift` pointer now trails `188bd5b` if you want to bump it.
+
+Remaining toward full MemGraphRAG: `#trt1` (authored Finding/Decision/Note node types) and folding decay ranking into `#rankdefault` over the now-merged graph.
+<!-- agent:boundary:5752c333 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,15 +72,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- run the gated backlog items
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#memgraphrag1] Decay-weighted memory retrieval (MemGraphRAG arxiv 2606.00610 core mechanism). tsift-memory MemoryEvent already carries observed_at_unix, but MemoryQueryPlan ranking (packages/tsift-memory/src/lib.rs ~1473) has no temporal decay. Add recency/decay weighting to memory retrieval scoring, reusing existing freshness_json + community_graph_watermark staleness signals; coordinate with #rankdefault ranked_neighborhood so memory + code share one ranking. GATED on user decision to pursue the mem-graph-rag direction.
-- [/] [#memgraphrag2] Unify tsift-memory GraphProjection (packages/tsift-memory/src/lib.rs ~1416, memory events to graph) with the code GraphStore so authored memory nodes (#trt1 Finding/Decision/Note) and code symbols live in ONE queryable graph surface (context-pack/search injection). The architectural move that makes tsift a true mem-graph-RAG: memory stream + code graph + decay retrieval over a single substrate. GATED on #trt1 and a product decision.
 <!-- /agent:backlog -->
 
 ## Review

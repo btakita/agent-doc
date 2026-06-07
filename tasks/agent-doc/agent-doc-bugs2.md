@@ -235,7 +235,29 @@ CI check, non-blocking per harness instruction:
 - parent repo has no workflow named `CI`.
 
 I also verified the non-blocking CI instruction is already present in the development harness guidance (`AGENTS.md`, `runbooks/code-navigation.md`, and `.codex/AGENTS.md`), so no extra harness-file edit was needed this cycle.
-<!-- agent:boundary:f9b629c9 -->
+
+### Re: cross-document pane recovery — gpt-5
+
+Yes. There was controller/session actor state corruption, and the prior root-cause fix made the recovery path too brittle by failing closed.
+
+I repaired the live environment first. `tasks/software/lazily-rs.md` is now bound to `%26` in window `@3`, and `tasks/agent-doc/agent-doc-bugs2.md` is bound to `%30` in window `@4`. Both documents now report `doctor: no issues detected`.
+
+Root cause fixed in `src/agent-doc`: binding a pane to a document now atomically evicts any other document that still claims that pane, closes that displaced actor, clears its `pane_id`/`window_id`, and updates `sessions.json` projection state. I also removed the fail-closed actor-store guard, made the session projection drop closed/pane-less actor records, fixed the attach path so it does not create a false projection diagnostic before `sessions.json` is updated, and taught `session doctor --repair` plus live evidence selection to ignore/clear stale closed actor pane pointers.
+
+Verification passed:
+- focused regression tests for cross-document pane handoff, projection cleanup, closed actor evidence, doctor stale-pane detection, and attach projection behavior
+- `make check`
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo install --path .`
+- latest `src/agent-doc` GitHub `CI` run was already green: `27099579913`; the parent repo has no workflow named `CI`
+
+Commits created locally:
+- `src/agent-doc`: `2131ca5b fix: recover cross-document pane handoffs`
+- parent repo: `05ca92a99 Update agent-doc submodule`
+
+I did not push because this prompt did not include an explicit `commit + push` directive.
+<!-- agent:boundary:961999b1 -->
 <!-- /agent:exchange -->
 
 ## Queue

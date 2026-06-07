@@ -265,7 +265,39 @@ Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`.
 Verification: checked the queue/backlog region and confirmed the six `#spcp-*` items plus `#adoc-pending-retry-loss` are present before this reconciliation closeout.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:c6ff0598 -->
+
+### Re: do #spcp-store / single-process control-plane spec batch — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do #spcp-store
+>
+> :round_pushpin: do #spcp-cache
+>
+> :round_pushpin: do #spcp-dispatch
+>
+> :round_pushpin: do #spcp-migrate
+>
+> :round_pushpin: do #spcp-tests
+
+
+> **Queue prompts completed in this batch:**
+>
+> `do #spcp-contract`, `do #spcp-store`, `do #spcp-cache`, `do #spcp-dispatch`, `do #spcp-migrate`, and `do #spcp-tests`.
+
+Completed the single-process control-plane spec batch in `src/agent-doc`.
+
+The new `specs/08b-single-process-control-plane.md` defines the target process boundary: one project controller process with in-process dispatch, store, session, supervisor-adapter, and projection-worker actors. Harnesses, tmux, and editors remain external systems. Mutable state enters through the dispatch actor, authoritative writes go through one SQLite WAL store actor, and JSON/session-log outputs are compatibility projections instead of ownership sources.
+
+The same spec covers the six backlog items: actor boundaries and lifecycle ownership (`#spcp-contract`), SQLite authority and JSON projection compatibility (`#spcp-store`), the in-memory write-through actor map/cache model (`#spcp-cache`), the fast receipt-based dispatch/admin API (`#spcp-dispatch`), shadow/dual-write/read-switch/authority/removal migration gates (`#spcp-migrate`), and deterministic SimWorld plus CLI/live-tmux verification obligations (`#spcp-tests`). I also linked the new supplement from `SPEC.md` and `specs/08-session-routing.md`.
+
+Source commit: `src/agent-doc` `84b2d690` (`docs: specify single-process control plane`), pushed to `origin/main`.
+Parent repo gitlink commit: `719887b96` (`chore: update agent-doc submodule`).
+Changed paths: `src/agent-doc/SPEC.md`, `src/agent-doc/specs/08-session-routing.md`, `src/agent-doc/specs/08b-single-process-control-plane.md`, `src/agent-doc` gitlink, and `tasks/agent-doc/agent-doc-bugs2.md`.
+Verification: `cargo fmt --check`; `make check` passed (clippy, 3943 nextest tests, doctests, and the medium deterministic SimWorld corpus). Latest submodule `CI` for `84b2d690` was `in_progress` at closeout; the previous `CI` run for `648fd3e7` was green.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:3fb437bd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -276,13 +308,13 @@ Escalation: none.
 - ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
 - ~~Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".~~
 - ~~:round_pushpin: do #spcp-contract~~
-- agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
-- :round_pushpin: do #spcp-store
-- :round_pushpin: do #spcp-cache
-- :round_pushpin: do #spcp-dispatch
-- :round_pushpin: do #spcp-migrate
-- :round_pushpin: do #spcp-tests
+- ~~:round_pushpin: do #spcp-store~~
+- ~~:round_pushpin: do #spcp-cache~~
+- ~~:round_pushpin: do #spcp-dispatch~~
+- ~~:round_pushpin: do #spcp-migrate~~
+- ~~:round_pushpin: do #spcp-tests~~
 - :round_pushpin: do [#adoc-pending-retry-loss]
+- agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
 - "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
 - `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
 - Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
@@ -313,12 +345,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#spcp-contract] Draft the single-process actor control-plane contract: in-process actor boundaries, lifecycle ownership, state invariants, crash recovery, and admin API.
-- [ ] [#spcp-store] Design the SQLite WAL authoritative-state schema and JSON projection compatibility layer for sessions.json/session-actors.json.
-- [ ] [#spcp-cache] Specify the lazily-rs in-memory cache/reservation model for fast session state, pane bindings, and synchronous attach/input coordination.
-- [ ] [#spcp-dispatch] Design the fast command/dispatch actor: non-blocking admission, receipts, bounded queues, background workers, and backpressure rules.
-- [ ] [#spcp-migrate] Plan the migration gates: feature flags, shadow reads, dual writes, telemetry, reconciliation, and rollback from JSON-first to SQLite-first state.
-- [ ] [#spcp-tests] Add SimWorld, CLI integration, and contention/stress tests for actor-pool operations, projection lag, restart recovery, and queue dispatch.
 - [ ] [#adoc-pending-retry-loss] #agent-doc-bug Fix finalize/editor-buffer mismatch retry so pending-add mutations cannot be dropped while the committed exchange claims backlog capture.
 <!-- /agent:backlog -->
 

@@ -1554,15 +1554,38 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
+                    if let Err(e) = mark_completed_queue_prompts_for_done_ids(
+                        file,
+                        &options.pending_done,
+                        false,
+                    ) {
+                        eprintln!("[queue] warning: done-id marking failed: {}", e);
+                    }
                 } else {
-                    eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
+                    match mark_completed_queue_prompts_for_done_ids(
+                        file,
+                        &options.pending_done,
+                        false,
+                    ) {
+                        Ok(0) => eprintln!("{}", queue_skip_diagnostic_for_file(file)?),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("[queue] warning: done-id marking failed: {}", e),
+                    }
                 }
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
                     consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)?;
+                    mark_completed_queue_prompts_for_done_ids(file, &options.pending_done, false)?;
                 } else {
-                    eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
+                    let marked = mark_completed_queue_prompts_for_done_ids(
+                        file,
+                        &options.pending_done,
+                        false,
+                    )?;
+                    if marked == 0 {
+                        eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
+                    }
                 }
             }
         }
@@ -3214,6 +3237,107 @@ fn queue_consume_count_for_done_ids(
         break;
     }
     count
+}
+
+fn mark_entries_completed_by_done_ids(
+    entries: &[crate::queue::QueueEntry],
+    done_ids: &[String],
+) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
+    if done_ids.is_empty() {
+        return (entries.to_vec(), Vec::new());
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<std::collections::HashSet<_>>();
+    let mut marked_texts = Vec::new();
+    let entries = entries
+        .iter()
+        .map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt)
+                if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
+            {
+                marked_texts.push(prompt.text.clone());
+                crate::queue::QueueEntry::Completed(prompt.clone())
+            }
+            _ => entry.clone(),
+        })
+        .collect();
+    (entries, marked_texts)
+}
+
+fn mark_completed_queue_prompts_for_done_ids(
+    file: &Path,
+    done_ids: &[String],
+    skip_visible_guard: bool,
+) -> Result<usize> {
+    if done_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let _lock = acquire_doc_lock(file)?;
+    let content =
+        std::fs::read_to_string(file).context("queue done-id mark: failed to read document")?;
+    let components = component::parse(&content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(0);
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        crate::queue::parse(body).context("queue done-id mark: failed to parse document queue")?;
+    let (marked_entries, marked_texts) = mark_entries_completed_by_done_ids(&entries, done_ids);
+    if marked_texts.is_empty() {
+        return Ok(0);
+    }
+
+    let new_body = crate::queue::render(&marked_entries);
+    let new_document = queue_component.replace_content(&content, &new_body);
+
+    let new_snapshot = if let Some(snapshot_content) = snapshot::load(file)? {
+        let snapshot_components = component::parse(&snapshot_content)?;
+        let snapshot_queue = snapshot_components
+            .iter()
+            .find(|component| component.name == "queue")
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "queue done-id mark: document queue changed but snapshot has no agent:queue component"
+                )
+            })?;
+        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+        let snapshot_entries = crate::queue::parse(snapshot_body)
+            .context("queue done-id mark: failed to parse snapshot queue")?;
+        let (snapshot_marked_entries, snapshot_marked_texts) =
+            mark_entries_completed_by_done_ids(&snapshot_entries, done_ids);
+        if snapshot_marked_texts.len() != marked_texts.len() {
+            anyhow::bail!(
+                "queue done-id mark: snapshot matched {} queue item(s) but document matched {}",
+                snapshot_marked_texts.len(),
+                marked_texts.len()
+            );
+        }
+        let snapshot_body = crate::queue::render(&snapshot_marked_entries);
+        Some(snapshot_queue.replace_content(&snapshot_content, &snapshot_body))
+    } else {
+        None
+    };
+
+    if !skip_visible_guard {
+        guard_visible_write_idle(file, "queue_done_id_mark")?;
+    }
+    atomic_write(file, &new_document).context("queue done-id mark: failed to write document")?;
+    if let Some(new_snapshot) = new_snapshot {
+        snapshot::save(file, &new_snapshot)?;
+    }
+
+    eprintln!(
+        "[queue] marked {} completed item(s) by done id: {:?}",
+        marked_texts.len(),
+        marked_texts
+    );
+    Ok(marked_texts.len())
 }
 
 struct QueuePromptNodeKeys {
@@ -7941,9 +8065,33 @@ pub fn run_stream(
                                 e
                             );
                         }
+                        if let Err(e) = mark_completed_queue_prompts_for_done_ids(
+                            file,
+                            &flags.pending_done_ids,
+                            true,
+                        ) {
+                            eprintln!(
+                                "[queue] warning: done-id marking on stream IPC-timeout failed: {}",
+                                e
+                            );
+                        }
                     }
                     Ok(false) => {
-                        if let Ok(diag) = queue_skip_diagnostic_for_file(file) {
+                        let marked = mark_completed_queue_prompts_for_done_ids(
+                            file,
+                            &flags.pending_done_ids,
+                            true,
+                        )
+                        .unwrap_or_else(|e| {
+                            eprintln!(
+                                "[queue] warning: done-id marking on stream IPC-timeout failed: {}",
+                                e
+                            );
+                            0
+                        });
+                        if marked == 0
+                            && let Ok(diag) = queue_skip_diagnostic_for_file(file)
+                        {
                             eprintln!("{}", diag);
                         }
                     }
@@ -13260,6 +13408,52 @@ mod tests {
             !should_consume_queue_prompt_for_write(&doc, Some(baseline), &current, &[]).unwrap(),
             "bare do[#id] head needs an explicit completion flag"
         );
+    }
+
+    #[test]
+    fn done_id_marks_later_queue_prompt_completed_without_consuming_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#opportunistic]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let marked =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["opportunistic".to_string()], true)
+                .unwrap();
+        assert_eq!(marked, 1);
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- do [#head]\n"), "{updated}");
+        assert!(updated.contains("- ~~do [#opportunistic]~~\n"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+        let snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snapshot.contains("- ~~do [#opportunistic]~~\n"),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn done_id_marking_ignores_already_completed_queue_prompt() {
+        let entries = crate::queue::parse(concat!(
+            "- do [#head]\n",
+            "- ~~do [#opportunistic]~~\n",
+            "- do [#tail]\n",
+        ))
+        .unwrap();
+
+        let (updated, marked) =
+            mark_entries_completed_by_done_ids(&entries, &["opportunistic".to_string()]);
+        assert!(marked.is_empty());
+        assert_eq!(updated, entries);
     }
 
     #[test]

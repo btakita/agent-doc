@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Completed queue items can be marked in place.** Explicit done IDs now mark
+  matching `agent:queue` prompts completed even when the matching queue item is
+  not part of the active contiguous head-consumption range. This preserves the
+  current head while striking opportunistically completed queued work in both the
+  document and snapshot. Tests
+  `done_id_marks_later_queue_prompt_completed_without_consuming_head` and
+  `done_id_marking_ignores_already_completed_queue_prompt`; spec
+  `specs/07-orchestration-commands.md`.
+
 - **Queue overwrite guard tracks free-text queue items.** The
   `#queue-user-edit-overwrite` detector now compares parsed `agent:queue`
   prompt entries by count instead of relying on prompt-target diff

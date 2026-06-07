@@ -320,7 +320,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 71,
+        // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
+        // call: opportunistic done-id queue marking is a document write path and
+        // must use the same visible editor drift guard as active-head queue consume.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 72,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

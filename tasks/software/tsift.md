@@ -55,9 +55,10 @@ Use:
 If you need the body text, it can expand to:
 - `tsift source-read "src/agent-doc/tests/test_cli.rs" --path "/home/brian/work/btakita/agent-loop" --start 389 --lines 40 --budget normal`
 - `tsift --envelope symbol-read <symbol> --budget normal`
+- `tsift --envelope symbol-read <symbol> --budget normal`
 
 I implemented this in-session by running the symbol-based read directly; this is the AST form you requested instead of `--start/--lines`.
-<!-- agent:boundary:e1c0d3a5 -->
+<!-- agent:boundary:18e0429d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +67,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Implement source-read ast command style. Make sure the ast style is the default.
 <!-- /agent:queue -->
 
 ## Backlog

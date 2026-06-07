@@ -324,7 +324,24 @@ Verification:
 - latest agent-doc CI for `e5cfa31c` was still in progress at closeout time; previous CI was green
 
 No new backlog item came out of this closeout.
-<!-- agent:boundary:cf914dbc -->
+
+### Re: auto-DAG queue priority — gpt-5
+
+> **Queue prompt:**
+>
+> agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
+
+
+Yes. The queue should not depend on physical FIFO order once priority markers or auto-DAG dependencies are present.
+
+The behavior should be split into two layers:
+
+- Closeout identity: already fixed by `e5cfa31c`. A done-backed queue closeout now resolves by `--done` IDs when the active head is one of those IDs, so interspersed priority/free-text prompts no longer make snapshot-vs-document head position mismatches fail the closeout.
+- Dispatch priority: still needs a scheduler feature. `agent:queue` should preserve the user-visible list order, but the controller should compute a runnable frontier from queue entries plus backlog dependencies, score that frontier using explicit priority markers (`:round_pushpin:`, `priority`, presets), and dispatch the highest-priority unblocked item. Auto-DAG should determine what is blocked by dependencies; priority should choose among ready work, not override dependency ordering.
+
+Captured backlog item:
+- [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
+<!-- agent:boundary:7bf44c5b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -341,7 +358,7 @@ No new backlog item came out of this closeout.
 - ~~:round_pushpin: do #spcp-migrate~~
 - ~~:round_pushpin: do #spcp-tests~~
 - ~~:round_pushpin: do [#adoc-pending-retry-loss]~~
-- agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
+- ~~agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.~~
 - "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
 - `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
 - Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
@@ -372,6 +389,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->
 
 ## Review

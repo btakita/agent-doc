@@ -181,6 +181,11 @@ No additional monsterrodholders document repair was needed in this pass.
 
 > **Queue prompt:**
 >
+> :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
+
+
+> **Queue prompt:**
+>
 > :pushpin: Please fix the root cause of the lazily-rs session issues.
 
 
@@ -198,7 +203,7 @@ Current lazily-rs state is also repaired:
 - The parent `btakita/agent-loop` gitlink now points at `src/agent-doc` `6734be4a` via parent commit `709f80dc9`.
 
 Remaining caveat: parent `btakita/agent-loop` has no workflow named `CI`, and its `Agent Doc` workflow still fails immediately with empty `steps: []` jobs, so there is no parent test log to fix from this queue item.
-<!-- agent:boundary:c36518ce -->
+<!-- agent:boundary:136072c3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -206,7 +211,7 @@ Remaining caveat: parent `btakita/agent-loop` has no workflow named `CI`, and it
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.~~
 - ~~:pushpin: Please fix the root cause of the lazily-rs session issues.~~
-- :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
+- ~~:pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.~~
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]
 - :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.

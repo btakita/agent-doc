@@ -297,7 +297,34 @@ Changed paths: `src/agent-doc/SPEC.md`, `src/agent-doc/specs/08-session-routing.
 Verification: `cargo fmt --check`; `make check` passed (clippy, 3943 nextest tests, doctests, and the medium deterministic SimWorld corpus). Latest submodule `CI` for `84b2d690` was `in_progress` at closeout; the previous `CI` run for `648fd3e7` was green.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:3fb437bd -->
+
+### Re: #adoc-pending-retry-loss — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#adoc-pending-retry-loss]
+
+
+Fixed in agent-doc.
+
+Root cause: the strict queue closeout planner still consumed done-backed queue items as a leading positional prefix, then compared the snapshot head text against the live document head text. When a retry or priority reorder put a free-text queue item before the same done-backed batch in the snapshot, the closeout could fail after the response claimed backlog capture, forcing a retry path where the pending mutation could be lost or require manual repair.
+
+Change: `agent-doc-orchestration/src/write.rs` now has a done-id identity path when the active queue head is one of the supplied `--done` IDs. It marks every matching done-backed queue prompt by ID, keeps unrelated queue prompts live, reconciles the snapshot by done-id identity instead of head position, and preserves node-key consume metadata for the actor/IPC surface. Ordinary free-text FIFO queue consumption remains unchanged.
+
+Regression coverage: added `write_commit_visible_response_retry_preserves_pending_add` for already-visible response retries with `--pending-add`, and `finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt` for the exact interspersed priority/done-id queue shape.
+
+Commits:
+- agent-doc `e5cfa31c` (`fix: preserve retry backlog closeouts`), pushed to `origin/main`
+- parent `f85d4cf56` (`chore: update agent-doc submodule`), pushed to `origin/main`
+
+Verification:
+- `cargo fmt --check`
+- targeted finalize integration tests
+- `make check` passed: clippy, 3,945 nextest tests, doctests, and the medium SimWorld run
+- latest agent-doc CI for `e5cfa31c` was still in progress at closeout time; previous CI was green
+
+No new backlog item came out of this closeout.
+<!-- agent:boundary:cf914dbc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -313,7 +340,7 @@ Escalation: none.
 - ~~:round_pushpin: do #spcp-dispatch~~
 - ~~:round_pushpin: do #spcp-migrate~~
 - ~~:round_pushpin: do #spcp-tests~~
-- :round_pushpin: do [#adoc-pending-retry-loss]
+- ~~:round_pushpin: do [#adoc-pending-retry-loss]~~
 - agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
 - "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
 - `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
@@ -345,7 +372,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#adoc-pending-retry-loss] #agent-doc-bug Fix finalize/editor-buffer mismatch retry so pending-add mutations cannot be dropped while the committed exchange claims backlog capture.
 <!-- /agent:backlog -->
 
 ## Review

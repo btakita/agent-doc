@@ -53,6 +53,62 @@ impl FaultPoint {
     ];
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum HarnessKind {
+    Codex,
+    ClaudeCode,
+    OpenCode,
+}
+
+impl HarnessKind {
+    const ALL: [HarnessKind; 3] = [
+        HarnessKind::Codex,
+        HarnessKind::ClaudeCode,
+        HarnessKind::OpenCode,
+    ];
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::ClaudeCode => "claude-code",
+            Self::OpenCode => "opencode",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum HarnessMatrixEdge {
+    ResponseCapture,
+    PendingBacklogMutation,
+    QueueConsumption,
+    IpcWrite,
+    PtyFallbackWrite,
+    HookStop,
+    HookContinue,
+    FailedCloseoutRecovery,
+}
+
+impl HarnessMatrixEdge {
+    const ALL: [HarnessMatrixEdge; 8] = [
+        HarnessMatrixEdge::ResponseCapture,
+        HarnessMatrixEdge::PendingBacklogMutation,
+        HarnessMatrixEdge::QueueConsumption,
+        HarnessMatrixEdge::IpcWrite,
+        HarnessMatrixEdge::PtyFallbackWrite,
+        HarnessMatrixEdge::HookStop,
+        HarnessMatrixEdge::HookContinue,
+        HarnessMatrixEdge::FailedCloseoutRecovery,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HookOutcome {
+    StopFinalAnswer,
+    ContinueInOwnerPane,
+    ContinueViaAutoLoop,
+    ContinueManually,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SimCommand {
     EditPrompt,
@@ -348,10 +404,15 @@ struct Coverage {
     sync_detachable_replacements: usize,
     sync_protected_expansions: usize,
     sync_focus_handoffs: usize,
+    harness_matrix_edges: BTreeSet<(HarnessKind, HarnessMatrixEdge)>,
     commits: usize,
 }
 
 impl Coverage {
+    fn record_harness_matrix_edge(&mut self, harness: HarnessKind, edge: HarnessMatrixEdge) {
+        self.harness_matrix_edges.insert((harness, edge));
+    }
+
     fn record_block(&mut self, message: &str) {
         if message.contains("unresolved prompt_target") {
             self.unresolved_prompt_blocks += 1;
@@ -441,6 +502,7 @@ impl Coverage {
         self.sync_detachable_replacements += other.sync_detachable_replacements;
         self.sync_protected_expansions += other.sync_protected_expansions;
         self.sync_focus_handoffs += other.sync_focus_handoffs;
+        self.harness_matrix_edges.extend(other.harness_matrix_edges);
         self.commits += other.commits;
     }
 }
@@ -1640,8 +1702,182 @@ fn response_patch(topic: &str) -> String {
     )
 }
 
+fn harness_response_patch(harness: HarnessKind, topic: &str) -> String {
+    format!(
+        "<!-- patch:exchange -->\n### Re: {topic} — gpt-5\n\n{} response captured and verified.\n<!-- /patch:exchange -->\n",
+        harness.as_str()
+    )
+}
+
 fn fallback_response(topic: &str) -> String {
     format!("### Re: {topic} — gpt-5\n\nImplemented and verified through fallback.\n")
+}
+
+fn harness_fallback_response(harness: HarnessKind, topic: &str) -> String {
+    format!(
+        "### Re: {topic} — gpt-5\n\n{} PTY fallback response captured and verified.\n",
+        harness.as_str()
+    )
+}
+
+fn hook_outcome_for(harness: HarnessKind, active_queue: bool) -> HookOutcome {
+    if !active_queue {
+        return HookOutcome::StopFinalAnswer;
+    }
+
+    match harness {
+        HarnessKind::Codex => HookOutcome::ContinueInOwnerPane,
+        HarnessKind::ClaudeCode => HookOutcome::ContinueViaAutoLoop,
+        HarnessKind::OpenCode => HookOutcome::ContinueManually,
+    }
+}
+
+fn harness_matrix_seed(harness: HarnessKind, edge: HarnessMatrixEdge) -> u64 {
+    let harness_offset = match harness {
+        HarnessKind::Codex => 0,
+        HarnessKind::ClaudeCode => 100,
+        HarnessKind::OpenCode => 200,
+    };
+    let edge_offset = match edge {
+        HarnessMatrixEdge::ResponseCapture => 1,
+        HarnessMatrixEdge::PendingBacklogMutation => 2,
+        HarnessMatrixEdge::QueueConsumption => 3,
+        HarnessMatrixEdge::IpcWrite => 4,
+        HarnessMatrixEdge::PtyFallbackWrite => 5,
+        HarnessMatrixEdge::HookStop => 6,
+        HarnessMatrixEdge::HookContinue => 7,
+        HarnessMatrixEdge::FailedCloseoutRecovery => 8,
+    };
+    10_000 + harness_offset + edge_offset
+}
+
+fn run_harness_matrix_edge(harness: HarnessKind, edge: HarnessMatrixEdge) -> Result<Coverage> {
+    let mut world = SimWorld::new(harness_matrix_seed(harness, edge));
+
+    match edge {
+        HarnessMatrixEdge::ResponseCapture => {
+            world.apply(SimCommand::EditPrompt)?;
+            world.captured_response =
+                Some(harness_response_patch(harness, "matrix response capture"));
+            world.apply_captured_response()?;
+            world.try_commit()?;
+            assert!(
+                world.doc.contains(&format!(
+                    "{} response captured and verified.",
+                    harness.as_str()
+                )),
+                "response body missing for {harness:?}:\n{}",
+                world.doc
+            );
+        }
+        HarnessMatrixEdge::PendingBacklogMutation => {
+            world.apply(SimCommand::EditPrompt)?;
+            world.captured_response =
+                Some(harness_response_patch(harness, "matrix pending mutation"));
+            world.apply_captured_response()?;
+            let next_backlog = format!(
+                "{}- [ ] [#matrixfollowup] Follow-up from {} pending mutation\n",
+                world.component_content("backlog")?,
+                harness.as_str()
+            );
+            world.replace_component_content("backlog", &next_backlog)?;
+            world.try_commit()?;
+            assert!(
+                world
+                    .component_content("backlog")?
+                    .contains("Follow-up from"),
+                "pending/backlog mutation missing for {harness:?}:\n{}",
+                world.doc
+            );
+        }
+        HarnessMatrixEdge::QueueConsumption => {
+            world.insert_after_exchange(
+                "\n## Queue\n\n<!-- agent:queue auto -->\n- do [#matrixhead]\n- do [#matrixnext]\n<!-- /agent:queue -->\n",
+            )?;
+            world.snapshot = world.doc.clone();
+            world.append_to_exchange("❯ do [#matrixhead]\n")?;
+            world.replace_component_content(
+                "queue",
+                "- ~~do [#matrixhead]~~\n- do [#matrixnext]\n",
+            )?;
+            world.captured_response = Some(harness_response_patch(harness, "do [#matrixhead]"));
+            world.apply_captured_response()?;
+            world.try_commit()?;
+            let queue = world.component_content("queue")?;
+            assert!(
+                queue.contains("~~do [#matrixhead]~~"),
+                "head not consumed:\n{queue}"
+            );
+            assert!(
+                queue.contains("do [#matrixnext]"),
+                "next head missing:\n{queue}"
+            );
+        }
+        HarnessMatrixEdge::IpcWrite => {
+            world.apply(SimCommand::EditPrompt)?;
+            world.captured_response = Some(harness_response_patch(harness, "matrix ipc write"));
+            world.apply_captured_response()?;
+            world.try_commit()?;
+            assert!(
+                world.doc.contains("<!-- agent:boundary:committed -->"),
+                "IPC closeout did not cross commit boundary for {harness:?}"
+            );
+        }
+        HarnessMatrixEdge::PtyFallbackWrite => {
+            world.apply(SimCommand::EditPrompt)?;
+            world.captured_response =
+                Some(harness_fallback_response(harness, "matrix pty fallback"));
+            world.apply_captured_response()?;
+            world.try_commit()?;
+            assert!(
+                world.doc.contains("PTY fallback response captured"),
+                "PTY fallback body missing for {harness:?}:\n{}",
+                world.doc
+            );
+        }
+        HarnessMatrixEdge::HookStop => {
+            assert_eq!(
+                hook_outcome_for(harness, false),
+                HookOutcome::StopFinalAnswer,
+                "clean {harness:?} closeout should allow final answer"
+            );
+        }
+        HarnessMatrixEdge::HookContinue => {
+            let expected = match harness {
+                HarnessKind::Codex => HookOutcome::ContinueInOwnerPane,
+                HarnessKind::ClaudeCode => HookOutcome::ContinueViaAutoLoop,
+                HarnessKind::OpenCode => HookOutcome::ContinueManually,
+            };
+            assert_eq!(
+                hook_outcome_for(harness, true),
+                expected,
+                "active queue continuation semantics changed for {harness:?}"
+            );
+        }
+        HarnessMatrixEdge::FailedCloseoutRecovery => {
+            world.apply(SimCommand::EditPrompt)?;
+            world.captured_response =
+                Some(harness_response_patch(harness, "matrix failed closeout"));
+            world.apply_captured_response()?;
+            world.apply(SimCommand::CrashAt(FaultPoint::GitCommit))?;
+            let err = world.try_commit().unwrap_err();
+            assert!(
+                err.to_string().contains("fault point GitCommit"),
+                "unexpected failed closeout error for {harness:?}: {err}"
+            );
+            assert!(
+                matches!(world.phase, CyclePhase::Interrupted(FaultPoint::GitCommit)),
+                "failed closeout should fail closed before recovery for {harness:?}"
+            );
+            world.apply(SimCommand::Recover)?;
+            assert_eq!(world.phase, CyclePhase::Committed);
+            assert_eq!(world.snapshot, world.doc);
+        }
+    }
+
+    world.coverage.record_harness_matrix_edge(harness, edge);
+    world.strict_closeout_invariants()?;
+    Ok(world.coverage)
 }
 
 fn post_exchange_scratch_comment(prompt: &str) -> String {
@@ -2053,6 +2289,32 @@ fn closeout_sim_fault_points_fail_closed_then_recover() {
                 "fault {fault:?} should recover to a committed closeout"
             );
             assert_eq!(world.snapshot, world.doc);
+        }
+    }
+}
+
+#[test]
+fn closeout_sim_harness_matrix_covers_agent_backends_and_edge_classes() {
+    let mut observed = BTreeSet::new();
+
+    for harness in HarnessKind::ALL {
+        for edge in HarnessMatrixEdge::ALL {
+            let coverage = run_harness_matrix_edge(harness, edge)
+                .unwrap_or_else(|err| panic!("{harness:?}/{edge:?} failed: {err}"));
+            assert!(
+                coverage.harness_matrix_edges.contains(&(harness, edge)),
+                "{harness:?}/{edge:?} did not record matrix coverage"
+            );
+            observed.extend(coverage.harness_matrix_edges);
+        }
+    }
+
+    for harness in HarnessKind::ALL {
+        for edge in HarnessMatrixEdge::ALL {
+            assert!(
+                observed.contains(&(harness, edge)),
+                "missing harness matrix coverage for {harness:?}/{edge:?}"
+            );
         }
     }
 }

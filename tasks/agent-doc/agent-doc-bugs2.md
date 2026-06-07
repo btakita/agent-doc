@@ -67,13 +67,16 @@ All three are sticky (manual priority beats computed priority), annotated (visib
 **The fence (this cycle's actual head):** apply-side generation fence shipped — `PatchWatcher` now drops a superseded queued patch (baseline drift OR same-cycle already committed) at the file-thread gate + EDT re-check, fail-open on error. Plugin `0.2.149` signed; `PatchGenerationFenceTest` + `make check` green. Only your live IntelliJ install+verify remains (folded into `#live-verify-batch`).
 
 The other pinned items (auto-dag priority, "queue attribute not populating the queue element") stay queued — say the word on the pin syntax and I'll take them in order.
-<!-- agent:boundary:6bab7dba -->
+<!-- agent:boundary:158e4d1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please mark queue items `~~` when they are completed. I see open items in the queue that have been completed but they are not completed. I also want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. If you can annotate the item that I manually prioritized, that would be great. So if I want to release my prioritization, I can delete the annotation.
-- do [#monsterrod-writeback-post-contamination-confirm]
 - [#late-ipc-patch-plugin-apply-fence]
+- __prioritized__ The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
+- __prioritized__ Please mark queue items `~~` when they are completed. I see open items in the queue that have been completed but they are not completed.
+- __prioritized__ I also want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `__prioritized__`. Terse is better. But don't get too vague. If `__prioritized__` is the most terse and clear way to express the intent, so be it. But see if you can do better.
+- __prioritized__ The backlog with `queue` attribute is not populating the queue element in this document.
+- __prioritized__ [#late-ipc-patch-plugin-apply-fence]
 - [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
@@ -83,8 +86,6 @@ The other pinned items (auto-dag priority, "queue attribute not populating the q
 - do [#queue-dedup-destroys-intentional-duplicates]
 - Is agent-doc in any way encouraging the turn to create gated responses? It seems the majority of my turns result review items. I want my turns to complete the tasks. Please update the SKILL/runbooks to complete tasks. Only create review items under exceptional conditions. I would rather have items in the backlog that are actionable. The gated review items make understanding the actionable items difficult. Especially when there are >10. I'm just accumulating gated review items in this document and in monsterrodholders.md. For this session...NO MORE GATED REVIEW ITEMS. FINISH WORK...NO PUNTING...NO EXCUSES...NO GIBBERISH. YOU ARE NOW BANNED FROM CREATING REVIEW ITEMS UNTIL YOU CAN GET THE REVIEW ITEM COUNT UNDER 10 IN THIS DOCUMENT. This session has lost its excessive review item spam priveledge. If a gated review item's conditions are not met, create a new backlog item and delete the gated review item. I want as much automated review as possible. This means logging to determine if an item is complete or not.
 - It seems that everytime I do some work on agent-doc, some regressions occur. Is this due to the current state of agent-doc having on unsettled turn pipeline? 
-- The backlog with `queue` attribute is not populating the queue element in this document.
-- The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
 <!-- /agent:queue -->
 ###
 <!--

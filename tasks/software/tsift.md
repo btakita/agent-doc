@@ -63,7 +63,36 @@ Escalation: none.
 ### Closeout recovery — gpt-5
 
 The answer above is the intended response. This closeout only records the live-turn recovery after the queue activation token was drained.
-<!-- agent:boundary:ba86f875 -->
+❯ Why is `tsift source-read` not being used in the current agent-doc-bugs2.md session?
+### Re: tsift source-read in agent-doc-bugs2 — gpt-5
+
+`tsift source-read` is not being used there because the current `agent-doc-bugs2.md` state is not a source-code navigation case yet.
+
+I checked the referenced document's session state: it is still `INTERRUPTED` at `preflight_started`, with IPC proof diagnostic `no_ack` and recovery path `direct_write_fallback`. That means the prior cycle did not get far enough into a normal response/write path where plan-driven source context would be selected.
+
+The tsift next-context digest for that document also reports prompt targets but `files=0` and `symbols=0`. `source-read` needs a concrete source file or symbol handle to expand. For a large markdown agent-doc session document, the intended token-efficient tools are instead:
+
+- `tsift --envelope session-review /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --next-context --budget normal`
+- `tsift --envelope context-pack /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --budget normal`
+
+So the Read fallback is not because `source-read` is disabled; it is because there is no source handle in that interrupted session context. Recover the interrupted `agent-doc-bugs2.md` cycle first. If that session later selects concrete implementation files under `src/agent-doc` or `src/tsift`, then `tsift source-read` becomes the right bounded expansion tool.
+
+Changed paths: none besides this agent-doc response.
+
+Commands run:
+- `tsift status`
+- `tsift status --fix`
+- `agent-doc --version`
+- `agent_doc_preflight` / `agent_doc_plan` / `agent_doc_read` for this session
+- `agent_doc_session_check` for `tasks/agent-doc/agent-doc-bugs2.md`
+- `tsift --envelope session-review /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --next-context --budget normal`
+
+Verification: no code changed; the referenced session-check still reports `INTERRUPTED` with `no_ack`, and the tsift digest reports no file or symbol handles for `source-read` to expand.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:6369d4b2 -->
 <!-- /agent:exchange -->
 ###
 <!--

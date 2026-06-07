@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-Completed the editor/IPC node-patch phase of #md-ast-document-model: src/agent-doc a45121b0 applies node_patches through shared Rust markdown-AST mutations in VS Code and JetBrains, parent pointer 3b59c9320 is pushed, local verification/install passed, and GitHub CI 27097245198 is green. Remaining: realtime watcher convergence and replacing the legacy text CRDT merge base with structured overlay/AST state.
+Answered the MCP API consolidation queue prompt: keep the public MCP surface as a small set of lifecycle-specific tools (`read`, `preflight`, `plan`, `session_check`, `finalize`) while consolidating implementation internally; avoid exposing one MCP tool per CLI command.
 <!-- /agent:status -->
 
 ## Exchange
@@ -45,15 +45,31 @@ Implemented shared Rust markdown-AST node patch application for insert/remove/re
 Verification passed: `make check`, focused AST/FFI/static-guard tests, VS Code `npm test`, JetBrains `./gradlew test buildPlugin`, `make install`, and GitHub CI `27097245198`. Commits: `src/agent-doc` `a45121b0`; parent submodule pointer `3b59c9320`.
 
 Scheduled next steps under `#md-ast-document-model`: `#md-ast-realtime-watcher` and `#md-ast-crdt-merge-base`.
-<!-- agent:boundary:9a6773d3 -->
+
+### Re: There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis? — gpt-5
+
+> **Queue prompt:**
+>
+> There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?
+
+
+Recommendation: keep multiple narrow public MCP tools, but keep consolidating the implementation behind them.
+
+A single catch-all MCP tool is tempting, but it would make the important lifecycle boundaries less explicit. `agent_doc_read`, `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_session_check`, and `agent_doc_finalize` each have different safety semantics, required arguments, and failure modes. Separate tool schemas make it harder for an agent to accidentally run a mutating closeout when it only meant to inspect, and they make client/tool UX easier to validate.
+
+The useful consolidation is internal: one server, one JSON-RPC handler, shared argument parsing, and shared `CommandOptions` plumbing. That is already mostly what `src/agent-doc/src/mcp.rs` does. I would avoid adding a separate MCP tool for every CLI subcommand; if the MCP surface grows, group by lifecycle stage or add a deliberately named low-level escape hatch rather than replacing the safe lifecycle tools with one generic dispatcher.
+
+So: no broad single-tool collapse for the primary API. Keep a small, stable set of purpose-specific MCP tools, and consolidate code paths underneath them.
+<!-- agent:boundary:328ceb65 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#md-ast-document-model]
-- There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?
-- Schedule #next-steps to finish [#md-ast-document-model].
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
+- ~~There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?~~
+- [#md-ast-realtime-watcher]
+- [#md-ast-crdt-merge-base]
+- [#stale-busy-after-auto-inject-no-clear]
 <!-- /agent:queue -->
 ###
 <!--

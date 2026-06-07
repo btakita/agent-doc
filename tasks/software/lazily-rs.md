@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -33,118 +33,12 @@ queue: start
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-062538.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-064921.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #ipc5 transport contract + benchmark matrix
+- Archived 3 response topic(s): IPC transport implementation; IPC implementation follow-through; remaining IPC items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: IPC transport implementation — gpt-5
-
-> **Queue prompt:**
->
-> do [#ipc8]
-
-
-> **Queue prompt:**
->
-> do [#ipc7]
-
-
-> **Queue prompt:**
->
-> do [#ipc6]
-
-
-> **Queue prompt:**
->
-> do [#ipc5]
-
-
-> **Queue prompt:**
->
-> do [#ipc4]
-
-
-> **Queue prompt:**
->
-> [#ipc8]
-
-
-> **Queue prompt:**
->
-> [#ipc7]
-
-
-> **Queue prompt:**
->
-> [#ipc6]
-
-
-> **Queue prompt:**
->
-> [#ipc5]
-
-
-> **Queue prompt:**
->
-> [#ipc4]
-
-
-> **Queue prompt:**
->
-> What are #next-steps for IPC transport implementation?
-
-Top backlog item: `#ipc4`.
-
-Proposed next steps (prioritized):
-- First, lock a transport contract and feature matrix so implementation work is testable (`#ipc4`).
-- Then define a transport protocol envelope with versioned operations and lifecycle semantics (`#ipc5`).
-- Next, implement reliability/backpressure/reconnect guarantees (`#ipc6`).
-- After transport correctness, build test coverage for ordering, permissions, and failure recovery (`#ipc7`).
-- Close with transport-specific benchmarks and regression guards (`#ipc8`).
-
-I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-
-### Re: IPC implementation follow-through — gpt-5
-
-> **Queue prompt:**
->
-> Implement the rest of the IPC items.
-
-
-Implemented the remaining IPC items from this queue prompt in `src/lazily-rs` by adding transport framing and a loopback transport adapter behind the existing `ipc` feature:
-
-- `src/lazily-rs/src/ipc.rs`
-  - Added versioned IPC envelope types and feature negotiation control messages: `IpcTransportFeature`, `IpcControlFrame`, `IpcFramePayload`, `IpcFrame`, `IPC_PROTOCOL_VERSION`, `IPC_DEFAULT_QUEUE_CAPACITY`.
-  - Added transport abstraction and lifecycle errors: `IpcTransport`, `IpcTransportError`.
-  - Added bounded in-process adapter with sequence IDs and backpressure behavior: `InProcessIpcTransport` with `pair`, `emit`, `send_control`, `send_message`, and `send_frame`/`recv_frame`.
-- `src/lazily-rs/src/lib.rs`
-  - Re-exported new IPC transport primitives and constants from `lazily`.
-- `src/lazily-rs/tests/ipc.rs`
-  - Added coverage for protocol version checking, bounded backpressure behavior, and frame ordering guarantees on the in-process transport.
-
-I also validated this as the queue action path for `#ipc4`/`#ipc5`-class transport-contract work. Remaining IPC transport milestones are still open for later cycles: shared-memory descriptor adapter hardening, OS-level FD/event transports, and benchmark coverage (`#ipc6`/`#ipc7`/`#ipc8`).
-Implemented the remaining IPC queue item by adding transport-level benchmark coverage.
-
-### Re: remaining IPC items
-
-I finished the queue action by adding a dedicated benchmark suite for the IPC transport and wiring it into cargo.
-
-#### Code changes
-- `src/lazily-rs/Cargo.toml`
-  - Added new bench target `ipc_transport` (`harness = false`, `required-features = ["ipc"]`).
-- `src/lazily-rs/benches/ipc_transport.rs` (new)
-  - Added benchmarks for
-    - control-frame roundtrip throughput,
-    - retransmit control path support,
-    - payload roundtrip across variable snapshot sizes,
-    - bounded queue backpressure behavior.
-
-#### Result
-- This addresses the queue prompt to continue IPC work by landing concrete IPC benchmark coverage and regression-oriented scaffolding (`#ipc8`-class scope).
-- Remaining IPC milestones still open for follow-up cycles: shared-memory adapter hardening and OS-level transport adapters for Unix/Windows (`#ipc6`/`#ipc7` in the `lazily-rs` backlog context).
-<!-- agent:boundary:4c934469 -->
+<!-- agent:boundary:7232a7f4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,8 +46,9 @@ I finished the queue action by adding a dedicated benchmark suite for the IPC tr
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- do the remaining ipc items.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- complete #ipc6
+- complete #ipc7
 <!-- /agent:queue -->
 
 ## Backlog

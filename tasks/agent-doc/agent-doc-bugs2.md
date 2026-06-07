@@ -205,7 +205,32 @@ Proof:
 - escalation: none
 
 No additional backlog follow-up is needed because the replay path, fail-closed empty-payload path, durable-marker path, real Codex CLI reproduction, full local check, and submodule push are complete.
-<!-- agent:boundary:369d2589 -->
+
+### Re: single-process actor control plane and fast durable state plan — gpt-5
+
+> **Queue prompt:**
+>
+> Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".
+
+
+The architecture work should be split into a specification phase, a storage/projection phase, an actor-runtime phase, and a migration/verification phase. The durable-state change is the foundation: one authoritative SQLite WAL store, one fast in-memory materialized state, and JSON files treated as compatibility projections rather than coordination locks.
+
+#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`:
+
+1. Define the single-process control-plane contract. Document which actors stay in-process, which external surfaces remain adapters, what state is authoritative, and which lifecycle transitions must be atomic.
+2. Specify the durable state store. Model projects, sessions, panes, actor ownership, queue heads, reservations, dispatch receipts, projections, and recovery cursors in SQLite with WAL enabled.
+3. Define the fast state layer. Use a lazily-rs-backed in-memory projection for hot session state, but keep synchronous reservations for pane binding, prompt dispatch, and input ownership so coordination never depends on delayed JSON writes.
+4. Design the admin API. It should expose actor listing, session inspection, health, queue state, dispatch receipts, projection lag, restart/drain controls, and explicit repair/reconcile commands.
+5. Introduce the real-time dispatch actor. It should validate commands quickly, create deterministic receipts, enqueue work to session actors or background workers, and return without waiting on slow filesystem, diagnostics, or projection work.
+6. Move diagnostics and JSON compatibility files behind background workers. `sessions.json`, `session-actors.json`, and stale/lazily diagnostics should be generated projections with debounced writes and forced flush/reconcile paths for compatibility readers.
+7. Migrate in stages. Start with shadow SQLite reads/writes beside existing JSON, then switch authoritative reads behind a feature flag, then demote JSON to projection-only after parity checks pass.
+8. Prove behavior under realistic harness conditions. Add SimWorld actor-pool scenarios plus CLI integration tests for Codex hook/queue flows, projection lag, lock contention, process restart, attach-pane reconciliation, and dispatch backpressure.
+
+The main invariant is: command admission and coordination state stay fast and synchronous in memory plus SQLite transactions; slow side effects are receipts, projections, diagnostics, or worker jobs. That gives us one reliable control plane without making every operation wait on IPC round trips or a JSON file lock.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
+Verification: plan/backlog capture only; no source tests were needed for this planning response.
+<!-- agent:boundary:3eac6e8c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -214,7 +239,7 @@ No additional backlog follow-up is needed because the replay path, fail-closed e
 - ~~Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?~~
 - ~~"The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.~~
 - ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
-- Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".
+- ~~Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".~~
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
 <!-- /agent:queue -->

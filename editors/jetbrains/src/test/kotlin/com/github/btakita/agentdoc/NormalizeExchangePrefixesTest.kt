@@ -282,6 +282,36 @@ One.
     }
 
     @Test
+    fun `file cache conflict path refreshes visual highlighters`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val visualHighlighterPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val visualHighlighter = Files.readString(visualHighlighterPath)
+
+        val pendingConflict = patchWatcher.indexOf("hasPendingMemoryDiskConflict(targetFile)")
+        val pendingRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"pending\")")
+        val cancelClassifier = patchWatcher.indexOf("memoryDiskConflictCancelLikelyUtil(")
+        val cancelRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"cancel\")")
+        val clearConflict = patchWatcher.indexOf("clearPatchDeferredForMemoryDiskConflict(patch)")
+        val resolvedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"resolved\")")
+        val documentWrite = patchWatcher.indexOf("document.setText(result)")
+        val appliedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"applied\")")
+
+        assertTrue(visualHighlighter.contains("fun refreshFile(file: VirtualFile)"))
+        assertTrue(pendingConflict >= 0 && pendingRefresh > pendingConflict)
+        assertTrue(cancelClassifier >= 0 && cancelRefresh > cancelClassifier)
+        assertTrue(clearConflict >= 0 && resolvedRefresh > clearConflict)
+        assertTrue(documentWrite >= 0 && appliedRefresh > documentWrite)
+        assertTrue(patchWatcher.contains("VisualHighlighterManager.getInstance(project).refreshFile(targetFile)"))
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

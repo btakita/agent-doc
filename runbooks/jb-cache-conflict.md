@@ -47,6 +47,8 @@ The JetBrains plugin refuses to mutate an open document while IntelliJ has a pen
 - after **Accept / Load FS changes**, retries against the reloaded document and can apply normally;
 - after **Cancel / Keep memory changes**, detects the still-unsaved memory/disk divergence, returns a failed socket acknowledgement, and leaves file-IPC patch files in place instead of writing over the user's chosen memory state.
 
+The same plugin-side path reschedules `VisualHighlighterManager` after pending/conflict-cancel checks, after an accepted dialog reloads the document, and after any deferred patch mutates the visible buffer. That keeps shared `agent_doc_visual_tokens_json` ranges reapplied across File Cache Conflict resolution instead of relying on IntelliJ's markdown cache refresh timing.
+
 The binary-side auto-recovery above remains the defense-in-depth path for older plugin versions or any case where the response had already reached the working tree before the refusal.
 
 ## Late-Accept Replay (`#jbccacceptdup`)

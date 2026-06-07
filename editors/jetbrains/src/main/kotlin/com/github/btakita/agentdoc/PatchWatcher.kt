@@ -703,6 +703,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             markPatchDeferredForMemoryDiskConflict(patch)
             lastApplyWasDeferredForConflict = true
             LOG.warn("[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog")
+            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "pending")
             return false
         }
 
@@ -716,6 +717,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         ) {
             lastApplyRejectedConflictCancel = true
             LOG.warn("[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document")
+            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "cancel")
             return false
         }
         if (wasDeferredForConflict) {
@@ -727,6 +729,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         } else {
             // Reload from disk to pick up boundary changes from agent-doc boundary
             fdm.reloadFromDisk(document)
+        }
+        if (wasDeferredForConflict) {
+            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "resolved")
         }
 
         // Capture caret offset before write action (for cursor-aware append ordering)
@@ -862,6 +867,9 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
+        if (wasDeferredForConflict) {
+            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "applied")
+        }
         writeAckContent(patch.patchId, document.text, patch.file)
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
         // window races with the skill's `agent-doc commit` call, causing the binary commit
@@ -883,6 +891,15 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun clearPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
         memoryDiskConflictDeferredPatchIds.remove(patchConflictKey(patch))
+    }
+
+    private fun refreshVisualHighlightersAfterFileCacheConflict(targetFile: VirtualFile, outcome: String) {
+        try {
+            VisualHighlighterManager.getInstance(project).refreshFile(targetFile)
+            LOG.info("[patch-watcher] refreshed visual highlighters after File Cache Conflict $outcome for ${targetFile.path}")
+        } catch (e: Exception) {
+            LOG.warn("[patch-watcher] unable to refresh visual highlighters after File Cache Conflict $outcome for ${targetFile.path}", e)
+        }
     }
 
     private fun hasPendingMemoryDiskConflict(targetFile: VirtualFile): Boolean {

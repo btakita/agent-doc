@@ -73,6 +73,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
             .forEach { refreshEditor(it) }
     }
 
+    fun refreshFile(file: VirtualFile) {
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        scheduleRefresh(document)
+    }
+
     private fun refreshDocument(document: Document) {
         EditorFactory.getInstance().getEditors(document, project).forEach { refreshEditor(it) }
     }

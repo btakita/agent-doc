@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains File Cache Conflict keeps visual highlighting fresh.** The
+JetBrains plugin now reschedules `VisualHighlighterManager` on the File Cache
+Conflict pending, Cancel, accepted/reload, and deferred-patch-applied paths so
+agent-doc markdown visual tokens are reapplied after the IDE resolves the
+dialog. Test
+`file cache conflict path refreshes visual highlighters`.
+
 - **Preflight/plan propose semantic completion matches.** The shared
 `tsift-memory` session-memory path now exposes advisory semantic completion
 candidates for open backlog/review items and free-text queue prompts that are

@@ -165,7 +165,11 @@ Root superproject pointer was committed locally as `ff5853573 chore: update tsif
 ### Re: continue [#7qky] — gpt-5
 
 The queued continuation was already satisfied by the completed `v0.1.64` release and publish closeout. Preflight auto-drained the queue and set it to stopped.
-<!-- agent:boundary:eca570f3 -->
+
+### Re: queue stopped — gpt-5
+
+The queue is stopped and there is no remaining queued tsift release work for this cycle.
+<!-- agent:boundary:92bb7b4a -->
 <!-- /agent:exchange -->
 ###
 <!--

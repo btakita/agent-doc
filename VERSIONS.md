@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Immediate editor focus handoff is bounded.** JetBrains and VS Code tab
+  selection now run the fast `agent-doc focus <file> --no-stash-promote`
+  handoff with a short editor-side timeout and leave slow/missing-pane work to
+  the debounced `sync --no-autostart` reconciler. This keeps navigation to
+  documents such as `lazily-rs.md` from letting a long-running CLI focus attempt
+  delay the UI handoff.
+
 - **Structured overlay CRDT is the merge-base authority
   (`#md-ast-crdt-merge-base`).** Template/CRDT merge paths now derive their
   text CRDT base from the structured `.overlay.yrs` sidecar when its markdown

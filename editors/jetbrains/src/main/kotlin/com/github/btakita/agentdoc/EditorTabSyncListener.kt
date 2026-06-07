@@ -36,6 +36,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val DEFERRED_RETRY_BASE_MS = 750L
         private const val DEFERRED_RETRY_MAX_MS = 5_000L
         private const val SYNC_GUARD_RETRY_MS = 150L
+        private const val FOCUS_FAST_TIMEOUT_MS = 750L
         private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
@@ -229,15 +230,18 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     agentDoc = agentDoc,
                     focusedFile = snapshot.focusedRelativePath,
                 )
-                val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(snapshot.focusedProjectRoot))
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText().trim()
-                val exitCode = process.waitFor()
+                val result = SyncLayoutAction.runCommandWithTimeout(
+                    cmd,
+                    snapshot.focusedProjectRoot,
+                    timeoutMs = FOCUS_FAST_TIMEOUT_MS,
+                )
+                val output = result.output
+                val exitCode = result.exitCode
                 if (exitCode == 0) {
                     log("focus-fast: applied ${snapshot.focusedRelativePath}")
                     TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
+                } else if (result.timedOut) {
+                    log("focus-fast: deferred ${snapshot.focusedRelativePath} timeout=${FOCUS_FAST_TIMEOUT_MS}ms output=${output.take(200)}")
                 } else {
                     log("focus-fast: skipped ${snapshot.focusedRelativePath} exit=$exitCode output=${output.take(200)}")
                 }

@@ -260,7 +260,7 @@ describe('buildTabChangeCommand', () => {
     it('builds immediate focus command args for the fast tab handoff path', () => {
         assert.deepStrictEqual(
             buildImmediateFocusCommandArgs('tasks/agent-doc/agent-doc-bugs2.md'),
-            ['focus', 'tasks/agent-doc/agent-doc-bugs2.md'],
+            ['focus', 'tasks/agent-doc/agent-doc-bugs2.md', '--no-stash-promote'],
         );
     });
 
@@ -318,7 +318,7 @@ describe('buildTabChangeCommand', () => {
 
     it('treats focus success as applied', () => {
         const result = analyzeTabSyncCommandResult(
-            { kind: 'focus', args: ['focus', 'tasks/software/tsift.md'] },
+            { kind: 'focus', args: ['focus', 'tasks/software/tsift.md', '--no-stash-promote'] },
             0,
             '',
         );

@@ -50,6 +50,7 @@ import {
 
 let resolvedAgentDoc: string | null = null;
 const SYNC_CLI_TIMEOUT_MS = 30_000;
+const FOCUS_CLI_TIMEOUT_MS = 750;
 
 function resolveAgentDoc(): string {
     if (resolvedAgentDoc) return resolvedAgentDoc;
@@ -1060,7 +1061,7 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                 let output = '';
                 if (execution.planned.command.kind === 'focus') {
                     const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-                    output = await runCli(['focus', rel], cwd);
+                    output = await runCli(buildImmediateFocusCommandArgs(rel), cwd, { timeoutMs: FOCUS_CLI_TIMEOUT_MS });
                 } else {
                     output = await runCli(execution.planned.command.args, execution.root, { timeoutMs: SYNC_CLI_TIMEOUT_MS });
                 }
@@ -1102,7 +1103,7 @@ function focusExistingPaneForTabChange(execution: PlannedTabSyncExecution, gener
         if (generation !== latestTabSyncGeneration) return;
         try {
             const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-            await runCli(buildImmediateFocusCommandArgs(rel), cwd);
+            await runCli(buildImmediateFocusCommandArgs(rel), cwd, { timeoutMs: FOCUS_CLI_TIMEOUT_MS });
             if (generation === latestTabSyncGeneration) {
                 showHint(`Focus: ${rel}`);
             }

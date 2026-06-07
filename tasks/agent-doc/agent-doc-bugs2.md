@@ -108,7 +108,36 @@ Commits:
 Confidence: high. The requested edge classes are covered by a deterministic matrix, and the full check/install path passed.
 
 Escalation: none.
-<!-- agent:boundary:22235e56 -->
+
+### Re: :pushpin: monsterrodholders.md queue responses are still not going into the exchange. — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: monsterrodholders.md queue responses are still not going into the exchange.
+
+
+I checked the current Monster Rod Holders state and the existing agent-doc guards. The live issue is not currently a completed queue item silently disappearing without exchange history. `agent-doc session-check src/boost-client/tasks/monsterrodholders.md` interrupts because the recursive same-pane guard abandoned an empty preflight while an exchange prompt remains unanswered:
+
+> https://monsterrodholders.com/the-catfish-dude-videos/ is also bare. We should have videos on that page. There is also text https://youtu.be/zzRZE8OBGJY that is not a link. What happened to this page?
+
+So the next repair for that document is to answer that prompt in the owning Monster Rod Holders pane and persist with `agent-doc finalize src/boost-client/tasks/monsterrodholders.md` or `agent-doc write --commit src/boost-client/tasks/monsterrodholders.md`, not to re-run `agent-doc src/boost-client/tasks/monsterrodholders.md` from that same owner pane.
+
+
+Changed paths:
+- No source changes for this queue item.
+- No Monster Rod Holders document changes were made from this pane.
+
+Existing verification/coverage I checked:
+- `tests/finalize_integration.rs` has `finalize_echoes_consumed_free_text_queue_prompt_into_response`, which asserts a consumed free-text queue prompt is embedded into the response block.
+- `tests/finalize_integration.rs` has `finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt`, which prevents unrelated exchange answers from consuming a free-text queue head.
+- `agent-doc-orchestration/src/session_check.rs` has guards/tests for a consumed free-text queue head without response/echo, including the Monster Rod Holders wording family.
+- `tests/codex_hook_integration.rs` has `codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop`, reproducing the Monster Rod Holders Codex Stop-hook shape where the second stop carries a plain final answer that must be written into `agent:exchange`.
+- `agent-doc session-check src/boost-client/tasks/monsterrodholders.md` was the live verification command; it failed closed with the unresolved Catfish Dude videos prompt instead of allowing a missing-response closeout.
+
+Confidence: medium-high. The missing-exchange class is already guarded in code, and the live document now points at a specific unanswered prompt/recovery path. I did not mutate `src/boost-client/tasks/monsterrodholders.md` from this pane because that would take over a separate document's owner-turn work.
+
+Escalation: none.
+<!-- agent:boundary:bad9adee -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -116,7 +145,7 @@ Escalation: none.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#adoc-semantic-diff-nav]~~
 - ~~:round_pushpin: [#adoc-harness-simworld]~~
-- :pushpin: monsterrodholders.md queue responses are still not going into the exchange.
+- ~~:pushpin: monsterrodholders.md queue responses are still not going into the exchange.~~
 - :round_pushpin: [#adoc-auto-dag-priority]
 - If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
 <!-- /agent:queue -->

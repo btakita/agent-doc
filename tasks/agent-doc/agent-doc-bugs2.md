@@ -41,7 +41,8 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#adoc-semantic-diff-nav]
+- ~~[#adoc-semantic-diff-nav]~~
+- monsterrodholders.md queue responses are still not going into the exchange.
 - [#adoc-harness-simworld]
 - [#adoc-auto-dag-priority]
 <!-- /agent:queue -->
@@ -69,7 +70,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#adoc-semantic-diff-nav] Add AST/semantic diff mode for agent-doc preflight, including component-level navigation, queue/backlog item identity changes, prompt-bearing change summaries, and bounded source/section expansion handles for agents.
 - [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
 - [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->

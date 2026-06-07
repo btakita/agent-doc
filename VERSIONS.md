@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Icebox queue sync no longer auto-promotes parked work.** `agent:icebox`
+  may still be sorted by priority and individual icebox items can still opt into
+  queueing with per-item enqueue markers, but a component-level `queue`
+  attribute on `agent:icebox` now warns and does not populate `agent:queue`.
+  A drained queue plus drained backlog remains terminal until work is explicitly
+  moved to backlog, queued manually, or marked for enqueue. Tests
+  `run_queue_maintenance_does_not_sync_icebox_into_empty_queue` and
+  `misplaced_component_attr_warning_flags_queue_sync_attr_on_icebox`.
+
 - **No-response active-head guard checks only the current queue head.** A stale
   no-response/reap-only cycle no longer blocks session closeout just because
   later `do [#id]` queue items still exist in backlog while a free-text prompt
@@ -54,7 +63,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items`,
   `..._empty_when_items_are_owned`, and `..._counts_duplicate_user_items`.
 
-- **Backlog queue priority visibly annotates promotions.** A backlog/icebox
+- **Backlog queue priority visibly annotates promotions.** A backlog
   component carrying both `queue` and `priority` now triggers queue priority /
   auto-DAG ordering for the synced `agent:queue` even when the queue marker
   itself has no `priority` token. Automatically promoted queue prompts are

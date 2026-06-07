@@ -294,9 +294,12 @@ field remains accepted as input for backward compatibility.
 
 ### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`, `#queue-enqueue-action`)
 
-An `agent:backlog` or `agent:icebox` component may carry a `queue` attribute so
-the binary keeps `agent:queue` populated from the source backlog instead of
-requiring a manual `--pending-reorder` + hand-regenerated queue each cycle:
+An `agent:backlog` component may carry a `queue` attribute so the binary keeps
+`agent:queue` populated from the active backlog instead of requiring a manual
+`--pending-reorder` + hand-regenerated queue each cycle. `agent:icebox` is a
+parking lot, not an automatic scheduling source: a drained queue and drained
+backlog remain terminal until the operator moves work to backlog, adds a manual
+queue item, or marks a specific parked item with a per-item enqueue token.
 
 - `<!-- agent:backlog queue -->` (bare token) — **append** (the default).
 - `<!-- agent:backlog queue=append -->` — add `do [#id]` for active backlog ids
@@ -341,20 +344,21 @@ Semantics:
     so the `queue` attribute populates the live queue as intended. Append/Prepend
     stay idempotent and processed items drop out of `active_item_ids` once marked
     `[/]`/`[x]`, so the queue stays bounded by the open backlog.
-- Both `agent:backlog` and `agent:icebox` (and the legacy `pending` alias) may
-  carry the attribute; the first queue-tagged component's mode wins and active
-  ids from every queue-tagged source are taken in document order.
+- `agent:backlog` and the legacy `pending` alias may carry the attribute; the
+  first queue-tagged component's mode wins and active ids from every queue-tagged
+  source are taken in document order. `agent:icebox queue` warns and does not
+  sync parked items.
 - The pure logic lives in `queue::sync_backlog_into_queue` (with
   `queue::BacklogQueueSyncMode`) and `pending::active_item_ids` /
-  `pending::active_enqueue_item_ids`. The `queue` key is a recognized backlog/icebox
-  attribute (the `tagpath` agent-doc lint accepts bare `queue` and
-  `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value` on an
+  `pending::active_enqueue_item_ids`. The `queue` key is a recognized
+  backlog/pending attribute (the `tagpath` agent-doc lint accepts bare `queue`
+  and `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value` on an
   unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
 - **Priority interplay (`#backlog-priority-attribute`).** A bare `priority`
   attribute on the source backlog/icebox marker stable-sorts its items by their
   per-item `priority=<1..9>` token before the sync runs (in `run_pending_maintenance`,
   earlier in the pipeline), so the synced queue inherits the prioritized order.
-  A queue-tagged source component that also carries `priority` additionally runs
+  A queue-tagged backlog source that also carries `priority` additionally runs
   the synced queue through the same priority/auto-DAG recompute as
   `agent:queue priority`, so append-built queues are reordered immediately even
   when the queue marker itself has no `priority` token. Automatically promoted

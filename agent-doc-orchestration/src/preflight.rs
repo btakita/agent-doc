@@ -772,10 +772,8 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
                         component.name
                     ));
                 }
-            } else if key == "queue"
-                && matches!(component.name.as_str(), "backlog" | "icebox" | "pending")
-            {
-                // `queue` is a recognized backlog/icebox sync attribute
+            } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
+                // `queue` is a recognized backlog/pending sync attribute
                 // (#backlog-queue-sync-attr). Surface only an unrecognized mode
                 // value as a typo; the bare token and sync/append/prepend are valid.
                 if crate::queue::BacklogQueueSyncMode::parse(value).is_none() {
@@ -784,6 +782,10 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
                         component.name
                     ));
                 }
+            } else if key == "queue" && component.name == "icebox" {
+                issues.push(
+                    "`queue` on `agent:icebox` does not auto-populate `agent:queue`; move the item to `agent:backlog` or use a per-item enqueue marker".to_string(),
+                );
             } else if key == "priority"
                 && matches!(
                     component.name.as_str(),
@@ -3325,12 +3327,14 @@ struct QueueState {
 /// The `diff` parameter is optional — only needed for detecting exchange-level
 /// `do queue`/`run queue` triggers. Pass `None` on the first call (before diff
 /// computation) and the exchange trigger will be resolved in a later step.
-/// Collect the backlog→queue sync request from `agent:backlog` / `agent:icebox`
+/// Collect the backlog→queue sync request from `agent:backlog`
 /// (and the legacy `pending` alias) components carrying a `queue` attribute
 /// (`#backlog-queue-sync-attr`). Returns the effective mode (the first
 /// queue-tagged component's mode wins) and the active item ids from every
 /// queue-tagged source component, in document order. Returns `None` when no
-/// source component carries a recognized `queue` attribute.
+/// source component carries a recognized `queue` attribute. Icebox items are
+/// intentionally excluded from component-level sync so a drained backlog cannot
+/// auto-promote parked work; explicit per-item enqueue markers still work.
 /// Narrow the raw `do [#id]` directive target ids to the set that must reach a
 /// `--done`/`--pending-gate` lifecycle outcome this cycle: ids still open in the
 /// live backlog, minus any id that the backlog→queue sync auto-populated this
@@ -3382,6 +3386,9 @@ fn collect_backlog_queue_sync(
         }
         let body = &content[comp.open_end..comp.close_start];
         enqueue_ids.extend(crate::pending::active_enqueue_item_ids(body));
+        if comp.name == "icebox" {
+            continue;
+        }
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
@@ -3491,10 +3498,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     });
     let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
 
-    // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog` /
-    // `agent:icebox` component carries a `queue` attribute, regenerate the queue
-    // `do [#id]` prompts from its active items BEFORE activation so a freshly
-    // synced queue can auto-activate on the same cycle. Per-item enqueue markers
+    // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog`
+    // component carries a `queue` attribute, regenerate the queue `do [#id]`
+    // prompts from its active items BEFORE activation so a freshly synced queue
+    // can auto-activate on the same cycle. `agent:icebox` is intentionally not a
+    // component-level sync source; parked work must be moved to backlog or
+    // explicitly marked for enqueue. Per-item enqueue markers
     // (#queue-enqueue-action) append marked ids without requiring the component
     // attribute.
     if let Some(sync_request) = collect_backlog_queue_sync(&components, &content) {
@@ -3616,7 +3625,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_warnings.push(PreflightWarning {
                     code: "backlog_queue_sync_pending".to_string(),
                     message: format!(
-                        "{}: a backlog/icebox/pending queue sync request populated an empty queue. \
+                        "{}: a backlog/pending queue sync request populated an empty queue. \
                          The binary synced {} item(s) this cycle. \
                          For manual one-shot sync outside binary preflight: `agent-doc queue sync <FILE>`.",
                         file.display(),
@@ -3700,11 +3709,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     }
     let snapshot_was_active = snapshot_proves_queue_was_active(file);
 
-    // Collapse duplicate live prompts before any other maintenance. Two
-    // identical live queue prompts are never valid; they only appear when a
-    // divergent IPC-buffer/snapshot CRDT/3-way merge duplicates a queue line
-    // (#adoc-queue-ipc-drift). Converging here stops the duplicate from growing
-    // on each preflight and re-syncs the rendered queue body.
+    // Collapse duplicate `do [#id]` prompts before any other maintenance.
+    // Those duplicates are the known `#adoc-queue-ipc-drift` pattern from
+    // IPC-buffer/snapshot replay; free-text duplicate prompts are preserved as
+    // intentional queue intent.
     if let Some(deduped) = crate::queue::dedup_live_prompts(&activation.entries_after) {
         let dropped = activation.entries_after.len() - deduped.len();
         let new_body = crate::queue::render(&deduped);
@@ -5928,6 +5936,49 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_does_not_sync_icebox_into_empty_queue() {
+        // Parked icebox work must not become the next active prompt just because the
+        // queue and backlog are drained. Move the item to backlog or mark the item
+        // with an explicit enqueue token when it should run.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox queue=append -->\n",
+            "- [ ] [#parked] parked follow-up\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            !updated.contains("- do [#parked]"),
+            "icebox queue attr must not auto-populate a drained queue:\n{updated}"
+        );
+        assert!(
+            state.synced_queue_ids.is_empty(),
+            "icebox ids must not be reported as synced queue ids: {:?}",
+            state.synced_queue_ids
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_enqueue_marker_populates_queue_without_backlog_attr() {
         // #queue-enqueue-action: a single marked backlog item appends to the
         // queue without a component-level `queue` attr. Explicit markers bypass
@@ -6954,6 +7005,44 @@ mod tests {
         assert_eq!(
             before, after,
             "queue maintenance must be idempotent after dedup"
+        );
+    }
+
+    #[test]
+    fn preflight_keeps_intentional_duplicate_free_text_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do deploy\n",
+            "- do deploy\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.queue_prompts,
+            vec!["do deploy".to_string(), "do deploy".to_string()],
+            "intentional duplicate free-text prompts should remain queued: {state:?}"
+        );
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            updated.matches("- do deploy").count(),
+            2,
+            "maintenance should preserve intentional duplicate free-text prompts:\n{updated}"
         );
     }
 
@@ -9418,26 +9507,35 @@ mod tests {
     #[test]
     fn misplaced_component_attr_warning_allows_queue_sync_attr_on_backlog() {
         // #backlog-queue-sync-attr: `queue`, `queue=sync|append|prepend` on the
-        // backlog/icebox are recognized sync attributes and must not warn.
+        // backlog are recognized sync attributes and must not warn.
         for marker in [
             "<!-- agent:backlog queue -->",
             "<!-- agent:backlog queue=sync -->",
             "<!-- agent:backlog queue=append -->",
-            "<!-- agent:icebox queue=prepend -->",
         ] {
-            let content = format!(
-                "{marker}\n- [ ] [#x1] keep this\n<!-- /agent:{}-->\n",
-                if marker.contains("icebox") {
-                    "icebox "
-                } else {
-                    "backlog "
-                }
-            );
+            let content = format!("{marker}\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n");
             assert!(
                 misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
                 "recognized queue sync attr must not warn: {marker}"
             );
         }
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_flags_queue_sync_attr_on_icebox() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:icebox queue=append -->\n",
+            "- [ ] [#x1] parked work\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`queue` on agent:icebox should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("agent:icebox"));
+        assert!(warning.message.contains("does not auto-populate"));
+        assert!(warning.message.contains("per-item enqueue"));
     }
 
     #[test]

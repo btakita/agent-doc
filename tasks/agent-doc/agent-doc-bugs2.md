@@ -194,7 +194,7 @@ Evidence checked:
 
 I did not manually force controller lifecycle state or kill/restart the pane. The live proof came from an actual managed Codex supervisor self-heal and queue drain, which is the behavior this tracker needed verified.
 
-### Re: do [#codex-mcp-server-mvp] — gpt-5
+### Re: do [#codex-mcp-server-mvp] — gpt-5 (HEAD)
 
 > **Queue prompt:**
 >
@@ -219,7 +219,7 @@ Verification:
 - Installed from a clean temporary worktree at `09ce0ce6`; `agent-doc --version` reports `agent-doc 0.34.0`.
 - Live stdio smoke: installed `agent-doc mcp serve` advertises all five MVP tools.
 
-### Re: do [#codex-mcp-codex-integration] — gpt-5
+### Re: do [#codex-mcp-codex-integration] — gpt-5 (HEAD)
 
 > **Queue prompt:**
 >
@@ -243,7 +243,7 @@ Verification:
 - `make check`
 - GitHub Actions CI `27090148828` passed with `make check` and `make tmux-ci`.
 
-### Re: do [#codex-mcp-live-verify] — gpt-5
+### Re: do [#codex-mcp-live-verify] — gpt-5 (HEAD)
 
 > **Queue prompt:**
 >
@@ -264,6 +264,9 @@ Verification:
 - `.codex/config.toml` includes the repo-local `mcp_servers.agent-doc` entry.
 - `agent-doc hook codex-stop` live probe returned `decision = "block"` with `agent_doc_preflight`, `agent_doc_finalize`, `agent_doc_session_check`, CLI fallback, and the recursive direct-invocation guard.
 - `agent_doc_finalize` over `agent-doc mcp serve --project-root /home/brian/work/btakita/agent-loop` performed this closeout.
+
+### Re: do [#auto-complete-done-archive-mirrors] — gpt-5 (HEAD)
+
 Implemented #auto-complete-done-archive-mirrors.
 
 > **Queue prompt:**
@@ -285,12 +288,12 @@ Verification:
 - `cargo test -p agent-doc-orchestration external_archive_done -- --nocapture`
 - `make check`
 - GitHub Actions CI `27090585631` passed (`make check` and `make tmux-ci`; only annotation was the actions/checkout Node.js 20 deprecation).
-<!-- agent:boundary:058238f1 -->
+<!-- agent:boundary:58441884 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue auto priority -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
 - ~~:round_pushpin: do [#partial-staging-closeout-guard]~~
 - ~~:round_pushpin: do [#codex-mcp-server-root-fix]~~

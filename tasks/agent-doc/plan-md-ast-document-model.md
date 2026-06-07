@@ -61,6 +61,10 @@ The queue-consume head-equality check compares the **sorted snapshot head** agai
 
 Cheap fix in `queue.rs`: normalize the annotation prefix + sort order on **both** sides before the head-equality comparison in queue consume. This is the text-keyed-mutation symptom that `#md-ast-document-model` removes structurally (node-id equality), but the normalization is a low-risk stopgap that should land first so the queue is committable in the meantime.
 
+## Another text-keyed symptom: `#queue-reconcile-strips-free-text-pins`
+
+Observed in commit `a0427a22a`: a `--done`/consume cycle committed 4 user-pinned free-text queue items (enqueue, backlog-queue-attr, items-deleted, completed-not-marked) **with their `:pushpin:` operator-pin prefix stripped** — demoting them from operator-pin tier to unpinned. Content preserved; the user's prioritization metadata was lost. The queue render/sort path (`queue.rs`) must preserve the pin annotation on free-text entries across reconcile. This is the same class node-keyed mutations (phase 4 `#md-ast-mutations-node-keyed`) fix structurally — pin state becomes a node attribute, not a fragile text prefix that reconcile can drop.
+
 ## Bugs this subsumes / overlaps
 
 `#queue-dedup-destroys-intentional-duplicates`, `#monsterrod-queue-items-deleted-live`, `#ipc-listener-dewedge-direct-disk`, `#ipc-typing-duplication-family`, the queue-consume wrong-head/head-mismatch failures observed this session, and (via the watcher) `#queue-enqueue-action`.

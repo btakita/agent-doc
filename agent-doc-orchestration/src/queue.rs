@@ -502,26 +502,53 @@ pub fn sync_backlog_into_queue(
 /// entry (completed, preset, dispatch, fence, freeform) at its original
 /// position. Ids absent from `rank` sort last (rank `u8::MAX`). Returns
 /// `Some(new_entries)` when the order changes, `None` otherwise.
-/// The manual-priority pin marker (`#queue-manual-priority-override`). A
-/// queue / backlog / icebox item whose text is prefixed with `__prioritized__`
-/// is pinned to the top of the priority ordering and held there across the
-/// per-turn recompute. Releasing the pin is just deleting the marker — the item
-/// then reverts to its `priority`-attribute rank. The agent may also add the
-/// marker to items it prioritizes, so deleting it re-opens the slot for the
-/// normal rank.
+/// Two-tier manual-priority pin markers (`#queue-manual-priority-override`).
+///
+/// A queue / backlog / icebox item prefixed with a pin marker floats above the
+/// `priority`-rank-ordered tail and is held there across the per-turn recompute
+/// (it lives in the document text). Releasing a pin is just deleting the marker
+/// — the item reverts to its `priority`-attribute rank. There are two tiers, so
+/// operator priority always outranks agent priority:
+///
+/// - [`PRIORITIZED_MARKER`] `__prioritized__` (double underscore) — **operator**
+///   pin. Top tier.
+/// - [`AGENT_PRIORITIZED_MARKER`] `_prioritized_` (single underscore) — **agent**
+///   pin, for items the agent prioritized. Middle tier: above unpinned items,
+///   never above operator pins. (`#queue-agent-vs-operator-pin-tier`.)
 pub const PRIORITIZED_MARKER: &str = "__prioritized__";
+pub const AGENT_PRIORITIZED_MARKER: &str = "_prioritized_";
 
-/// True when `text` carries the manual-priority pin marker at its head (after
-/// optional leading whitespace). Tolerant of an immediately-following space so
-/// both `__prioritized__ do [#id]` and a bare `__prioritized__[#id]` match.
+/// True when `text` carries the **operator** pin marker (`__prioritized__`) at
+/// its head (after optional leading whitespace).
 pub fn is_prioritized(text: &str) -> bool {
     text.trim_start().starts_with(PRIORITIZED_MARKER)
 }
 
-fn entry_is_prioritized(entry: &QueueEntry) -> bool {
+/// True when `text` carries the **agent** pin marker (`_prioritized_`) at its
+/// head but is not an operator pin. `__prioritized__` does not start with
+/// `_prioritized_` (second char differs: `_` vs `p`), so the two are cleanly
+/// separable; the explicit operator-pin guard is belt-and-suspenders.
+pub fn is_agent_prioritized(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with(AGENT_PRIORITIZED_MARKER) && !t.starts_with(PRIORITIZED_MARKER)
+}
+
+/// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
+/// unpinned. Lower tiers sort first; agent pins never outrank operator pins.
+fn priority_tier(text: &str) -> u8 {
+    if is_prioritized(text) {
+        0
+    } else if is_agent_prioritized(text) {
+        1
+    } else {
+        2
+    }
+}
+
+fn entry_priority_tier(entry: &QueueEntry) -> u8 {
     match entry {
-        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => is_prioritized(&p.text),
-        _ => false,
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => priority_tier(&p.text),
+        _ => 2,
     }
 }
 
@@ -537,18 +564,20 @@ pub fn sort_prompts_by_priority(
     if positions.len() < 2 {
         return None;
     }
-    // Sort key: pinned (`__prioritized__`) prompts float to the top (class 0) and
-    // hold document order among themselves (constant secondary key + stable sort);
-    // unpinned prompts (class 1) keep their backlog-priority rank order below the
-    // pins. Deleting the marker drops a prompt back into the rank-ordered tail.
+    // Sort key (tier, rank): operator pins (`__prioritized__`, tier 0) float to
+    // the top, then agent pins (`_prioritized_`, tier 1), then the unpinned tail
+    // (tier 2) in backlog-priority rank order. Pinned tiers use a constant
+    // secondary key so the stable sort holds their document order. Deleting a
+    // marker drops the prompt down a tier (ultimately into the rank-ordered tail).
     let key = |e: &QueueEntry| -> (u8, u8) {
-        if entry_is_prioritized(e) {
-            (0, 0)
+        let tier = entry_priority_tier(e);
+        if tier < 2 {
+            (tier, 0)
         } else {
             let r = entry_do_id(e)
                 .and_then(|id| rank.get(&id).copied())
                 .unwrap_or(u8::MAX);
-            (1, r)
+            (2, r)
         }
     };
     let mut prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
@@ -990,6 +1019,35 @@ mod tests {
         assert!(is_prioritized("  __prioritized__ [#x]"));
         assert!(!is_prioritized("do [#x]"));
         assert!(!is_prioritized("not __prioritized__ here"));
+    }
+
+    #[test]
+    fn pin_tiers_operator_then_agent_then_unpinned() {
+        // #queue-agent-vs-operator-pin-tier: operator pin (__) outranks agent pin (_)
+        // outranks unpinned, regardless of backlog rank.
+        let entries = parse(concat!(
+            "- do [#a]\n",
+            "- _prioritized_ do [#b]\n",
+            "- __prioritized__ do [#c]\n",
+        ))
+        .unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8); // best rank, but unpinned → bottom
+        rank.insert("b".to_string(), 5u8);
+        rank.insert("c".to_string(), 9u8); // worst rank, but operator-pinned → top
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        assert_eq!(
+            render(&sorted),
+            "- __prioritized__ do [#c]\n- _prioritized_ do [#b]\n- do [#a]\n"
+        );
+    }
+
+    #[test]
+    fn is_agent_prioritized_distinguishes_single_from_double_underscore() {
+        assert!(is_agent_prioritized("_prioritized_ do [#x]"));
+        assert!(!is_agent_prioritized("__prioritized__ do [#x]")); // operator pin, not agent
+        assert!(!is_prioritized("_prioritized_ do [#x]")); // agent pin is not operator pin
+        assert!(!is_agent_prioritized("do [#x]"));
     }
 
     #[test]

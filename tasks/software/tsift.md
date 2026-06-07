@@ -36,7 +36,30 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): do #trt1 + #memgraphrag-ont; #rankdefault; Can tree-sitter-md be a tsift dependency?; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1d673cd3 -->
+Done. I implemented the Phase 2 tsift-side incremental markdown reparse helper.
+
+> **Queue prompt:**
+>
+> do "*Phase 2c (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."
+
+
+What changed:
+
+- Added `MdTextEdit` to `tsift-md-ast` as a serializable byte-range replacement shape for CRDT/live-editor edit events.
+- Added `reparse_incremental()` for old-source/new-source edits and `reparse_incremental_with_input_edit()` for callers that already have a `tree_sitter::InputEdit`.
+- Kept `parse()` as the full-parse convenience API, backed by the same parser helper as incremental reparsing.
+- Added validation that the unchanged old/new prefix and suffix match before converting `MdTextEdit` into a tree-sitter edit.
+- Added tests proving incremental reparse matches a full parse after an inserted heading, and rejects mismatched edit/source pairs.
+- Updated the `tsift-md-ast` README and changelog.
+
+While running the required repo check, `make check` exposed that the local OpenCode npm package gate used `npm publish --dry-run`, which now fails after `opencode-tsift@0.1.63` has already been published. I switched the local `make check` target to `npm pack --dry-run`; the release workflow still owns the actual publish dry-run before tagged npm publishes.
+
+Verification:
+
+- `cargo test -p tsift-md-ast` passed.
+- `make check` passed on the final narrowed diff.
+- Latest GitHub Actions CI check was `completed success` for workflow `CI` on `main` at run `27082060444`.
+<!-- agent:boundary:6aa3d13e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,9 +69,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~[#tsift-shared-md-ast-and-memgraphrag-lib]~~
-- ~~[#trt1phase2]~~
-- do "*Phase 2 (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."
+- ~~do "*Phase 2c (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."~~
 - [#trt1inject]
 - [#trt1watermark]
 - [#trt1capture]

@@ -35,7 +35,32 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): source-read command style
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:4fa5ff75 -->
+❯ The agent-doc-bugs2.md now seems to be falling back to the Read tool which is token inefficient. Do I need to restart the session?
+### Re: agent-doc-bugs2 Read fallback — gpt-5
+
+No, I would not restart as the first move.
+
+I checked `tasks/agent-doc/agent-doc-bugs2.md`; its session is `INTERRUPTED` at `preflight_started`, with IPC proof diagnostic `no_ack` and recovery path `direct_write_fallback`. That means the document cycle did not get a write/commit acknowledgement. It does not by itself mean the session is unrecoverable.
+
+Recommended order:
+- First run/continue `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` so preflight can repair the stale cycle and the next response can finalize normally.
+- If the same `no_ack` / direct-write fallback repeats after that, restart that specific agent-doc pane/session to clear the stale IPC path.
+- You do not need to restart this `tasks/software/tsift.md` session for that symptom.
+
+Changed paths: none besides this agent-doc response.
+
+Commands run:
+- `tsift status`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent_doc_plan` / `agent_doc_read` for this session
+- `agent_doc_session_check` and `agent-doc session-check` for `tasks/agent-doc/agent-doc-bugs2.md`
+
+Verification: the referenced session check consistently reports `INTERRUPTED` with `no_ack`; no queue continuation is pending there.
+
+Confidence: medium-high.
+
+Escalation: none.
+<!-- agent:boundary:408ecfa0 -->
 <!-- /agent:exchange -->
 ###
 <!--

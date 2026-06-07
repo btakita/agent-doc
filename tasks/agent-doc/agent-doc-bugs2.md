@@ -341,7 +341,24 @@ The behavior should be split into two layers:
 
 Captured backlog item:
 - [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
-<!-- agent:boundary:7bf44c5b -->
+
+### Re: #spcp backlog capture — gpt-5
+
+Resolved.
+
+The six `#spcp-*` items were added to the backlog and then completed through the single-process control-plane spec work:
+
+- `#spcp-contract`
+- `#spcp-store`
+- `#spcp-cache`
+- `#spcp-dispatch`
+- `#spcp-migrate`
+- `#spcp-tests`
+
+Yes, the original non-add was an `#agent-doc-bug`. The failure mode was not that the response text was unclear; it was that finalize/retry and queue closeout could leave the exchange claiming backlog capture while the pending mutation did not reliably survive. That is now tracked and fixed by agent-doc `e5cfa31c` (`fix: preserve retry backlog closeouts`), with regression coverage for visible-response retry plus `--pending-add` and interspersed done-id queue consumption.
+
+No new backlog item is needed for this prompt.
+<!-- agent:boundary:21a029f5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -359,7 +376,7 @@ Captured backlog item:
 - ~~:round_pushpin: do #spcp-tests~~
 - ~~:round_pushpin: do [#adoc-pending-retry-loss]~~
 - ~~agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.~~
-- "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
+- ~~"#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?~~
 - `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
 - Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.

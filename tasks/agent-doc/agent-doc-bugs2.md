@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,12 +35,13 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 14 response topic(s): do [#recursion-guard-wedge-escape] -- gpt-5; do [#partial-staging-closeout-guard]; #codex-mcp-server-root-fix split; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b0a9e56d -->
+<!-- agent:boundary:14aa1ad3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- Schedule #next-steps to finish [#md-ast-document-model].
 <!-- /agent:queue -->
 ###
 <!--

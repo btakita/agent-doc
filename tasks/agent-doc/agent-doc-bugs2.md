@@ -197,7 +197,13 @@ Changed paths already shipped for the source fix: `src/agent-doc/agent-doc-orche
 Verification already completed for the source fix: `cargo test -p agent-doc-orchestration stop_hook_active_blocks_committed_cycle_fresh_prompt_instead_of_stopping -- --nocapture`, `cargo test -p agent-doc-orchestration stop_ -- --nocapture`, `cargo test -p agent-doc force_interrupt_clear_summary_reports_destructive_cleanup -- --nocapture`, `make check`, and `cargo install --path .` all passed.
 
 Repository proof: `src/agent-doc` commit `0b7638cc fix: recover codex stop fresh prompt cycles` was pushed to `origin/main`; parent pointer commit `ead679fc0 chore: update agent-doc pointer` was pushed to `origin/main`. The remaining parent changes in this pass are session-document recovery state only.
-<!-- agent:boundary:1c30eeeb -->
+
+### Re: do #repair-false-closeouts - final snapshot sync - gpt-5
+
+Completed the repair closeout and synced the session snapshot after the pushed recovery commit `9dab3c97c`. The final document state preserves the reopened `#md-ast-document-model` and `#jb-file-cache-conflict-syntax-loss` backlog entries, keeps both reopened items queued, archives `#repair-false-closeouts` in the done file, and records that `src/agent-doc` CI run `27087636824` passed for `0b7638cc`.
+
+Concrete proof remains unchanged: `codex_hook.rs` and `specs/07-orchestration-commands.md` changed in `src/agent-doc` commit `0b7638cc`; targeted Stop-hook tests, broader `stop_` tests, the force interrupt-clear regression, `make check`, and `cargo install --path .` all passed; the submodule commit and parent pointer/recovery commits were pushed to `origin/main`.
+<!-- agent:boundary:46f98ed3 -->
 <!-- /agent:exchange -->
 
 ## Queue

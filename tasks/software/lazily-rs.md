@@ -253,7 +253,43 @@ Top backlog item: `#ipc5`.
 The strategy is to keep `lazily-rs` core transport-neutral: `Snapshot`, `Delta`, `IpcMessage`, `ShmBlobRef`, epochs, checksums, and permission filtering remain pure protocol/data types. SHM should become the large-payload data plane through blob arenas; FD/HANDLE/event primitives should be optional platform transport optimizations, not the portable protocol surface.
 
 The first backlog item is the transport contract plus benchmark matrix because it gives us evidence before we choose defaults. After that, the order is SHM backing adapter, Unix FD/event adapter, Windows parity design, then the agent-doc/tsift process-state schema that sits on top of the transport-neutral protocol.
-<!-- agent:boundary:dc0b51cc -->
+
+### Re: Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions. — gpt-5
+
+> **Queue prompt:**
+>
+> Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.
+
+
+- Moved required checks out of the monolithic Rust job into a fast CI lane and a parallel feature matrix in `src/lazily-rs/.github/workflows/ci.yml`.
+- Added `src/lazily-rs/.github/workflows/regressions.yml` with a scheduled/manual Loom-only workflow so long-running model checks run passively.
+- Split local Make targets in `src/lazily-rs/Makefile` so `make check` is the fast, default lane and `make check-full` remains for slower gates.
+- Updated `src/lazily-rs/README.md` and `src/lazily-rs/SPEC.md` to document the new CI/check split.
+
+Queue is kept productive: this removes the Loom and benchmark-gate coupling from every cycle while still preserving a regression path.
+
+#### changed_paths
+- `.github/workflows/ci.yml`
+- `.github/workflows/regressions.yml` (new)
+- `Makefile`
+- `README.md`
+- `SPEC.md`
+
+#### commands
+- `agent-doc preflight tasks/software/lazily-rs.md`
+- `agent-doc plan tasks/software/lazily-rs.md`
+- `git diff` checks in `src/lazily-rs` for the modified files
+
+#### verification
+- Verified the diff in each touched file matches the intended split; no unrelated file changes were introduced.
+- Skipped waiting for remote CI runs in line with your request to move on quickly.
+
+#### confidence
+- Medium.
+
+#### escalation
+- None.
+<!-- agent:boundary:292ec90a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -263,7 +299,7 @@ The first backlog item is the transport contract plus benchmark matrix because i
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Add #next-steps for a SHM & FD IPC strategy.~~
-- Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.
+- ~~Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.~~
 - do [#ipc5]
 - do [#ipc6]
 - do [#ipc7]

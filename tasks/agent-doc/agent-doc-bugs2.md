@@ -35,7 +35,17 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 8 response topic(s): monsterrodholders.md cycling between sessions - gpt-5; :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any...; Please investigate the lazily-rs session. It is not behaving correctly.; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f31d7479 -->
+
+### Re: :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing? - gpt-5
+
+Yes. The useful role for lazily-rs here is a typed state/snapshot layer between processes, not a replacement for the markdown AST and node-keyed mutation work.
+
+For agent-doc, the right shape is explicit process state models: the editor plugin owns visible buffer/version/typing-idle state, agent-doc owns session cycle/snapshot/queue state, tsift owns index freshness/search handles, and each process publishes Snapshot plus Delta updates with authority-scoped fields. Consumers can then reason from declared state contracts instead of re-parsing logs, panes, or whole markdown buffers.
+
+That would help most for IPC reliability: stale editor-buffer proofs, listener wedge detection, tsift index freshness, and queue/mutation handoff can all be modeled as typed state transitions with compare-and-swap style versions. It should stay layered under the planned markdown AST CRDT: lazily-rs can distribute state and deltas, while agent-doc still decides document ownership and applies node-keyed markdown mutations.
+
+Existing tracking already points this way: lazily-rs has IPC/state-sharing archive items like `#ipc5` and `#ipc9`, and agent-doc has related structural work in `#ipc-typing-duplication-family`, `#ipc-listener-dewedge-direct-disk`, `#codex-mcp-server-root-fix`, and `#md-ast-document-model`.
+<!-- agent:boundary:ad6982e2 -->
 <!-- /agent:exchange -->
 
 ## Queue

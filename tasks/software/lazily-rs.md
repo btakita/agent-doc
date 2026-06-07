@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -80,7 +80,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:a64534c0 -->
+<!-- agent:boundary:2d5b8e65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,6 +89,11 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#ipc4]
+- do [#ipc5]
+- do [#ipc6]
+- do [#ipc7]
+- do [#ipc8]
 <!-- /agent:queue -->
 
 ## Backlog

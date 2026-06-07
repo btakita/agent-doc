@@ -123,7 +123,23 @@ I marked #late-ipc-patch-plugin-apply-fence done from that evidence. I moved #li
 I did not ship the whole automated completion feature in this cycle. The current spec/code already has a narrower `auto_done` path for explicit completion prompts, but the backlog item asks for broader evidence-driven completion from done archives, ops/cycle proof, and semantic retrieval. That scope needs separate implementation phases rather than one queue closeout.
 
 I split the parent into three concrete child items: deterministic done-archive mirror cleanup, ops/cycle proof detection, and semantic retrieval integration. I marked only the decomposition parent done. I left the unrelated dirty `src/agent-doc` source changes untouched.
-<!-- agent:boundary:2d9c4f57 -->
+
+### Re: #monsterrod-queue-items-deleted-live -- gpt-5
+
+Closed this as covered by the shipped queue-preservation fixes. I did not make source changes in this cycle.
+
+Evidence checked:
+- `tasks/agent-doc-bugs2.done.md` already contains the shipped/fixed queue-loss classes: `#queue-user-edit-overwrite`, `#queue-edit-lost-during-finalize-crdt`, `#queue-dedup-destroys-intentional-duplicates`, and `#md-ast-mutations-node-keyed`.
+- `queue.rs` now dedups only explicit `do #id` / `do [#id]` identity prompts, while preserving free-text queue prompts.
+- `session_check.rs` and `write.rs` contain the dropped-queue-prompt guard/provenance path for `content_ours` adoption.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration dedup_live_prompts_preserves_free_text_duplicates -- --nocapture`
+- `cargo test -p agent-doc-orchestration preflight_preserves_intentional_duplicate_tracked_queue_prompt -- --nocapture`
+- `cargo test -p agent-doc-orchestration dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items -- --nocapture`
+
+The item was archived as done because the live MonsterRod deletion report is covered by those shipped guards and regression tests.
+<!-- agent:boundary:9418ac4c -->
 <!-- /agent:exchange -->
 
 ## Queue

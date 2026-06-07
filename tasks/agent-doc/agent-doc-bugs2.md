@@ -395,7 +395,28 @@ Gap:
 
 Captured backlog item:
 - [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
-<!-- agent:boundary:6625c93f -->
+
+### Re: queue boolean attribute `=true` regression — gpt-5
+
+> **Queue prompt:**
+>
+> `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
+
+
+Resolved.
+
+This was a real regression: marker boolean attributes such as `priority`, `go`, and `preset="#spec-test-build-install-commit-push"` were being normalized incorrectly, producing malformed output like `preset="#spec-test-build-install-commit-push"=true` and `go=true`.
+
+Fix already landed in agent-doc `648fd3e7` (`fix: normalize queue marker boolean attrs`):
+- queue marker attribute parsing now treats bare boolean attributes as booleans without appending `=true`
+- serialization preserves valid marker syntax for `priority`, `go`, and `preset="..."`
+- regression coverage was added for the malformed marker shapes
+
+This document's current queue marker is valid:
+`&lt;!-- agent:queue priority preset="#spec-test-build-install-commit-push" go --&gt;`
+
+No new backlog item is needed from this prompt.
+<!-- agent:boundary:4adbbeb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -416,7 +437,7 @@ Captured backlog item:
 - ~~"#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?~~
 - ~~`agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.~~
 - ~~Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.~~
-- `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
+- ~~`=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.~~
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
 <!-- /agent:queue -->
 ###

@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#ipc7]
+
+
+> **Queue prompt:**
+>
 > [#ipc6]
 
 
@@ -70,7 +75,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:f5dce77d -->
+<!-- agent:boundary:626a5d43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,14 +87,13 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 - ~~[#ipc4]~~
 - ~~[#ipc5]~~
 - ~~[#ipc6]~~
-- [#ipc7]
+- ~~[#ipc7]~~
 - [#ipc8]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc7] Build transport test harness (property + integration) for ordering guarantees, permissioned routing, and crash/reconnect recovery scenarios.
 - [ ] [#ipc8] Add benchmark suite: cross-process latency/throughput, fanout scaling, and end-to-end snapshot update time across transport variants.
 <!-- /agent:backlog -->
 

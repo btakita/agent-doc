@@ -230,7 +230,22 @@ The main invariant is: command admission and coordination state stay fast and sy
 
 Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
 Verification: plan/backlog capture only; no source tests were needed for this planning response.
-<!-- agent:boundary:3eac6e8c -->
+
+### Re: missing #spcp backlog capture — gpt-5
+
+> **Queue prompt:**
+>
+> "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
+
+Added the six missing `#spcp-*` backlog items through tracked pending mutations in this closeout.
+
+Yes, the non-add is an `#agent-doc-bug`. The failure mode was a closeout/retry reliability gap: the earlier finalize attempt tried to apply the pending additions, hit a visible editor-buffer mismatch after local drift existed, and the retry committed the exchange response without re-recording the pending-add mutations. The document therefore contained prose claiming the backlog capture, but the committed backlog component was still empty. That should fail closed or preserve/replay the pending mutations; it should never commit a response that says items were captured when the tracked component does not contain them.
+
+I also added a dedicated follow-up backlog item for that pending-mutation-loss bug.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`.
+Verification: backlog state was checked before closeout and was empty; this response uses binary-owned pending mutations so the items are materialized by the closeout path, not by manual component editing.
+<!-- agent:boundary:7bd196d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -267,6 +282,13 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#spcp-contract] Draft the single-process actor control-plane contract: in-process actor boundaries, lifecycle ownership, state invariants, crash recovery, and admin API.
+- [ ] [#spcp-store] Design the SQLite WAL authoritative-state schema and JSON projection compatibility layer for sessions.json/session-actors.json.
+- [ ] [#spcp-cache] Specify the lazily-rs in-memory cache/reservation model for fast session state, pane bindings, and synchronous attach/input coordination.
+- [ ] [#spcp-dispatch] Design the fast command/dispatch actor: non-blocking admission, receipts, bounded queues, background workers, and backpressure rules.
+- [ ] [#spcp-migrate] Plan the migration gates: feature flags, shadow reads, dual writes, telemetry, reconciliation, and rollback from JSON-first to SQLite-first state.
+- [ ] [#spcp-tests] Add SimWorld, CLI integration, and contention/stress tests for actor-pool operations, projection lag, restart recovery, and queue dispatch.
+- [ ] [#adoc-pending-retry-loss] #agent-doc-bug Fix finalize/editor-buffer mismatch retry so pending-add mutations cannot be dropped while the committed exchange claims backlog capture.
 <!-- /agent:backlog -->
 
 ## Review

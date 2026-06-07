@@ -38,7 +38,7 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): IPC transport implementation; IPC implementation follow-through; remaining IPC items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:cf6c7146 -->
+<!-- agent:boundary:e846de06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,8 +47,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- complete #ipc6
-- complete #ipc7
+- What are #next-steps to implement the planned ipc features?
 <!-- /agent:queue -->
 
 ## Backlog

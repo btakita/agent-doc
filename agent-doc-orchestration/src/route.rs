@@ -1891,6 +1891,18 @@ fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+fn operator_prioritize_route_prompt(prompt_text: String) -> String {
+    if crate::queue::is_prioritized(&prompt_text) {
+        prompt_text
+    } else {
+        format!(
+            "{} {}",
+            crate::queue::PRIORITIZED_MARKER,
+            crate::queue::strip_priority_markers(&prompt_text)
+        )
+    }
+}
+
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
 ///
 /// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
@@ -1906,6 +1918,12 @@ fn enqueue_route_dispatch_prompt(
 ) -> Result<RouteQueueEnqueueOutcome> {
     let prompt_text = queue_prompt_text_for_route_change(prompt_text)
         .ok_or_else(|| anyhow::anyhow!("route queue prompt is empty"))?;
+    let prompt_text = if priority {
+        operator_prioritize_route_prompt(prompt_text)
+    } else {
+        prompt_text
+    };
+    let prompt_identity = crate::queue::strip_priority_markers(&prompt_text);
     let _lock = acquire_route_queue_lock(file)?;
     let original = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -1924,9 +1942,9 @@ fn enqueue_route_dispatch_prompt(
         let body = &content[queue_component.open_end..queue_component.close_start];
         match crate::queue::parse(body) {
             Ok(mut entries) => {
-                already_present = crate::queue::prompts(&entries)
-                    .iter()
-                    .any(|prompt| prompt.text.trim() == prompt_text);
+                already_present = crate::queue::prompts(&entries).iter().any(|prompt| {
+                    crate::queue::strip_priority_markers(&prompt.text) == prompt_identity
+                });
                 if !already_present {
                     let active_prompt_count = entries
                         .iter()

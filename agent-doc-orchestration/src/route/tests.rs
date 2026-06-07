@@ -1099,9 +1099,9 @@ fn route_enqueue_priority_dispatch_preempts_multi_prompt_auto_queue() {
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(
         updated.contains(
-            "- manual preempt prompt\n- first queued prompt\n- second queued prompt"
+            "- :pushpin: manual preempt prompt\n- first queued prompt\n- second queued prompt"
         ),
-        "priority dispatch must head-insert ahead of pending auto items:\n{updated}"
+        "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
     );
     let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
     assert_eq!(snapshot, updated, "priority preempt must sync the snapshot");
@@ -1139,8 +1139,8 @@ fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_auto_prompt() {
     assert!(!outcome.superseded, "priority dispatch must not supersede");
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(
-        updated.contains("- manual preempt prompt\n- pending auto-loop item"),
-        "priority dispatch must preserve the pending item and run ahead of it:\n{updated}"
+        updated.contains("- :pushpin: manual preempt prompt\n- pending auto-loop item"),
+        "priority dispatch must preserve the pending item and run ahead of it with operator pin:\n{updated}"
     );
 }
 
@@ -1174,7 +1174,7 @@ fn route_enqueue_priority_dispatch_preserves_leading_queue_directives() {
     let updated = std::fs::read_to_string(&doc).unwrap();
     let preset_pos = updated.find("preset #spec").expect("preset directive preserved");
     let preempt_pos = updated
-        .find("- manual preempt prompt")
+        .find("- :pushpin: manual preempt prompt")
         .expect("preempt prompt inserted");
     let first_pos = updated
         .find("- first queued prompt")

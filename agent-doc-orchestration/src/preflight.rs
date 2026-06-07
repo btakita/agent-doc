@@ -3365,6 +3365,7 @@ struct BacklogQueueSyncRequest {
     mode: crate::queue::BacklogQueueSyncMode,
     ids: Vec<String>,
     enqueue_ids: Vec<String>,
+    priority: bool,
 }
 
 fn collect_backlog_queue_sync(
@@ -3374,6 +3375,7 @@ fn collect_backlog_queue_sync(
     let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
     let mut enqueue_ids: Vec<String> = Vec::new();
+    let mut priority = false;
     for comp in components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
@@ -3383,6 +3385,7 @@ fn collect_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
+        priority |= comp.attrs.contains_key("priority");
         let Some(comp_mode) = crate::queue::BacklogQueueSyncMode::parse(value) else {
             continue;
         };
@@ -3399,6 +3402,7 @@ fn collect_backlog_queue_sync(
         mode: m,
         ids,
         enqueue_ids,
+        priority,
     })
 }
 
@@ -3473,6 +3477,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
+    let mut source_queue_priority = false;
 
     // `#ynra`: collect `agent:done` ids ONCE up front. The backlog→queue sync
     // below must never re-mint a `do [#id]` whose id is already completed
@@ -3494,6 +3499,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // attribute.
     if let Some(sync_request) = collect_backlog_queue_sync(&components, &content) {
         let mode = sync_request.mode;
+        source_queue_priority = sync_request.priority;
         let enqueue_ids: std::collections::HashSet<String> = sync_request
             .enqueue_ids
             .iter()
@@ -3633,7 +3639,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // Also runs when the rank map is empty so a `__prioritized__` manual pin
     // (#queue-manual-priority-override) still floats to the top of the queue even
     // when no backlog item carries a `priority` attribute.
-    if comp.attrs.contains_key("priority") {
+    if comp.attrs.contains_key("priority") || source_queue_priority {
         let rank = collect_backlog_priority_ranks(&components, &content);
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
         // graph first (a blocker outranks a pin); fall back to the plain
@@ -3646,6 +3652,8 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     .map(|s| ("backlog priority (pins floated to top)", s))
             });
         if let Some((how, sorted)) = sorted {
+            let sorted = crate::queue::annotate_agent_priority_promotions(&entries, &sorted)
+                .unwrap_or(sorted);
             let new_body = crate::queue::render(&sorted);
             current_content = {
                 let comps = crate::component::parse(&current_content)?;
@@ -6444,6 +6452,36 @@ mod tests {
             &synced_queue_ids,
         );
         assert_eq!(result, vec!["worked".to_string()]);
+    }
+
+    #[test]
+    fn run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync priority -->\n",
+            "- [ ] [#slow] slower follow-up priority=9\n",
+            "- [ ] [#fast] fast follow-up priority=1\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- :round_pushpin: do [#fast]\n- do [#slow]"),
+            "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
+        );
     }
 
     #[test]

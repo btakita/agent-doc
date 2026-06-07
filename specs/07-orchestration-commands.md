@@ -353,11 +353,16 @@ Semantics:
 - **Priority interplay (`#backlog-priority-attribute`).** A bare `priority`
   attribute on the source backlog/icebox marker stable-sorts its items by their
   per-item `priority=<1..9>` token before the sync runs (in `run_pending_maintenance`,
-  earlier in the pipeline), so the synced queue inherits the prioritized order. A
-  bare `priority` attribute on the `agent:queue` marker additionally stable-sorts
-  the queue's `do [#id]` prompts by their source item's priority after the sync
-  (`queue::sort_prompts_by_priority`), covering append-built or manually edited
-  queues. `priority` is recognized on backlog/icebox/queue by both the lint and
+  earlier in the pipeline), so the synced queue inherits the prioritized order.
+  A queue-tagged source component that also carries `priority` additionally runs
+  the synced queue through the same priority/auto-DAG recompute as
+  `agent:queue priority`, so append-built queues are reordered immediately even
+  when the queue marker itself has no `priority` token. Automatically promoted
+  queue prompts are annotated with `:round_pushpin:`; manual priority dispatches
+  use `:pushpin:`. A bare `priority` attribute on the `agent:queue` marker still
+  stable-sorts `do [#id]` prompts by their source item's priority after the sync
+  (`queue::sort_prompts_by_priority`), covering manually edited queues.
+  `priority` is recognized on backlog/icebox/queue by both the lint and
   preflight. See `specs/pending-system.md` for the per-item token grammar.
 
 ### Preflight queue behavior

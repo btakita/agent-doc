@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Backlog queue priority visibly annotates promotions.** A backlog/icebox
+  component carrying both `queue` and `priority` now triggers queue priority /
+  auto-DAG ordering for the synced `agent:queue` even when the queue marker
+  itself has no `priority` token. Automatically promoted queue prompts are
+  annotated with `:round_pushpin:`, while priority route dispatches are inserted
+  with the operator `:pushpin:` marker and dedupe against bare equivalents.
+  Tests `run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item`
+  and `route_enqueue_priority_dispatch_*`; specs `specs/pending-system.md`,
+  `specs/07-orchestration-commands.md`.
+
 - **Per-item enqueue markers populate `agent:queue` (`#queue-enqueue-action`).**
   Open backlog/icebox/pending items containing `:inbox_tray:`, `/enqueue`, or a
   Markdown-decorated `enqueue` token such as `**enqueue**` now append `do [#id]`

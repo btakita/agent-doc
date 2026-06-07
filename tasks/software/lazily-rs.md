@@ -90,7 +90,23 @@ Verification:
 - Latest GitHub Actions `CI` run on `main` was green.
 
 Install/escalation: no install step applies here because `lazily` is a library crate with no binary install target. No escalated permissions were used. Confidence is high for the pure protocol/API work; the remaining local verification caveat is only the benchmark artifact prerequisite.
-<!-- agent:boundary:b1f09d8f -->
+
+### Re: shared-memory ring buffer performance — gpt-5
+
+A shared-memory ring buffer can outperform sockets for large content, but only if the design actually avoids extra serialization and copy steps. If lazily-rs serializes a large payload into a `Vec<u8>`, then copies it into shared memory, and the receiver copies it out again, the win may be modest. The bigger gains come from using shared memory as a blob arena: write the large payload once, send a small `IpcMessage` descriptor with `{offset, len, epoch, checksum/type}`, and let the receiver read or map that region directly.
+
+For agent-doc / tsift, I would use a hybrid transport:
+
+- Keep control messages small and boring: `Snapshot`, `Delta`, ack, resync request, patch lifecycle, index freshness, etc. can use the existing socket/file IPC path.
+- Put large document bodies, context packs, tsift artifacts, and patch payloads in a shared-memory blob segment when they cross a size threshold.
+- Let the `IpcMessage` carry references to shared blobs rather than embedding huge byte arrays.
+- Keep epochs and checksums in the message so stale or partially overwritten shared-memory regions are rejected.
+- Benchmark against the current socket IPC and file fallback before adopting it globally; for small messages, sockets will likely be simpler and fast enough.
+
+So yes, shared memory is promising for large content, especially repeated document/context exchange between agent-doc, the editor, and tsift. I would not make it the default first transport. The safer next step is an `IpcTransport` benchmark harness comparing socket, file-backed, and shared-memory blob-reference paths at representative sizes: 4 KB, 64 KB, 1 MB, and 10 MB.
+
+No code changed in this cycle.
+<!-- agent:boundary:29f1ed34 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +114,8 @@ Install/escalation: no install step applies here because `lazily` is a library c
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Would the shared memory ring buffer perform better than sockets or whatever mechanism we have currently? Especially for large content?
 <!-- /agent:queue -->
 
 ## Backlog

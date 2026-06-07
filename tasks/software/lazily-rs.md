@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -40,6 +40,11 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
 ### Re: IPC transport implementation — gpt-5
+
+> **Queue prompt:**
+>
+> [#ipc8]
+
 
 > **Queue prompt:**
 >
@@ -75,7 +80,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:626a5d43 -->
+<!-- agent:boundary:a64534c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,18 +88,12 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~[#ipc4]~~
-- ~~[#ipc5]~~
-- ~~[#ipc6]~~
-- ~~[#ipc7]~~
-- [#ipc8]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc8] Add benchmark suite: cross-process latency/throughput, fanout scaling, and end-to-end snapshot update time across transport variants.
 <!-- /agent:backlog -->
 
 ## Review

@@ -117,11 +117,11 @@ const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-d
 
 /// Claude-Code-only auto-loop instruction appended to the rendered SKILL.md.
 ///
-/// Codex has a `Stop` hook in `.codex/hooks.json` that re-invokes
-/// `agent-doc <FILE>` in the same turn when the queue is still active and the
-/// next head is ready (see `specs/07-orchestration-commands.md`). Claude Code
-/// has no equivalent Stop hook, so without this instruction the operator has
-/// to retype `agent-doc <FILE>` after every cycle to drain the queue.
+/// Codex has a `Stop` hook in `.codex/hooks.json` that blocks final-answer
+/// completion and instructs the active turn to continue the next queue head
+/// in-pane when the queue is still active. Claude Code has no equivalent Stop
+/// hook, so without this instruction the operator has to retype `agent-doc
+/// <FILE>` after every cycle to drain the queue.
 ///
 /// The instruction tells the Claude Code agent to invoke `/loop agent-doc
 /// <FILE>` via the `Skill` tool after a successful closeout when the queue is
@@ -216,6 +216,8 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit";
 const CODEX_STOP_COMMAND: &str = "agent-doc hook codex-stop";
+const CODEX_MCP_SERVER_NAME: &str = "agent-doc";
+const CODEX_MCP_COMMAND: &str = "agent-doc";
 
 fn config() -> SkillConfig {
     let env = detect_install_env();
@@ -620,7 +622,7 @@ fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
     let codex_dir = base.join(".codex");
     std::fs::create_dir_all(&codex_dir)?;
     merge_codex_hooks_json(&codex_dir.join("hooks.json"))?;
-    merge_codex_config(&codex_dir.join("config.toml"))?;
+    merge_codex_config(&codex_dir.join("config.toml"), &base)?;
     Ok(())
 }
 
@@ -919,7 +921,7 @@ fn ensure_codex_hook_command(
     entry_array.push(serde_json::json!({ "hooks": [hook] }));
 }
 
-fn merge_codex_config(path: &Path) -> Result<()> {
+fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
     let mut root = if path.exists() {
         let content =
             std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -929,13 +931,14 @@ fn merge_codex_config(path: &Path) -> Result<()> {
         toml::Value::Table(toml::map::Map::new())
     };
 
+    let project_root = std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.into());
+
     if !root.is_table() {
         anyhow::bail!("Codex config at {} must be a TOML table", path.display());
     }
 
-    let features = root
-        .as_table_mut()
-        .expect("checked table")
+    let root_table = root.as_table_mut().expect("checked table");
+    let features = root_table
         .entry("features".to_string())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
     let features_table = features
@@ -943,6 +946,31 @@ fn merge_codex_config(path: &Path) -> Result<()> {
         .context("Codex config `features` must be a table")?;
     features_table.remove("codex_hooks");
     features_table.insert("hooks".to_string(), toml::Value::Boolean(true));
+
+    let mcp_servers = root_table
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let mcp_servers_table = mcp_servers
+        .as_table_mut()
+        .context("Codex config `mcp_servers` must be a table")?;
+    let mut server = toml::map::Map::new();
+    server.insert(
+        "command".to_string(),
+        toml::Value::String(CODEX_MCP_COMMAND.to_string()),
+    );
+    server.insert(
+        "args".to_string(),
+        toml::Value::Array(vec![
+            toml::Value::String("mcp".to_string()),
+            toml::Value::String("serve".to_string()),
+            toml::Value::String("--project-root".to_string()),
+            toml::Value::String(project_root.display().to_string()),
+        ]),
+    );
+    mcp_servers_table.insert(
+        CODEX_MCP_SERVER_NAME.to_string(),
+        toml::Value::Table(server),
+    );
 
     std::fs::write(path, toml::to_string_pretty(&root)?)
         .with_context(|| format!("write {}", path.display()))?;
@@ -1194,6 +1222,27 @@ mod tests {
 
     fn line_count(content: &str) -> usize {
         content.lines().count()
+    }
+
+    fn assert_codex_mcp_config(config: &toml::Value, root: &std::path::Path) {
+        let server = &config["mcp_servers"][CODEX_MCP_SERVER_NAME];
+        assert_eq!(server["command"].as_str(), Some(CODEX_MCP_COMMAND));
+        let args: Vec<&str> = server["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        let canonical_root = std::fs::canonicalize(root).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "mcp",
+                "serve",
+                "--project-root",
+                canonical_root.to_str().unwrap()
+            ]
+        );
     }
 
     #[test]
@@ -1655,6 +1704,7 @@ mod tests {
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
         assert!(config["features"].get("codex_hooks").is_none());
+        assert_codex_mcp_config(&config, dir.path());
     }
 
     #[test]
@@ -1781,6 +1831,7 @@ mod tests {
         );
         assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
         assert!(config["features"].get("codex_hooks").is_none());
+        assert_codex_mcp_config(&config, dir.path());
     }
 
     #[test]

@@ -326,6 +326,42 @@ fn first_nonempty_prompt_line(prompt: &str) -> String {
         .to_string()
 }
 
+fn agent_doc_mcp_configured_for(file: &Path) -> bool {
+    project_roots_for(file).iter().any(|root| {
+        let config_path = root.join(".codex/config.toml");
+        let Ok(content) = std::fs::read_to_string(&config_path) else {
+            return false;
+        };
+        let Ok(config) = toml::from_str::<toml::Value>(&content) else {
+            return false;
+        };
+        config
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .and_then(|servers| servers.get("agent-doc"))
+            .and_then(toml::Value::as_table)
+            .map(|server| {
+                server.get("command").and_then(toml::Value::as_str) == Some("agent-doc")
+                    || server.get("url").and_then(toml::Value::as_str).is_some()
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn continuation_closeout_instruction(file: &Path) -> String {
+    if agent_doc_mcp_configured_for(file) {
+        format!(
+            "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_preflight` for {disp}, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            disp = file.display()
+        )
+    } else {
+        format!(
+            "Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            disp = file.display()
+        )
+    }
+}
+
 fn auto_queue_continuation_response(
     file: &Path,
     cleanup_roots: &[PathBuf],
@@ -365,9 +401,10 @@ fn auto_queue_continuation_response(
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
+            instruction = continuation_closeout_instruction(file),
         ),
     }))
 }
@@ -419,9 +456,10 @@ fn marker_fallback_continuation_response(
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = continuation.head_prompt,
+            instruction = continuation_closeout_instruction(&file),
         ),
     }))
 }
@@ -1025,6 +1063,18 @@ mod tests {
         fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
+    }
+
+    fn write_codex_mcp_config(root: &Path) {
+        fs::create_dir_all(root.join(".codex")).unwrap();
+        fs::write(
+            root.join(".codex/config.toml"),
+            format!(
+                "[mcp_servers.agent-doc]\ncommand = \"agent-doc\"\nargs = [\"mcp\", \"serve\", \"--project-root\", \"{}\"]\n",
+                root.display()
+            ),
+        )
+        .unwrap();
     }
 
     fn init_git_repo(root: &Path, tracked: &Path) {
@@ -2122,6 +2172,52 @@ agent-doc {}\n",
     }
 
     #[test]
+    fn stop_auto_queue_continuation_prefers_configured_mcp_tools() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        write_codex_mcp_config(dir.path());
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: #fix1 — gpt-5\n\n",
+                "Done.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+            .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.contains("configured `agent-doc` MCP server"),
+                    "{reason}"
+                );
+                assert!(reason.contains("agent_doc_preflight"), "{reason}");
+                assert!(reason.contains("agent_doc_plan"), "{reason}");
+                assert!(reason.contains("agent_doc_finalize"), "{reason}");
+                assert!(reason.contains("agent_doc_session_check"), "{reason}");
+                assert!(
+                    reason.contains("agent-doc finalize")
+                        && reason.contains("MCP tools are unavailable"),
+                    "{reason}"
+                );
+                assert!(reason.contains("do not send the final answer"), "{reason}");
+            }
+            other => panic!("expected auto-queue continuation block, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn stop_blocks_from_durable_marker_when_session_state_missing() {
         // #codex-auto-queue-stalled-final-gate live regression (monsterrodholders
         // shape): the completed head was consumed, `#seopdp` remains, queue_active
@@ -2153,6 +2249,44 @@ agent-doc {}\n",
                     "{reason}"
                 );
                 assert!(reason.contains("do not send the final answer"), "{reason}");
+                assert!(!reason.contains("agent_doc_finalize"), "{reason}");
+            }
+            other => panic!("expected durable-marker continuation block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_marker_fallback_continuation_prefers_configured_mcp_tools() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        write_codex_mcp_config(dir.path());
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("durable"), "{reason}");
+                assert!(
+                    reason.contains("do [#seopdp] deploy product page"),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains("configured `agent-doc` MCP server"),
+                    "{reason}"
+                );
+                assert!(reason.contains("agent_doc_preflight"), "{reason}");
+                assert!(reason.contains("agent_doc_finalize"), "{reason}");
+                assert!(reason.contains("agent_doc_session_check"), "{reason}");
+                assert!(reason.contains("agent-doc write --commit"), "{reason}");
             }
             other => panic!("expected durable-marker continuation block, got {other:?}"),
         }

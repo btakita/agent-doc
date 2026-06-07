@@ -2082,6 +2082,25 @@ fn test_codex_skill_install_writes_hook_artifacts() {
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
     assert!(config["features"].get("codex_hooks").is_none());
+    assert_eq!(
+        config["mcp_servers"]["agent-doc"]["command"].as_str(),
+        Some("agent-doc")
+    );
+    let mcp_args: Vec<&str> = config["mcp_servers"]["agent-doc"]["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        mcp_args,
+        vec![
+            "mcp",
+            "serve",
+            "--project-root",
+            std::fs::canonicalize(tmp.path()).unwrap().to_str().unwrap()
+        ]
+    );
 }
 
 #[test]

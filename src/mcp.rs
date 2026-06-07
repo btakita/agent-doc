@@ -100,6 +100,118 @@ fn initialize_result(params: Option<&Value>) -> Value {
     })
 }
 
+fn string_property(description: Option<&str>) -> Value {
+    let mut property = Map::new();
+    property.insert("type".to_string(), Value::String("string".to_string()));
+    if let Some(description) = description {
+        property.insert(
+            "description".to_string(),
+            Value::String(description.to_string()),
+        );
+    }
+    Value::Object(property)
+}
+
+fn bool_property(description: Option<&str>) -> Value {
+    let mut property = Map::new();
+    property.insert("type".to_string(), Value::String("boolean".to_string()));
+    if let Some(description) = description {
+        property.insert(
+            "description".to_string(),
+            Value::String(description.to_string()),
+        );
+    }
+    Value::Object(property)
+}
+
+fn string_array_property(description: Option<&str>) -> Value {
+    let mut property = Map::new();
+    property.insert("type".to_string(), Value::String("array".to_string()));
+    property.insert("items".to_string(), json!({ "type": "string" }));
+    if let Some(description) = description {
+        property.insert(
+            "description".to_string(),
+            Value::String(description.to_string()),
+        );
+    }
+    Value::Object(property)
+}
+
+fn finalize_input_schema() -> Value {
+    let mut properties = Map::new();
+    properties.insert(
+        "file".to_string(),
+        string_property(Some("Path to the session document.")),
+    );
+    properties.insert(
+        "response".to_string(),
+        string_property(Some("Assistant response or template patchback body.")),
+    );
+    properties.insert(
+        "baseline_file".to_string(),
+        string_property(Some("Optional baseline file from agent_doc_preflight.")),
+    );
+    properties.insert(
+        "template".to_string(),
+        bool_property(Some("Treat the response as a template patchback body.")),
+    );
+    properties.insert(
+        "stream".to_string(),
+        bool_property(Some("Use stream-mode write semantics.")),
+    );
+    properties.insert(
+        "ipc".to_string(),
+        bool_property(Some("Use IPC-mode write semantics.")),
+    );
+    properties.insert(
+        "done".to_string(),
+        string_array_property(Some(
+            "Optional backlog ids to mark done, equivalent to repeated --done.",
+        )),
+    );
+    properties.insert(
+        "pending_add".to_string(),
+        string_array_property(Some(
+            "Optional backlog items to add, equivalent to repeated --pending-add.",
+        )),
+    );
+    properties.insert(
+        "pending_add_back".to_string(),
+        string_array_property(Some(
+            "Optional backlog items to append, equivalent to repeated --pending-add-back.",
+        )),
+    );
+    for key in [
+        "pending_add_to",
+        "pending_add_gated",
+        "pending_add_after",
+        "pending_add_before",
+        "pending_edit",
+        "pending_gate",
+        "pending_ungate",
+        "pending_resolve_gate",
+        "pending_set_gate_type",
+        "review_add",
+        "review_edit",
+        "commit_sibling",
+        "commit_sibling_message",
+    ] {
+        properties.insert(key.to_string(), string_array_property(None));
+    }
+    properties.insert("pending_clear".to_string(), bool_property(None));
+    properties.insert("pending_reorder".to_string(), string_property(None));
+    properties.insert("allow_replace_pending".to_string(), bool_property(None));
+    properties.insert("force_disk".to_string(), bool_property(None));
+    properties.insert("origin".to_string(), string_property(None));
+    properties.insert("status".to_string(), string_property(None));
+
+    json!({
+        "type": "object",
+        "properties": Value::Object(properties),
+        "required": ["file", "response"]
+    })
+}
+
 fn tools_list_result() -> Value {
     json!({
         "tools": [
@@ -157,32 +269,7 @@ fn tools_list_result() -> Value {
                 "name": "agent_doc_finalize",
                 "title": "Finalize agent-doc response",
                 "description": "Write an assistant response through the strict agent-doc finalize path and require a committed closeout.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "file": { "type": "string", "description": "Path to the session document." },
-                        "response": { "type": "string", "description": "Assistant response or template patchback body." },
-                        "done": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional backlog ids to mark done, equivalent to repeated --done."
-                        },
-                        "pending_add": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional backlog items to add, equivalent to repeated --pending-add."
-                        },
-                        "pending_add_back": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional backlog items to append, equivalent to repeated --pending-add-back."
-                        },
-                        "allow_replace_pending": { "type": "boolean" },
-                        "force_disk": { "type": "boolean" },
-                        "origin": { "type": "string" }
-                    },
-                    "required": ["file", "response"]
-                }
+                "inputSchema": finalize_input_schema()
             }
         ]
     })
@@ -555,6 +642,44 @@ mod tests {
         assert!(names.contains(&"agent_doc_plan"));
         assert!(names.contains(&"agent_doc_session_check"));
         assert!(names.contains(&"agent_doc_finalize"));
+    }
+
+    #[test]
+    fn finalize_schema_advertises_supported_closeout_options() {
+        let response = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list"
+        }));
+        let tools = response["result"]["tools"].as_array().unwrap();
+        let finalize = tools
+            .iter()
+            .find(|tool| tool["name"].as_str() == Some("agent_doc_finalize"))
+            .unwrap();
+        let props = finalize["inputSchema"]["properties"].as_object().unwrap();
+        for key in [
+            "baseline_file",
+            "done",
+            "pending_add",
+            "pending_add_to",
+            "pending_add_gated",
+            "pending_add_after",
+            "pending_add_before",
+            "pending_add_back",
+            "pending_edit",
+            "pending_clear",
+            "pending_reorder",
+            "pending_gate",
+            "pending_ungate",
+            "pending_resolve_gate",
+            "pending_set_gate_type",
+            "review_add",
+            "review_edit",
+            "commit_sibling",
+            "commit_sibling_message",
+        ] {
+            assert!(props.contains_key(key), "missing finalize schema key {key}");
+        }
     }
 
     #[test]

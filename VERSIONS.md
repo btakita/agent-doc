@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex installs now register the agent-doc MCP server.** `agent-doc skill
+  install --harness codex` writes `[mcp_servers.agent-doc]` into
+  `.codex/config.toml` and the Codex Stop hook prefers the
+  `agent_doc_preflight` / `agent_doc_plan` / `agent_doc_finalize` /
+  `agent_doc_session_check` continuation path when that server is configured,
+  while preserving the existing in-pane CLI fallback for runs without MCP.
+
 - **Session clear ignores its own drafted control command.** Codex protected
   prompt detection now treats `agent-doc session clear`, `interrupt-clear`,
   `stop`, and restart control lines as operator commands instead of unsaved

@@ -333,7 +333,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // ops_log diagnostic: when the post-CRDT-merge document queue diverges from
         // the snapshot, consume reconciles (document wins) instead of bailing
         // (#finalize-divergence-orphans-committed-head / IPC-CRDT resilience).
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 27,
+        // +2 for the audited `ipc_listener_degraded_direct_disk ... reason=repeated_ack_timeout`
+        // diagnostics: repeated socket IPC ack timeouts de-wedge the current
+        // document/session away from socket/file IPC and onto the direct-disk path.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 29,
         _ => 0,
     }
 }

@@ -7654,7 +7654,7 @@ pub fn run_stream(
         let project_root = resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
 
-        if patches_dir.exists() {
+        if patches_dir.exists() && !ipc_direct_disk_degraded(&project_root, file)? {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
@@ -8108,6 +8108,12 @@ pub fn run_stream(
                 }
             }
             std::process::exit(75); // EX_TEMPFAIL
+        } else if patches_dir.exists() {
+            eprintln!(
+                "[write] IPC listener degraded for {} — using direct disk write",
+                file.display()
+            );
+            log_ipc_dewedge_direct_disk_skip(file, "run_stream");
         }
     }
 
@@ -8922,9 +8928,144 @@ fn patch_response_headings_already_in_head(
 
 fn cleanup_legacy_ipc_degraded(project_root: &Path) {
     let marker = project_root.join(".agent-doc/ipc-degraded");
-    if marker.exists() {
-        let _ = std::fs::remove_file(&marker);
+    if marker.is_file()
+        && let Err(e) = std::fs::remove_file(&marker)
+    {
+        eprintln!(
+            "[write] WARNING: failed to remove legacy IPC degraded marker {}: {}",
+            marker.display(),
+            e
+        );
     }
+}
+
+const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
+
+fn ipc_dewedge_session_id(file: &Path) -> String {
+    frontmatter::read_session_id(file).unwrap_or_else(|| "-".to_string())
+}
+
+fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
+    let hash = snapshot::doc_hash(file)?;
+    Ok(project_root
+        .join(".agent-doc/ipc-degraded")
+        .join(format!("{hash}.json")))
+}
+
+fn ipc_dewedge_marker_for_current_session(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<serde_json::Value>> {
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if !marker.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&marker)
+        .with_context(|| format!("failed to read IPC degraded marker {}", marker.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse IPC degraded marker {}", marker.display()))?;
+    let marker_session = value
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    if marker_session != ipc_dewedge_session_id(file) {
+        return Ok(None);
+    }
+    Ok(Some(value))
+}
+
+fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Result<bool> {
+    Ok(ipc_dewedge_marker_for_current_session(project_root, file)?
+        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
+        .unwrap_or(false))
+}
+
+fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_listener_degraded_direct_disk file={} transport={} reason=repeated_ack_timeout",
+            file.display(),
+            transport
+        ),
+    );
+}
+
+fn record_ipc_socket_ack_timeout(
+    project_root: &Path,
+    file: &Path,
+    patch_id: Option<&str>,
+    transport: &str,
+) -> Result<bool> {
+    cleanup_legacy_ipc_degraded(project_root);
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create IPC degraded marker directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    let prior = ipc_dewedge_marker_for_current_session(project_root, file)?;
+    let prior_timeouts = prior
+        .as_ref()
+        .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+    let consecutive_timeouts = prior_timeouts.saturating_add(1);
+    let degraded = consecutive_timeouts >= IPC_DEWEDGE_TIMEOUT_THRESHOLD;
+    let value = serde_json::json!({
+        "session_id": ipc_dewedge_session_id(file),
+        "consecutive_timeouts": consecutive_timeouts,
+        "degraded": degraded,
+        "last_patch_id": patch_id.unwrap_or("-"),
+        "last_transport": transport,
+    });
+    atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_socket_ack_timeout_recorded file={} transport={} patch_id={} consecutive_timeouts={} degraded={}",
+            file.display(),
+            transport,
+            patch_id.unwrap_or("-"),
+            consecutive_timeouts,
+            degraded
+        ),
+    );
+    Ok(degraded)
+}
+
+fn is_socket_ack_timeout_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("IPC ack timeout (2s)")
+}
+
+fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
+        return Ok(());
+    };
+    if value
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if marker.exists() {
+        std::fs::remove_file(&marker).with_context(|| {
+            format!("failed to remove IPC degraded marker {}", marker.display())
+        })?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_socket_ack_timeouts_cleared file={} reason={}",
+                file.display(),
+                reason
+            ),
+        );
+    }
+    Ok(())
 }
 
 /// Poll for the ack-content sidecar with timeout.
@@ -10650,6 +10791,19 @@ pub fn try_ipc(
     // Clean up any legacy degraded marker from older versions
     cleanup_legacy_ipc_degraded(&project_root);
 
+    if ipc_direct_disk_degraded(&project_root, file)? {
+        eprintln!(
+            "[write] IPC listener degraded for {} — using direct disk write",
+            file.display()
+        );
+        log_ipc_dewedge_direct_disk_skip(file, "try_ipc");
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
+
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
         // Seed the boundary from patch_id so the socket patch and any later file /
@@ -10770,6 +10924,7 @@ pub fn try_ipc(
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
+                clear_ipc_socket_ack_timeouts(&project_root, file, "socket_ack")?;
                 // Poll for ack-content sidecar (written by plugin after apply).
                 let sidecar = poll_ack_content_sidecar(
                     &project_root,
@@ -10938,10 +11093,30 @@ pub fn try_ipc(
                 }
                 // Sidecar timed out — plugin likely applied the patch but the
                 // ack write was slow. Fall through to disk write for a reliable
-                // snapshot. No degradation — next write will still try socket.
+                // snapshot unless repeated timeouts have de-wedged this
+                // document/session away from IPC.
                 eprintln!(
                     "[write] sidecar ack timed out — socket delivery unconfirmed, falling back to disk write"
                 );
+                let degraded = record_ipc_socket_ack_timeout(
+                    &project_root,
+                    file,
+                    Some(&patch_id),
+                    "socket_ack_content_sidecar",
+                )?;
+                if degraded {
+                    eprintln!(
+                        "[write] IPC listener degraded for {} after repeated socket ack timeouts — skipping file IPC fallback",
+                        file.display()
+                    );
+                    cleanup_fallback_patch_files(file);
+                    log_ipc_dewedge_direct_disk_skip(file, "socket_ack_content_sidecar");
+                    return Ok(IpcResult {
+                        success: false,
+                        patch_id,
+                        skipped_committed_cycle: false,
+                    });
+                }
                 if fallback_patch_file.is_some() {
                     eprintln!("[write] fallback patch file left for file watcher recovery");
                 }
@@ -11043,6 +11218,26 @@ pub fn try_ipc(
                     "[write] socket IPC failed: {} — falling back to file IPC",
                     e
                 );
+                if is_socket_ack_timeout_error(&e) {
+                    let degraded = record_ipc_socket_ack_timeout(
+                        &project_root,
+                        file,
+                        Some(&patch_id),
+                        "socket_ipc",
+                    )?;
+                    if degraded {
+                        eprintln!(
+                            "[write] IPC listener degraded for {} after repeated socket ack timeouts — skipping file IPC fallback",
+                            file.display()
+                        );
+                        log_ipc_dewedge_direct_disk_skip(file, "socket_ipc_timeout");
+                        return Ok(IpcResult {
+                            success: false,
+                            patch_id,
+                            skipped_committed_cycle: false,
+                        });
+                    }
+                }
             }
         }
     }
@@ -11511,6 +11706,24 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Err(_) => return false,
     };
     let project_root = resolve_ipc_project_root(&canonical);
+    cleanup_legacy_ipc_degraded(&project_root);
+    match ipc_direct_disk_degraded(&project_root, file) {
+        Ok(true) => {
+            eprintln!(
+                "[commit] IPC reposition skipped for {}: listener degraded for this session",
+                file.display()
+            );
+            log_ipc_dewedge_direct_disk_skip(file, "reposition");
+            return false;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!(
+                "[commit] IPC reposition degradation check failed (non-fatal): {}",
+                e
+            );
+        }
+    }
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
     let working_doc = std::fs::read_to_string(file).ok();
     let boundary_id = snapshot_doc
@@ -11569,6 +11782,14 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
 
     match result {
         Ok(true) => {
+            if let Err(e) =
+                clear_ipc_socket_ack_timeouts(&project_root, file, "reposition_socket_ack")
+            {
+                eprintln!(
+                    "[commit] IPC reposition timeout clear failed (non-fatal): {}",
+                    e
+                );
+            }
             if normalize_prefix_lines.is_empty() {
                 eprintln!("[commit] IPC reposition boundary signal sent");
             } else {
@@ -11597,6 +11818,24 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
+            if is_socket_ack_timeout_error(&e) {
+                match record_ipc_socket_ack_timeout(&project_root, file, None, "reposition") {
+                    Ok(true) => {
+                        eprintln!(
+                            "[commit] IPC listener degraded for {} after repeated reposition ack timeouts",
+                            file.display()
+                        );
+                        log_ipc_dewedge_direct_disk_skip(file, "reposition_timeout");
+                        cleanup_fallback_patch_files(file);
+                        return false;
+                    }
+                    Ok(false) => {}
+                    Err(record_err) => eprintln!(
+                        "[commit] IPC reposition timeout record failed (non-fatal): {}",
+                        record_err
+                    ),
+                }
+            }
             match queue_file_ipc_reposition_boundary(
                 file,
                 boundary_id.as_deref(),
@@ -14898,6 +15137,78 @@ scratch
         assert!(
             !result.success,
             "should return false when patches dir doesn't exist"
+        );
+    }
+
+    #[test]
+    fn ipc_ack_timeouts_degrade_current_session_to_direct_disk() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test-session\n---\n\ncontent").unwrap();
+
+        assert!(
+            !record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap(),
+            "first timeout should only record health state"
+        );
+        assert!(
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap(),
+            "second consecutive timeout should mark the listener degraded"
+        );
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "current session should now bypass IPC"
+        );
+
+        fs::write(&doc, "---\nsession: next-session\n---\n\ncontent").unwrap();
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a new session id must not inherit the old session's degraded marker"
+        );
+    }
+
+    #[test]
+    fn try_ipc_skips_socket_and_file_fallback_when_listener_degraded() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let started = std::time::Instant::now();
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(!result.success, "degraded IPC should report not consumed");
+        assert!(
+            elapsed < std::time::Duration::from_millis(250),
+            "degraded bypass must not wait for the 2s IPC timeout: elapsed={elapsed:?}"
+        );
+        let leftover: Vec<_> = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "degraded bypass must not leave a file-IPC fallback patch"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_listener_degraded_direct_disk")
+                && ops_log.contains("transport=try_ipc"),
+            "direct-disk bypass should be logged:\n{ops_log}"
         );
     }
 

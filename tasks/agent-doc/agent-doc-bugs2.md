@@ -267,6 +267,11 @@ Verification:
 
 ### Re: do [#auto-complete-done-archive-mirrors] — gpt-5
 
+> **Queue prompt:**
+>
+> do [#sync-fast-pane-hotpath]
+
+
 Implemented #auto-complete-done-archive-mirrors.
 
 > **Queue prompt:**
@@ -436,7 +441,7 @@ Escalation: none.
 Residual state:
 - The source repo still has unrelated unstaged edits in agent-doc-orchestration/src/queue.rs, queue_cmd.rs, and start.rs; I left them untouched.
 - The root repo still has unrelated dirty submodule state in src/boost-client, src/corky, and src/instruction-files; I left that untouched.
-<!-- agent:boundary:0486f364 -->
+<!-- agent:boundary:30aac46e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -463,7 +468,7 @@ Residual state:
 - ~~do [#jb-busy-active-turn-stall-live-verify]~~
 - ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
 - ~~do [#multi-session-shared-build-isolation]~~
-- do [#sync-fast-pane-hotpath]
+- ~~do [#sync-fast-pane-hotpath]~~
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->
 ###
@@ -493,7 +498,6 @@ What are #next-steps to fix bugs?
 1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED 9df1244f: runtime writes now persist structured .overlay.yrs sidecars beside legacy .yrs from the same markdown snapshot, and preflight queue dedup is markdown-AST node-keyed so intentional duplicate do/free-text prompts survive. REMAINING: legacy text CRDT is still the merge base; editor/IPC plugins still need the authoritative node_patches apply path and realtime watcher convergence. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 3. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
-4. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
 <!-- /agent:backlog -->
 
 ## Review

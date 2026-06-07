@@ -35,7 +35,43 @@ complete
 Compacted content:
 - Archived 17 response topic(s): queue context reset; queue context reset and partial compaction; go-mode queue context reset; 14 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:2a3033ca -->
+
+### Re: #adoc-semantic-diff-nav — gpt-5
+
+Implemented semantic preflight diff navigation for agent-doc.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/diff_io.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/specs/04-diff-computation.md`
+- parent gitlink: `src/agent-doc`
+
+What changed:
+- `ComputeResult` now carries both exact snapshot and stable current document text so preflight can build semantic summaries from the same inputs as the raw diff.
+- `preflight` now emits additive `semantic_diff` JSON when there is meaningful semantic signal, including changed components, bounded before/after navigation handles, AST node-level queue/backlog identity events, and prompt-bearing change previews.
+- Empty semantic summaries are omitted to preserve existing output shape for no-signal cases.
+- The diff computation spec now documents the additive `semantic_diff` contract and the bounded-summary/no-full-document rule.
+
+Verification:
+- `cargo fmt --check` passed earlier during focused verification.
+- `cargo test -q -p agent-doc-orchestration semantic_diff` passed.
+- `cargo test -q -p agent-doc-orchestration preflight_output` passed.
+- `cargo test -q -p agent-doc-orchestration preflight_detects_diff` passed.
+- `cargo check -q -p agent-doc-orchestration` passed.
+- `make check` passed: clippy/build gates, 3,949 nextest tests, doctests, and the ignored closeout simulation target.
+- `make install` passed and installed `agent-doc 0.34.0` plus the shared library.
+- `agent-doc --version` reports `agent-doc 0.34.0`.
+- Latest GitHub Actions `CI` run before commit was green: `27103650327`, `completed/success`, `2026-06-07T20:17:47Z`.
+- `git diff --check` passed.
+
+Commits:
+- `src/agent-doc`: `ab04b830 feat: add semantic preflight diff summary` pushed to `btakita/agent-doc main`.
+- parent repo: `c5baf0a40 chore: update agent-doc submodule` pushed to `btakita/agent-loop main`.
+
+Confidence: high. The feature is covered by focused serialization/semantic tests and the full project check/install path.
+
+Escalation: none.
+<!-- agent:boundary:e953909c -->
 <!-- /agent:exchange -->
 
 ## Queue

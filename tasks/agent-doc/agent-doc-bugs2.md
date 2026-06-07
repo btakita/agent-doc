@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -154,7 +154,7 @@ Verification:
 - `make check`
 
 Commits: `src/agent-doc` `2f2e9327` (`Make focus default to fast handoff`), parent submodule pointer `c8f7fd750` (`Update agent-doc submodule`). CI check: `agent-doc` CI run `27098734151` was `in_progress` when checked; per instruction, I did not wait for completion. The parent repo has no workflow named `CI`.
-<!-- agent:boundary:734a0b91 -->
+<!-- agent:boundary:6c86f31d -->
 <!-- /agent:exchange -->
 
 ## Queue

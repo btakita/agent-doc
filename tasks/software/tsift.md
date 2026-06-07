@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -76,7 +76,7 @@ Flipping `ranked_output_default` to `true` without that study would violate the 
 3. Only then flip `ranked_output_default` → `true`, update the gate + `lib.rs:24441` test, and integrate the shipped `#memgraphrag1` decay ranking into the unified scoring so memory + code share one ranking.
 
 Stopping the auto-drain here — a gate decision needs your eyeball, and I'd rather not auto-flip a quality-gated default. `#surrealbulk` and `#trt1phase2` remain queued; say the word (or run the quality study) and I'll proceed. I also reordered the backlog so `#trt1phase2` (deferred follow-on) sits below `#rankdefault`/`#surrealbulk` again — my earlier `--pending-add` had prepended it ahead of your groomed priority.
-<!-- agent:boundary:1c7ebf55 -->
+<!-- agent:boundary:2252f2ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,11 +86,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#trt1]~~
-- ~~do [#memgraphrag-ont]~~
-- [#trt1phase2]
-- ~~[#rankdefault]~~
-- ~~[#surrealbulk]~~
 <!-- /agent:queue -->
 
 ## Backlog

@@ -263,6 +263,9 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             };
             let display = file.display();
             if input.stop_hook_active {
+                if let Some(response) = committed_prompt_diff_stop_response(&file, &reason)? {
+                    return Ok(response);
+                }
                 return Ok(StopResponse::Stop {
                     continue_: false,
                     stop_reason: format!(
@@ -278,6 +281,49 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             })
         }
     }
+}
+
+fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {
+    if !is_committed_prompt_diff_interruption(reason) {
+        return Ok(None);
+    }
+    let prompt = crate::session_check::unresolved_exchange_prompt(file)?
+        .or_else(|| prompt_target_from_interruption_reason(reason))
+        .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
+    Ok(Some(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook found fresh unresolved exchange work for {disp} after the previous cycle was already committed. Continue THIS turn in-pane: answer {prompt:?} in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT send the final answer yet.",
+            disp = file.display(),
+            prompt = first_nonempty_prompt_line(&prompt),
+        ),
+    }))
+}
+
+fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
+    reason.contains("is `committed`")
+        && reason.contains("prompt_target:")
+        && (reason.contains("unresolved prompt-bearing user changes")
+            || reason.contains(
+                "active harness session changed this document after the last committed closeout",
+            ))
+        && (reason.contains("no new agent-doc cycle started")
+            || reason.contains("without reopening the binary-owned write/commit path"))
+}
+
+fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
+    let marker = "prompt_target:";
+    let tail = reason.split_once(marker)?.1.trim();
+    (!tail.is_empty()).then(|| tail.to_string())
+}
+
+fn first_nonempty_prompt_line(prompt: &str) -> String {
+    prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(prompt)
+        .trim()
+        .to_string()
 }
 
 fn auto_queue_continuation_response(
@@ -2294,6 +2340,62 @@ agent-doc {}\n",
                 assert!(stop_reason.contains("cycle is still open"));
             }
             other => panic!("expected stop response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_hook_active_blocks_committed_cycle_fresh_prompt_instead_of_stopping() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit", Some(&original), Some(&original))
+            .unwrap();
+        fs::write(
+            &doc,
+            format!(
+                "{original}\n❯ do #repair-false-closeouts. #spec-test-build-install-commit-push\n"
+            ),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("is `committed`"), "{message}");
+                assert!(
+                    message.contains("no new agent-doc cycle started")
+                        || message.contains("without reopening the binary-owned write/commit path"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected interrupted session-check status, got {other:?}"),
+        }
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Still working.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.contains("fresh unresolved exchange work"),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains("previous cycle was already committed"),
+                    "{reason}"
+                );
+                assert!(reason.contains("do #repair-false-closeouts"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
+                assert!(!reason.contains("already continued once"), "{reason}");
+            }
+            other => panic!("expected block response, got {other:?}"),
         }
     }
 }

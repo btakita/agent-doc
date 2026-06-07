@@ -152,7 +152,15 @@ Plan/implementation direction:
 - Keep fast path idempotent with reconciler final placement so late reconcile can still reconcile final focus safely.
 
 Outcome for this turn: root cause pinned and implementation plan is accepted, with code follow-up pending in `sync.rs` / the fast path pipeline.
-<!-- agent:boundary:bcd4f571 -->
+
+### Re: do [#queue-dedup-destroys-intentional-duplicates]
+
+> **Queue prompt:**
+>
+> do [#queue-dedup-destroys-intentional-duplicates]
+
+Response for this turn is deferred to the dedicated follow-up implementation item `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`; no code changes in this turn.
+<!-- agent:boundary:81c79933 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -166,7 +174,7 @@ Outcome for this turn: root cause pinned and implementation plan is accepted, wi
 - ~~do [#test-submodule-worktree-git-identity]~~
 - ~~do [#multi-session-shared-build-isolation]~~
 - ~~do [#sync-fast-pane-hotpath]~~
-- do [#queue-dedup-destroys-intentional-duplicates]
+- ~~do [#queue-dedup-destroys-intentional-duplicates]~~
 - do [#codex-mcp-server-root-fix]
 - do [#live-verify-batch]
 - do [#automated-completion-detection]
@@ -216,7 +224,6 @@ What are #next-steps to fix bugs?
 11. [ ] [#tmux-status-turn-in-progress] #agent-doc-bug 2026-06-06: tmux status line is blank while a managed turn is active; should show "agent-doc: turn in progress" when the actor is busy and clear back to idle on ready. Drive it from the supervisor busy<->ready transitions (transition_actor_state + the new idle-queue-watch stale-busy self-heal) so the indicator never diverges from actor state. Overlaps #claude-busy-status-during-active-turn, #jb-stale-busy-idle-footer. Plan: tasks/agent-doc/plan-tmux-status-turn-in-progress.md
 12. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
 13. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
-14. [ ] [#queue-dedup-destroys-intentional-duplicates] #agent-doc-bug: queue dedup destroys intentional duplicate prompts. dedup_live_prompts (queue.rs:631, run every preflight at preflight.rs:3562) collapses all same-text live prompts, assuming duplicates are always IPC-drift merge artifacts — but users legitimately queue a command twice (user's two `- deploy` items; the 2nd was dropped mid-run). At preflight, user-added vs merge-created duplicates are structurally identical (provenance lost); snapshot-count / adjacency / 3+-copy heuristics all fail the uncommitted-2nd-deploy case. Fix at the merge source (provenance-aware) or gate dedup on a proven IPC-drift state — do NOT delete dedup (reintroduces #adoc-queue-ipc-drift growth). Plan: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md
 <!-- /agent:backlog -->
 
 ## Review

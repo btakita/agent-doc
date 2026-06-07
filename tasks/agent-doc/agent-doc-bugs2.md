@@ -86,7 +86,55 @@ Verification: network probe printed `AGENT_DOC_NETWORK_PROBE_OK`; `cargo test -p
 Commits/push: submodule commit `316681b0` pushed to `btakita/agent-doc` `main`; current `agent-doc` main is `6a017bea`, which includes that commit plus a later pinned-queue fix. Superproject pointer commit pushed to `btakita/agent-loop` `main` as `1b933127b` via a clean temporary worktree.
 
 Confidence: high. Escalation: none for the code path; the superproject workflow has an external CI-start blocker from GitHub billing/spending-limit allocation.
-<!-- agent:boundary:82bdf935 -->
+
+### Re: #md-ast-ipc-node-patches — gpt-5
+
+Implemented `#md-ast-ipc-node-patches`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-markdown-ast/src/mutations.rs`
+- `src/agent-doc/agent-doc-orchestration/src/write.rs`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/RepositionBoundaryTest.kt`
+- `src/agent-doc/editors/vscode/src/extension.ts`
+- `src/agent-doc/docs/reference/ipc.md`
+- `src/agent-doc/agent-doc-orchestration/Cargo.toml`
+- `src/agent-doc/Cargo.lock`
+- superproject gitlink `src/agent-doc`
+
+What changed:
+- IPC payloads now carry node-addressed metadata: legacy component patch entries include `op` and `node_id` where available, and response IPC payloads include top-level `node_patches` entries with `component`, `node_key`, `op`, anchors, and content.
+- Markdown AST mutation keys no longer depend on byte offsets, survive strikethrough, and can consume multiple node keys from one initial view.
+- Queue consumption uses node-keyed strikes when the queue has AST item nodes, and falls back to the existing rendered queue update for synthetic/free-text queue entries that have no list node.
+- JetBrains and VS Code receivers parse/preserve the new wire shape while retaining legacy component patch application during the transition.
+- The IPC reference documents `node_patches`.
+
+Commits:
+- `src/agent-doc`: `7271ec08 Add node-keyed IPC patch metadata`; `origin/main` is currently `f3375fb8` and includes that commit.
+- superproject: `715ba31c4 Update agent-doc submodule` pushed to `btakita/agent-loop/main`.
+
+Commands run:
+- Network probe requested by the operator: `AGENT_DOC_NETWORK_PROBE_OK`.
+- `cargo test -p agent-doc-orchestration build_ipc_node_patches_json -- --nocapture`.
+- `./gradlew test --tests com.github.btakita.agentdoc.RepositionBoundaryTest`.
+- `npm run compile` in `editors/vscode`.
+- `cargo test --test finalize_integration finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id -- --nocapture`.
+- `cargo test --test finalize_integration finalize_echoes_consumed_free_text_queue_prompt_into_response -- --nocapture`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`.
+- `gh run watch 27083360552 --exit-status` for `btakita/agent-doc` CI.
+
+Verification:
+- Local focused Rust/editor checks passed.
+- Local full `make check` passed.
+- `btakita/agent-doc` GitHub CI run `27083360552` passed, including `make check` and `make tmux-ci`.
+- Superproject has no `CI` workflow; latest `Agent Doc` workflow run `27083460378` did not start because GitHub reported account billing/spending-limit runner allocation failure for both jobs. This is the same external runner blocker class as earlier, not a code failure.
+
+Confidence: high.
+
+Escalation: no code blocker remains. The only unresolved verification issue is the superproject GitHub billing/spending-limit setting that prevents its `Agent Doc` workflow from starting.
+
+--done md-ast-ipc-node-patches
+<!-- agent:boundary:b5916e59 -->
 <!-- /agent:exchange -->
 
 ## Queue

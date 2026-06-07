@@ -73,6 +73,7 @@ mod queue_dispatch;
 mod read;
 mod rename;
 mod reset;
+mod self_install;
 mod serve;
 mod session_actor_cmd;
 mod session_cmd;
@@ -1130,6 +1131,19 @@ enum Commands {
         /// Target directory (default: directory containing agent-doc binary)
         #[arg(long)]
         target_dir: Option<String>,
+    },
+    /// Install this committed checkout from an isolated sibling git worktree
+    #[command(name = "self-install")]
+    SelfInstall {
+        /// Source repo to install from (default: current git root)
+        #[arg(long)]
+        source_root: Option<PathBuf>,
+        /// Target directory for the shared library (default: binary directory)
+        #[arg(long)]
+        target_dir: Option<PathBuf>,
+        /// Leave the temporary worktree on disk for debugging
+        #[arg(long)]
+        keep_worktree: bool,
     },
     /// List all available commands as JSON (for editor plugin autocomplete)
     #[command(name = "commands")]
@@ -2615,6 +2629,11 @@ fn main() -> anyhow::Result<()> {
         Commands::LibInstall { source, target_dir } => {
             lib_install::run(source.as_deref(), target_dir.as_deref())
         }
+        Commands::SelfInstall {
+            source_root,
+            target_dir,
+            keep_worktree,
+        } => self_install::run(source_root.as_deref(), target_dir.as_deref(), keep_worktree),
         Commands::ListCommands => commands::run(),
         Commands::Session { action } => match action {
             Some(SessionAction::Set { name }) => session_cmd::set(&name),

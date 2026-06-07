@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Session-isolated self install.** `agent-doc self-install` now installs the
+current committed checkout from a temporary sibling git worktree, preserving
+relative Cargo path dependencies like `../agent-kit` while avoiding dirty files
+from concurrent sessions in the shared `src/agent-doc` checkout. It runs
+`cargo install --path .`, builds the release cdylib, installs it with the
+existing atomic `lib-install` path, and removes the worktree unless
+`--keep-worktree` is set. Test
+`isolated_worktree_uses_committed_head_not_dirty_checkout`.
+
 - **JetBrains Run Agent Doc recognizes active-turn skip-wait refusals.** The
 JetBrains route-failure classifier now maps the route core's
 `pane is busy on an active ... turn` dispatch-only refusal to the immediate

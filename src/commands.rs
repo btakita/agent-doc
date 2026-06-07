@@ -235,6 +235,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Check for updates and upgrade",
     ));
     cmds.push(cmd(
+        "/agent-doc self-install",
+        "[--source-root DIR] [--target-dir DIR] [--keep-worktree]",
+        "Install committed checkout from an isolated sibling git worktree",
+    ));
+    cmds.push(cmd(
         "/agent-doc autoclaim",
         "",
         "Re-establish claims after context compaction",
@@ -682,6 +687,7 @@ mod tests {
         let cmds = all_commands();
         let json = serde_json::to_string(&cmds).unwrap();
         assert!(json.contains("/agent-doc"));
+        assert!(json.contains("/agent-doc self-install"));
         assert!(json.contains("/help"));
         assert!(json.contains("/existence"));
     }

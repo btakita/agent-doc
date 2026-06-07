@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-fn platform_lib_name() -> &'static str {
+pub(crate) fn platform_lib_name() -> &'static str {
     #[cfg(target_os = "linux")]
     {
         "libagent_doc.so"
@@ -79,11 +79,17 @@ pub fn install_versioned(source: &Path, target_dir: &Path, version: &str) -> Res
 }
 
 pub fn run(source: Option<&str>, target_dir: Option<&str>) -> Result<()> {
+    let source_path = source.map(PathBuf::from);
+    let target_dir = target_dir.map(PathBuf::from);
+    run_paths(source_path.as_deref(), target_dir.as_deref())
+}
+
+pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let ext = platform_lib_ext();
 
     let source_path = match source {
-        Some(s) => PathBuf::from(s),
+        Some(s) => s.to_path_buf(),
         None => {
             let cwd = std::env::current_dir()?;
             cwd.join(format!("target/release/{}", platform_lib_name()))
@@ -98,7 +104,7 @@ pub fn run(source: Option<&str>, target_dir: Option<&str>) -> Result<()> {
     }
 
     let target = match target_dir {
-        Some(d) => PathBuf::from(d),
+        Some(d) => d.to_path_buf(),
         None => {
             let exe = std::env::current_exe()?;
             exe.parent()

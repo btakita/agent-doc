@@ -24,9 +24,11 @@
 The registry key is the stable document identity; `session_id` stays in the value so the same document can preserve its session UUID while the owning supervisor instance changes. Multiple documents can still map to the same pane (one Claude/Codex session, multiple files). The `window` field (optional) enables window-scoped routing — `claim --window` and `layout --window` use it to filter panes to the correct IDE window.
 
 The broader single-owner session-actor contract lives in
-[08a-session-actor-contract.md](08a-session-actor-contract.md). In phase 1 the
-registry remains a projection/binding helper, while the session log carries the
-monotonic ownership-generation provenance.
+[08a-session-actor-contract.md](08a-session-actor-contract.md), and the target
+single-process control-plane contract lives in
+[08b-single-process-control-plane.md](08b-single-process-control-plane.md). In
+phase 1 the registry remains a projection/binding helper, while the session log
+carries the monotonic ownership-generation provenance.
 
 ## Use Cases
 

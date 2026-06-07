@@ -165,3 +165,4 @@ Command sub-specs:
 
 Session-routing supplements:
 - [Session Actor Contract](specs/08a-session-actor-contract.md)
+- [Single Process Control Plane Contract](specs/08b-single-process-control-plane.md)

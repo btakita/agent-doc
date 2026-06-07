@@ -78,24 +78,50 @@ pub enum MutationInsertPosition {
 /// Return component item nodes with deterministic node keys.
 pub fn item_nodes(source: &str, component: &str) -> MutationResult<Vec<MutationItemNode>> {
     let (component_index, component_node) = find_component(source, component)?;
+    Ok(item_nodes_for_component(
+        component_index,
+        component_node.name.clone(),
+        component_node.items,
+    ))
+}
+
+/// Return all component item nodes in document order with deterministic node keys.
+pub fn all_item_nodes(source: &str) -> Vec<MutationItemNode> {
+    overlay::components(source)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(component_index, component_node)| {
+            item_nodes_for_component(
+                component_index,
+                component_node.name.clone(),
+                component_node.items,
+            )
+        })
+        .collect()
+}
+
+fn item_nodes_for_component(
+    component_index: usize,
+    component: String,
+    items: Vec<Item>,
+) -> Vec<MutationItemNode> {
     let mut occurrences: HashMap<String, usize> = HashMap::new();
-    Ok(component_node
-        .items
+    items
         .into_iter()
         .enumerate()
         .map(|(index, item)| {
-            let identity = node_identity(&item);
+            let identity = node_occurrence_identity(&item);
             let occurrence = occurrences.entry(identity).or_insert(0);
-            let node_key = initial_node_key(component, component_index, *occurrence, &item);
+            let node_key = initial_node_key(&component, component_index, *occurrence, &item);
             *occurrence += 1;
             MutationItemNode {
-                component: component.to_string(),
+                component: component.clone(),
                 node_key,
                 index,
                 item,
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Strike a component item by durable node key. Already-struck items are idempotent.
@@ -369,8 +395,8 @@ fn open_marker_end(source: &str, component: &Component) -> usize {
         .unwrap_or(component.end_byte)
 }
 
-fn node_identity(item: &Item) -> String {
-    format!("{:?}\u{0}{}\u{0}{}", item.kind, item.id, item.text)
+fn node_occurrence_identity(item: &Item) -> String {
+    item.id.clone()
 }
 
 fn initial_node_key(
@@ -471,6 +497,38 @@ mod tests {
 
         assert_eq!(updated.matches("- do [#beta]\n").count(), 2);
         assert_eq!(updated.matches("- duplicate prose\n").count(), 2);
+    }
+
+    #[test]
+    fn same_id_different_text_gets_distinct_node_keys() {
+        let doc = "\
+<!-- agent:queue -->
+- do [#same] first
+- do [#same] second
+<!-- /agent:queue -->
+";
+        let nodes = item_nodes(doc, "queue").unwrap();
+
+        assert_eq!(nodes[0].node_key, "queue:0:same:0");
+        assert_eq!(nodes[1].node_key, "queue:0:same:1");
+    }
+
+    #[test]
+    fn all_item_nodes_preserves_component_indexes() {
+        let doc = "\
+<!-- agent:queue -->
+- do [#alpha]
+<!-- /agent:queue -->
+
+<!-- agent:queue -->
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let nodes = all_item_nodes(doc);
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].node_key, "queue:0:alpha:0");
+        assert_eq!(nodes[1].node_key, "queue:1:beta:0");
     }
 
     #[test]

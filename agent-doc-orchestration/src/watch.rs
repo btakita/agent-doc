@@ -26,6 +26,9 @@
 //!   `stream::flush_to_document()`.
 //! - CRDT documents also get reactive file-watching with zero debounce (tracked in
 //!   `reactive_paths: HashSet<PathBuf>`).
+//! - Watched documents keep a previous markdown projection and log
+//!   `document_node_events` batches with node-keyed item insert/remove/replace/
+//!   move/strike/unstrike events on each file change.
 //! - Session registry is rescanned every 10 s to pick up newly registered documents.
 //! - Dead stream panes (pane no longer alive in tmux) are pruned on rescan.
 //! - Idle timeout: daemon exits automatically after 60 s with no active sessions.
@@ -67,6 +70,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
+
+use agent_doc_markdown_ast::events::DocumentNodeEvent;
 
 use crate::{config::Config, frontmatter, graph::ActorContext, run, sessions, stream};
 
@@ -167,6 +172,46 @@ fn strip_boundaries_for_hash(content: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn update_node_snapshot(
+    path: &Path,
+    snapshots: &mut HashMap<PathBuf, String>,
+) -> Result<Vec<DocumentNodeEvent>> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {} for node-event snapshot", path.display()))?;
+    let previous = snapshots.insert(path.to_path_buf(), content.clone());
+    Ok(previous
+        .as_deref()
+        .map(|before| agent_doc_markdown_ast::events::diff_node_events(before, &content))
+        .unwrap_or_default())
+}
+
+fn log_node_events(path: &Path, events: &[DocumentNodeEvent]) {
+    if events.is_empty() {
+        return;
+    }
+    let payload = serde_json::json!({
+        "event": "document_node_events",
+        "file": path.display().to_string(),
+        "events": events.iter().map(node_event_json).collect::<Vec<_>>(),
+    });
+    crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
+}
+
+fn node_event_json(event: &DocumentNodeEvent) -> serde_json::Value {
+    serde_json::json!({
+        "component": &event.component,
+        "node_key": &event.node_key,
+        "op": event.kind.as_str(),
+        "item_id": &event.item_id,
+        "before_index": event.before_index,
+        "after_index": event.after_index,
+        "before": event.before.as_deref(),
+        "after": event.after.as_deref(),
+        "previous_node_key": event.previous_node_key.as_deref(),
+        "next_node_key": event.next_node_key.as_deref(),
+    })
 }
 
 /// Check if a PID is alive via /proc.
@@ -343,6 +388,7 @@ fn run_event_loop(
     let mut watched_files: Vec<PathBuf> = Vec::new();
     let mut reactive_paths: HashSet<PathBuf> = HashSet::new();
     let mut stream_states: HashMap<PathBuf, StreamState> = HashMap::new();
+    let mut node_snapshots: HashMap<PathBuf, String> = HashMap::new();
 
     for entry in &entries {
         match entry.mode {
@@ -351,6 +397,13 @@ fn run_event_loop(
                     eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
                 } else {
                     watched_files.push(entry.path.clone());
+                    if let Err(e) = update_node_snapshot(&entry.path, &mut node_snapshots) {
+                        eprintln!(
+                            "[watch] could not seed node-event snapshot for {}: {}",
+                            entry.path.display(),
+                            e
+                        );
+                    }
                 }
             }
             DocMode::StreamCapture => {
@@ -369,6 +422,13 @@ fn run_event_loop(
                     } else {
                         watched_files.push(entry.path.clone());
                         reactive_paths.insert(entry.path.clone());
+                        if let Err(e) = update_node_snapshot(&entry.path, &mut node_snapshots) {
+                            eprintln!(
+                                "[watch] could not seed node-event snapshot for {}: {}",
+                                entry.path.display(),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -448,6 +508,15 @@ fn run_event_loop(
                             } else {
                                 eprintln!("Now watching {}", entry.path.display());
                                 watched_files.push(entry.path.clone());
+                                if let Err(e) =
+                                    update_node_snapshot(&entry.path, &mut node_snapshots)
+                                {
+                                    eprintln!(
+                                        "[watch] could not seed node-event snapshot for {}: {}",
+                                        entry.path.display(),
+                                        e
+                                    );
+                                }
                             }
                         }
                     }
@@ -478,6 +547,15 @@ fn run_event_loop(
                                 } else {
                                     eprintln!("Now watching {} (reactive)", entry.path.display());
                                     watched_files.push(entry.path.clone());
+                                    if let Err(e) =
+                                        update_node_snapshot(&entry.path, &mut node_snapshots)
+                                    {
+                                        eprintln!(
+                                            "[watch] could not seed node-event snapshot for {}: {}",
+                                            entry.path.display(),
+                                            e
+                                        );
+                                    }
                                 }
                             }
                             reactive_paths.insert(entry.path.clone());
@@ -624,6 +702,15 @@ fn run_event_loop(
                 // User change — reset cycle counter
                 state.cycle_count = 0;
                 state.last_hash = hash_content(&path);
+            }
+
+            match update_node_snapshot(&path, &mut node_snapshots) {
+                Ok(node_events) => log_node_events(&path, &node_events),
+                Err(e) => eprintln!(
+                    "[watch] node-event snapshot failed for {}: {}",
+                    path.display(),
+                    e
+                ),
             }
 
             // Skip if file has an active agent-doc operation (prevents duplicate
@@ -869,6 +956,65 @@ mod tests {
         let mut state = FileState::new();
         state.last_hash = Some(42);
         assert_eq!(state.last_hash, Some(42));
+    }
+
+    #[test]
+    fn update_node_snapshot_emits_node_keyed_events_after_seed() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("session.md");
+        std::fs::write(
+            &path,
+            "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let mut snapshots = HashMap::new();
+
+        assert!(
+            update_node_snapshot(&path, &mut snapshots)
+                .unwrap()
+                .is_empty()
+        );
+
+        std::fs::write(
+            &path,
+            "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let events = update_node_snapshot(&path, &mut snapshots).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].kind,
+            agent_doc_markdown_ast::events::DocumentNodeEventKind::Insert
+        );
+        assert!(events[0].node_key.contains(":beta:"));
+        assert!(
+            events[0]
+                .previous_node_key
+                .as_deref()
+                .is_some_and(|key| key.contains(":alpha:"))
+        );
+    }
+
+    #[test]
+    fn log_node_events_writes_document_node_events_payload() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let path = dir.path().join("session.md");
+        let before =
+            "<!-- agent:backlog -->\n1. [ ] [#task] old wording\n<!-- /agent:backlog -->\n";
+        let after = "<!-- agent:backlog -->\n1. [ ] [#task] new wording\n<!-- /agent:backlog -->\n";
+        std::fs::write(&path, after).unwrap();
+        let events = agent_doc_markdown_ast::events::diff_node_events(before, after);
+
+        log_node_events(&path, &events);
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("document_node_events"), "{log}");
+        assert!(log.contains("\"event\":\"document_node_events\""), "{log}");
+        assert!(log.contains("\"component\":\"backlog\""), "{log}");
+        assert!(log.contains("\"node_key\":\"backlog:0:task:0\""), "{log}");
+        assert!(log.contains("\"op\":\"replace\""), "{log}");
     }
 
     #[test]

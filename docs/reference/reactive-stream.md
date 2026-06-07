@@ -84,6 +84,8 @@ The watch daemon (`watch.rs`) tracks reactive paths via a `HashSet<PathBuf>`:
 - `discover_entries()` marks stream-mode documents as reactive
 - Stream-mode paths are added to both `watched_files` (for file-change events) and `stream_states` (for tmux capture polling)
 - In the debounce check, reactive paths use `Duration::ZERO` instead of the configured debounce
+- Every watched document keeps the last observed markdown projection in memory. On each file change, the daemon diffs the previous and current agent-component overlay and emits a `document_node_events` ops-log payload with `{component, node_key, op, item_id, before_index, after_index, before, after, previous_node_key, next_node_key}` for each changed item.
+- Event `op` values are `insert`, `remove`, `replace`, `strike`, `unstrike`, and `move`. These node-keyed records are the realtime handoff for follow-up features such as backlog `:inbox_tray:` enqueue without relying on text-line matching.
 - All other loop prevention mechanisms apply unchanged
 
 ## Configuration

@@ -6,6 +6,18 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Watch daemon emits node-keyed document events (`#md-ast-realtime-watcher`).**
+  The markdown AST crate now exposes `events::diff_node_events`, producing
+  insert, remove, replace, move, strike, and unstrike events keyed by the same
+  semantic node ids used by mutations and IPC patches. The watch daemon seeds a
+  per-file node snapshot for watched session documents and logs `document_node_events`
+  JSON batches on subsequent file changes, giving realtime enqueue/follow-up work
+  a stable node-keyed event stream. Tests
+  `diff_node_events_reports_insert_with_anchors`,
+  `diff_node_events_reports_strike_by_stable_node_key`,
+  `diff_node_events_reports_reorder_without_text_matching`, and
+  `update_node_snapshot_emits_node_keyed_events_after_seed`.
+
 - **Markdown-AST IPC patches are node-addressed (`#md-ast-ipc-node-patches`).**
   Queue closeout now derives semantic occurrence node keys for live queue items
   and strikes non-draining queue heads through the AST mutation layer, so

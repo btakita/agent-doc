@@ -13,6 +13,7 @@
 //! operations on node identity instead of text.
 
 pub mod crdt;
+pub mod events;
 pub mod mutations;
 pub mod overlay;
 
@@ -102,9 +103,7 @@ fn block_id(kind: &BlockKind, text: &str) -> String {
 /// returns no tree (both effectively impossible for valid in-process setup).
 pub fn parse(source: &str) -> Option<Block> {
     let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_md::LANGUAGE.into())
-        .ok()?;
+    parser.set_language(&tree_sitter_md::LANGUAGE.into()).ok()?;
     let tree = parser.parse(source, None)?;
     Some(build_block(tree.root_node(), source.as_bytes()))
 }

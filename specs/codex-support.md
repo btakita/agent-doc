@@ -28,6 +28,12 @@ OpenCode:
    applies the response through the normal template/write pipeline, commit
    transaction, and `session-check`.
 
+Codex may also enter that same boundary through `agent-doc mcp serve`, whose
+stdio MCP tools expose document read/session-check/finalize operations to the
+host. The MCP server is a transport adapter only: its finalize tool must call
+the strict shared write/commit/session-check machinery, and a failed MCP tool
+call must leave the same recovery surface as the equivalent CLI closeout.
+
 Do not standardize on the Claude Code slash command or Skill-tool path across
 all harnesses. That path is not available to Codex. Standardize on the
 harness-neutral closeout and document-mutation path instead: component patches

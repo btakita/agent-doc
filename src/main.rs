@@ -57,6 +57,7 @@ mod jobs;
 mod layout;
 mod lib_gc;
 mod lib_install;
+mod mcp;
 mod migrate;
 mod mode;
 mod notify;
@@ -292,6 +293,16 @@ struct WriteArgs {
     /// Commit message for each `--commit-sibling` (repeatable, positional pairing).
     #[arg(long = "commit-sibling-message", value_name = "MSG")]
     commit_sibling_message: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Run a stdio Model Context Protocol server for agent-doc tools
+    Serve {
+        /// Set the working directory before serving MCP requests
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -739,6 +750,11 @@ enum Commands {
         /// Strict Codex final gate: exit nonzero when a clean document still owes an active `agent:queue auto` continuation
         #[arg(long)]
         codex_final_gate: bool,
+    },
+    /// Run agent-doc's stdio MCP server
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
     },
     /// Serve a localhost HTTP markdown editor for one document or a project session list
     Serve {
@@ -2314,6 +2330,9 @@ fn main() -> anyhow::Result<()> {
             file,
             codex_final_gate,
         } => agent_doc_orchestration::session_check::run_with_options(&file, codex_final_gate),
+        Commands::Mcp { action } => match action {
+            McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),
+        },
         Commands::Serve {
             file,
             host,

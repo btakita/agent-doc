@@ -218,6 +218,7 @@
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -235,6 +236,10 @@ use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
     flow::types::FlowOutcome,
 };
+
+thread_local! {
+    static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
 
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
@@ -295,6 +300,31 @@ pub enum CommitMode {
     None,
     BestEffort,
     Required,
+}
+
+pub fn run_command_with_response(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    response: String,
+) -> Result<()> {
+    let previous = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.replace(Some(response)));
+    let result = run_command(options, commit_mode);
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.replace(previous);
+    });
+    result
+}
+
+fn read_response_input() -> Result<String> {
+    if let Some(response) = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.borrow_mut().take()) {
+        return Ok(response);
+    }
+
+    let mut response = String::new();
+    std::io::stdin()
+        .read_to_string(&mut response)
+        .context("failed to read response from stdin")?;
+    Ok(response)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7126,11 +7156,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     }
     verify_pane_ownership(file)?;
 
-    // Read response from stdin
-    let mut response = String::new();
-    std::io::stdin()
-        .read_to_string(&mut response)
-        .context("failed to read response from stdin")?;
+    let response = read_response_input()?;
 
     if response.trim().is_empty() {
         if recover_empty_response_for_strict_closeout(file, &flags)? {
@@ -7280,11 +7306,7 @@ pub fn run_template(
     verify_pane_ownership(file)?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
 
-    // Read response from stdin
-    let mut response = String::new();
-    std::io::stdin()
-        .read_to_string(&mut response)
-        .context("failed to read response from stdin")?;
+    let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
         if recover_empty_response_for_strict_closeout(file, &flags)? {
@@ -7542,11 +7564,7 @@ pub fn run_stream(
     // executing inside a tmux pane that owns a different document.
     crate::sync::log_cross_document_execution_context(file, "stream");
 
-    // Read response from stdin
-    let mut response = String::new();
-    std::io::stdin()
-        .read_to_string(&mut response)
-        .context("failed to read response from stdin")?;
+    let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
         if recover_empty_response_for_strict_closeout(file, &flags)? {
@@ -8382,11 +8400,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
     let rc = crate::graph::RunContext::new(file.to_path_buf());
 
-    // Read response from stdin
-    let mut response = String::new();
-    std::io::stdin()
-        .read_to_string(&mut response)
-        .context("failed to read response from stdin")?;
+    let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
         if recover_empty_response_for_strict_closeout(file, &flags)? {

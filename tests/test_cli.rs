@@ -5,6 +5,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
@@ -79,6 +80,120 @@ fn template_doc(title: &str, exchange: &str, backlog: &str, icebox: &str) -> Str
 #[test]
 fn test_binary_exists() {
     let _cmd = agent_doc_cmd();
+}
+
+#[test]
+fn mcp_serve_handles_initialize_list_and_read() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    write!(
+        file,
+        "<!-- agent:exchange -->\nMCP body\n<!-- /agent:exchange -->\n"
+    )
+    .unwrap();
+
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "agent-doc-test", "version": "1" }
+        }
+    });
+    let tools_list = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list"
+    });
+    let read = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_read",
+            "arguments": {
+                "file": file.path().display().to_string(),
+                "component": "exchange"
+            }
+        }
+    });
+    let input = format!("{initialize}\n{tools_list}\n{read}\n");
+
+    let assert = agent_doc_cmd()
+        .args(["mcp", "serve"])
+        .write_stdin(input)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let responses: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+
+    assert_eq!(responses.len(), 3);
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
+    assert!(
+        responses[1]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "agent_doc_finalize")
+    );
+    assert_eq!(
+        responses[2]["result"]["structuredContent"]["content"],
+        "MCP body\n"
+    );
+}
+
+#[test]
+fn mcp_finalize_uses_strict_write_commit_path() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        template_doc(
+            "Session",
+            "❯ Please reply\n<!-- agent:boundary:1234abcd -->\n",
+            "",
+            "",
+        ),
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let finalize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_finalize",
+            "arguments": {
+                "file": doc.display().to_string(),
+                "response": "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n"
+            }
+        }
+    });
+
+    let assert = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["mcp", "serve"])
+        .write_stdin(format!("{finalize}\n"))
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(response["result"]["isError"], false);
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: MCP finalize - gpt-5"),
+        "HEAD blob should contain the MCP finalize response"
+    );
 }
 
 #[test]

@@ -103,7 +103,26 @@ Verification passed:
 - GitHub CI `27097931595` green, including `make check` and `make tmux-ci`
 
 Commits: `src/agent-doc` `5fd64b26` (`Use overlay CRDT as merge base`), parent submodule pointer `960fab435`. With the earlier IPC node-patch and watcher work, `#md-ast-document-model` is now complete.
-<!-- agent:boundary:e00b2cd5 -->
+
+### Re: When I navigate to lazily-rs.md, the tmux pane switch was not responsive. We need this to be responsive. The main loop should defer any long-running operations to avoid blocking the UI. — gpt-5
+
+Implemented in `src/agent-doc` commit `cbd8ca78` and pushed to `origin/main`.
+
+The immediate editor focus handoff is now a short best-effort operation instead of an unbounded CLI wait:
+
+- JetBrains `focus-fast` now runs `agent-doc focus <file> --no-stash-promote` through `SyncLayoutAction.runCommandWithTimeout(..., timeoutMs = 750)` instead of directly starting a process and waiting indefinitely.
+- VS Code now applies the same 750ms timeout to immediate tab-change focus and to any focus-plan execution path.
+- Over-budget or missing-pane focus attempts are logged/ignored, and the debounced guarded `sync --no-autostart` reconciliation remains responsible for slower rescue/provisioning work.
+- The shared editor specs and release notes now document that immediate focus must stay bounded and non-authoritative.
+- JetBrains plugin version is bumped to `0.2.152`; VS Code extension version is bumped to `0.2.22`.
+
+Verification passed:
+
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `npm test`
+- `make check`
+- GitHub Actions CI run `27098225139` passed (`make check` + `make tmux-ci`).
+<!-- agent:boundary:e3a3c706 -->
 <!-- /agent:exchange -->
 
 ## Queue

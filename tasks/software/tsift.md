@@ -89,7 +89,37 @@ Verification:
 
 
 - `cargo test -p tsift-cli --test finding context_pack_` passed: 4 tests cover trusted fresh injection plus draft, stale, and out-of-result exclusions.
-<!-- agent:boundary:e14ee7c9 -->
+
+### Re: incremental markdown reparse - gpt-5
+
+Implemented the Phase 2 tsift refinement in `src/tsift`.
+
+What changed:
+
+- Added an incremental markdown reparse API to `packages/tsift-md-ast`:
+  - `MdTextEdit` for CRDT/editor-style one-edit byte range transitions.
+  - `reparse_incremental(previous_tree, old_source, new_source, edit)` for callers that know the old and new buffers.
+  - `reparse_incremental_with_input_edit(previous_tree, new_source, &InputEdit)` for callers that already computed a tree-sitter edit.
+  - validation that the supplied old/new buffers match the edit prefix and suffix before reparsing.
+- Kept behavior equivalent to full parse with focused tests for insertion and mismatched-edit rejection.
+- Documented the helper in `packages/tsift-md-ast/README.md`, `specs/search-navigation.md`, `specs/architecture.md`, and `plans/shared-md-ast-memgraphrag-lib.md`.
+- Recorded the work in `VERSIONS.md` under `#md-ast-incremental-reparse`.
+- Updated the local OpenCode package validation in `src/tsift/Makefile` from npm publish-check to `npm pack --dry-run` so `make check` does not fail only because the current package version is already published.
+
+Verification:
+
+- `cargo test -p tsift-md-ast`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `0.1.63`
+- GitHub Actions CI run `27082376667` completed successfully on `main`.
+
+Persistence:
+
+- Pushed tsift submodule commit `d3f7f05` (`Add incremental markdown reparse helper`) to `btakita/tsift` `main`.
+- Committed the superproject submodule pointer locally as `b97c8e3` (`tsift: update submodule for incremental reparse`). I did not push the superproject because the root branch was already diverged and has many unrelated dirty files outside this task.
+<!-- agent:boundary:8e0f2fb6 -->
 <!-- /agent:exchange -->
 ###
 <!--

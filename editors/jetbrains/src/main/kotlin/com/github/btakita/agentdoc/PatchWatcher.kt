@@ -667,6 +667,26 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
+    private fun nodePatchesJson(nodePatches: List<NodePatch>): String {
+        val array = com.google.gson.JsonArray()
+        for (patch in nodePatches) {
+            val obj = com.google.gson.JsonObject()
+            obj.addProperty("component", patch.component)
+            obj.addProperty("node_key", patch.nodeKey)
+            obj.addProperty("op", patch.op)
+            patch.content?.let { obj.addProperty("content", it) }
+            patch.before?.let { obj.addProperty("before", it) }
+            patch.after?.let { obj.addProperty("after", it) }
+            if (patch.order.isNotEmpty()) {
+                val order = com.google.gson.JsonArray()
+                patch.order.forEach { order.add(it) }
+                obj.add("order", order)
+            }
+            array.add(obj)
+        }
+        return array.toString()
+    }
+
     private fun applyPatch(patch: IpcPatch): Boolean {
         lastApplyWasNoOp = false
         lastApplyWasDeferredForConflict = false
@@ -786,7 +806,20 @@ class PatchWatcher(private val project: Project) : Disposable {
             result = NativePatching.convergeQueueAuto(result, patch.queueAuto) ?: result
         }
 
+        val nodePatchNativeAvailable = patch.nodePatches.isNotEmpty() && NativePatching.canApplyNodePatches()
+        val nodePatchedComponents = patch.nodePatches.map { it.component }.toSet()
+        if (nodePatchNativeAvailable) {
+            result = NativePatching.applyNodePatches(result, nodePatchesJson(patch.nodePatches)) ?: run {
+                LOG.warn("[patch-watcher] native node-patch apply rejected patch_id ${patch.patchId} for ${patch.file}")
+                return false
+            }
+        }
+
         for (p in patch.patches) {
+            if (nodePatchNativeAvailable && p.component in nodePatchedComponents) {
+                LOG.info("[patch-watcher] skipping legacy component patch for node-patched component ${p.component}")
+                continue
+            }
             val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                 findBoundaryInComponent(result, p.component)
             } else {
@@ -997,7 +1030,20 @@ class PatchWatcher(private val project: Project) : Disposable {
                 result = NativePatching.convergeQueueAuto(result, patch.queueAuto) ?: result
             }
 
+            val nodePatchNativeAvailable = patch.nodePatches.isNotEmpty() && NativePatching.canApplyNodePatches()
+            val nodePatchedComponents = patch.nodePatches.map { it.component }.toSet()
+            if (nodePatchNativeAvailable) {
+                result = NativePatching.applyNodePatches(result, nodePatchesJson(patch.nodePatches)) ?: run {
+                    LOG.warn("[patch-watcher] native VFS node-patch apply rejected patch_id ${patch.patchId} for ${patch.file}")
+                    return false
+                }
+            }
+
             for (p in patch.patches) {
+                if (nodePatchNativeAvailable && p.component in nodePatchedComponents) {
+                    LOG.info("[patch-watcher] skipping legacy VFS component patch for node-patched component ${p.component}")
+                    continue
+                }
                 val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                     findBoundaryInComponent(result, p.component)
                 } else {

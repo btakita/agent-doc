@@ -75,6 +75,29 @@ pub enum MutationInsertPosition {
     After(String),
 }
 
+/// Node-keyed IPC patch operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutationNodePatchOp {
+    Insert,
+    Remove,
+    Replace,
+    Move,
+    Strike,
+    Unstrike,
+}
+
+/// A drift-resilient patch against one component item node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutationNodePatch {
+    pub component: String,
+    pub node_key: String,
+    pub op: MutationNodePatchOp,
+    pub content: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    pub order: Vec<String>,
+}
+
 /// Return component item nodes with deterministic node keys.
 pub fn item_nodes(source: &str, component: &str) -> MutationResult<Vec<MutationItemNode>> {
     let (component_index, component_node) = find_component(source, component)?;
@@ -264,6 +287,139 @@ pub fn enqueue_node(
     Ok(out)
 }
 
+/// Apply node-keyed IPC patches against the current document snapshot.
+pub fn apply_node_patches(source: &str, patches: &[MutationNodePatch]) -> MutationResult<String> {
+    let mut out = source.to_string();
+    for patch in patches {
+        out = apply_node_patch(&out, patch)?;
+    }
+    Ok(out)
+}
+
+fn apply_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    match patch.op {
+        MutationNodePatchOp::Insert => insert_node_patch(source, patch),
+        MutationNodePatchOp::Remove => remove_node_patch(source, patch),
+        MutationNodePatchOp::Replace => replace_node_patch(source, patch),
+        MutationNodePatchOp::Move => move_node_patch(source, patch),
+        MutationNodePatchOp::Strike => consume_node(source, &patch.component, &patch.node_key),
+        MutationNodePatchOp::Unstrike => unstrike_node_patch(source, patch),
+    }
+}
+
+fn insert_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    let content = patch_node_source(patch)?;
+    let (_, component_node) = find_component(source, &patch.component)?;
+    let nodes = item_nodes(source, &patch.component)?;
+    if nodes.iter().any(|node| node.node_key == patch.node_key) {
+        return Ok(source.to_string());
+    }
+
+    let insert_at = anchored_insert_offset(source, &component_node, &nodes, patch);
+    let mut out = source.to_string();
+    out.insert_str(insert_at, &content);
+    Ok(out)
+}
+
+fn remove_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    let nodes = item_nodes(source, &patch.component)?;
+    let Some(node) = nodes.iter().find(|node| node.node_key == patch.node_key) else {
+        return Ok(source.to_string());
+    };
+    let mut out = source.to_string();
+    out.replace_range(node.item.start_byte..node.item.end_byte, "");
+    Ok(out)
+}
+
+fn replace_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    let content = patch_node_source(patch)?;
+    let nodes = item_nodes(source, &patch.component)?;
+    let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    let mut out = source.to_string();
+    out.replace_range(node.item.start_byte..node.item.end_byte, &content);
+    Ok(out)
+}
+
+fn move_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    if !patch.order.is_empty() {
+        let order = patch.order.iter().map(String::as_str).collect::<Vec<_>>();
+        return reorder_nodes(source, &patch.component, &order);
+    }
+
+    find_component(source, &patch.component)?;
+    let nodes = item_nodes(source, &patch.component)?;
+    let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    let moved = source[node.item.start_byte..node.item.end_byte].to_string();
+
+    let mut without_node = source.to_string();
+    without_node.replace_range(node.item.start_byte..node.item.end_byte, "");
+
+    let (_, component_after_remove) = find_component(&without_node, &patch.component)?;
+    let nodes_after_remove = item_nodes(&without_node, &patch.component)?;
+    let insert_at = anchored_insert_offset(
+        &without_node,
+        &component_after_remove,
+        &nodes_after_remove,
+        patch,
+    );
+    without_node.insert_str(insert_at, &moved);
+    Ok(without_node)
+}
+
+fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    let nodes = item_nodes(source, &patch.component)?;
+    let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    if !node.item.struck {
+        return Ok(source.to_string());
+    }
+    let (start, end) = raw_range(source, &patch.component, node)?;
+    let raw = &source[start..end];
+    let Some(unstruck) = raw
+        .strip_prefix("~~")
+        .and_then(|body| body.strip_suffix("~~"))
+    else {
+        return Err(MutationError::MalformedItem {
+            component: patch.component.clone(),
+            node_key: patch.node_key.clone(),
+        });
+    };
+    let mut out = source.to_string();
+    out.replace_range(start..end, unstruck);
+    Ok(out)
+}
+
+fn anchored_insert_offset(
+    source: &str,
+    component: &Component,
+    nodes: &[MutationItemNode],
+    patch: &MutationNodePatch,
+) -> usize {
+    if let Some(after) = patch.after.as_deref()
+        && let Some(node) = nodes.iter().find(|node| node.node_key == after)
+    {
+        return node.item.end_byte;
+    }
+    if let Some(before) = patch.before.as_deref()
+        && let Some(node) = nodes.iter().find(|node| node.node_key == before)
+    {
+        return node.item.start_byte;
+    }
+    nodes
+        .last()
+        .map(|node| node.item.end_byte)
+        .unwrap_or_else(|| open_marker_end(source, component))
+}
+
+fn patch_node_source(patch: &MutationNodePatch) -> MutationResult<String> {
+    let content = patch
+        .content
+        .as_deref()
+        .ok_or_else(|| MutationError::InvalidNodeOrder("node patch requires content".into()))?;
+    let mut content = content.trim_end_matches('\n').to_string();
+    content.push('\n');
+    Ok(content)
+}
+
 /// Compatibility wrapper for older id-keyed callers.
 pub fn consume_item(source: &str, component: &str, item_id: &str) -> MutationResult<String> {
     let node_key = find_node_key_by_item_id(source, component, item_id)?;
@@ -425,6 +581,24 @@ mod tests {
 <!-- /agent:queue -->
 ";
 
+    fn node_patch(
+        node_key: &str,
+        op: MutationNodePatchOp,
+        content: Option<&str>,
+        before: Option<&str>,
+        after: Option<&str>,
+    ) -> MutationNodePatch {
+        MutationNodePatch {
+            component: "queue".to_string(),
+            node_key: node_key.to_string(),
+            op,
+            content: content.map(str::to_string),
+            before: before.map(str::to_string),
+            after: after.map(str::to_string),
+            order: Vec::new(),
+        }
+    }
+
     #[test]
     fn consume_strikes_exact_node_key_without_matching_text() {
         let nodes = item_nodes(DOC, "queue").unwrap();
@@ -569,5 +743,122 @@ mod tests {
 
         assert!(alpha < inserted);
         assert!(inserted < beta);
+    }
+
+    #[test]
+    fn apply_node_patches_preserves_unrelated_live_buffer_items() {
+        let live = "\
+operator note
+<!-- agent:queue preset=\"#spec-test\" priority go -->
+- :pushpin: do [#alpha]
+- do [#beta]
+- live buffer addition
+<!-- /agent:queue -->
+";
+        let patches = [
+            node_patch(
+                "queue:0:beta:0",
+                MutationNodePatchOp::Strike,
+                None,
+                None,
+                None,
+            ),
+            node_patch(
+                "queue:0:gamma:0",
+                MutationNodePatchOp::Insert,
+                Some("- do [#gamma]\n"),
+                None,
+                Some("queue:0:beta:0"),
+            ),
+        ];
+
+        let updated = apply_node_patches(live, &patches).unwrap();
+
+        assert!(updated.contains("operator note\n"));
+        assert!(updated.contains("- live buffer addition\n"));
+        assert!(updated.contains("- ~~do [#beta]~~\n- do [#gamma]\n"));
+    }
+
+    #[test]
+    fn apply_node_patches_replace_unstrike_and_move_by_node_key() {
+        let doc = "\
+<!-- agent:queue -->
+- do [#alpha]
+- ~~do [#beta]~~
+- do [#gamma]
+<!-- /agent:queue -->
+";
+        let patches = [
+            node_patch(
+                "queue:0:beta:0",
+                MutationNodePatchOp::Unstrike,
+                None,
+                None,
+                None,
+            ),
+            node_patch(
+                "queue:0:gamma:0",
+                MutationNodePatchOp::Replace,
+                Some("- :round_pushpin: do [#gamma]\n"),
+                None,
+                None,
+            ),
+            node_patch(
+                "queue:0:gamma:0",
+                MutationNodePatchOp::Move,
+                None,
+                Some("queue:0:alpha:0"),
+                None,
+            ),
+        ];
+
+        let updated = apply_node_patches(doc, &patches).unwrap();
+        let lines = updated
+            .lines()
+            .filter(|line| line.starts_with("- "))
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines[0], "- :round_pushpin: do [#gamma]");
+        assert_eq!(lines[1], "- do [#alpha]");
+        assert_eq!(lines[2], "- do [#beta]");
+    }
+
+    #[test]
+    fn apply_node_patches_is_idempotent_for_insert_remove_and_move() {
+        let doc = "\
+<!-- agent:queue -->
+- do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let patches = [
+            node_patch(
+                "queue:0:beta:0",
+                MutationNodePatchOp::Move,
+                None,
+                Some("queue:0:alpha:0"),
+                None,
+            ),
+            node_patch(
+                "queue:0:gamma:0",
+                MutationNodePatchOp::Insert,
+                Some("- do [#gamma]\n"),
+                None,
+                Some("queue:0:alpha:0"),
+            ),
+            node_patch(
+                "queue:0:missing:0",
+                MutationNodePatchOp::Remove,
+                None,
+                None,
+                None,
+            ),
+        ];
+
+        let once = apply_node_patches(doc, &patches).unwrap();
+        let twice = apply_node_patches(&once, &patches).unwrap();
+
+        assert_eq!(once, twice);
+        assert_eq!(once.matches("- do [#gamma]\n").count(), 1);
     }
 }

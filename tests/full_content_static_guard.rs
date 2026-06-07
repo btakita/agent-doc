@@ -63,6 +63,11 @@ fn assert_source_not_contains(path: &str, needle: &str) {
     );
 }
 
+fn assert_source_contains(path: &str, needle: &str) {
+    let source = read_source(path);
+    assert!(source.contains(needle), "{path} must contain `{needle}`");
+}
+
 fn assert_guard_before_sink(path: &str, anchor: &str, guard: &str, sink: &str) {
     let source = read_source(path);
     let anchor_idx = source
@@ -197,4 +202,38 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         "if (patch.fullContent != null && patch.fullContent !== '')",
         "edit.replace(fileUri, fullRange, content)",
     );
+}
+
+#[test]
+fn node_patches_apply_before_legacy_visible_write_sinks() {
+    let jetbrains = "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt";
+    assert_guard_before_sink(
+        jetbrains,
+        "private fun applyPatch(patch: IpcPatch): Boolean",
+        "NativePatching.applyNodePatches",
+        "document.setText(result)",
+    );
+    assert_guard_before_sink(
+        jetbrains,
+        "private fun applyPatchViaVfs",
+        "NativePatching.applyNodePatches",
+        "targetFile.setBinaryContent(result.toByteArray",
+    );
+    assert_source_contains(
+        jetbrains,
+        "skipping legacy component patch for node-patched component",
+    );
+    assert_source_contains(
+        jetbrains,
+        "skipping legacy VFS component patch for node-patched component",
+    );
+
+    let vscode = "editors/vscode/src/extension.ts";
+    assert_guard_before_sink(
+        vscode,
+        "private async applyPatch",
+        "native.applyNodePatches",
+        "edit.replace(fileUri, fullRange, content)",
+    );
+    assert_source_contains(vscode, "skipping legacy component patch for node-patched");
 }

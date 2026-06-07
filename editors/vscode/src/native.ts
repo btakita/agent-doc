@@ -77,6 +77,7 @@ function resetBindings(): void {
     _reposition_boundary_to_end_preserve_head = null;
     _reposition_boundary_to_end_preserve_head_with_id = null;
     _normalize_template_structure = null;
+    _apply_node_patches = null;
     _visual_tokens_json = null;
     _is_idle = null;
     _await_idle = null;
@@ -173,6 +174,7 @@ let _reposition_boundary_to_end_with_id: any = null;
 let _reposition_boundary_to_end_preserve_head: any = null;
 let _reposition_boundary_to_end_preserve_head_with_id: any = null;
 let _normalize_template_structure: any = null;
+let _apply_node_patches: any = null;
 let _visual_tokens_json: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
@@ -214,6 +216,12 @@ function bindFunctions(): void {
         ['str', 'str'],
     );
     _normalize_template_structure = lib.func('agent_doc_normalize_template_structure', FfiPatchResultType, ['str']);
+    try {
+        _apply_node_patches = lib.func('agent_doc_apply_node_patches', FfiPatchResultType, ['str', 'str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] apply_node_patches unavailable: ${e.message}`);
+        _apply_node_patches = null;
+    }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
@@ -314,6 +322,39 @@ export function normalizeTemplateStructure(doc: string, projectRoot?: string): s
     } finally {
         if (result.text) _free_string(result.text);
     }
+}
+
+/**
+ * Apply node-keyed IPC patches through the shared Rust document model.
+ * Returns null when FFI is unavailable or rejects the patch.
+ */
+export function applyNodePatches(doc: string, nodePatches: unknown[], projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_apply_node_patches) return null;
+
+    const result = _apply_node_patches(doc, JSON.stringify(nodePatches));
+    try {
+        if (result.error) {
+            const error = koffi.decode(result.error, 'char', -1);
+            console.warn(`[agent-doc/native] apply_node_patches error: ${error}`);
+            _free_string(result.error);
+            return null;
+        }
+        if (!result.text) return null;
+        return koffi.decode(result.text, 'char', -1);
+    } finally {
+        if (result.text) _free_string(result.text);
+    }
+}
+
+/**
+ * True when the loaded native library exposes node-keyed IPC patch application.
+ */
+export function canApplyNodePatches(projectRoot?: string): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    return Boolean(_apply_node_patches);
 }
 
 /**

@@ -143,6 +143,11 @@ interface AgentDocLib : Library {
     fun agent_doc_normalize_template_structure(doc: String): FfiPatchResult.ByValue
 
     /**
+     * Apply node-keyed IPC patches through the shared Rust document model.
+     */
+    fun agent_doc_apply_node_patches(doc: String, node_patches_json: String): FfiPatchResult.ByValue
+
+    /**
      * Parse components from a document.
      * Returns JSON array of component objects.
      */
@@ -441,12 +446,41 @@ interface AgentDocLib : Library {
  */
 object NativePatching {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(NativePatching::class.java)
+    @Volatile private var nodePatchesAvailable: Boolean? = null
 
     data class VisualToken(
         val kind: String,
         val start: Int,
         val end: Int,
     )
+
+    fun isAvailable(): Boolean = AgentDocLib.get() != null
+
+    fun canApplyNodePatches(): Boolean {
+        nodePatchesAvailable?.let { return it }
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            val result = lib.agent_doc_apply_node_patches("", "[]")
+            try {
+                if (result.error != null) {
+                    val error = result.error!!.getString(0)
+                    LOG.debug("[native] apply_node_patches probe rejected: $error")
+                    false
+                } else {
+                    result.text != null
+                }
+            } finally {
+                lib.agent_doc_free_string(result.text)
+                lib.agent_doc_free_string(result.error)
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            LOG.debug("[native] apply_node_patches unavailable: ${e.message}")
+            false
+        } catch (e: Throwable) {
+            LOG.debug("[native] apply_node_patches probe failed: ${e.message}")
+            false
+        }.also { nodePatchesAvailable = it }
+    }
 
     fun patchContentAlreadyCommitted(filePath: String, content: String): Boolean {
         val lib = AgentDocLib.get() ?: return false
@@ -455,6 +489,32 @@ object NativePatching {
         } catch (e: Throwable) {
             LOG.debug("[native] patch_content_already_committed unavailable: ${e.message}")
             false
+        }
+    }
+
+    /**
+     * Apply node-keyed IPC patches using the native library.
+     * Returns the patched document, or null if FFI is unavailable/errors.
+     */
+    fun applyNodePatches(doc: String, nodePatchesJson: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_apply_node_patches(doc, nodePatchesJson)
+        } catch (e: Throwable) {
+            LOG.warn("[native] apply_node_patches unavailable: ${e.message}")
+            return null
+        }
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] apply_node_patches error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            return result.text!!.getString(0)
+        } finally {
+            lib.agent_doc_free_string(result.text)
         }
     }
 

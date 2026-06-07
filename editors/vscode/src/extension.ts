@@ -1657,14 +1657,30 @@ class PatchWatcher implements vscode.Disposable {
 
         // Component-based patching (template/stream-mode documents)
         let content = baselineContent;
+        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
 
         // Apply frontmatter patch first
         if (patch.frontmatter) {
             content = this.applyFrontmatterPatch(content, patch.frontmatter);
         }
 
+        const nodePatchedComponents = new Set((patch.node_patches ?? []).map(p => p.component));
+        const nodePatchNativeAvailable = (patch.node_patches?.length ?? 0) > 0 && native.canApplyNodePatches(projectRoot);
+        if (nodePatchNativeAvailable) {
+            const nodePatched = native.applyNodePatches(content, patch.node_patches ?? [], projectRoot);
+            if (nodePatched == null) {
+                this.outputChannel.appendLine(`PatchWatcher: native node-patch apply rejected ${patch.file}`);
+                return false;
+            }
+            content = nodePatched;
+        }
+
         // Apply component patches
         for (const p of patch.patches) {
+            if (nodePatchNativeAvailable && nodePatchedComponents.has(p.component)) {
+                this.outputChannel.appendLine(`PatchWatcher: skipping legacy component patch for node-patched ${p.component}`);
+                continue;
+            }
             content = this.applyComponentPatch(content, p.component, p.content);
         }
 
@@ -1678,7 +1694,6 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
-        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
         if (patch.reposition_boundary) {
             content = native.repositionBoundaryToEnd(content, projectRoot, patch.reposition_boundary_id)
                 ?? this.repositionBoundaryToEndTs(content, 'exchange', patch.reposition_boundary_id)

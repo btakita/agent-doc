@@ -24,6 +24,7 @@ name = "agent-doc"
 version = "0.34.0"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-markdown-ast",
  "agent-doc-orchestration",
  "agent-kit",
  "anyhow",

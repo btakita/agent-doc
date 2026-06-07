@@ -932,10 +932,11 @@ fn check_no_response_active_queue_head(
     }
 
     let content = rc.doc_content();
-    let still_queued: std::collections::HashSet<String> = committed_queue_head_ids(&content)
-        .into_iter()
-        .map(|id| crate::pending::normalize_pending_id(&id))
-        .collect();
+    let current_head_ids: std::collections::HashSet<String> =
+        committed_current_queue_head_ids(&content)
+            .into_iter()
+            .map(|id| crate::pending::normalize_pending_id(&id))
+            .collect();
     let open_backlog: std::collections::HashSet<String> =
         open_backlog_ids(file)?.into_iter().collect();
     let mut resolved_or_deferred = crate::cycle_state::resolved_pending_ids(file)?;
@@ -953,7 +954,7 @@ fn check_no_response_active_queue_head(
         if norm.is_empty() {
             continue;
         }
-        if !still_queued.contains(&norm) || !open_backlog.contains(&norm) {
+        if !current_head_ids.contains(&norm) || !open_backlog.contains(&norm) {
             continue;
         }
         if resolved_or_deferred.contains(&norm) {
@@ -2748,6 +2749,21 @@ fn committed_queue_head_ids(content: &str) -> Vec<String> {
         return Vec::new();
     };
     do_directive_target_ids(&[queue.content(content).to_string()])
+}
+
+/// `do [#id]` target ids for the current live queue head only.
+fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
+    let Ok(components) = crate::component::parse(content) else {
+        return Vec::new();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return Vec::new();
+    };
+    let entries = crate::queue::parse(queue.content(content)).unwrap_or_default();
+    let Some(head) = crate::queue::first_prompt(&entries) else {
+        return Vec::new();
+    };
+    do_directive_target_ids(std::slice::from_ref(&head.text))
 }
 
 /// `#queue-clear-unrun-items`: an active `agent:queue` head is executable user
@@ -5520,6 +5536,36 @@ Body\n\
             }
             other => panic!("expected no-response active-head interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn no_response_active_queue_head_passes_when_later_do_item_is_not_current_head() {
+        // The no-response closeout guard only protects the current live queue
+        // head. Later id-backed queue items can remain queued and open while a
+        // free-text prompt sits ahead of them.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#later] Complete the later queue item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Investigate the current free-text prompt\n",
+            "- do [#later]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "later do items are not active heads while a free-text prompt is current"
+        );
     }
 
     #[test]

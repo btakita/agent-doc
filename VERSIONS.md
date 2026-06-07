@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **No-response active-head guard checks only the current queue head.** A stale
+  no-response/reap-only cycle no longer blocks session closeout just because
+  later `do [#id]` queue items still exist in backlog while a free-text prompt
+  sits ahead of them. The guard now compares recorded ids only with the first
+  live queue prompt. Test
+  `no_response_active_queue_head_passes_when_later_do_item_is_not_current_head`.
+
 - **Pending shadow guard ignores exchange transcripts.** The shadow-backlog
   detector no longer treats checklist or ordered-list `[#id]` lines inside
   `agent:exchange` response history as live pending shadows. Completed items

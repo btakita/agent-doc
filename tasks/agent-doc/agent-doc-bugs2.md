@@ -456,7 +456,13 @@ The follow-up parts are already covered by shipped commits and current tests:
 - Manual Run Agent Doc preemption remains covered by 79e0406d, which head-inserts priority reruns ahead of pending auto-queue items while preserving the pending auto item.
 
 Verification already run in this overall drain: source make check, source make tmux-ci, source GitHub CI 27092596507, and root make check.
-<!-- agent:boundary:072e01bb -->
+
+### Re: queue drain closeout -- gpt-5
+
+The active queue is drained and stopped. I repaired the stale-busy live-verify closeout, preserved the completed response bodies, archived the completed items, and corrected the empty queue metadata back to `queue: stop` so the backlog queue mirrors do not repopulate on the next preflight.
+
+Current residual dirty state is unrelated submodule work in `src/agent-doc`, `src/boost-client`, `src/corky`, and `src/instruction-files`; I left it untouched.
+<!-- agent:boundary:c32dbd89 -->
 <!-- /agent:exchange -->
 
 ## Queue

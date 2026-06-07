@@ -177,7 +177,7 @@ Commits and push:
 - parent repo: `ead679fc0 chore: update agent-doc pointer`, pushed to `origin/main`.
 
 CI:
-- Latest `src/agent-doc` CI run after the push is in progress: `27087636824` for `0b7638cc`.
+- Latest `src/agent-doc` CI run after the push passed: `27087636824` for `0b7638cc`.
 - The parent repo has no workflow named `CI`, so there was no parent CI run to inspect under that workflow name.
 
 Confidence: high for the Stop-hook regression and the reopened backlog state. The two reopened parent tasks intentionally remain open; they now need real implementation/verification before any future closeout.

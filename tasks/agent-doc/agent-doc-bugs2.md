@@ -30,12 +30,11 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-074044.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-080228.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of...; agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do n...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1aa1dbad -->
+<!-- agent:boundary:940369dd -->
 <!-- /agent:exchange -->
 
 ## Queue

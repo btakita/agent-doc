@@ -36,6 +36,8 @@ Compacted content:
 - Archived 10 response topic(s): do [#md-ast-document-model]; There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?; [#md-ast-realtime-node-events]; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 ❯ Is the `agent:queue` token inefficient across many turns? We seem to be burning too many token with long queue runs. I'm concerned about many turns accumulating context. Should we run `/clear` in between each task if a certain context threshold is exceeded? At least 1 compaction should also cause `/clear` between turn if many-turn token inefficiency is an issue. #spec-test-build-install-commit-push
+### Re: queue context reset — gpt-5
+
 Yes. The expensive part is not the `agent:queue` token itself; it is carrying the same already-loaded agent conversation across many automatic queue turns. I implemented the reset policy in code.
 
 What changed:
@@ -62,6 +64,8 @@ Commits:
 ❯ I also want partial exchange compaction where entries in the exchange that are related to the upcoming run can remain but remove the unrelated entries. Use AST/semantic structure navigation to identify related entries for token efficiency if the entire document is not already in the context.
 
 ❯ Claude seems efficient across multiple turns. Codex seems to burn through much context on each turn. opencode/glm seems in the middle of the pack. I typically compact the context >=~50% for all 3 agent harnesses.
+### Re: queue context reset and partial compaction — gpt-5
+
 For the queue-context part: the implemented policy is threshold-based, not blindly every queue item. Once session accretion is warn/block, automatic queue continuation starts the next backend turn fresh. A recent exchange compaction forces at least one fresh context (`/clear`/`/new` for Codex Stop-hook, fresh backend session for direct `run`), then direct `run` treats that fresh backend dispatch as the reset so compaction alone does not cause repeated first-turn overhead.
 
 On harness differences: yes, this is more visible with Codex and opencode than Claude in practice. Claude tends to amortize multi-turn context more efficiently; Codex is more sensitive to already-loaded conversation growth, and opencode/GLM tends to land between those. The right control is still local session-accretion evidence (`exchange_lines`, response count, closeout churn, recent compaction), not a harness-name special case.
@@ -73,7 +77,7 @@ For partial exchange compaction: I agree, but I did not fold that into this comm
 - Tests should cover unresolved-tail preservation, queue-head/id matching, file/symbol matching, archive index continuity, and the no-prompt-bury rule.
 
 So the queue-context reset work is done and verified; partial semantic exchange compaction is the next implementation task, not completed in this cycle.
-<!-- agent:boundary:d871229c -->
+<!-- agent:boundary:0be0c181 -->
 <!-- /agent:exchange -->
 
 ## Queue

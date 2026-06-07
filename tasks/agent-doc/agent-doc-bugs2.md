@@ -106,11 +106,32 @@ On the token: I kept `__prioritized__` (you're using it, it's unambiguous). Swap
 Still in your pinned queue, in order: **auto-dag priority** (the graph/linear ordering projection — the big one), **`~~`-on-complete marking**, the **backlog-`queue`-attr-not-populating** bug, and your new **bold-markdown rendering** request for the JB/VSCode plugins. Say go and I'll drain them in pinned order.
 
 Fence head is done (plugin `0.2.149` signed + pushed); kept as actionable pending only your live IntelliJ verify.
-<!-- agent:boundary:d4a7811c -->
+
+### Re: manual-priority pin — complete across all marker forms — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `:pushpin:`. Terse is better. But don't get too vague. If `:pushpin:` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `:pushpin:` to mark anything that you prioritized, so if I delete `:pushpin:`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use :round_pushpin: for items that you prioritize and :pushpin: for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.
+
+
+The pin feature is done and live (shipped across `034d80ec → 5a68b2b2`, installed + release-built each step). Your "override priority with reordering, make it stick, release by deleting the annotation" contract is fully implemented, and I added every alias you asked for so you can settle on whichever form you like — **no more chasing**:
+
+| Tier | Markers (any spelling) |
+|------|------------------------|
+| **Operator** (top) | `**pin**` · `__pin__` · `**prioritized**` · `__prioritized__` · `:pin:` · `:pushpin:` · 📌 |
+| *Agent* (middle) | `*pin*` · `_pin_` · `*prioritized*` · `_prioritized_` · `:round_pushpin:` · 📍 |
+| unpinned (tail) | sorted by `priority=` rank |
+
+Strong-emphasis / pushpin = operator; italic-emphasis / round-pushpin = agent; operator always outranks agent which always outranks unpinned. Sticky (lives in the doc text, survives the per-turn recompute), released by deleting the marker, agent can pin with the italic/round-pushpin tier but never above your pins (your deferred "agent above operator?" question stays "no"). Verified live this turn: your `:pushpin:` items float to the top while the `do [#…]` items stay rank-ordered below. Spec in `pending-system.md`, full alias test sweep, `make check` green.
+
+**Re: ":pushpin: I did the update. Please verify [#late-ipc-patch…]"** — I can't drive your live IntelliJ to stage a timed-out-reposition race, so the live confirmation is yours: with `#com.github.btakita.agentdoc` debug logging on, after a finalize whose IPC reposition times out, grep `idea.log` for `generation fence: dropping superseded patch` — and confirm no duplicate `### Re:` block appears. The binary side is proven by `PatchGenerationFenceTest` + CI-green `9eee5255`.
+
+Still in your pinned queue, in order: **auto-dag priority** (graph + linear ordering projections — the big one), **`~~`-on-complete marking**, the **backlog-`queue`-attr-not-populating** bug, and **bold-markdown rendering** in the JB/VSCode plugins. Say go and I'll take them top-down.
+<!-- agent:boundary:797e2e46 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `:pushpin:`. Terse is better. But don't get too vague. If `:pushpin:` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `:pushpin:` to mark anything that you prioritized, so if I delete `:pushpin:`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use :round_pushpin: for items that you prioritize and :pushpin: for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.
+- ~:pushpin: I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `:pushpin:`. Terse is better. But don't get too vague. If `:pushpin:` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `:pushpin:` to mark anything that you prioritized, so if I delete `:pushpin:`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use :round_pushpin: for items that you prioritize and :pushpin: for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.~
 - Add :pushpin:/:round_pushpin: + **pin**/_pin_ as an alias to **prioritized**/_prioritized_.
 - :pushpin: The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
 - :pushpin: The backlog with `queue` attribute is not populating the queue element in this document.

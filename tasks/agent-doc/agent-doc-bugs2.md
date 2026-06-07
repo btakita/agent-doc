@@ -55,7 +55,20 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed `src/agent-doc` commit `bd5cb6a6 Annotate prioritized queue promotions`. Latest CI listing after push: run `27085017356` was `in_progress`; per instruction, I did not wait on CI.
-<!-- agent:boundary:288728a2 -->
+
+### Re: A backlog with queue attribute should immediately add to the queue and prioritize using auto-dag when priority is present — gpt-5
+
+
+This answers the active free-text queue head about `queue` + `priority` behavior and pin annotations.
+
+Implemented and pushed in `src/agent-doc` commit `bd5cb6a6 Annotate prioritized queue promotions`:
+
+- Source components with both `queue` and `priority` now populate the queue and trigger priority/auto-DAG ordering for synced queue prompts.
+- Automatically promoted queue prompts get the agent-owned `:round_pushpin:` marker.
+- Priority free-text route dispatches get the operator-owned `:pushpin:` marker and marker-normalized dedupe.
+
+Local verification passed: focused regression tests, `make check`, and `cargo install --path .`. CI run `27085017356` was listed as `in_progress`; not waited per instruction.
+<!-- agent:boundary:07e45859 -->
 <!-- /agent:exchange -->
 
 ## Queue

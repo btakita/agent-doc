@@ -51,7 +51,16 @@ Important boundary:
 - Attempting `agent-doc write --commit tasks/monsterrodholders.md` inside `src/boost-client` correctly failed on pane ownership mismatch (`%39` vs this pane `%30`). That response repair should be run from the Monster owner pane if the operator wants the full captured Blog/Videos response replayed into the visible compacted document rather than only kept in the archive/capture artifacts.
 
 No source-code changes were needed for this investigation. The concrete current state is: recovered response artifacts exist, parent boundary is repaired, and the remaining Monster prompt must be answered in the Monster owner pane rather than from this agent-doc-bugs queue pane.
-<!-- agent:boundary:8f40fb78 -->
+
+### Re: A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.
+
+> **Queue prompt:**
+>
+> A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.
+
+
+Answered above. The missing Monster Rod Holders response was captured in agent-doc artifacts, the parent/submodule boundary interruption has been repaired, and the remaining Monster work is a separate unresolved prompt owned by pane `%39`; I did not run or claim that queue from this pane.
+<!-- agent:boundary:cb2ec40f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -61,7 +70,7 @@ No source-code changes were needed for this investigation. The concrete current 
 - ~~:round_pushpin: [#adoc-harness-simworld]~~
 - ~~:pushpin: monsterrodholders.md queue responses are still not going into the exchange.~~
 - ~~:round_pushpin: [#adoc-auto-dag-priority]~~
-- A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.
+- ~~A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.~~
 - If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
 <!-- /agent:queue -->
 ###

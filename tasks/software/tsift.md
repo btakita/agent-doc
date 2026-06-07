@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): is [#rtsw] done?; Separate SQLite DBs for caches to avoid writer-lock contention? Is it even an issue with WAL?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:bf19c9f6 -->
+<!-- agent:boundary:9e6a122c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +45,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - Is there a more efficient way to serialize the data such as msgpack, instead of JSON?
 - Please read https://arxiv.org/pdf/2606.00610. Can tsift become a mem graph rag?
 <!-- /agent:queue -->

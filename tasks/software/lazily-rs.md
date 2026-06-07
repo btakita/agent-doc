@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -40,6 +40,11 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
 ### Re: #ipc5 transport contract + benchmark matrix — gpt-5
+
+> **Queue prompt:**
+>
+> do [#ipc9]
+
 
 > **Queue prompt:**
 >
@@ -76,7 +81,7 @@ I resolved `#ipc5` as follows:
 - Next actions tied to queue chain:
   - `#ipc6` implement concrete `ShmBlobArena` transport with memmap/shared-memory lifecycle and generation validation.
   - `#ipc7`/`#ipc8` add FD/event parity (Linux socket/eventfd first, then platform fallback and Windows adapter) behind feature gating.
-<!-- agent:boundary:8b20c9a4 -->
+<!-- agent:boundary:77987cd3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,17 +90,11 @@ I resolved `#ipc5` as follows:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#ipc5]~~
-- ~~do [#ipc6]~~
-- ~~do [#ipc7]~~
-- ~~do [#ipc8]~~
-- do [#ipc9]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc9] [recommended] Define the agent-doc/tsift process-state schema on top of lazily IPC Snapshot/Delta: authority domains, permission-filtered views, resync rules, large-blob thresholds, and passive regression telemetry for transport health.
 <!-- /agent:backlog -->
 
 ## Review

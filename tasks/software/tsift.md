@@ -119,7 +119,49 @@ Persistence:
 
 - Pushed tsift submodule commit `d3f7f05` (`Add incremental markdown reparse helper`) to `btakita/tsift` `main`.
 - Committed the superproject submodule pointer locally as `b97c8e3` (`tsift: update submodule for incremental reparse`). I did not push the superproject because the root branch was already diverged and has many unrelated dirty files outside this task.
-<!-- agent:boundary:c706805f -->
+
+### Re: release + publish — gpt-5
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+Released and published `tsift` `v0.1.64`.
+
+What landed:
+
+- `src/tsift` release commit: `ac5a318 chore: release v0.1.64`.
+- `v0.1.64` tag pushed.
+- GitHub release published: `https://github.com/btakita/tsift/releases/tag/v0.1.64`.
+- npm published: `opencode-tsift@0.1.64`.
+- crates.io published: `tsift@0.1.64`; also confirmed the dependency crate `tsift-md-ast@0.1.64`.
+- Local install verified: `tsift --version` reported `tsift 0.1.64`.
+
+Release workflow notes:
+
+- The first release attempt hit a transient Windows crates.io download failure and was rerun.
+- The crates.io publish leg then exposed a real release-list gap: `tsift-md-ast` was missing from the dependency-ordered publish list, so `tsift-graph` could not resolve it.
+- I manually published `tsift-md-ast@0.1.64`, reran the failed release job, and the release workflow completed successfully: `https://github.com/btakita/tsift/actions/runs/27082864204`.
+
+Follow-up fix committed and pushed in `src/tsift`:
+
+- `a5f390a fix: include md ast crate in release publish order`.
+- The workflow package-check and publish lists now include `tsift-md-ast`.
+- The release guard test now verifies both release lists against the same crate order.
+- `VERSIONS.md` has an Unreleased note for `#release-publish-md-ast`.
+
+Verification:
+
+- `cargo check --workspace`: passed before release.
+- `make check`: passed before release and again after the release-list fix.
+- `npm run publish:check`: passed.
+- `cargo install --path . --force`: passed.
+- GitHub release workflow: success.
+- Post-fix `main` CI: success, `https://github.com/btakita/tsift/actions/runs/27083642494`.
+
+Root superproject pointer was committed locally as `ff5853573 chore: update tsift submodule to v0.1.64`. I did not push the root superproject because `main` is currently diverged (`ahead 42, behind 8`) with many pre-existing local changes; pushing that branch would involve unrelated history beyond this tsift release.
+<!-- agent:boundary:45d28fb5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +171,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- release + publish
+- ~~release + publish~~
+- continue [#7qky]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -137,7 +180,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:backlog priority -->
 - [ ] [#surrealbulk] SurrealDB projection performance (consolidates surrealbulk + surrealbulk-close + surreal-batch-bfs + surreal-fixture): replace per-row upsert loops with bulk/transactional row load + one-pass secondary-index rebuild; add batch frontier expansion; record SurrealDB samples in graph-db-performance-history.json fixture; re-run backend-eval benchmarks, update SPEC.md/BENCHMARKS.md table, measure refresh vs load separately.
 - [/] [#e2e-install] E2E verify opencode-tsift install in a fresh opencode project: opencode plugin opencode-tsift && opencode then /tsift-status returns healthy (consolidates e2e-install + full-e2e-verify). Live-verify only; npm publish + OIDC auth already done (opencode-tsift@0.1.63 on npm).
-- [/] [#7qky] [recommended] AGENT-DOC-SCOPED (drive from an agent-doc session, not tsift): re-measure Codex redundant runbook reads after the v0.34.0 retain-dont-reread nudge accumulates live Codex sessions; compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate does not drop, build a session-scoped content-dedup LEDGER in a shared LEAF crate (register(id,hash)/should_deliver->Full|Stub; exemptions via hash-change+compaction; session-id from harness). GATED on accumulating post-nudge Codex sessions.<!-- /agent:backlog -->
+- [/] [#7qky] [recommended] AGENT-DOC-SCOPED (drive from an agent-doc session, not tsift): re-measure Codex redundant runbook reads after the v0.34.0 retain-dont-reread nudge accumulates live Codex sessions; compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate does not drop, build a session-scoped content-dedup LEDGER in a shared LEAF crate (register(id,hash)/should_deliver->Full|Stub; exemptions via hash-change+compaction; session-id from harness). GATED on accumulating post-nudge Codex sessions.
+<!-- /agent:backlog -->
 
 ## Review
 

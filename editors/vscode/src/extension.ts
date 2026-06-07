@@ -274,6 +274,13 @@ class SyntaxDecorationController implements vscode.Disposable {
         backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
         fontWeight: '600',
     });
+    // #editor-bold-markdown-rendering: render markdown emphasis inline.
+    private readonly boldDecoration = vscode.window.createTextEditorDecorationType({
+        fontWeight: 'bold',
+    });
+    private readonly italicDecoration = vscode.window.createTextEditorDecorationType({
+        fontStyle: 'italic',
+    });
 
     constructor() {
         this.disposables.push(
@@ -287,6 +294,8 @@ class SyntaxDecorationController implements vscode.Disposable {
             this.responseHeadingDecoration,
             this.trackedIdDecoration,
             this.labelTagDecoration,
+            this.boldDecoration,
+            this.italicDecoration,
         );
         this.disposables.push(
             vscode.window.onDidChangeVisibleTextEditors((editors) => {
@@ -349,6 +358,8 @@ class SyntaxDecorationController implements vscode.Disposable {
             responseHeading: [] as vscode.Range[],
             trackedId: [] as vscode.Range[],
             labelTag: [] as vscode.Range[],
+            bold: [] as vscode.Range[],
+            italic: [] as vscode.Range[],
         };
 
         for (const token of tokens) {
@@ -389,6 +400,12 @@ class SyntaxDecorationController implements vscode.Disposable {
                 case 'label_tag':
                     ranges.labelTag.push(range);
                     break;
+                case 'bold':
+                    ranges.bold.push(range);
+                    break;
+                case 'italic':
+                    ranges.italic.push(range);
+                    break;
             }
         }
 
@@ -402,6 +419,8 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.responseHeadingDecoration, ranges.responseHeading);
         editor.setDecorations(this.trackedIdDecoration, ranges.trackedId);
         editor.setDecorations(this.labelTagDecoration, ranges.labelTag);
+        editor.setDecorations(this.boldDecoration, ranges.bold);
+        editor.setDecorations(this.italicDecoration, ranges.italic);
     }
 
     private clearEditor(editor: vscode.TextEditor): void {
@@ -415,6 +434,8 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.responseHeadingDecoration, []);
         editor.setDecorations(this.trackedIdDecoration, []);
         editor.setDecorations(this.labelTagDecoration, []);
+        editor.setDecorations(this.boldDecoration, []);
+        editor.setDecorations(this.italicDecoration, []);
     }
 
     dispose(): void {

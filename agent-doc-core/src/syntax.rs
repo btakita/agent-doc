@@ -15,6 +15,11 @@ pub enum VisualTokenKind {
     ResponseHeading,
     TrackedId,
     LabelTag,
+    /// Markdown **strong** emphasis span (`**text**` or `__text__`), rendered
+    /// bold in the editor (`#editor-bold-markdown-rendering`).
+    Bold,
+    /// Markdown *emphasis* span (`*text*` or `_text_`), rendered italic.
+    Italic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -34,9 +39,84 @@ pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
     collect_line_tokens(doc, &code_ranges, &mut tokens);
     collect_label_tags(doc, &code_ranges, &mut tokens);
     collect_tracked_ids(doc, &code_ranges, &mut tokens);
+    collect_emphasis_tokens(doc, &code_ranges, &mut tokens);
 
     tokens.sort_by_key(|token| (token.start, token.end));
     tokens
+}
+
+/// Collect markdown emphasis spans (`#editor-bold-markdown-rendering`): `**…**`
+/// / `__…__` → [`VisualTokenKind::Bold`], `*…*` / `_…_` → [`VisualTokenKind::Italic`].
+/// Scans per line (no cross-line matches), skips code ranges, and marks consumed
+/// byte ranges so a strong run is never re-matched as italic or double-emitted.
+/// Markers are ASCII so byte-index scanning stays on char boundaries; emitted
+/// offsets are byte offsets (the FFI layer converts to UTF-16).
+fn collect_emphasis_tokens(doc: &str, code_ranges: &[(usize, usize)], out: &mut Vec<VisualToken>) {
+    let mut line_start = 0usize;
+    for line in doc.split_inclusive('\n') {
+        let base = line_start;
+        line_start += line.len();
+        let bytes = line.as_bytes();
+        let mut consumed = vec![false; bytes.len()];
+
+        // Strong emphasis first (double markers), then italic (single), so a
+        // `**bold**` run is not re-matched by the `*` italic pass.
+        for (marker, kind, mlen) in [
+            (b'*', VisualTokenKind::Bold, 2usize),
+            (b'_', VisualTokenKind::Bold, 2usize),
+            (b'*', VisualTokenKind::Italic, 1usize),
+            (b'_', VisualTokenKind::Italic, 1usize),
+        ] {
+            // Marker-char test (does not read `consumed`, so it never conflicts
+            // with the mutable borrow when marking a span consumed below).
+            let is_marker_chars = |i: usize| -> bool {
+                if i + mlen > bytes.len() {
+                    return false;
+                }
+                (0..mlen).all(|k| bytes[i + k] == marker)
+                    // A single-marker italic must not be part of a double marker.
+                    && (mlen == 2
+                        || ((i == 0 || bytes[i - 1] != marker)
+                            && (i + 1 >= bytes.len() || bytes[i + 1] != marker)))
+            };
+            let is_marker = |i: usize, consumed: &[bool]| -> bool {
+                is_marker_chars(i) && (0..mlen).all(|k| !consumed[i + k])
+            };
+            let mut i = 0usize;
+            while i + mlen <= bytes.len() {
+                if is_marker(i, &consumed) {
+                    let mut j = i + mlen;
+                    let mut close = None;
+                    while j + mlen <= bytes.len() {
+                        if is_marker(j, &consumed) {
+                            close = Some(j);
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if let Some(close) = close
+                        && close > i + mlen
+                    {
+                        let tok_start = base + i;
+                        let tok_end = base + close + mlen;
+                        if !overlaps_code(tok_start, tok_end, code_ranges) {
+                            out.push(VisualToken {
+                                kind,
+                                start: tok_start,
+                                end: tok_end,
+                            });
+                            for slot in consumed.iter_mut().take(close + mlen).skip(i) {
+                                *slot = true;
+                            }
+                        }
+                        i = close + mlen;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
 }
 
 enum CommentKind<'a> {
@@ -292,6 +372,57 @@ fn overlaps_code(start: usize, end: usize, code_ranges: &[(usize, usize)]) -> bo
 #[cfg(test)]
 mod tests {
     use super::{VisualTokenKind, collect_visual_tokens};
+
+    fn tokens_of(doc: &str, kind: VisualTokenKind) -> Vec<String> {
+        collect_visual_tokens(doc)
+            .into_iter()
+            .filter(|t| t.kind == kind)
+            .map(|t| doc[t.start..t.end].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn collects_bold_emphasis_spans() {
+        // #editor-bold-markdown-rendering: ** ** and __ __ → Bold.
+        let doc = "this is **bold** and __also bold__ here\n";
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::Bold),
+            vec!["**bold**".to_string(), "__also bold__".to_string()]
+        );
+    }
+
+    #[test]
+    fn collects_italic_emphasis_spans_not_overlapping_bold() {
+        let doc = "**strong** then *soft* and _under_\n";
+        assert_eq!(tokens_of(doc, VisualTokenKind::Bold), vec!["**strong**"]);
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::Italic),
+            vec!["*soft*".to_string(), "_under_".to_string()]
+        );
+    }
+
+    #[test]
+    fn bold_pin_marker_renders_bold() {
+        // The operator pin marker `**prioritized**` / `**pin**` is bold emphasis.
+        let doc = "- **prioritized** do [#x]\n- **pin** do [#y]\n";
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::Bold),
+            vec!["**prioritized**".to_string(), "**pin**".to_string()]
+        );
+    }
+
+    #[test]
+    fn emphasis_inside_code_is_ignored() {
+        let doc = "before\n```\n**not bold**\n```\nafter **yes**\n";
+        assert_eq!(tokens_of(doc, VisualTokenKind::Bold), vec!["**yes**"]);
+    }
+
+    #[test]
+    fn unclosed_emphasis_marker_is_not_a_span() {
+        let doc = "a ** dangling and b * lonely\n";
+        assert!(tokens_of(doc, VisualTokenKind::Bold).is_empty());
+        assert!(tokens_of(doc, VisualTokenKind::Italic).is_empty());
+    }
 
     #[test]
     fn collects_agent_and_scratch_comments() {

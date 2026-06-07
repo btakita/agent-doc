@@ -12,6 +12,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   archived elsewhere, such as lazily-rs `#ipc1`, no longer block
   `session-check` just because an earlier response listed next steps.
 
+- **Missing-response recovery trusts committed exchange bodies without capture
+  metadata.** `session-check` now treats any committed `agent:exchange`
+  `### Re:` body as sufficient proof that a missing-response closeout has been
+  repaired, even when the stale queue-drain cycle lost `capture_id` /
+  `response_sha256` metadata. This lets `agent-doc write --commit` recovery
+  clear interrupted sessions like `tasks/software/lazily-rs.md` instead of
+  re-failing forever. Test
+  `committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata`.
+
 - **Idle queue stale-busy recovery preserves same-head dedup.** The supervisor
   idle-queue watcher no longer clears `last_dispatched` while reconciling a
   stale busy actor over an idle pane. This stops a stuck active head from

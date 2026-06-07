@@ -817,6 +817,10 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
     if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
         return Ok(GuardResult::None);
     }
+    let committed_exchange_has_body = committed_exchange_has_response_body(file)?;
+    if committed_exchange_has_body {
+        return Ok(GuardResult::None);
+    }
     // A captured response (capture_id/response_sha256) normally means the
     // close-out body landed through the binary write path — not the
     // missing-response shape. EXCEPTION (#codex-queue-drain-no-response-body):
@@ -828,9 +832,8 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
     // change); only a queue turn whose committed exchange has no `### Re:` body
     // falls through to fire.
     if state.capture_id.is_some() || state.response_sha256.is_some() {
-        let is_queue_turn =
-            state.queue_task_id.is_some() || !state.active_queue_heads.is_empty();
-        if !is_queue_turn || committed_exchange_has_response_body(file)? {
+        let is_queue_turn = state.queue_task_id.is_some() || !state.active_queue_heads.is_empty();
+        if !is_queue_turn {
             return Ok(GuardResult::None);
         }
     }
@@ -5329,6 +5332,49 @@ Body\n\
             dir.path(),
             "### Session Summary\n\nCompacted.\n\n### Re: do #x — gpt-5\n\nDone.",
         );
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata(
+    ) {
+        // Recovery may commit a visible `### Re:` after the original queue-drain
+        // cycle lost its capture metadata. The committed exchange body is still
+        // sufficient proof that the missing-response closeout has been repaired.
+        let _lock = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nCompacted.\n\n",
+            "### Re: do [#ipc1] / do [#39c5]\n\nRecovered.\n",
+            "<!-- /agent:exchange -->\n"
+        )
+        .to_string();
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::record_pending_done_ids(
+            &doc,
+            &["ipc1".to_string(), "39c5".to_string()],
+        )
+        .unwrap();
+        crate::cycle_state::record_active_queue_heads(
+            &doc,
+            &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
+        )
+        .unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
+            .unwrap();
+
         assert!(matches!(
             check_committed_without_response_body_guard(&doc).unwrap(),
             GuardResult::None

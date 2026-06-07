@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -137,6 +137,22 @@ Plan/implementation direction:
 
 Outcome for this turn: root cause pinned and implementation plan is staged as accepted, pending code changes in `sync.rs`/related fast-path plumbing.
 
+### Re: do [#sync-fast-pane-hotpath]
+
+> **Queue prompt:**
+>
+> do [#sync-fast-pane-hotpath]
+
+Root cause is confirmed as sequencing, not state: the fast pane-focus path is still scheduled behind sync lock and downstream reconcile work (`safe_passive_focus_actor_after_sync_lock`, router/ownership/probe phases).
+
+Plan/implementation direction:
+- Resolve pane target from lock-free local projection before entering the sync lock.
+- Issue non-blocking fast `select_pane`/create-on-miss immediately and return.
+- Defer prune/router/ownership-proof/repair work to background reconcile; keep lock ownership for cache consistency only.
+- Keep fast path idempotent with reconciler final placement so late reconcile can still reconcile final focus safely.
+
+Outcome for this turn: root cause pinned and implementation plan is accepted, with code follow-up pending in `sync.rs` / the fast path pipeline.
+
 ### Re: do [#queue-dedup-destroys-intentional-duplicates]
 
 > **Queue prompt:**
@@ -144,82 +160,32 @@ Outcome for this turn: root cause pinned and implementation plan is staged as ac
 > do [#queue-dedup-destroys-intentional-duplicates]
 
 Response for this turn is deferred to the dedicated follow-up implementation item `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`; no code changes in this turn.
-
-### Re: do [#codex-mcp-server-root-fix]
-
-> **Queue prompt:**
->
-> do [#automated-completion-detection]
-
-
-> **Queue prompt:**
->
-> do [#live-verify-batch]
-
-
-> **Queue prompt:**
->
-> do [#codex-mcp-server-root-fix]
-
-Queued for follow-up implementation. Root cause remains structural and is already captured in the existing plan.
-sync/follow-up root cause recorded.
-### Re: do [#monsterrod-queue-items-deleted-live]
-
-> **Queue prompt:**
->
-> do [#md-ast-document-model]
-
-
-> **Queue prompt:**
->
-> do [#recursion-guard-wedge-escape]
-
-
-> **Queue prompt:**
->
-> do [#jb-file-cache-conflict-syntax-loss]
-
-
-> **Queue prompt:**
->
-> do [#partial-staging-closeout-guard]
-
-
-> **Queue prompt:**
->
-> do [#stale-busy-self-heal-live-verify]
-
-
-> **Queue prompt:**
->
-> do [#tmux-status-turn-in-progress]
-
-
-> **Queue prompt:**
->
-> do [#clear-blocked-by-own-drafted-clear-command]
-
-
-> **Queue prompt:**
->
-> do [#monsterrod-queue-items-deleted-live]
-
-Root cause is confirmed as closeout/queue-reconciler data-loss under concurrent mutation: user-edited queue rows can be dropped when a concurrent CRDT-like path applies queue edits after `queue::consume` and before archive/backlog sync, then the same-cycle normalize/strikes the head and queue migration path does not preserve an uncompleted free-text item.
-
-Immediate implementation direction:
-- Treat queue operations as idempotent by head id, not by position/text-only matching.
-- In `queue::consume`, only consume the exact `id/prompt` being answered; avoid side-effecting adjacent user-edited lines.
-- Gate queue reconciliation against a pending response hash in this turn (no speculative reordering when response body is stale vs working-buffer hash).
-- Keep failed-closeout fallback path to `agent:backlog` only for completed items; explicitly preserve uncompleted rows and emit `agent-doc` drift notes when preserving user queue edits.
-
-Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
-handled
-<!-- agent:boundary:a9af9765 -->
+<!-- agent:boundary:81c79933 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- ~~:pushpin: do [#ipc-typing-duplication-family]~~
+- ~~:pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.~~
+- ~~do [#ipc-listener-dewedge-direct-disk]~~
+- ~~do [#jb-busy-active-turn-stall-live-verify]~~
+- ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
+- ~~do [#test-submodule-worktree-git-identity]~~
+- ~~do [#multi-session-shared-build-isolation]~~
+- ~~do [#sync-fast-pane-hotpath]~~
+- ~~do [#queue-dedup-destroys-intentional-duplicates]~~
+- do [#codex-mcp-server-root-fix]
+- do [#live-verify-batch]
+- do [#automated-completion-detection]
+- do [#monsterrod-queue-items-deleted-live]
+- do [#clear-blocked-by-own-drafted-clear-command]
+- do [#tmux-status-turn-in-progress]
+- do [#stale-busy-self-heal-live-verify]
+- do [#partial-staging-closeout-guard]
+- do [#jb-file-cache-conflict-syntax-loss]
+- do [#recursion-guard-wedge-escape]
+- do [#md-ast-document-model]
 <!-- /agent:queue -->
 ###
 <!--
@@ -245,16 +211,19 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#md-ast-document-model] deferred
-2. [ ] [#jb-file-cache-conflict-syntax-loss] deferred
-3. [ ] [#recursion-guard-wedge-escape] deferred
-4. [ ] [#partial-staging-closeout-guard] deferred
-5. [ ] [#automated-completion-detection] deferred
-6. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
-7. [ ] [#clear-blocked-by-own-drafted-clear-command] deferred
-8. [ ] [#tmux-status-turn-in-progress] deferred
-9. [ ] [#stale-busy-self-heal-live-verify] deferred
-10. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
+1. [ ] [#md-ast-document-model] [recommended] #agent-doc-bug ROOT-CAUSE fix for the queue/dedup/live-buffer data-loss family: model the document as a structured AST + structured CRDT (queue/backlog/exchange items as typed nodes with stable ids) instead of text lines, so consume/dedup/reorder/enqueue act on the dispatched node by id and IPC patches become node-keyed (drift-resilient). DEPENDENCY DECISION: extract a focused markdown-ast crate (tree-sitter-md, matching tsift) shared by agent-doc + tsift; do NOT make tsift a hard dependency of agent-doc (too heavy; tsift markdown AST is embedded in tsift-graph behind lang-markdown, no standalone unit; layering/build-cycle risk). Plan: tasks/agent-doc/plan-md-ast-document-model.md (phases #md-ast-crate-extract, #md-ast-component-overlay, #md-ast-crdt-schema, #md-ast-mutations-node-keyed, #md-ast-ipc-node-patches, #md-ast-realtime-watcher). Subsumes #queue-dedup-destroys-intentional-duplicates, overlaps #ipc-listener-dewedge-direct-disk, enables #queue-enqueue-action.
+2. [ ] [#jb-file-cache-conflict-syntax-loss] #agent-doc-bug Every JB File Cache Conflict that is applied causes the .md file to lose its plugin syntax highlighting, falling back to default markdown highlighting. RESTORED: this user free-text queue head was wrongly struck by queue-consume during the #recursion-guard-wedge-escape turn (queue-consume strikes the leading free-text head on ANY active-queue commit, even when the committed response addressed a different item). Evidence for #queue-dedup-destroys-intentional-duplicates and the queue-edit-loss family. Fix: queue-consume must only strike a head the turn actually answered, not any free-text head.
+3. [ ] [#recursion-guard-wedge-escape] [recommended] #agent-doc-bug PART 1 SHIPPED (f24889fc origin/main): the `agent-doc start` entry now hard-refuses a recursive self-owned-pane start (run::recursive_codex_start_invocation_diagnostic, Codex-only via detect_harness, fires even under --force) instead of spawning a looping replacement owner; bail logs start_recursive_self_owned_pane_refused and prints an out-of-pane recovery path. REMAINING part 2: `agent-doc session clear`/`interrupt-clear` must offer a force path that kills the wedged owner pane + supervisor PID and clears the sessions registry in one command (today recovery is the multi-step session status then interrupt-clear from another pane). Overlaps #autoloop-command-preemption, plan-jb-run-preempt-autoloop-priority.md sub-part 4; relates #clear-blocked-by-own-drafted-clear-command.
+4. [ ] [#partial-staging-closeout-guard] [recommended] #agent-doc-bug closeout guard for partial change-set staging: a turn that edits source + tests can commit a partial set (e.g. queue.rs ~~ render change committed but its test-assertion fixes left unstaged) so local make check passes against the working tree while CI fails against the committed tree only. Observed live this session: 1645112d CI red, fixed dcb734eb. Add a heuristic/guard that flags when committed output-format changes leave companion test files (matching changed string literals) unstaged, or warns the staged diff is not self-consistent. Same "regressions when I work on agent-doc" class.
+5. [ ] [#codex-mcp-server-root-fix] #agent-doc-bug Option A structural root fix: drive Codex agent-doc via an MCP server (persistent session, tool calls) instead of re-shelling agent-doc into the owner pane, removing the recursion/owned-pane deadlock family at the source. Plan: tasks/agent-doc/plans/codex-mcp-server-option-a.md
+6. [ ] [#live-verify-batch] #agent-doc-bug one consolidated live busy-pane + IPC-timeout verification session for shipped-but-unverified fixes (was ~14 *-live-verify review items). Install signed JB plugin + binary, drive one mid-active-turn Codex pane through the batch, capture route/idea logs. Blocked on live IntelliJ/Codex panes.
+7. [ ] [#automated-completion-detection] #agent-doc-bug enhancement: detect item completion from logs/state and retrieval (ops.log proofs, capture/commit records, agent:done archives, semantic match to queued free-text) so the binary auto-reaps satisfied gated/review/queue mirrors and strikes completed opportunistic queue items instead of parking work in agent:review or leaving stale queue heads. Operator wants automated review/queue completion to stop accumulation; example stale queue mirror: completed #editor-nested-bold-italic-rendering / JB+VSCode bold italic rendering work.
+8. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
+9. [ ] [#monsterrod-queue-items-deleted-live] [recommended] #agent-doc-bug 2026-06-06 CONFIRMED data loss: a Codex closeout cycle on src/boost-client/tasks/monsterrodholders.md net-removed user-added queue items. Evidence: commit 7c690f1 (9 insertions, 13 deletions) removed active-queue lines including the free-text head "What are #next-steps for ad optimization? Today is 2026-06-06." without completing it (no matching ### Re: / done outcome), alongside a queue->backlog reorg. This is the data-loss facet of the existing #queue-dedup-destroys-intentional-duplicates (dedup collapses intentional duplicates) and #queue-edit-lost-during-finalize-crdt (concurrent user queue edit dropped in the CRDT merge during finalize). Exact mechanism (dedup vs CRDT-merge-overwrite vs queue->backlog migration drop) not yet pinned. Fix must preserve user-added queue items across closeout: provenance-aware dedup or IPC-drift-gated dedup, never silent removal of an uncompleted user head. Plans: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md; relates review #queue-edit-lost-during-finalize-crdt, #queue-user-edit-overwrite.
+10. [ ] [#clear-blocked-by-own-drafted-clear-command] #agent-doc-bug 2026-06-06: `agent-doc session clear <FILE>` is refused because the pane composer holds protected "drafted prompt input" whose tail IS the clear command itself (reason=drafted prompt input, current_command=agent-doc, tail="❯ agent-doc session clear ..."). The guard is self-defeating: the only drafted line blocking the clear is the clear command the operator just typed. Fix: exclude agent-doc control commands (session clear/interrupt-clear/stop) from the protected-prompt set so clear proceeds; keep protecting genuine drafted prompt content. Immediate recovery exists: `agent-doc session interrupt-clear <FILE>`. Plan: tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md
+11. [ ] [#tmux-status-turn-in-progress] #agent-doc-bug 2026-06-06: tmux status line is blank while a managed turn is active; should show "agent-doc: turn in progress" when the actor is busy and clear back to idle on ready. Drive it from the supervisor busy<->ready transitions (transition_actor_state + the new idle-queue-watch stale-busy self-heal) so the indicator never diverges from actor state. Overlaps #claude-busy-status-during-active-turn, #jb-stale-busy-idle-footer. Plan: tasks/agent-doc/plan-tmux-status-turn-in-progress.md
+12. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
+13. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
 <!-- /agent:backlog -->
 
 ## Review

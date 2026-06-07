@@ -149,6 +149,11 @@ Response for this turn is deferred to the dedicated follow-up implementation ite
 
 > **Queue prompt:**
 >
+> do [#automated-completion-detection]
+
+
+> **Queue prompt:**
+>
 > do [#live-verify-batch]
 
 
@@ -158,7 +163,7 @@ Response for this turn is deferred to the dedicated follow-up implementation ite
 
 Queued for follow-up implementation. Root cause remains structural and is already captured in the existing plan.
 sync/follow-up root cause recorded.
-<!-- agent:boundary:dde6f72e -->
+<!-- agent:boundary:1b207aa9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -175,7 +180,7 @@ sync/follow-up root cause recorded.
 - ~~do [#queue-dedup-destroys-intentional-duplicates]~~
 - ~~do [#codex-mcp-server-root-fix]~~
 - ~~do [#live-verify-batch]~~
-- do [#automated-completion-detection]
+- ~~do [#automated-completion-detection]~~
 - do [#monsterrod-queue-items-deleted-live]
 - do [#clear-blocked-by-own-drafted-clear-command]
 - do [#tmux-status-turn-in-progress]
@@ -213,7 +218,7 @@ What are #next-steps to fix bugs?
 2. [ ] [#jb-file-cache-conflict-syntax-loss] #agent-doc-bug Every JB File Cache Conflict that is applied causes the .md file to lose its plugin syntax highlighting, falling back to default markdown highlighting. RESTORED: this user free-text queue head was wrongly struck by queue-consume during the #recursion-guard-wedge-escape turn (queue-consume strikes the leading free-text head on ANY active-queue commit, even when the committed response addressed a different item). Evidence for #queue-dedup-destroys-intentional-duplicates and the queue-edit-loss family. Fix: queue-consume must only strike a head the turn actually answered, not any free-text head.
 3. [ ] [#recursion-guard-wedge-escape] [recommended] #agent-doc-bug PART 1 SHIPPED (f24889fc origin/main): the `agent-doc start` entry now hard-refuses a recursive self-owned-pane start (run::recursive_codex_start_invocation_diagnostic, Codex-only via detect_harness, fires even under --force) instead of spawning a looping replacement owner; bail logs start_recursive_self_owned_pane_refused and prints an out-of-pane recovery path. REMAINING part 2: `agent-doc session clear`/`interrupt-clear` must offer a force path that kills the wedged owner pane + supervisor PID and clears the sessions registry in one command (today recovery is the multi-step session status then interrupt-clear from another pane). Overlaps #autoloop-command-preemption, plan-jb-run-preempt-autoloop-priority.md sub-part 4; relates #clear-blocked-by-own-drafted-clear-command.
 4. [ ] [#partial-staging-closeout-guard] [recommended] #agent-doc-bug closeout guard for partial change-set staging: a turn that edits source + tests can commit a partial set (e.g. queue.rs ~~ render change committed but its test-assertion fixes left unstaged) so local make check passes against the working tree while CI fails against the committed tree only. Observed live this session: 1645112d CI red, fixed dcb734eb. Add a heuristic/guard that flags when committed output-format changes leave companion test files (matching changed string literals) unstaged, or warns the staged diff is not self-consistent. Same "regressions when I work on agent-doc" class.
-5. [ ] [#automated-completion-detection] #agent-doc-bug enhancement: detect item completion from logs/state and retrieval (ops.log proofs, capture/commit records, agent:done archives, semantic match to queued free-text) so the binary auto-reaps satisfied gated/review/queue mirrors and strikes completed opportunistic queue items instead of parking work in agent:review or leaving stale queue heads. Operator wants automated review/queue completion to stop accumulation; example stale queue mirror: completed #editor-nested-bold-italic-rendering / JB+VSCode bold italic rendering work.
+5. [ ] [#automated-completion-detection] deferred
 6. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 7. [ ] [#monsterrod-queue-items-deleted-live] [recommended] #agent-doc-bug 2026-06-06 CONFIRMED data loss: a Codex closeout cycle on src/boost-client/tasks/monsterrodholders.md net-removed user-added queue items. Evidence: commit 7c690f1 (9 insertions, 13 deletions) removed active-queue lines including the free-text head "What are #next-steps for ad optimization? Today is 2026-06-06." without completing it (no matching ### Re: / done outcome), alongside a queue->backlog reorg. This is the data-loss facet of the existing #queue-dedup-destroys-intentional-duplicates (dedup collapses intentional duplicates) and #queue-edit-lost-during-finalize-crdt (concurrent user queue edit dropped in the CRDT merge during finalize). Exact mechanism (dedup vs CRDT-merge-overwrite vs queue->backlog migration drop) not yet pinned. Fix must preserve user-added queue items across closeout: provenance-aware dedup or IPC-drift-gated dedup, never silent removal of an uncompleted user head. Plans: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md; relates review #queue-edit-lost-during-finalize-crdt, #queue-user-edit-overwrite.
 8. [ ] [#clear-blocked-by-own-drafted-clear-command] #agent-doc-bug 2026-06-06: `agent-doc session clear <FILE>` is refused because the pane composer holds protected "drafted prompt input" whose tail IS the clear command itself (reason=drafted prompt input, current_command=agent-doc, tail="❯ agent-doc session clear ..."). The guard is self-defeating: the only drafted line blocking the clear is the clear command the operator just typed. Fix: exclude agent-doc control commands (session clear/interrupt-clear/stop) from the protected-prompt set so clear proceeds; keep protecting genuine drafted prompt content. Immediate recovery exists: `agent-doc session interrupt-clear <FILE>`. Plan: tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md

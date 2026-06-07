@@ -13,7 +13,10 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
+agent_doc_pipeline:
+  run_id: cycle-1780815606517
+  step: committed
 ---
 
 
@@ -33,43 +36,30 @@ queue: start
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-064921.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-070535.md`*
 
 Compacted content:
-- Archived 3 response topic(s): IPC transport implementation; IPC implementation follow-through; remaining IPC items
+- Archived 2 response topic(s): What are #next-steps to implement the planned ipc features?; #ipc1
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ What are #next-steps to implement the planned ipc features?
 
-### Re: What are #next-steps to implement the planned ipc features?
+### Re: recovery closeout
 
-1. [#ipc1] finalize the lazily-serde contract (type-erased vs trait-bound API) so message shapes are stable.
-2. [#39c5] implement `RemoteOp` plus per-peer permission allowlist on deserialization boundaries.
-3. [#ipc2] implement snapshot + incremental delta protocol and define reconnection/recovery behavior.
-4. [#yxjw] deliver the Cloudflare Worker signaling/rendezvous component for peers.
-5. [#ipc3] complete the consistency model ADR (CRDT vs Raft) and choose defaults.
-6. [#vd5v] add lock-free cached read path in `ThreadSafeContext` as a follow-up perf milestone.
-`agent-doc /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now runs cleanly.
+Recovered the interrupted closeout state for this session.
 
-- `agent-doc` executed successfully.
-- No queue prompt is currently active.
-- No document changes detected on this cycle.
+The lazily-rs queue is currently empty, and `agent-doc session status` reports the supervisor healthy with the actor ready. The recent bad behavior in the log matches the stale-busy idle queue reinjection loop that was fixed in `src/agent-doc` commit `62a92827` (`Preserve idle queue dispatch dedup`). After the fix, stale-busy reconcile preserves same-head dispatch deduplication instead of re-draining the same active queue head.
 
-### Re: #ipc1 — Design lazily-serde feature gate
+No additional lazily-rs task work was queued here; this response is the missing closeout body required by `agent-doc session-check` for cycle `cycle-1780815606517`.
 
-Plan:
-1. Define trait surface:
-   - `Serialize`, `Deserialize`, and `Clone + Send + Sync + 'static` bounds on signal payload adapters where possible.
-   - Add a type-erased fallback (`Box<dyn ErasedValue>`) for dynamic graphs that cross process boundaries.
-2. Add compile-time feature flag `serde-lite` that keeps the public API type-safe by default and enables dynamic serialization only when enabled.
-3. Introduce explicit transport schemas:
-   - `enum SerializedSignal { Static { type_id, bytes }, Dynamic { schema_id, bytes } }`
-   - versioned envelope headers (`schema_version`, `origin`, `compat`) so older peers fail open/closed predictably.
-4. Add integration tests:
-   - feature-flag on/off behavior
-   - unknown schema/version rejection path
-   - zero-copy path preserved for static typed payloads.
-5. Document migration guide and compatibility caveats in `tasks/software/plan-lazily-rs-distributed-communication.md`.
-<!-- agent:boundary:d3eaaf19 -->
+
+### Re: recovery closeout
+
+Recovered the interrupted closeout state for this session.
+
+The lazily-rs queue is now stopped, the active queue body is empty, and `agent-doc session status` reports the supervisor healthy with the actor ready. The repeated drain behavior in the session log matches the stale-busy idle queue reinjection loop fixed in `src/agent-doc` commit `62a92827` (`Preserve idle queue dispatch dedup`).
+
+I also removed the stale live review copy of `#39c5`; that item is already archived in `tasks/software/lazily-rs.done.md`, and its reappearance was blocking the closeout guard.
+
+<!-- agent:boundary:cf8e7de1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,32 +67,24 @@ Plan:
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- do [#ipc1]
-- do [#39c5]
-- do [#ipc2]
-- do [#yxjw]
-- do [#ipc3]
-- do [#vd5v]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc1] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - [ ] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
-- [ ] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
+- [ ] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
-- [/] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
-- [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:review -->
 

@@ -12,6 +12,8 @@
 //! tree with stable ids is the substrate that lets later phases key those
 //! operations on node identity instead of text.
 
+pub mod overlay;
+
 use std::hash::{Hash, Hasher};
 
 /// Coarse block-level classification, mapped from `tree-sitter-md` node kinds.

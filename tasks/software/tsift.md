@@ -118,7 +118,7 @@ flowchart TD
 **The one genuine gap = the Ontology Graph.** To match MemGraphRAG, tsift would materialize an ontology layer: node-kind and edge-kind *types* (and their permitted relations) as a small queryable schema graph, letting retrieval start from abstract types and prune by schema constraints. The ontology source could be the code's `NodeKind`/edge-kind enums, the authored-node types from `#trt1`, or your Existence Lang ontology. Queued as gated `#memgraphrag-ont` (needs a decision on the ontology source).
 
 Net: tsift already implements the bottom two of the three layers well — it's a **Fact + Evidence** graph today. The missing piece to be a full tri-layer MemGraphRAG is the typed ontology backbone on top.
-<!-- agent:boundary:7b41c573 -->
+<!-- agent:boundary:d0acd9a7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,25 +134,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#memgraphrag-ont] Materialize a Semantic Ontology Graph layer (MemGraphRAG arxiv 2606.00610 third layer). Today tsift node/edge kinds are conventions on rows, not first-class queryable type-nodes with valid inter-type relations; tsift is a Fact+Evidence graph but lacks the ontology backbone. Add a small typed schema graph (node-kind/edge-kind types + permitted relations) so retrieval can start from abstract types and prune by schema constraints. Ontology source TBD: code NodeKind/edge-kind enums, #trt1 authored-node types, or Existence Lang ontology. GATED on the ontology-source decision; relates to #trt1 and #memgraphrag2.
-<!-- /agent:backlog -->
+- [/] [#memgraphrag-ont] Materialize a Semantic Ontology Graph layer (MemGraphRAG arxiv 2606.00610 third layer). Today tsift node/edge kinds are conventions on rows, not first-class queryable type-nodes with valid inter-type relations; tsift is a Fact+Evidence graph but lacks the ontology backbone. Add a small typed schema graph (node-kind/edge-kind types + permitted relations) so retrieval can start from abstract types and prune by schema constraints. Ontology source TBD: code NodeKind/edge-kind enums, #trt1 authored-node types, or Existence Lang ontology. GATED on the ontology-source decision; relates to #trt1 and #memgraphrag2.<!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#7qky] [recommended] Reduce Codex redundant runbook reads. SHIPPED (v0.34.0 unreleased): retain-don't-reread nudge in shared SKILL Runbooks source -> regenerated all harness surfaces; contract-safe. GATED on re-measurement: re-run 3-harness redundant-read analysis after Codex sessions accumulate with nudge live, compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate doesn't drop, build enforcement as a session-scoped content-dedup LEDGER in a shared LEAF crate (depends on nothing in graph; tsift + agent-doc + others depend down onto it -- NOT inside tsift or agent-doc, avoids dependency cycle). Core = register(id,hash)/should_deliver(id,hash)->Full|Stub, exemptions via hash-change + compaction; session-id passed in by harness (agent-doc cycle_state.rs adapter); thin per-consumer integration. Design tsift-runbook + agent-doc seam to call this ledger from day one. NOT a Claude-only PreToolUse Read hook.
-- [/] [#trt1] [recommended] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), with provenance+confidence+freshness fields gated on community_graph_watermark for staleness; expose retrieval via context-pack/search injection and a / graph-menu command; opt-in/passive capture from agent-doc session archives; md/html as on-demand projection, graph store as source of truth. Spec in src/tsift/SPEC.md.
-- [/] [#0y9e] I set NPM_TOKEN="$(passage btak/NPM_TOKEN)". Publish to npm.
-- [/] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
-- [/] [#surreal-batch-bfs] #surreal-batch-bfs-gated: Batch frontier expansion - gated (low)
-- [/] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
-- [/] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [/] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
-- [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
-- [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
-- [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
-- [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
-- [/] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
 <!-- /agent:review -->
 ###
 <!--

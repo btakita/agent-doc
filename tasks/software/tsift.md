@@ -169,7 +169,7 @@ The queued continuation was already satisfied by the completed `v0.1.64` release
 ### Re: queue stopped — gpt-5
 
 The queue is stopped and there is no remaining queued tsift release work for this cycle.
-<!-- agent:boundary:92bb7b4a -->
+<!-- agent:boundary:91382019 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,7 +178,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

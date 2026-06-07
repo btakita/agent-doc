@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -38,7 +38,7 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): IPC transport implementation; IPC implementation follow-through; remaining IPC items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:e846de06 -->
+<!-- agent:boundary:28331008 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,8 +46,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps to implement the planned ipc features?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

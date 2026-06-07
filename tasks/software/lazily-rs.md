@@ -129,7 +129,40 @@ A SHM ring buffer helps when the payload is large enough that avoiding socket/fi
 It is not free: the protocol must handle wraparound, stale descriptors, torn writes, generation counters, checksums, reader lag, and fallback for oversized payloads. So the best use is a hybrid path: keep small control frames on the existing IPC transport, and put large blobs in shared memory behind descriptor references.
 
 No code changed for this answer; the implementation item remains next in the queue.
-<!-- agent:boundary:2af84705 -->
+
+### Re: Implement a SHM blob arena for IPC transport. — gpt-5
+
+> **Queue prompt:**
+>
+> Implement a SHM blob arena for IPC transport.
+
+
+Implemented the SHM blob arena for lazily-rs IPC and pushed the lazily-rs submodule commit.
+
+Changed paths in `src/lazily-rs`:
+
+- `src/ipc.rs`: added `ShmBlobArena`, `ShmBlobRef`, `ShmBlobArenaError`, `IpcValue`, `NodeState::SharedBlob`, and blob-backed `DeltaOp` constructors. The arena writes a fixed header before each blob and validates generation, epoch, length, and checksum before reads.
+- `src/lib.rs`: exported the SHM blob arena and blob-reference IPC types under the `ipc` feature.
+- `tests/ipc.rs`: added SHM blob tests for descriptor round-trip, oversized payload rejection, wrap/stale descriptor rejection, torn-payload checksum rejection, and `IpcMessage` serialization with shared blob refs.
+- `SPEC.md`: documented the SHM blob payload path and clarified the control-frame plus shared-blob descriptor transport shape.
+
+Commits:
+
+- `src/lazily-rs`: `00e2076 feat: add ipc shared memory blob arena` pushed to `lazily-rs` `origin/main`.
+- parent repo: `3958924ad chore: update lazily-rs ipc shm arena` records the submodule pointer locally.
+
+Verification:
+
+- `cargo fmt --all` passed.
+- `cargo test --locked --features ipc --test ipc` passed: 10 tests.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make fmt clippy build test test-tokio test-async test-loom test-distributed test-ipc test-signaling-client'` passed.
+- `python3 scripts/update-benchmark-results.py --check` still fails because this checkout has no `target/criterion` Criterion estimates; this is the same local benchmark-artifact prerequisite as before, not a SHM arena test failure.
+- Latest lazily-rs GitHub Actions `CI` for `00e2076` was still in progress when checked.
+
+Push status: the lazily-rs submodule push succeeded. The parent `agent-loop` push was rejected as non-fast-forward because local `main` is behind `origin/main`; I did not pull/rebase the dirty superproject with many unrelated local changes.
+
+No escalated permissions were used. Confidence is high for the implemented IPC arena surface and tests.
+<!-- agent:boundary:933f678e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +172,9 @@ No code changed for this answer; the implementation item remains next in the que
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~What is the benefit of a SHM ring buffer?~~
-- Implement a SHM blob arena for IPC transport.
+- ~~Implement a SHM blob arena for IPC transport.~~
+- What is the benefit of a SHM ring buffer over a SHM blob arena?
+- Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
 <!-- /agent:queue -->
 
 ## Backlog

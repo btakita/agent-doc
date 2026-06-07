@@ -38,7 +38,30 @@ queue: start
 Compacted content:
 - Archived 11 response topic(s): lazily-rs IPC state sharing; shared-memory IPC and #ipc4; shared-memory ring buffer performance; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:ab6189e3 -->
+
+### Re: #ipc5 transport contract + benchmark matrix — gpt-5
+
+> **Queue prompt:**
+>
+> do [#ipc5]
+
+
+I resolved `#ipc5` as follows:
+
+- Define a new transport abstraction layer so `agent-doc-orchestration` and `tsift` IPC paths share one contract: `IpcTransport` with bounded async send/recv, startup handshake, shutdown, and metadata (`capabilities`, `buffer_size_hint`, `is_in_process`, `supports_fd_paths`, `supports_shared_memory`, `supports_mmap_blob_arena`).
+- Keep protocol messages transport-agnostic (`Envelope`, `Snapshot`, `Delta`, `Ack`, `Error`) and only expose out-of-band channels (`PayloadHint`, `FdBundle`) via optional capability-gated extensions.
+- Add four transport variants for benchmarking:
+  - `InProcessDirect`: same process callback / bounded queue.
+  - `UnixSocket`: Unix-domain socket + length-prefixed framing + optional SCM_RIGHTS for fd passing (where available).
+  - `SharedMemoryBlob`: memory arena + token-based handles for large blobs.
+  - `EventWakeup`: control socket/eventfd/socketpair wake source to measure wake/sleep overhead separately from data transport.
+- Benchmark matrix to execute before default selection: every transport × payload sizes `{4 KiB, 64 KiB, 1 MiB, 10 MiB}`.
+- For each cell record: median/p95 latency, throughput/sec, cpu+sys% by process, allocation count, wake count, FD descriptor deltas, and failure/retry behavior under short bursts.
+- Decision rule: default transport is the variant that wins the weighted aggregate score for each host class, with per-host caps for FD pressure and memory residency.
+- Next actions tied to queue chain:
+  - `#ipc6` implement concrete `ShmBlobArena` transport with memmap/shared-memory lifecycle and generation validation.
+  - `#ipc7`/`#ipc8` add FD/event parity (Linux socket/eventfd first, then platform fallback and Windows adapter) behind feature gating.
+<!-- agent:boundary:7b6516fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,9 +70,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Add #next-steps for a SHM & FD IPC strategy.~~
-- ~~Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.~~
-- do [#ipc5]
+- ~~do [#ipc5]~~
 - do [#ipc6]
 - do [#ipc7]
 - do [#ipc8]
@@ -59,7 +80,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc5] [recommended] Define an IpcTransport adapter contract and benchmark matrix for agent-doc/tsift IPC: in-process, Unix socket/interprocess, mmap/shared-memory blob arena, FD/event wakeup paths; measure 4 KB, 64 KB, 1 MB, and 10 MB payloads before choosing defaults.
 - [ ] [#ipc6] [recommended] Add a real shared-memory backing adapter for ShmBlobArena using shared_memory or memmap2, with lifecycle cleanup, namespace rules, cross-process descriptor validation, stale-generation rejection, and fallback for oversized payloads.
 - [ ] [#ipc7] [recommended] Add a Unix FD/event transport adapter behind an optional feature: Unix-domain control socket, SCM_RIGHTS for shared-memory handles, eventfd on Linux or socketpair/pipe fallback elsewhere, descriptor-budget enforcement, and tests that core IPC messages stay transport-neutral.
 - [ ] [#ipc8] [recommended] Design the Windows transport parity layer for the same IPC capabilities using HANDLE duplication, named pipes, file mappings, and event objects, so FD concepts do not leak into the portable lazily-rs protocol surface.

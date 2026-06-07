@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-Answered the MCP API consolidation queue prompt: keep the public MCP surface as a small set of lifecycle-specific tools (`read`, `preflight`, `plan`, `session_check`, `finalize`) while consolidating implementation internally; avoid exposing one MCP tool per CLI command.
+Closed the duplicate `#md-ast-realtime-node-events` queue head as already shipped by `src/agent-doc` commit `1cc8e2ad`; focused AST and watcher tests passed. Remaining markdown-AST work: `#md-ast-crdt-merge-base`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -60,16 +60,36 @@ A single catch-all MCP tool is tempting, but it would make the important lifecyc
 The useful consolidation is internal: one server, one JSON-RPC handler, shared argument parsing, and shared `CommandOptions` plumbing. That is already mostly what `src/agent-doc/src/mcp.rs` does. I would avoid adding a separate MCP tool for every CLI subcommand; if the MCP surface grows, group by lifecycle stage or add a deliberately named low-level escape hatch rather than replacing the safe lifecycle tools with one generic dispatcher.
 
 So: no broad single-tool collapse for the primary API. Keep a small, stable set of purpose-specific MCP tools, and consolidate code paths underneath them.
-<!-- agent:boundary:30732989 -->
+
+### Re: [#md-ast-realtime-node-events] — gpt-5
+
+> **Queue prompt:**
+>
+> [#md-ast-realtime-node-events]
+
+
+Closed this as an already-shipped duplicate of the archived `#md-ast-realtime-watcher` phase.
+
+The realtime watcher path is present in `src/agent-doc` commit `1cc8e2ad` (`Add node-keyed watch events`): `agent-doc-markdown-ast` exposes `events::diff_node_events`, the watch daemon seeds per-document markdown snapshots, and file changes log `document_node_events` JSON batches keyed by component/node id with insert/remove/replace/move/strike/unstrike operations. The docs and release notes already describe this as the watcher handoff for realtime enqueue work.
+
+Verification passed this cycle:
+
+- `cargo test -p agent-doc-markdown-ast diff_node_events`
+- `cargo test -p agent-doc-orchestration node_events`
+- `cargo test -p agent-doc-orchestration update_node_snapshot_emits_node_keyed_events_after_seed`
+
+No new source change was needed for this queue head. The remaining `#md-ast-document-model` work is the CRDT merge-base phase, tracked by `#md-ast-crdt-merge-base`.
+<!-- agent:boundary:948ae8d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
 - ~~There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?~~
-- [#md-ast-realtime-watcher]
+- ~~[#md-ast-realtime-node-events]~~
 - [#md-ast-crdt-merge-base]
-- [#stale-busy-after-auto-inject-no-clear]
+- ~~[#stale-busy-after-auto-inject-no-clear]~~
+- do [#md-ast-document-model]
 <!-- /agent:queue -->
 ###
 <!--
@@ -95,9 +115,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED a45121b0: editor/IPC plugins now apply authoritative node_patches via shared Rust markdown-AST mutations, preserving unrelated live-buffer edits while skipping stale legacy component replacement for node-patched components. REMAINING: legacy text CRDT is still the merge base; realtime watcher convergence still needs the structured node-patch apply path. NEXT: #md-ast-realtime-watcher and #md-ast-crdt-merge-base. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-2. [ ] [#md-ast-realtime-node-events] #next-steps Finish #md-ast-document-model realtime watcher convergence for editor/IPC plugins against the structured node-patch document model. Replaces archived planning id #md-ast-realtime-watcher. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-3. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
+1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED a45121b0 + 1cc8e2ad: editor/IPC plugins apply authoritative node_patches via shared Rust markdown-AST mutations, and the watch daemon already emits node-keyed `document_node_events` batches for realtime consumers. REMAINING: legacy text CRDT is still the merge base. NEXT: #md-ast-crdt-merge-base. Plan: tasks/agent-doc/plan-md-ast-document-model.md
+2. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 <!-- /agent:backlog -->
 
 ## Review

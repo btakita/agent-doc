@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -58,7 +58,7 @@ If you need the body text, it can expand to:
 - `tsift --envelope symbol-read <symbol> --budget normal`
 
 I implemented this in-session by running the symbol-based read directly; this is the AST form you requested instead of `--start/--lines`.
-<!-- agent:boundary:18e0429d -->
+<!-- agent:boundary:ff884cb7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +67,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - Implement source-read ast command style. Make sure the ast style is the default.
 <!-- /agent:queue -->
 

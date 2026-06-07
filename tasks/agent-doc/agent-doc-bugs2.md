@@ -139,7 +139,33 @@ Verification passed:
 - `cargo test -p agent-doc-orchestration dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items -- --nocapture`
 
 The item was archived as done because the live MonsterRod deletion report is covered by those shipped guards and regression tests.
-<!-- agent:boundary:9418ac4c -->
+
+### Re: #clear-blocked-by-own-drafted-clear-command -- gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]
+
+
+Shipped and closed.
+
+Changed:
+- `agent-doc-orchestration/src/harness.rs` now treats Codex prompt candidates that are `agent-doc session clear`, `interrupt-clear`, `stop`, `restart`, or `restart-supervisor` as operator control commands, not protected drafted prompt input.
+- Ordinary drafted Codex text remains protected.
+- Added an Unreleased note in `VERSIONS.md`.
+
+Commits:
+- `src/agent-doc` `e6c7b7b2` (`fix: allow self-drafted session clear controls`)
+- superproject pointer `910ec31fe` (`agent-doc: allow self-drafted clear controls`)
+
+Verification:
+- `cargo test -p agent-doc-orchestration protected_prompt_input_reason_ -- --nocapture` passed.
+- `make check` passed locally.
+- GitHub Actions `agent-doc` CI run `27089249574` passed, including `make check` and `make tmux-ci`.
+- Superproject has no workflow named `CI`.
+
+Unrelated dirty files in `src/agent-doc` (`queue.rs`, `queue_cmd.rs`, `start.rs`) and `src/boost-client` were left out of this commit.
+<!-- agent:boundary:3f3ebaed -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -151,22 +177,22 @@ The item was archived as done because the live MonsterRod deletion report is cov
 - ~~:round_pushpin: do [#live-verify-batch]~~
 - ~~:round_pushpin: do [#automated-completion-detection]~~
 - ~~:round_pushpin: do [#monsterrod-queue-items-deleted-live]~~
-- :round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]
+- ~~:round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]~~
 - :round_pushpin: do [#tmux-status-turn-in-progress]
 - :round_pushpin: do [#stale-busy-self-heal-live-verify]
 - :round_pushpin: do [#codex-mcp-server-mvp]
 - :round_pushpin: do [#codex-mcp-codex-integration]
 - :round_pushpin: do [#codex-mcp-live-verify]
-- do [#jb-file-cache-conflict-syntax-loss]
-- do [#jb-busy-active-turn-stall-live-verify]
+- :round_pushpin: do [#auto-complete-done-archive-mirrors]
+- :round_pushpin: do [#auto-complete-ops-proof]
 - ~~do [#recursion-guard-wedge-escape]~~
 - ~~do [#queue-dedup-destroys-intentional-duplicates]~~
+- :round_pushpin: do [#auto-complete-semantic-retrieval]
+- do [#jb-file-cache-conflict-syntax-loss]
+- do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
-- :round_pushpin: do [#auto-complete-done-archive-mirrors]
-- :round_pushpin: do [#auto-complete-ops-proof]
-- :round_pushpin: do [#auto-complete-semantic-retrieval]
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->
 ###
@@ -202,14 +228,13 @@ What are #next-steps to fix bugs?
 7. [ ] [#auto-complete-ops-proof] #agent-doc-bug Automated completion detection phase 2: derive completion candidates from ops or cycle state, capture records, commit or CI proof, and review-gated shipped markers; auto-gate or mark done only when evidence is deterministic and logged.
 8. [ ] [#auto-complete-semantic-retrieval] #agent-doc-bug Automated completion detection phase 3: integrate the tsift-memory or MemGraphRag retrieval path so preflight and plan can propose already-resolved semantic matches such as completed free-text queue mirrors without embedding the heavy tsift CLI. Relates #agent-doc-memgraphrag-retrieval.
 9. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
-10. [ ] [#clear-blocked-by-own-drafted-clear-command] #agent-doc-bug 2026-06-06: `agent-doc session clear <FILE>` is refused because the pane composer holds protected "drafted prompt input" whose tail IS the clear command itself (reason=drafted prompt input, current_command=agent-doc, tail="❯ agent-doc session clear ..."). The guard is self-defeating: the only drafted line blocking the clear is the clear command the operator just typed. Fix: exclude agent-doc control commands (session clear/interrupt-clear/stop) from the protected-prompt set so clear proceeds; keep protecting genuine drafted prompt content. Immediate recovery exists: `agent-doc session interrupt-clear <FILE>`. Plan: tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md
-11. [ ] [#tmux-status-turn-in-progress] #agent-doc-bug 2026-06-06: tmux status line is blank while a managed turn is active; should show "agent-doc: turn in progress" when the actor is busy and clear back to idle on ready. Drive it from the supervisor busy<->ready transitions (transition_actor_state + the new idle-queue-watch stale-busy self-heal) so the indicator never diverges from actor state. Overlaps #claude-busy-status-during-active-turn, #jb-stale-busy-idle-footer. Plan: tasks/agent-doc/plan-tmux-status-turn-in-progress.md
-12. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
-13. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
-14. [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.
-15. [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.
-16. [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
-17. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
+10. [ ] [#tmux-status-turn-in-progress] #agent-doc-bug 2026-06-06: tmux status line is blank while a managed turn is active; should show "agent-doc: turn in progress" when the actor is busy and clear back to idle on ready. Drive it from the supervisor busy<->ready transitions (transition_actor_state + the new idle-queue-watch stale-busy self-heal) so the indicator never diverges from actor state. Overlaps #claude-busy-status-during-active-turn, #jb-stale-busy-idle-footer. Plan: tasks/agent-doc/plan-tmux-status-turn-in-progress.md
+11. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
+12. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
+13. [ ] [#jb-busy-active-turn-stall-live-verify] [recommended] live-verify #jb-run-agent-doc-busy-active-turn-stall end-to-end: with prompt-bearing drift present in a doc whose Codex pane is mid-turn, click JB Run Agent Doc and confirm the session-still-running notification fires IMMEDIATELY (logs route_dispatch_only_busy_active_turn_skip_wait) instead of after a 60s stall. Deterministic core shipped b93b3c3c (skip busy ready-wait on proven active-turn busy_proof_line); could not repro the exact prompt-drift-while-busy path non-disruptively on the live monsterrodholders pane this session.
+14. [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.
+15. [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
+16. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
 <!-- /agent:backlog -->
 
 ## Review

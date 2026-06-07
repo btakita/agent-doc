@@ -113,13 +113,29 @@ Yes, and this is squarely `#md-ast-document-model`:
 (Q1 — tsift hard-dep vs extracted crate — answered last turn: extract a focused `tree-sitter-md` crate shared by both, no hard tsift dep. Plan: `tasks/agent-doc/plan-md-ast-document-model.md`.)
 
 I left Q2/Q3 in the queue rather than risk striking your `stop` control with a multi-head consume; they are answered here. Honoring `stop` — halting after this.
-<!-- agent:boundary:4f91ade3 -->
+
+### Re: queue state — consume fix verified, paused at your `stop` — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#md-ast-document-model]. I like using the tsift markdown AST. Should tsift be a hard dependency for agent-doc or should we extract a separate crate for the markdown AST?
+
+
+No new question this cycle — the only change was the completed-marker strike on `#queue-consume-pushpin-normalization` from last turn's `--done`, now committed. This cycle also **confirms the consume fix works end-to-end**: closeout committed without a `reset`/recovery dance.
+
+Document state (source of truth):
+- **Q1/Q2/Q3 answered** (above) — tsift dep → extract a shared `tree-sitter-md` crate; reorder/provenance/realtime → `#md-ast-document-model`; AST candidate → `tree-sitter-md`, custom overlay only, MemGraphRag is a separate retrieval layer.
+- `#queue-consume-pushpin-normalization` — **done** (shipped `1750e345`).
+- Your `:pushpin: stop` sits right after the design questions, so I'm **halted there** and not draining the `do` items below it (`#queue-enqueue-action`, `#ipc-listener-dewedge-direct-disk`, …).
+
+To continue: remove the `stop` item to let the queue drain, or tell me a phase to start — I'd suggest `#md-ast-crate-extract` (phase 1 of the plan).
+<!-- agent:boundary:dd07054f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#md-ast-document-model]. I like using the tsift markdown AST. Should tsift be a hard dependency for agent-doc or should we extract a separate crate for the markdown AST?
+- ~~:pushpin: do [#md-ast-document-model]. I like using the tsift markdown AST. Should tsift be a hard dependency for agent-doc or should we extract a separate crate for the markdown AST?~~
 - :pushpin: Preflight should recognize when I reorder the queue items. Perhaps we should have a realtime document event hooks and fallback watcher that updates the document model and can understand what my edits are vs your edits?
 - :pushpin: Should tsift + agent-doc use one of the other markdown AST candidates instead? I want something high performance since we are becoming realtime. And can support our document model. Is a custom md ast the best way to achieve that or another existing library? Note that tsift is working on a MemGraphRag implementation. Would that be useful for agent-doc?
 - :pushpin: stop
@@ -128,7 +144,7 @@ I left Q2/Q3 in the queue rather than risk striking your `stop` control with a m
 - :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
 - :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
-- :pushpin: do [#queue-consume-pushpin-normalization]
+- ~~:pushpin: do [#queue-consume-pushpin-normalization]~~
 - do [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

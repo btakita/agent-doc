@@ -502,6 +502,29 @@ pub fn sync_backlog_into_queue(
 /// entry (completed, preset, dispatch, fence, freeform) at its original
 /// position. Ids absent from `rank` sort last (rank `u8::MAX`). Returns
 /// `Some(new_entries)` when the order changes, `None` otherwise.
+/// The manual-priority pin marker (`#queue-manual-priority-override`). A
+/// queue / backlog / icebox item whose text is prefixed with `__prioritized__`
+/// is pinned to the top of the priority ordering and held there across the
+/// per-turn recompute. Releasing the pin is just deleting the marker — the item
+/// then reverts to its `priority`-attribute rank. The agent may also add the
+/// marker to items it prioritizes, so deleting it re-opens the slot for the
+/// normal rank.
+pub const PRIORITIZED_MARKER: &str = "__prioritized__";
+
+/// True when `text` carries the manual-priority pin marker at its head (after
+/// optional leading whitespace). Tolerant of an immediately-following space so
+/// both `__prioritized__ do [#id]` and a bare `__prioritized__[#id]` match.
+pub fn is_prioritized(text: &str) -> bool {
+    text.trim_start().starts_with(PRIORITIZED_MARKER)
+}
+
+fn entry_is_prioritized(entry: &QueueEntry) -> bool {
+    match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => is_prioritized(&p.text),
+        _ => false,
+    }
+}
+
 pub fn sort_prompts_by_priority(
     entries: &[QueueEntry],
     rank: &std::collections::HashMap<String, u8>,
@@ -514,15 +537,24 @@ pub fn sort_prompts_by_priority(
     if positions.len() < 2 {
         return None;
     }
-    let key = |e: &QueueEntry| -> u8 {
-        entry_do_id(e)
-            .and_then(|id| rank.get(&id).copied())
-            .unwrap_or(u8::MAX)
+    // Sort key: pinned (`__prioritized__`) prompts float to the top (class 0) and
+    // hold document order among themselves (constant secondary key + stable sort);
+    // unpinned prompts (class 1) keep their backlog-priority rank order below the
+    // pins. Deleting the marker drops a prompt back into the rank-ordered tail.
+    let key = |e: &QueueEntry| -> (u8, u8) {
+        if entry_is_prioritized(e) {
+            (0, 0)
+        } else {
+            let r = entry_do_id(e)
+                .and_then(|id| rank.get(&id).copied())
+                .unwrap_or(u8::MAX);
+            (1, r)
+        }
     };
     let mut prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
-    let before: Vec<u8> = prompts.iter().map(key).collect();
+    let before: Vec<(u8, u8)> = prompts.iter().map(key).collect();
     prompts.sort_by_key(key);
-    let after: Vec<u8> = prompts.iter().map(key).collect();
+    let after: Vec<(u8, u8)> = prompts.iter().map(key).collect();
     if before == after {
         return None;
     }
@@ -898,6 +930,66 @@ mod tests {
         rank.insert("a".to_string(), 1u8);
         rank.insert("b".to_string(), 2u8);
         assert!(sort_prompts_by_priority(&entries, &rank).is_none());
+    }
+
+    #[test]
+    fn prioritized_marker_floats_pinned_prompt_to_top() {
+        // #queue-manual-priority-override: a `__prioritized__` pin floats above
+        // higher-backlog-rank items regardless of its own rank.
+        let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n- do [#c]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        rank.insert("b".to_string(), 9u8); // worst rank, but pinned → top
+        rank.insert("c".to_string(), 2u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pin should float");
+        assert_eq!(
+            render(&sorted),
+            "- __prioritized__ do [#b]\n- do [#a]\n- do [#c]\n"
+        );
+    }
+
+    #[test]
+    fn prioritized_marker_floats_multiple_pins_in_document_order() {
+        // Multiple pins keep their document order at the top; unpinned tail keeps rank order.
+        let entries =
+            parse("- do [#a]\n- __prioritized__ [#z]\n- do [#b]\n- __prioritized__ [#y]\n")
+                .unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 2u8);
+        rank.insert("b".to_string(), 1u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pins should float");
+        assert_eq!(
+            render(&sorted),
+            "- __prioritized__ [#z]\n- __prioritized__ [#y]\n- do [#b]\n- do [#a]\n"
+        );
+    }
+
+    #[test]
+    fn prioritized_marker_release_reverts_to_rank_order() {
+        // Deleting the marker drops the item back into rank-ordered position.
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 2u8);
+        rank.insert("b".to_string(), 1u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("rank reorders");
+        assert_eq!(render(&sorted), "- do [#b]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn prioritized_marker_floats_pin_with_empty_rank_map() {
+        // No backlog priority at all, but a pin must still float to the top.
+        let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pin floats sans rank");
+        assert_eq!(render(&sorted), "- __prioritized__ do [#b]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn is_prioritized_detects_marker() {
+        assert!(is_prioritized("__prioritized__ do [#x]"));
+        assert!(is_prioritized("  __prioritized__ [#x]"));
+        assert!(!is_prioritized("do [#x]"));
+        assert!(!is_prioritized("not __prioritized__ here"));
     }
 
     #[test]

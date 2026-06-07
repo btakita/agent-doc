@@ -3575,18 +3575,21 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // the matching backlog/icebox item so append-built or manual queues come out
     // prioritized. The backlog itself is priority-sorted earlier in the pipeline
     // by run_pending_maintenance, so the rank map read here is already current.
+    // Also runs when the rank map is empty so a `__prioritized__` manual pin
+    // (#queue-manual-priority-override) still floats to the top of the queue even
+    // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") {
         let rank = collect_backlog_priority_ranks(&components, &content);
-        if !rank.is_empty()
-            && let Some(sorted) = crate::queue::sort_prompts_by_priority(&entries, &rank)
-        {
+        if let Some(sorted) = crate::queue::sort_prompts_by_priority(&entries, &rank) {
             let new_body = crate::queue::render(&sorted);
             current_content = {
                 let comps = crate::component::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
-            eprintln!("[preflight] queue: sorted do-prompts by backlog priority");
+            eprintln!(
+                "[preflight] queue: sorted do-prompts by backlog priority (pins floated to top)"
+            );
             entries = sorted;
             mutated = true;
         }

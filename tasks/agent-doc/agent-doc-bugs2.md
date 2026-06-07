@@ -30,56 +30,17 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-061834.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-063455.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #queue-enqueue-action; #queue-enqueue-action closeout recovery
+- Archived 2 response topic(s): backlog queue priority markers; A backlog with queue attribute should immediately add to the queue and prioritize using auto-dag when priority is pre...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: backlog queue priority markers — gpt-5
-
-
-Implemented the queue priority marker behavior in `src/agent-doc`. No new follow-up backlog items are needed from this closeout.
-
-- Source components carrying both `queue` and `priority` now trigger queue priority/auto-DAG ordering for the synced `agent:queue` even when the queue marker itself has no `priority` token.
-- Automatically promoted queue prompts are visibly annotated with `:round_pushpin:`.
-- Priority route dispatches now insert with the operator `:pushpin:` marker and dedupe against equivalent bare queue prompts.
-- Updated `VERSIONS.md`, `specs/pending-system.md`, and `specs/07-orchestration-commands.md`.
-
-Verification:
-
-- `cargo test -p agent-doc-orchestration run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item`
-- `cargo test -p agent-doc-orchestration route_enqueue_priority_dispatch`
-- `cargo test -p agent-doc-orchestration annotate_agent_priority_promotions_marks_promoted_prompt`
-- `make check`
-- `cargo install --path .`
-
-Committed and pushed `src/agent-doc` commit `bd5cb6a6 Annotate prioritized queue promotions`. Latest CI listing after push: run `27085017356` was `in_progress`; per instruction, I did not wait on CI.
-
-### Re: A backlog with queue attribute should immediately add to the queue and prioritize using auto-dag when priority is present — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
-
-
-
-This answers the active free-text queue head about `queue` + `priority` behavior and pin annotations.
-
-Implemented and pushed in `src/agent-doc` commit `bd5cb6a6 Annotate prioritized queue promotions`:
-
-- Source components with both `queue` and `priority` now populate the queue and trigger priority/auto-DAG ordering for synced queue prompts.
-- Automatically promoted queue prompts get the agent-owned `:round_pushpin:` marker.
-- Priority free-text route dispatches get the operator-owned `:pushpin:` marker and marker-normalized dedupe.
-
-Local verification passed: focused regression tests, `make check`, and `cargo install --path .`. CI run `27085017356` was listed as `in_progress`; not waited per instruction.
-<!-- agent:boundary:ef569075 -->
+<!-- agent:boundary:b3484d95 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.~~
 - :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?

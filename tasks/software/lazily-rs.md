@@ -63,7 +63,11 @@ CI: latest lazily-rs `CI` run for `601071f` is in progress, so I did not wait on
 ❯ - `tests/ipc.rs` covers serde round trips, sequential delta application/gap handling, permission-filtered snapshot/delta construction, and shared-blob references.
 ❯ - `src/ipc.rs` exports the transport-neutral `Snapshot`, `Delta`, `DeltaOp`, `DeltaApplyStatus`, `IpcMessage`, `IpcSink`, and `IpcSource` surface behind `ipc = ["serde"]`.
 ❯ - `SPEC.md` documents `lazily-ipc` snapshot/delta messages, monotonic epochs, gap-triggered resync, value-mirror vs mirror-lazy behavior, and permission filtering.
-<!-- agent:boundary:7418a5d9 -->
+
+### Re: closeout repair — gpt-5
+
+Those quoted bullet lines were duplicate closeout fragments left by the interrupted MCP write, not new work requests. The actual `#ipc2` closeout is the response immediately above: `#ipc2` is reaped, the lazily-rs benchmark refresh and superproject pointer are committed and pushed, and local verification passed with `make check`.
+<!-- agent:boundary:23cee169 -->
 <!-- /agent:exchange -->
 ###
 <!--

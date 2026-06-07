@@ -102,7 +102,29 @@ Verification:
 
 Note: I attempted to push the superproject, but `agent-loop/main` is 145 local commits ahead and 15 behind `origin/main` with many unrelated dirty files. I did not autostash/rebase that dirty superproject. The `agent-doc` code fix itself is pushed.
 
-<!-- agent:boundary:ed495789 -->
+### Re: :pushpin: Please investigate the lazily-rs session. It is not behaving correctly. - gpt-5
+
+Investigated and repaired both the agent-doc root cause and the current lazily-rs session state.
+
+Findings:
+- The original lazily-rs `session-check` failure was a false positive in `detect_shadow_open_items`: it treated the historical exchange line `1. [#ipc1] ...` as a live open backlog item even though `#ipc1` was already archived.
+- The live lazily-rs state had also accumulated recovery drift: missing exact queue-head response bodies for `do [#ipc1]` / `do [#39c5]`, restored-but-runnable unrun queue heads, duplicate gated review copies, and a new prompt asking to replace review items with actionable backlog work.
+- The lazily actor registry had been evicted/rebound across this bugs2 pane, which matched the observed cross-document behavior; I did not restart it from here.
+
+Fix:
+- Pushed `btakita/agent-doc` commit `bd1e6b88` (`Ignore exchange transcripts in pending shadow guard`), which excludes `agent:exchange` transcript ranges from the pending shadow detector and adds a regression for ordered-list `[#ipc1]` transcript text.
+- Installed the patched `agent-doc` binary locally with `cargo install --path .` from the clean worktree.
+- Updated the parent `btakita/agent-loop` gitlink to that agent-doc commit at `a95ffea4b`.
+- Repaired `tasks/software/lazily-rs.md`: exact closeout responses exist for `do [#ipc1]` and `do [#39c5]`; review is empty; queue continuation is stopped; the backlog now contains actionable tasks for `#ipc2`, `#yxjw`, `#ipc3`, and `#vd5v`.
+- Committed the lazily archive state in `tasks/software/lazily-rs.done.md` as `e48ac60c5`.
+
+Verification:
+- `cargo test -p agent-doc-core detect_shadow_open_items -- --nocapture` passed.
+- `make check` passed locally in the clean agent-doc worktree.
+- Agent-doc CI run `27085793181` passed (`make check` and `make tmux-ci`).
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now passes with `queue_continuation_required=false`.
+- Parent `btakita/agent-loop` has no workflow named `CI`; its `Agent Doc` run `27085892248` failed immediately with `check` and `tmux-ci` jobs containing `steps: []`, matching the existing runner/infra-shaped failure pattern.
+<!-- agent:boundary:87667596 -->
 <!-- /agent:exchange -->
 
 ## Queue

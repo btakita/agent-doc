@@ -34,7 +34,25 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:940369dd -->
+
+### Re: do [#test-submodule-worktree-git-identity] — gpt-5
+
+Implemented and closed `#test-submodule-worktree-git-identity` in `src/agent-doc`.
+
+The closeout regression test now configures the checked-out submodule commit with inline git identity (`-c user.email=... -c user.name=...`), so it no longer depends on parent-repo or global git config in clean CI sandboxes. I also included the missing queue dedupe follow-up that CI exposed: duplicate ID-backed `do [#id]` queue heads still collapse, but intentional duplicate free-text queue prompts are preserved.
+
+Committed and pushed source fix `0edcd2dc Fix queue dedup and submodule identity tests` to `btakita/agent-doc/main`; GitHub Actions CI run `27086772914` passed, including `make check` and `make tmux-ci`. I also committed the parent gitlink locally as `4db079519 Update agent-doc submodule for queue fixes`.
+
+Verification run:
+- `cargo test -p agent-doc-orchestration preflight_keeps_intentional_duplicate_free_text_prompt -- --nocapture`
+- `cargo test -p agent-doc-orchestration dedup_live_prompts_preserves_free_text_duplicates -- --nocapture`
+- `cargo test -p agent-doc-orchestration classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent -- --nocapture`
+- `make check` in `src/agent-doc`
+- `make -C src/corky check`
+- `cd src/instruction-files && cargo clippy -- -D warnings && cargo test`
+
+Parent repo combined `make check` was also attempted, but it fails while reading separate uncommitted `src/agent-doc` IPC dewedge work: `flowcore_hot_path_guard_and_proof_tokens_are_budgeted` reports `agent-doc-orchestration/src/write.rs token reason=: expected 27, got 29`. I left that work unstaged and separate from this item. The parent repo has no `CI` workflow by that name; latest `Agent Doc` workflow runs are not starting because GitHub reports the account billing/spending-limit annotation.
+<!-- agent:boundary:55410434 -->
 <!-- /agent:exchange -->
 
 ## Queue

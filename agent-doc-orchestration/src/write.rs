@@ -3296,6 +3296,15 @@ fn mark_entries_completed_by_done_ids(
     (entries, marked_texts)
 }
 
+fn normalized_done_id_bag(texts: &[String]) -> Vec<String> {
+    let mut ids = texts
+        .iter()
+        .filter_map(|text| queue_prompt_done_id(text))
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
 fn mark_completed_queue_prompts_for_done_ids(
     file: &Path,
     done_ids: &[String],
@@ -3422,6 +3431,48 @@ fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> Result<Queue
         keys,
         ast_backed: false,
     })
+}
+
+fn queue_prompt_node_keys_for_done_ids(
+    content: &str,
+    done_ids: &[String],
+    consumed_texts: &[String],
+) -> QueuePromptNodeKeys {
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<std::collections::HashSet<_>>();
+
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+        let keys = nodes
+            .into_iter()
+            .filter(|node| !node.item.struck)
+            .filter(|node| {
+                queue_prompt_done_id(&node.item.text).is_some_and(|id| done_ids.contains(&id))
+            })
+            .map(|node| node.node_key)
+            .collect::<Vec<_>>();
+        if keys.len() == consumed_texts.len() {
+            return QueuePromptNodeKeys {
+                keys,
+                ast_backed: true,
+            };
+        }
+    }
+
+    let keys = consumed_texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let hash = crate::ops_log::content_hash(text);
+            let short_hash = &hash[..hash.len().min(12)];
+            format!("queue:done:{index}:{short_hash}")
+        })
+        .collect::<Vec<_>>();
+    QueuePromptNodeKeys {
+        keys,
+        ast_backed: false,
+    }
 }
 
 fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
@@ -3640,7 +3691,163 @@ fn plan_queue_prompt_consumption(
     let entries =
         crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
 
-    let consume_count = queue_consume_count_for_done_ids(&entries, done_ids).max(1);
+    let leading_done_consume_count = queue_consume_count_for_done_ids(&entries, done_ids);
+    if leading_done_consume_count > 0 {
+        let (completed_entries, consumed_texts) =
+            mark_entries_completed_by_done_ids(&entries, done_ids);
+        if !consumed_texts.is_empty() {
+            let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "queue consume: done-id consumption matched no queue prompt to consume"
+                )
+            })?;
+            let consumed_node_keys =
+                queue_prompt_node_keys_for_done_ids(content, done_ids, &consumed_texts);
+            let node_ops = consumed_node_keys
+                .keys
+                .iter()
+                .cloned()
+                .map(|node_key| IpcNodeOp::consume("queue", node_key))
+                .collect::<Vec<_>>();
+
+            let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+            let remaining = crate::queue::prompts(&completed_entries).len();
+            let drained = remaining == 0;
+            let new_entries = if drained {
+                Vec::new()
+            } else {
+                completed_entries
+            };
+            let new_body = crate::queue::render(&new_entries);
+            let mut current = if drained || !consumed_node_keys.ast_backed {
+                comp.replace_content(content, &new_body)
+            } else {
+                consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
+            };
+
+            if drained {
+                if has_auto {
+                    let comps = component::parse(&current)?;
+                    if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                        let raw = &current[q.open_start..q.open_end];
+                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        if new_tag != raw {
+                            let mut rebuilt = String::with_capacity(current.len());
+                            rebuilt.push_str(&current[..q.open_start]);
+                            rebuilt.push_str(&new_tag);
+                            rebuilt.push_str(&current[q.open_end..]);
+                            current = rebuilt;
+                        }
+                    }
+                }
+                current = frontmatter::merge_queue_state(&current, false)?;
+            }
+
+            let snap = snapshot::load(file)?.ok_or_else(|| {
+                anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
+            })?;
+            let snap_comps = component::parse(&snap)?;
+            let snap_queue = snap_comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "queue consume: queue_active is true but snapshot has no agent:queue component"
+                    )
+                })?;
+            let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
+            let snap_entries = crate::queue::parse(snap_body)
+                .context("queue consume: failed to parse snapshot queue")?;
+            let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
+            let (snap_completed_entries, snapshot_consumed_texts) =
+                mark_entries_completed_by_done_ids(&snap_entries, done_ids);
+            if normalized_done_id_bag(&snapshot_consumed_texts)
+                != normalized_done_id_bag(&consumed_texts)
+            {
+                anyhow::bail!(
+                    "queue consume: snapshot done-id prompts {:?} do not match document done-id prompts {:?}",
+                    snapshot_consumed_texts,
+                    consumed_texts
+                );
+            }
+            let snapshot_node_keys =
+                queue_prompt_node_keys_for_done_ids(&snap, done_ids, &snapshot_consumed_texts);
+            let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
+            let snap_new_entries = if snap_remaining == 0 {
+                Vec::new()
+            } else {
+                snap_completed_entries
+            };
+            if snap_new_entries != new_entries {
+                let snap_remaining_prompts = crate::queue::prompts(&snap_new_entries).len();
+                let doc_remaining_prompts = crate::queue::prompts(&new_entries).len();
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "queue_done_id_consume_divergence_reconciled file={} cause=done_id_authoritative consumed={} snap_remaining={} doc_remaining={}",
+                        file.display(),
+                        consumed_texts.len(),
+                        snap_remaining_prompts,
+                        doc_remaining_prompts
+                    ),
+                );
+            }
+
+            let mut new_snap =
+                if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
+                    snap_queue.replace_content(&snap, &new_body)
+                } else {
+                    consume_queue_nodes_by_key(&snap, &snapshot_node_keys.keys)?
+                };
+            if drained {
+                if snap_has_auto
+                    && let Ok(sc2) = component::parse(&new_snap)
+                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                {
+                    let raw = &new_snap[sq2.open_start..sq2.open_end];
+                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(new_snap.len());
+                        rebuilt.push_str(&new_snap[..sq2.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&new_snap[sq2.open_end..]);
+                        new_snap = rebuilt;
+                    }
+                }
+                new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+            }
+
+            let response_first_line = crate::capture::load_active(file)
+                .ok()
+                .flatten()
+                .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+            current = embed_consumed_prompt_in_response(
+                &current,
+                &consumed_texts,
+                response_first_line.as_deref(),
+            );
+            new_snap = embed_consumed_prompt_in_response(
+                &new_snap,
+                &consumed_texts,
+                response_first_line.as_deref(),
+            );
+            let save_snapshot = new_snap != snap;
+
+            return Ok(Some(QueueConsumptionPlan {
+                consumed_text,
+                consumed_texts,
+                node_ops,
+                remaining,
+                drained,
+                auto: has_auto,
+                new_document: current,
+                new_snapshot: new_snap,
+                save_snapshot,
+            }));
+        }
+    }
+
+    let consume_count = leading_done_consume_count.max(1);
     let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(

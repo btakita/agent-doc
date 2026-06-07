@@ -744,6 +744,53 @@ fn write_commit_empty_stdin_with_pending_add_commits_pending_only_change() {
 }
 
 #[test]
+fn write_commit_visible_response_retry_preserves_pending_add() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = session_stream_doc_content();
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    place_uncommitted_visible_response(
+        tmp.path(),
+        &doc,
+        &original,
+        "### Re: capture backlog — gpt-5\nFiled the retry follow-up as #retry.",
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--pending-add",
+            "[#retry] Retry-visible response must keep backlog mutation",
+        ])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("[#retry] Retry-visible response must keep backlog mutation"),
+        "retry closeout must keep the pending-add mutation in the live document:\n{content}"
+    );
+    assert!(
+        content.contains("### Re: capture backlog"),
+        "retry closeout must preserve the already-visible response:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("[#retry] Retry-visible response must keep backlog mutation"),
+        "retry closeout must commit the pending-add mutation:\n{head}"
+    );
+    assert!(
+        head.contains("### Re: capture backlog"),
+        "retry closeout must commit the already-visible response:\n{head}"
+    );
+}
+
+#[test]
 fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::write(
@@ -2487,6 +2534,76 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
     assert!(
         !content.contains("- do [#cspe]") && !content.contains("- ~~do [#cspe]~~"),
         "drained queue must not retain consumed prompts:\n{content}"
+    );
+}
+
+#[test]
+fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let priority_prompt = "agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotated tasks.";
+    let baseline_content = format!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ why did the queue stop?\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\npreset #spec-test-build-install-commit-push\n- {priority_prompt}\n- do [#cspe]\n- do [#ctes]\n- do [#crem]\n- do [#cobs]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#cspe] Update specs.\n- [ ] [#ctes] Rewrite tests.\n- [ ] [#crem] Remove obsolete workaround.\n- [ ] [#cobs] Add observability criteria.\n<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, &baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let reordered_queue = format!(
+        "preset #spec-test-build-install-commit-push\n- do [#cspe]\n- do [#ctes]\n- do [#crem]\n- do [#cobs]\n- {priority_prompt}\n"
+    );
+    let current = baseline_content
+        .replace(
+            "<!-- agent:boundary:1234abcd -->",
+            "❯ Handle the done-backed queued batch in this response.\n<!-- agent:boundary:1234abcd -->",
+        )
+        .replace(
+            &format!(
+                "preset #spec-test-build-install-commit-push\n- {priority_prompt}\n- do [#cspe]\n- do [#ctes]\n- do [#crem]\n- do [#cobs]\n"
+            ),
+            &reordered_queue,
+        );
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--done",
+            "cspe",
+            "--done",
+            "ctes",
+            "--done",
+            "crem",
+            "--done",
+            "cobs",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed 4 item(s)"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("queue: stop"),
+        "queue_active should remain true while the interspersed priority prompt is still live:\n{content}"
+    );
+    assert!(
+        content.contains("- ~~do [#cspe]~~")
+            && content.contains("- ~~do [#ctes]~~")
+            && content.contains("- ~~do [#crem]~~")
+            && content.contains("- ~~do [#cobs]~~"),
+        "all done-backed queue items should be struck:\n{content}"
+    );
+    assert!(
+        content.contains(&format!("- {priority_prompt}")),
+        "the unrelated priority prompt should stay unstruck:\n{content}"
     );
 }
 

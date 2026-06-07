@@ -203,7 +203,32 @@ Current lazily-rs state is also repaired:
 - The parent `btakita/agent-loop` gitlink now points at `src/agent-doc` `6734be4a` via parent commit `709f80dc9`.
 
 Remaining caveat: parent `btakita/agent-loop` has no workflow named `CI`, and its `Agent Doc` workflow still fails immediately with empty `steps: []` jobs, so there is no parent test log to fix from this queue item.
-<!-- agent:boundary:136072c3 -->
+
+### Re: :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing? - gpt-5
+
+Yes, but only as a typed state/snapshot layer, not as a shortcut around the current agent-doc document/queue correctness work.
+
+Useful shape:
+- Each process publishes an authority-scoped model of its state: actor lifecycle, current document snapshot hash, queue head ids, editor buffer generation, IPC listener health, tsift index freshness, and known stale/dirty flags.
+- Peers consume permission-filtered `Snapshot` + `Delta` streams instead of inferring state from logs, tmux text, or full-document patch echoes.
+- Agent-doc can then make route/write/session-check decisions from explicit peer state: editor buffer generation acked patch P, tsift index covers file hash H, or Codex pane owns document D and is idle.
+
+Where lazily-rs helps:
+- The lazily model fits reactive derived state: local facts update, computed views invalidate, and interested processes receive deltas instead of polling.
+- It can provide a shared vocabulary for agent-doc and tsift IPC once lazily-rs has stable protocol types, transport contracts, and resync semantics.
+- It should reduce stale-busy, duplicate-patch, and cross-document ownership bugs by making state disagreement explicit and recoverable.
+
+Constraints:
+- This does not replace the markdown AST / node-keyed mutation work. Agent-doc still needs stable document-node ids for queue/backlog/exchange operations.
+- It should start with a narrow process-state schema and local transport benchmark before adopting shared memory or cross-host transports.
+- It must be authority-scoped: tsift should not be able to mutate agent-doc session state just because it can observe it.
+
+Existing tracking already covers this direction:
+- lazily-rs archive items `#ipc5` and `#ipc9` cover the transport benchmark matrix and agent-doc/tsift process-state schema on top of lazily IPC.
+- agent-doc backlog items `#ipc-typing-duplication-family`, `#ipc-listener-dewedge-direct-disk`, `#codex-mcp-server-root-fix`, and `#md-ast-document-model` are the near-term consumers.
+
+So the answer is: use lazily-rs IPC as the eventual shared reactive state substrate, but land it behind explicit Snapshot/Delta contracts and keep document mutation correctness node-keyed inside agent-doc.
+<!-- agent:boundary:bfeaa4ad -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -296,4 +321,3 @@ What are #next-steps to fix bugs?
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
-

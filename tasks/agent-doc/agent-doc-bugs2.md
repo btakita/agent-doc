@@ -35,7 +35,40 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 5 response topic(s): #md-ast-crdt-schema; closeout repair; #md-ast-mutations-node-keyed; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:69c88905 -->
+
+### Re: #md-ast-realtime-watcher
+
+Implemented `#md-ast-realtime-watcher`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-markdown-ast/src/events.rs`
+- `src/agent-doc/agent-doc-markdown-ast/src/lib.rs`
+- `src/agent-doc/agent-doc-markdown-ast/src/mutations.rs`
+- `src/agent-doc/agent-doc-orchestration/src/watch.rs`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/docs/reference/reactive-stream.md`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+
+What changed:
+- Added `events::diff_node_events` for node-keyed insert, remove, replace, move, strike, and unstrike events, sharing mutation node keys through `all_item_nodes`.
+- The watch daemon now seeds per-file markdown-AST snapshots and logs `document_node_events` / `watch_node_events` style JSON batches on file changes with structural anchors.
+- Documented the watcher event stream for realtime queue and enqueue follow-up work.
+
+Verification:
+- `cargo test -p agent-doc-markdown-ast diff_node_events`
+- `cargo test -p agent-doc-orchestration update_node_snapshot_emits_node_keyed_events_after_seed`
+- `cargo test -p agent-doc-markdown-ast`
+- `cargo test -p agent-doc-orchestration watch::tests`
+- `cargo check -p agent-doc-markdown-ast -p agent-doc-orchestration`
+- `make check`
+- `cargo install --path .`
+- GitHub Actions CI run `27083820892` passed, including `make check` and `make tmux-ci`.
+
+Commits pushed to `src/agent-doc`:
+- `1cc8e2ad Add node-keyed watch events`
+- `8ccf4f2c Document watcher node-event spec`
+<!-- agent:boundary:f41a2d60 -->
 <!-- /agent:exchange -->
 
 ## Queue

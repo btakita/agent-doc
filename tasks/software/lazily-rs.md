@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#ipc6]
+
+
+> **Queue prompt:**
+>
 > do [#ipc5]
 
 
@@ -61,7 +66,7 @@ I resolved `#ipc5` as follows:
 - Next actions tied to queue chain:
   - `#ipc6` implement concrete `ShmBlobArena` transport with memmap/shared-memory lifecycle and generation validation.
   - `#ipc7`/`#ipc8` add FD/event parity (Linux socket/eventfd first, then platform fallback and Windows adapter) behind feature gating.
-<!-- agent:boundary:7b6516fb -->
+<!-- agent:boundary:7c1a46b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +76,7 @@ I resolved `#ipc5` as follows:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#ipc5]~~
-- do [#ipc6]
+- ~~do [#ipc6]~~
 - do [#ipc7]
 - do [#ipc8]
 - do [#ipc9]
@@ -80,7 +85,6 @@ I resolved `#ipc5` as follows:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc6] [recommended] Add a real shared-memory backing adapter for ShmBlobArena using shared_memory or memmap2, with lifecycle cleanup, namespace rules, cross-process descriptor validation, stale-generation rejection, and fallback for oversized payloads.
 - [ ] [#ipc7] [recommended] Add a Unix FD/event transport adapter behind an optional feature: Unix-domain control socket, SCM_RIGHTS for shared-memory handles, eventfd on Linux or socketpair/pipe fallback elsewhere, descriptor-budget enforcement, and tests that core IPC messages stay transport-neutral.
 - [ ] [#ipc8] [recommended] Design the Windows transport parity layer for the same IPC capabilities using HANDLE duplication, named pipes, file mappings, and event objects, so FD concepts do not leak into the portable lazily-rs protocol surface.
 - [ ] [#ipc9] [recommended] Define the agent-doc/tsift process-state schema on top of lazily IPC Snapshot/Delta: authority domains, permission-filtered views, resync rules, large-blob thresholds, and passive regression telemetry for transport health.

@@ -134,7 +134,11 @@ Final closeout update for `#md-ast-realtime-watcher`:
 - Superproject has no workflow named `CI`. Its latest `Agent Doc` run `27083990660` failed before either job started because GitHub reported the account billing/spending-limit runner allocation blocker. The `check` and `tmux-ci` jobs had no steps/logs.
 
 The current free-text queue head was intentionally left queued; this update is only the final pointer/CI record for the completed watcher item.
-<!-- agent:boundary:9c415569 -->
+
+### Re: #md-ast-realtime-watcher queue-state correction - gpt-5
+
+Correction to the prior closeout update: while recording the final watcher pointer/CI note, `agent-doc` also associated the already-present monsterrodholders response with its free-text queue head and struck that row. The next active queue head is now `#agent-doc-memgraphrag-retrieval`. No additional `#md-ast-realtime-watcher` work remains.
+<!-- agent:boundary:26ede8fd -->
 <!-- /agent:exchange -->
 
 ## Queue

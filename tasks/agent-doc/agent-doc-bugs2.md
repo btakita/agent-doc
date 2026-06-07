@@ -203,7 +203,9 @@ Repository proof: `src/agent-doc` commit `0b7638cc fix: recover codex stop fresh
 Completed the repair closeout and synced the session snapshot after the pushed recovery commit `9dab3c97c`. The final document state preserves the reopened `#md-ast-document-model` and `#jb-file-cache-conflict-syntax-loss` backlog entries, keeps both reopened items queued, archives `#repair-false-closeouts` in the done file, and records that `src/agent-doc` CI run `27087636824` passed for `0b7638cc`.
 
 Concrete proof remains unchanged: `codex_hook.rs` and `specs/07-orchestration-commands.md` changed in `src/agent-doc` commit `0b7638cc`; targeted Stop-hook tests, broader `stop_` tests, the force interrupt-clear regression, `make check`, and `cargo install --path .` all passed; the submodule commit and parent pointer/recovery commits were pushed to `origin/main`.
-<!-- agent:boundary:46f98ed3 -->
+Recovered the post-CI closeout metadata drift after the repair response was already committed: the session document now records that source CI run `27087636824` passed, and the related `#repair-false-closeouts` archive entry is preserved. No source files changed in this recovery note; the unrelated dirty `src/boost-client` submodule state remains untouched.
+
+<!-- agent:boundary:d12b81a3 -->
 <!-- /agent:exchange -->
 
 ## Queue

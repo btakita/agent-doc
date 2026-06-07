@@ -13,6 +13,7 @@
 //! operations on node identity instead of text.
 
 pub mod crdt;
+pub mod mutations;
 pub mod overlay;
 
 use std::hash::{Hash, Hasher};

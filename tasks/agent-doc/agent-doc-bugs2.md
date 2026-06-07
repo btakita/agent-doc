@@ -81,7 +81,7 @@ Verification: network probe printed `AGENT_DOC_NETWORK_PROBE_OK`; `cargo test -p
 Commits/push: submodule commit `316681b0` pushed to `btakita/agent-doc` `main`; current `agent-doc` main is `6a017bea`, which includes that commit plus a later pinned-queue fix. Superproject pointer commit pushed to `btakita/agent-loop` `main` as `1b933127b` via a clean temporary worktree.
 
 Confidence: high. Escalation: none for the code path; the superproject workflow has an external CI-start blocker from GitHub billing/spending-limit allocation.
-<!-- agent:boundary:2140fc7c -->
+<!-- agent:boundary:88c4fe6c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +94,7 @@ Confidence: high. Escalation: none for the code path; the superproject workflow 
 - ~~:pushpin: do [#md-ast-mutations-node-keyed]~~
 - :pushpin: do [#md-ast-ipc-node-patches]
 - :pushpin: do [#md-ast-realtime-watcher]
-- :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fixed. If yes, do I need to restart something? If not, fix.
+- :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fix. If yes, do I need to restart something? If not, fix.
 - :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.
 - :pushpin: do [#queue-enqueue-action]
 - :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.

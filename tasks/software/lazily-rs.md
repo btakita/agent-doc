@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -162,7 +162,26 @@ Verification:
 Push status: the lazily-rs submodule push succeeded. The parent `agent-loop` push was rejected as non-fast-forward because local `main` is behind `origin/main`; I did not pull/rebase the dirty superproject with many unrelated local changes.
 
 No escalated permissions were used. Confidence is high for the implemented IPC arena surface and tests.
-<!-- agent:boundary:933f678e -->
+
+### Re: What is the benefit of a SHM ring buffer over a SHM blob arena? — gpt-5
+
+> **Queue prompt:**
+>
+> What is the benefit of a SHM ring buffer over a SHM blob arena?
+
+
+A SHM ring buffer and a SHM blob arena solve different parts of the transport problem.
+
+A ring buffer is best for ordered event delivery: single-producer/single-consumer or bounded multi-producer queues, fixed sequencing, backpressure, wraparound, and low-latency notification that "message N is ready." It is the control/event lane.
+
+A blob arena is best for large payload storage: document bodies, context packs, patch bodies, artifact logs, and other byte arrays that should not be copied through every control message. It is the data lane.
+
+For agent-doc / tsift IPC, the better architecture is usually both together: ring entries carry compact descriptors, and descriptors point into a blob arena. The ring buffer gives order and wakeup semantics; the blob arena gives large-content efficiency. A ring buffer alone becomes awkward for variable-size multi-megabyte payloads because wraparound, fragmentation, and reader lag get harder. A blob arena alone does not provide enough event ordering or delivery semantics.
+
+So the benefit of the ring buffer over the blob arena is event sequencing and backpressure. The benefit of the blob arena over the ring buffer is large-payload storage. They compose cleanly: ring for control, arena for bytes.
+
+No code changed for this answer.
+<!-- agent:boundary:82bcb77d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,8 +192,8 @@ No escalated permissions were used. Confidence is high for the implemented IPC a
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~What is the benefit of a SHM ring buffer?~~
 - ~~Implement a SHM blob arena for IPC transport.~~
-- What is the benefit of a SHM ring buffer over a SHM blob arena?
-- Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
+- ~~What is the benefit of a SHM ring buffer over a SHM blob arena?~~
+- Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
 <!-- /agent:queue -->
 
 ## Backlog

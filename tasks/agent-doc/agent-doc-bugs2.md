@@ -167,6 +167,11 @@ sync/follow-up root cause recorded.
 
 > **Queue prompt:**
 >
+> do [#stale-busy-self-heal-live-verify]
+
+
+> **Queue prompt:**
+>
 > do [#tmux-status-turn-in-progress]
 
 
@@ -189,7 +194,7 @@ Immediate implementation direction:
 
 Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
 handled
-<!-- agent:boundary:2b5a6a8a -->
+<!-- agent:boundary:f7dae532 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -210,7 +215,7 @@ handled
 - ~~do [#monsterrod-queue-items-deleted-live]~~
 - ~~do [#clear-blocked-by-own-drafted-clear-command]~~
 - ~~do [#tmux-status-turn-in-progress]~~
-- do [#stale-busy-self-heal-live-verify]
+- ~~do [#stale-busy-self-heal-live-verify]~~
 - do [#partial-staging-closeout-guard]
 - do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
@@ -248,7 +253,7 @@ What are #next-steps to fix bugs?
 6. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 7. [ ] [#clear-blocked-by-own-drafted-clear-command] deferred
 8. [ ] [#tmux-status-turn-in-progress] deferred
-9. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
+9. [ ] [#stale-busy-self-heal-live-verify] deferred
 10. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
 <!-- /agent:backlog -->
 

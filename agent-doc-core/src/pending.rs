@@ -1070,9 +1070,11 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
 
     let excluded_ranges: Vec<(usize, usize)> = components
         .iter()
-        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+        .filter(|component| {
+            crate::component::is_tracked_work_component(&component.name)
+                || component.name == "exchange"
+        })
         .map(|component| (component.open_start, component.close_end))
-        .chain(compact_exchange_summary_ranges(doc, &components))
         .collect();
     let code_ranges = crate::component::find_code_ranges(doc);
 
@@ -1119,46 +1121,6 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     }
 
     Ok(report)
-}
-
-fn compact_exchange_summary_ranges<'a>(
-    doc: &'a str,
-    components: &'a [crate::component::Component],
-) -> impl Iterator<Item = (usize, usize)> + 'a {
-    components.iter().filter_map(|component| {
-        if component.name != "exchange" {
-            return None;
-        }
-
-        let content = component.content(doc);
-        let mut offset = 0usize;
-        let mut summary_start = None;
-        let mut summary_end = None;
-        for raw_line in content.split_inclusive('\n') {
-            let line = raw_line.strip_suffix('\n').unwrap_or(raw_line).trim();
-            let abs_start = component.open_end + offset;
-            offset += raw_line.len();
-
-            if summary_start.is_none() {
-                if line == "### Session Summary" {
-                    summary_start = Some(abs_start);
-                }
-                continue;
-            }
-
-            if line.starts_with('❯')
-                || line.starts_with("### Re:")
-                || line.starts_with("#### Re:")
-                || line.starts_with("##### Re:")
-                || line.starts_with("<!-- agent:boundary:")
-            {
-                summary_end = Some(abs_start);
-                break;
-            }
-        }
-
-        summary_start.map(|start| (start, summary_end.unwrap_or(component.close_start)))
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3813,10 +3775,13 @@ mod tests {
     }
 
     #[test]
-    fn detect_shadow_open_items_ignores_compact_exchange_summary_items() {
+    fn detect_shadow_open_items_ignores_exchange_transcript_items() {
         let doc = concat!(
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
+            "❯ What are #next-steps to implement the planned ipc features?\n\n",
+            "### Re: What are #next-steps to implement the planned ipc features?\n\n",
+            "1. [#ipc1] finalize the lazily-serde contract so message shapes are stable.\n\n",
             "### Session Summary\n\n",
             "*Compacted.*\n\n",
             "Icebox:\n",
@@ -3828,6 +3793,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:icebox -->\n",
+            "- [ ] [#ipc2] Live backlog item\n",
             "- [ ] [#cold1] Intentionally parked\n",
             "- [ ] [#cold2] Still parked\n",
             "<!-- /agent:icebox -->\n"

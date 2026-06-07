@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Pending shadow guard ignores exchange transcripts.** The shadow-backlog
+  detector no longer treats checklist or ordered-list `[#id]` lines inside
+  `agent:exchange` response history as live pending shadows. Completed items
+  archived elsewhere, such as lazily-rs `#ipc1`, no longer block
+  `session-check` just because an earlier response listed next steps.
+
 - **Idle queue stale-busy recovery preserves same-head dedup.** The supervisor
   idle-queue watcher no longer clears `last_dispatched` while reconciling a
   stale busy actor over an idle pane. This stops a stuck active head from

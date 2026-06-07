@@ -78,29 +78,56 @@ pub enum MutationInsertPosition {
 /// Return component item nodes with deterministic node keys.
 pub fn item_nodes(source: &str, component: &str) -> MutationResult<Vec<MutationItemNode>> {
     let (component_index, component_node) = find_component(source, component)?;
+    let mut occurrences: HashMap<String, usize> = HashMap::new();
     Ok(component_node
         .items
         .into_iter()
         .enumerate()
-        .map(|(index, item)| MutationItemNode {
-            component: component.to_string(),
-            node_key: initial_node_key(component, component_index, index, &item),
-            index,
-            item,
+        .map(|(index, item)| {
+            let identity = node_identity(&item);
+            let occurrence = occurrences.entry(identity).or_insert(0);
+            let node_key = initial_node_key(component, component_index, *occurrence, &item);
+            *occurrence += 1;
+            MutationItemNode {
+                component: component.to_string(),
+                node_key,
+                index,
+                item,
+            }
         })
         .collect())
 }
 
 /// Strike a component item by durable node key. Already-struck items are idempotent.
 pub fn consume_node(source: &str, component: &str, node_key: &str) -> MutationResult<String> {
+    consume_nodes(source, component, &[node_key])
+}
+
+/// Strike component items by durable node key. Already-struck items are idempotent.
+pub fn consume_nodes(source: &str, component: &str, node_keys: &[&str]) -> MutationResult<String> {
     let nodes = item_nodes(source, component)?;
-    let node = find_node(&nodes, component, node_key)?;
-    if node.item.struck {
-        return Ok(source.to_string());
+    let mut requested = HashSet::new();
+    for node_key in node_keys {
+        if !requested.insert(*node_key) {
+            return Err(MutationError::DuplicateNodeKey {
+                component: component.to_string(),
+                node_key: (*node_key).to_string(),
+            });
+        }
     }
-    let (start, end) = raw_range(source, component, node)?;
+    let mut ranges = Vec::new();
+    for node_key in node_keys {
+        let node = find_node(&nodes, component, node_key)?;
+        if !node.item.struck {
+            ranges.push(raw_range(source, component, node)?);
+        }
+    }
     let mut out = source.to_string();
-    out.replace_range(start..end, &format!("~~{}~~", &source[start..end]));
+    ranges.sort_by_key(|(start, _)| *start);
+    ranges.dedup();
+    for (start, end) in ranges.into_iter().rev() {
+        out.replace_range(start..end, &format!("~~{}~~", &source[start..end]));
+    }
     Ok(out)
 }
 
@@ -342,15 +369,19 @@ fn open_marker_end(source: &str, component: &Component) -> usize {
         .unwrap_or(component.end_byte)
 }
 
+fn node_identity(item: &Item) -> String {
+    format!("{:?}\u{0}{}\u{0}{}", item.kind, item.id, item.text)
+}
+
 fn initial_node_key(
     component_name: &str,
     component_index: usize,
-    item_index: usize,
+    occurrence: usize,
     item: &Item,
 ) -> String {
     format!(
-        "{component_name}:{component_index}:{}:{}:{}:{item_index}",
-        item.id, item.start_byte, item.end_byte
+        "{component_name}:{component_index}:{}:{occurrence}",
+        item.id
     )
 }
 
@@ -395,6 +426,43 @@ mod tests {
         let twice = consume_item(&once, "queue", "alpha").unwrap();
 
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn node_keys_survive_unrelated_prefix_drift_and_strike() {
+        let nodes = item_nodes(DOC, "queue").unwrap();
+        let beta = nodes
+            .iter()
+            .filter(|node| node.item.id == "beta")
+            .nth(1)
+            .unwrap()
+            .node_key
+            .clone();
+        let drifted = format!("operator note\n{DOC}");
+        let drifted_nodes = item_nodes(&drifted, "queue").unwrap();
+        assert!(
+            drifted_nodes.iter().any(|node| node.node_key == beta),
+            "node key should not depend on absolute byte offsets"
+        );
+
+        let struck = consume_node(DOC, "queue", &beta).unwrap();
+        let struck_nodes = item_nodes(&struck, "queue").unwrap();
+        assert!(
+            struck_nodes.iter().any(|node| node.node_key == beta),
+            "node key should not change after consume wraps the item in strikethrough"
+        );
+    }
+
+    #[test]
+    fn consume_nodes_strikes_multiple_keys_from_initial_snapshot() {
+        let nodes = item_nodes(DOC, "queue").unwrap();
+        let alpha = nodes[0].node_key.as_str();
+        let second_beta = nodes[2].node_key.as_str();
+
+        let updated = consume_nodes(DOC, "queue", &[alpha, second_beta]).unwrap();
+
+        assert!(updated.contains("- ~~:pushpin: do [#alpha]~~\n"));
+        assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
     }
 
     #[test]

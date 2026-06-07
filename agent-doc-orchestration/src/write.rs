@@ -218,11 +218,12 @@
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
 use crate::snapshot::find_project_root;
@@ -2525,6 +2526,7 @@ fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Res
 struct QueueConsumptionPlan {
     consumed_text: String,
     consumed_texts: Vec<String>,
+    node_ops: Vec<IpcNodeOp>,
     remaining: usize,
     drained: bool,
     auto: bool,
@@ -2534,9 +2536,35 @@ struct QueueConsumptionPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpcNodeOp {
+    pub component: String,
+    pub node_id: String,
+    pub op: String,
+}
+
+impl IpcNodeOp {
+    fn consume(component: &str, node_id: String) -> Self {
+        Self {
+            component: component.to_string(),
+            node_id,
+            op: "consume".to_string(),
+        }
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "component": self.component,
+            "node_id": self.node_id,
+            "op": self.op,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueConsumptionOutcome {
     pub consumed_text: String,
     pub consumed_count: usize,
+    pub node_ops: Vec<IpcNodeOp>,
     pub remaining: usize,
     pub drained: bool,
     pub auto: bool,
@@ -2594,6 +2622,7 @@ fn consume_queue_prompts_with_outcome(
     let outcome = QueueConsumptionOutcome {
         consumed_text: plan.consumed_text.clone(),
         consumed_count: plan.consumed_texts.len(),
+        node_ops: plan.node_ops.clone(),
         remaining: plan.remaining,
         drained: plan.drained,
         auto: plan.auto,
@@ -3144,6 +3173,23 @@ fn queue_consume_count_for_done_ids(
     count
 }
 
+fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> Result<Vec<String>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
+    Ok(nodes
+        .into_iter()
+        .filter(|node| !node.item.struck)
+        .take(count)
+        .map(|node| node.node_key)
+        .collect::<Vec<_>>())
+}
+
+fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
+    let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
+    agent_doc_markdown_ast::mutations::consume_nodes(content, "queue", &borrowed)
+        .map_err(|err| anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}"))
+}
+
 fn normalize_queue_prompt_text(text: &str) -> String {
     display_queue_prompt_text(text).to_ascii_lowercase()
 }
@@ -3361,6 +3407,17 @@ fn plan_queue_prompt_consumption(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
+    let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
+    let node_consume_available = consumed_node_keys.len() == consume_count;
+    let node_ops = if node_consume_available {
+        consumed_node_keys
+            .iter()
+            .cloned()
+            .map(|node_key| IpcNodeOp::consume("queue", node_key))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
     let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
@@ -3372,7 +3429,11 @@ fn plan_queue_prompt_consumption(
         completed_entries
     };
     let new_body = crate::queue::render(&new_entries);
-    let mut current = comp.replace_content(content, &new_body);
+    let mut current = if drained || !node_consume_available {
+        comp.replace_content(content, &new_body)
+    } else {
+        consume_queue_nodes_by_key(content, &consumed_node_keys)?
+    };
 
     if drained {
         if has_auto {
@@ -3411,6 +3472,8 @@ fn plan_queue_prompt_consumption(
         crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
     let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
+    let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
+    let snapshot_node_consume_available = snapshot_node_keys.len() == consume_count;
     if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
             "queue consume: snapshot has {} prompt(s) available but document consumed {}",
@@ -3473,7 +3536,12 @@ fn plan_queue_prompt_consumption(
         );
     }
 
-    let mut new_snap = snap_queue.replace_content(&snap, &new_body);
+    let mut new_snap =
+        if drained || snap_new_entries != new_entries || !snapshot_node_consume_available {
+            snap_queue.replace_content(&snap, &new_body)
+        } else {
+            consume_queue_nodes_by_key(&snap, &snapshot_node_keys)?
+        };
     if drained {
         if snap_has_auto
             && let Ok(sc2) = component::parse(&new_snap)
@@ -3518,6 +3586,7 @@ fn plan_queue_prompt_consumption(
         return Ok(Some(QueueConsumptionPlan {
             consumed_text,
             consumed_texts,
+            node_ops,
             remaining,
             drained,
             auto: has_auto,
@@ -3530,6 +3599,7 @@ fn plan_queue_prompt_consumption(
     Ok(Some(QueueConsumptionPlan {
         consumed_text,
         consumed_texts,
+        node_ops,
         remaining,
         drained,
         auto: has_auto,
@@ -7588,6 +7658,7 @@ pub fn run_stream(
                 norm_lines_for_timeout,
                 Some(&ipc_result.patch_id),
             )?;
+            let ipc_node_patches = build_ipc_node_patches_json(Some(base), Some(&content_ours));
 
             // Same dedup guard as try_ipc: don't send unmatched when it was synthesized into a patch.
             let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -7599,11 +7670,12 @@ pub fn run_stream(
             // Reuse the patch_id from try_ipc so the plugin deduplicates
             // if the original socket/file delivery was applied late.
             let mut ipc_payload = serde_json::json!({
-                "file": canonical.to_string_lossy(),
-                "patches": ipc_patches,
-                "unmatched": effective_unmatched,
-                "baseline": ipc_baseline.unwrap_or(""),
-                "reposition_boundary": true,
+                    "file": canonical.to_string_lossy(),
+                    "patches": ipc_patches,
+                    "node_patches": ipc_node_patches,
+                    "unmatched": effective_unmatched,
+                    "baseline": ipc_baseline.unwrap_or(""),
+                    "reposition_boundary": true,
             });
             ipc_payload["patch_id"] = serde_json::Value::String(ipc_result.patch_id.clone());
 
@@ -8180,10 +8252,23 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     })?;
     let base = base_cow.as_ref();
     let ipc_baseline = baseline.map(|_| base);
+    let content_ours = template::apply_patches_with_overrides_with_context(
+        base,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+        Some(&rc),
+    )
+    .context("failed to apply template patches for IPC node patch metadata")?;
+    let content_ours =
+        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
+    let ipc_node_patches = build_ipc_node_patches_json(Some(base), Some(&content_ours));
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
+        "node_patches": ipc_node_patches,
         "unmatched": effective_unmatched,
         "baseline": ipc_baseline.unwrap_or(""),
     });
@@ -10342,8 +10427,15 @@ pub fn try_ipc(
         // run_stream fallback rebuild share an IDENTICAL boundary — otherwise a
         // late socket apply + file apply land the response twice
         // (#finalize-visible-buffer-ipc-timeout-race).
-        let ipc_patches_json =
-            build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines, Some(&patch_id))?;
+        let ipc_patches_json = build_ipc_patches_json(
+            file,
+            patches,
+            unmatched,
+            normalize_prefix_lines,
+            Some(&patch_id),
+        )?;
+        let ipc_node_patches_json =
+            build_ipc_node_patches_json(baseline.or(ipc_before_content.as_deref()), content_ours);
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
         let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
@@ -10358,6 +10450,7 @@ pub fn try_ipc(
             "type": "patch",
             "file": canonical.to_string_lossy(),
             "patches": ipc_patches_json,
+            "node_patches": ipc_node_patches_json,
             "unmatched": effective_unmatched_socket,
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
@@ -10768,8 +10861,15 @@ pub fn try_ipc(
     // Build patches using shared helper (same logic as socket path). Seed the
     // boundary from patch_id so a later file/fallback rebuild reuses the same
     // boundary (#finalize-visible-buffer-ipc-timeout-race).
-    let ipc_patches =
-        build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines, Some(&patch_id))?;
+    let ipc_patches = build_ipc_patches_json(
+        file,
+        patches,
+        unmatched,
+        normalize_prefix_lines,
+        Some(&patch_id),
+    )?;
+    let ipc_node_patches =
+        build_ipc_node_patches_json(baseline.or(ipc_before_content.as_deref()), content_ours);
 
     // Same dedup guard as socket path: don't send unmatched when it was synthesized into a patch.
     let effective_unmatched_file = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -10781,6 +10881,7 @@ pub fn try_ipc(
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
+        "node_patches": ipc_node_patches,
         "unmatched": effective_unmatched_file,
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
@@ -11754,9 +11855,15 @@ fn build_ipc_patches_json(
             let mut patch_json = serde_json::json!({
                 "component": p.name,
                 "content": content,
+                "op": if is_append_mode_component(&p.name) {
+                    "append"
+                } else {
+                    "replace"
+                },
             });
             if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
-                patch_json["boundary_id"] = serde_json::Value::String(bid);
+                patch_json["boundary_id"] = serde_json::Value::String(bid.clone());
+                patch_json["node_id"] = serde_json::Value::String(bid);
             } else if is_append_mode_component(&p.name) {
                 patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
             }
@@ -11801,7 +11908,9 @@ fn build_ipc_patches_json(
                 ipc_patches.push(serde_json::json!({
                     "component": target,
                     "content": synthesized_content,
+                    "op": "append",
                     "boundary_id": bid,
+                    "node_id": bid,
                 }));
                 break;
             } else if is_append_mode_component(target) {
@@ -11818,6 +11927,7 @@ fn build_ipc_patches_json(
                 ipc_patches.push(serde_json::json!({
                     "component": target,
                     "content": synthesized_content,
+                    "op": "append",
                     "ensure_boundary": true,
                 }));
                 break;
@@ -11826,6 +11936,163 @@ fn build_ipc_patches_json(
     }
 
     Ok(ipc_patches)
+}
+
+fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&str>) -> Vec<Value> {
+    let (Some(before), Some(after)) = (before, after) else {
+        return Vec::new();
+    };
+    if before == after {
+        return Vec::new();
+    }
+
+    let mut component_names = BTreeSet::new();
+    for component in agent_doc_markdown_ast::overlay::components(before)
+        .into_iter()
+        .chain(agent_doc_markdown_ast::overlay::components(after))
+    {
+        if !component.items.is_empty() {
+            component_names.insert(component.name);
+        }
+    }
+
+    let mut node_patches = Vec::new();
+    for component in component_names {
+        let before_nodes =
+            agent_doc_markdown_ast::mutations::item_nodes(before, &component).unwrap_or_default();
+        let after_nodes =
+            agent_doc_markdown_ast::mutations::item_nodes(after, &component).unwrap_or_default();
+        if before_nodes.is_empty() && after_nodes.is_empty() {
+            continue;
+        }
+
+        let before_by_key: HashMap<&str, _> = before_nodes
+            .iter()
+            .map(|node| (node.node_key.as_str(), node))
+            .collect();
+        let after_by_key: HashMap<&str, _> = after_nodes
+            .iter()
+            .map(|node| (node.node_key.as_str(), node))
+            .collect();
+
+        for node in &before_nodes {
+            if !after_by_key.contains_key(node.node_key.as_str()) {
+                node_patches.push(serde_json::json!({
+                    "component": component.as_str(),
+                    "node_key": node.node_key.as_str(),
+                    "op": "remove",
+                    "content": ipc_node_source(before, node),
+                }));
+            }
+        }
+
+        for (index, node) in after_nodes.iter().enumerate() {
+            if before_by_key.contains_key(node.node_key.as_str()) {
+                continue;
+            }
+            let mut patch = serde_json::json!({
+                "component": component.as_str(),
+                "node_key": node.node_key.as_str(),
+                "op": "insert",
+                "content": ipc_node_source(after, node),
+            });
+            if let Some(anchor) = previous_existing_node_key(&after_nodes[..index], &before_by_key)
+            {
+                patch["after"] = Value::String(anchor);
+            } else if let Some(anchor) =
+                next_existing_node_key(&after_nodes[index + 1..], &before_by_key)
+            {
+                patch["before"] = Value::String(anchor);
+            }
+            node_patches.push(patch);
+        }
+
+        for node in &before_nodes {
+            let Some(after_node) = after_by_key.get(node.node_key.as_str()) else {
+                continue;
+            };
+            let before_source = ipc_node_source(before, node);
+            let after_source = ipc_node_source(after, after_node);
+            if before_source == after_source {
+                continue;
+            }
+            let op = if !node.item.struck && after_node.item.struck {
+                "strike"
+            } else if node.item.struck && !after_node.item.struck {
+                "unstrike"
+            } else {
+                "replace"
+            };
+            node_patches.push(serde_json::json!({
+                "component": component.as_str(),
+                "node_key": node.node_key.as_str(),
+                "op": op,
+                "content": after_source,
+            }));
+        }
+
+        let before_shared = before_nodes
+            .iter()
+            .filter(|node| after_by_key.contains_key(node.node_key.as_str()))
+            .map(|node| node.node_key.as_str())
+            .collect::<Vec<_>>();
+        let after_shared = after_nodes
+            .iter()
+            .filter(|node| before_by_key.contains_key(node.node_key.as_str()))
+            .map(|node| node.node_key.as_str())
+            .collect::<Vec<_>>();
+        if before_shared != after_shared {
+            for (index, node_key) in after_shared.iter().enumerate() {
+                if before_shared.get(index).copied() == Some(*node_key) {
+                    continue;
+                }
+                let mut patch = serde_json::json!({
+                    "component": component.as_str(),
+                    "node_key": *node_key,
+                    "op": "move",
+                });
+                if let Some(anchor) = after_shared[..index].last() {
+                    patch["after"] = Value::String((*anchor).to_string());
+                } else if let Some(anchor) = after_shared.get(index + 1) {
+                    patch["before"] = Value::String((*anchor).to_string());
+                }
+                node_patches.push(patch);
+            }
+        }
+    }
+
+    node_patches
+}
+
+fn ipc_node_source(
+    source: &str,
+    node: &agent_doc_markdown_ast::mutations::MutationItemNode,
+) -> String {
+    source
+        .get(node.item.start_byte..node.item.end_byte)
+        .unwrap_or(&node.item.raw)
+        .to_string()
+}
+
+fn previous_existing_node_key(
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    existing: &HashMap<&str, &agent_doc_markdown_ast::mutations::MutationItemNode>,
+) -> Option<String> {
+    nodes
+        .iter()
+        .rev()
+        .find(|node| existing.contains_key(node.node_key.as_str()))
+        .map(|node| node.node_key.clone())
+}
+
+fn next_existing_node_key(
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    existing: &HashMap<&str, &agent_doc_markdown_ast::mutations::MutationItemNode>,
+) -> Option<String> {
+    nodes
+        .iter()
+        .find(|node| existing.contains_key(node.node_key.as_str()))
+        .map(|node| node.node_key.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -12765,8 +13032,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        let cs =
-            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let cs = crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
         assert!(matches!(result, FileIpcRepositionResult::Queued));
@@ -13034,6 +13300,54 @@ mod tests {
         assert!(
             result.contains("- user added later"),
             "the concurrently-added item must be preserved (document wins):\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap_result.contains("- user added later"),
+            "snapshot must adopt the reconciled document queue:\n{snap_result}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: duplicate prose\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- duplicate prose\n",
+            "- duplicate prose\n",
+            "- keep\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("node-keyed queue consume should handle duplicates")
+            .expect("the answered duplicate head should be consumed");
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~duplicate prose~~\n- duplicate prose\n- keep\n"),
+            "only the first duplicate prompt should be struck:\n{result}"
+        );
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.node_ops.len(), 1);
+        assert_eq!(outcome.node_ops[0].component, "queue");
+        assert_eq!(outcome.node_ops[0].op, "consume");
+        assert!(
+            outcome.node_ops[0].node_id.starts_with("queue:")
+                && outcome.node_ops[0].node_id.contains(":ft-"),
+            "node op should carry the queue node key, got {:?}",
+            outcome.node_ops[0]
+        );
+        assert_eq!(
+            outcome.node_ops[0].to_json()["op"].as_str(),
+            Some("consume")
         );
     }
 
@@ -15406,6 +15720,68 @@ scratch
     }
 
     #[test]
+    fn build_ipc_node_patches_json_tracks_strike_and_insert_by_node_key() {
+        let before = "\
+<!-- agent:queue priority go -->
+- :pushpin: do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:queue priority go -->
+- :pushpin: do [#alpha]
+- ~~do [#beta]~~
+- do [#gamma]
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:beta:0"
+                && patch["op"] == "strike"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("- ~~do [#beta]~~"))
+        }));
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:gamma:0"
+                && patch["op"] == "insert"
+                && patch["after"] == "queue:0:beta:0"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("- do [#gamma]"))
+        }));
+    }
+
+    #[test]
+    fn build_ipc_node_patches_json_tracks_reorder_without_text_matching() {
+        let before = "\
+<!-- agent:queue priority go -->
+- do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:queue priority go -->
+- do [#beta]
+- do [#alpha]
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:beta:0"
+                && patch["op"] == "move"
+                && patch["before"] == "queue:0:alpha:0"
+        }));
+    }
+
+    #[test]
     fn stale_baseline_guard_prefix_check() {
         // Baseline that starts with snapshot content (user added text) = NOT stale
         let snapshot = "## Exchange\nResponse here.\n";
@@ -15616,9 +15992,14 @@ scratch
         let patches: Vec<crate::template::PatchBlock> = vec![];
         let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
         let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
-        let result =
-            build_ipc_patches_json(&doc, &patches, unmatched, Some(prefix_lines.as_slice()), None)
-                .unwrap();
+        let result = build_ipc_patches_json(
+            &doc,
+            &patches,
+            unmatched,
+            Some(prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             result.len(),
@@ -15663,7 +16044,20 @@ scratch
         let build_b = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
         let bid_a = build_a[0]["boundary_id"].as_str();
         let bid_b = build_b[0]["boundary_id"].as_str();
-        assert!(bid_a.is_some(), "patch should carry a boundary_id: {build_a:?}");
+        assert!(
+            bid_a.is_some(),
+            "patch should carry a boundary_id: {build_a:?}"
+        );
+        assert_eq!(
+            build_a[0]["op"].as_str(),
+            Some("append"),
+            "append-mode patches should carry an explicit IPC op"
+        );
+        assert_eq!(
+            build_a[0]["node_id"].as_str(),
+            bid_a,
+            "append-mode patches should address the boundary node"
+        );
         assert_eq!(
             bid_a, bid_b,
             "same patch_id seed must yield the SAME boundary across rebuilds (no double-apply)"

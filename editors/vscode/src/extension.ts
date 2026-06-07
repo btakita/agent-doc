@@ -1312,11 +1312,26 @@ async function popupMenuAction(): Promise<void> {
 interface IpcComponentPatch {
     component: string;
     content: string;
+    op?: string;
+    node_id?: string;
+    boundary_id?: string;
+    ensure_boundary?: boolean;
+}
+
+interface IpcNodePatch {
+    component: string;
+    node_key: string;
+    op: string;
+    content?: string;
+    before?: string;
+    after?: string;
+    order?: string[];
 }
 
 interface IpcPatch {
     file: string;
     patches: IpcComponentPatch[];
+    node_patches?: IpcNodePatch[];
     unmatched: string;
     frontmatter?: string;
     fullContent?: string;

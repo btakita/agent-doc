@@ -284,6 +284,34 @@ User prompt.
     }
 
     @Test
+    fun `parsePatchJson preserves node-addressed component patch fields`() {
+        val json = """
+            {
+              "file": "/tmp/doc.md",
+              "patches": [
+                {
+                  "component": "exchange",
+                  "content": "### Re: topic\n\nDone.",
+                  "op": "append",
+                  "boundary_id": "abc123:doc",
+                  "node_id": "abc123:doc"
+                }
+              ],
+              "unmatched": "",
+              "patch_id": "patch-1"
+            }
+        """.trimIndent()
+
+        val patch = requireNotNull(parsePatchJson(json))
+        val componentPatch = patch.patches.single()
+
+        assertEquals("exchange", componentPatch.component)
+        assertEquals("append", componentPatch.op)
+        assertEquals("abc123:doc", componentPatch.boundaryId)
+        assertEquals("abc123:doc", componentPatch.nodeId)
+    }
+
+    @Test
     fun `parsePatchJson preserves narrow normalization repair payload fields`() {
         val json = """
             {
@@ -312,6 +340,42 @@ User prompt.
         assertTrue(patch.patches.isEmpty())
         assertEquals("", patch.unmatched)
         assertNull(patch.fullContent)
+    }
+
+    @Test
+    fun `parsePatchJson preserves node-keyed IPC patch payloads`() {
+        val json = """
+{
+  "file": "/tmp/doc.md",
+  "patches": [],
+  "node_patches": [
+    {
+      "component": "queue",
+      "node_key": "queue:0:beta:0",
+      "op": "strike",
+      "content": "- ~~do [#beta]~~\n"
+    },
+    {
+      "component": "queue",
+      "node_key": "queue:0:gamma:0",
+      "op": "insert",
+      "content": "- do [#gamma]\n",
+      "after": "queue:0:beta:0"
+    }
+  ],
+  "unmatched": "",
+  "patch_id": "patch-node-1"
+}
+""".trimIndent()
+
+        val patch = requireNotNull(parsePatchJson(json))
+
+        assertEquals("patch-node-1", patch.patchId)
+        assertEquals(2, patch.nodePatches.size)
+        assertEquals("queue:0:beta:0", patch.nodePatches[0].nodeKey)
+        assertEquals("strike", patch.nodePatches[0].op)
+        assertEquals("- ~~do [#beta]~~\n", patch.nodePatches[0].content)
+        assertEquals("queue:0:beta:0", patch.nodePatches[1].after)
     }
 
     @Test

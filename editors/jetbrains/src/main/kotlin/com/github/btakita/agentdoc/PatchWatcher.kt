@@ -1581,6 +1581,8 @@ data class IpcPatch(
      * doc no longer hashes to this value — the doc moved on to a later cycle.
      */
     val baselineHash: String? = null,
+    /** Node-keyed mutation plan carried alongside legacy component patches. */
+    val nodePatches: List<NodePatch> = emptyList(),
 )
 
 data class ComponentPatch(
@@ -1588,6 +1590,18 @@ data class ComponentPatch(
     val content: String,
     val boundaryId: String? = null,
     val ensureBoundary: Boolean = false,
+    val op: String? = null,
+    val nodeId: String? = null,
+)
+
+data class NodePatch(
+    val component: String,
+    val nodeKey: String,
+    val op: String,
+    val content: String? = null,
+    val before: String? = null,
+    val after: String? = null,
+    val order: List<String> = emptyList(),
 )
 
 internal data class EditorApplyProof(
@@ -2073,7 +2087,9 @@ fun parsePatchJson(json: String): IpcPatch? {
             val content = obj.get("content")?.asString ?: continue
             val boundaryId = obj.get("boundary_id")?.asString
             val ensureBoundary = obj.get("ensure_boundary")?.asBoolean ?: false
-            patches.add(ComponentPatch(component, content, boundaryId, ensureBoundary))
+            val op = obj.get("op")?.asString
+            val nodeId = obj.get("node_id")?.asString
+            patches.add(ComponentPatch(component, content, boundaryId, ensureBoundary, op, nodeId))
         }
 
         val repositionBoundary = root.get("reposition_boundary")?.asBoolean ?: false
@@ -2087,6 +2103,23 @@ fun parsePatchJson(json: String): IpcPatch? {
         val queueAuto = root.get("queue_auto")?.let { if (it.isJsonNull) null else it.asBoolean }
         val cycleId = root.get("cycle_id")?.let { if (it.isJsonNull) null else it.asString }
         val baselineHash = root.get("baseline_hash")?.let { if (it.isJsonNull) null else it.asString }
+        val nodePatches = root.getAsJsonArray("node_patches")
+            ?.mapNotNull { elem ->
+                val obj = elem.asJsonObject
+                val component = obj.get("component")?.asString ?: return@mapNotNull null
+                val nodeKey = obj.get("node_key")?.asString ?: return@mapNotNull null
+                val op = obj.get("op")?.asString ?: return@mapNotNull null
+                val order = obj.getAsJsonArray("order")?.mapNotNull { it.asString } ?: emptyList()
+                NodePatch(
+                    component,
+                    nodeKey,
+                    op,
+                    obj.get("content")?.let { if (it.isJsonNull) null else it.asString },
+                    obj.get("before")?.let { if (it.isJsonNull) null else it.asString },
+                    obj.get("after")?.let { if (it.isJsonNull) null else it.asString },
+                    order,
+                )
+            } ?: emptyList()
         return IpcPatch(
             file,
             patches,
@@ -2103,6 +2136,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             queueAuto,
             cycleId,
             baselineHash,
+            nodePatches,
         )
     } catch (e: Exception) {
         return null

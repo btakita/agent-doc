@@ -90,6 +90,7 @@ name = "agent-doc-orchestration"
 version = "0.1.0"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-markdown-ast",
  "agent-doc-sqlite",
  "agent-kit",
  "alacritty_terminal",

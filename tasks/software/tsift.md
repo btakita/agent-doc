@@ -60,7 +60,10 @@ Verification: the referenced session check consistently reports `INTERRUPTED` wi
 Confidence: medium-high.
 
 Escalation: none.
-<!-- agent:boundary:408ecfa0 -->
+### Closeout recovery — gpt-5
+
+The answer above is the intended response. This closeout only records the live-turn recovery after the queue activation token was drained.
+<!-- agent:boundary:ba86f875 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +72,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

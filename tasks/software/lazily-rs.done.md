@@ -119,3 +119,4 @@
 - 2026-06-07 [#ipc8] Add benchmark suite: cross-process latency/throughput, fanout scaling, and end-to-end snapshot update time across transport variants.
 - 2026-06-07 [#ipc1] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - 2026-06-07 [#39c5] Implement RemoteOp enum + per-peer permission allowlist
+- 2026-06-07 [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol

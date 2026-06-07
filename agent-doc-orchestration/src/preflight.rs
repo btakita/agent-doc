@@ -7252,6 +7252,47 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_auto_dag_intersperses_blocker_with_pinned_batch() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue priority auto -->\n",
+            "- :pushpin: do [#ops]\n",
+            "- :pushpin: do [#ship]\n",
+            "- :pushpin: do [#notify]\n",
+            "- :round_pushpin: do [#setup]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority -->\n",
+            "- [ ] [#ops] priority=5 independent operator-pinned task\n",
+            "- [ ] [#ship] priority=1 after=#setup depends on setup\n",
+            "- [ ] [#notify] priority=2 after=#ship depends on ship\n",
+            "- [ ] [#setup] priority=9 required setup work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(
+                "- :pushpin: do [#ops]\n\
+                 - :round_pushpin: do [#setup]\n\
+                 - :pushpin: do [#ship]\n\
+                 - :pushpin: do [#notify]"
+            ),
+            "auto-dag must let dependency blockers intersperse a pinned batch:\n{updated}"
+        );
+    }
+
+    #[test]
     fn preflight_new_auto_queue_from_inactive_snapshot_does_not_halt_on_changed_head() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

@@ -261,7 +261,7 @@ Verification: backlog state was checked before closeout and was empty; this resp
 - ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
 - ~~Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".~~
 - :round_pushpin: do #spcp-contract
-- agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks.
+- agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
 - :round_pushpin: do #spcp-store
 - :round_pushpin: do #spcp-cache
 - :round_pushpin: do #spcp-dispatch

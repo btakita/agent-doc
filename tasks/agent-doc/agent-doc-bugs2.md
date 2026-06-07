@@ -257,7 +257,13 @@ Commits created locally:
 - parent repo: `05ca92a99 Update agent-doc submodule`
 
 I did not push because this prompt did not include an explicit `commit + push` directive.
-<!-- agent:boundary:961999b1 -->
+
+### Re: closeout recovery — gpt-5
+
+Operational closeout only: the substantive answer is the preceding `### Re: cross-document pane recovery — gpt-5` response.
+
+I reopened this because `session-check` detected that the live document had uncommitted prompt/queue state after the first finalize commit. No additional code changes were made in this recovery closeout. The repaired live bindings remain `lazily-rs.md` on `%26`/`@3` and `agent-doc-bugs2.md` on `%30`/`@4`, and both documents reported `doctor: no issues detected` before this closeout.
+<!-- agent:boundary:339ec131 -->
 <!-- /agent:exchange -->
 
 ## Queue

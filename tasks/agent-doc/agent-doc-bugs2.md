@@ -34,12 +34,27 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 Compacted content:
 - Archived 3 response topic(s): queue-populate confirmed + fence verified in logs; monsterrod queue responses + `~~`-not-struck + nested bold/italic; do [#codex-queue-drain-no-response-body]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ef2befe4 -->
+
+### Re: `~~`-not-struck — your "finalize not called?" hypothesis is right — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
+
+
+You diagnosed it correctly. There are two strike paths, and the gap is exactly where finalize didn't run:
+
+1. **`do [#id]` items auto-strike** — `strike_done_queue_head_prompts` runs *every* preflight and strikes **any** queue prompt (anywhere in the queue, not just the head) whose `#id` is in `agent:done` or `agent:review` (gated). So once a backlog item is `--done`/gated, its queue line becomes `~~struck~~` on the next preflight. No id-item should sit completed-but-unstruck — and right now the open `do [#…]` lines in your queue are genuinely still-open backlog items, correctly unstruck.
+
+2. **Free-text items strike on consume** — a `:pushpin: <prose>` prompt has no id to match against `agent:done`, so it's struck only when a `finalize` cycle *consumes it as the head*. That's the gap you hit: when a turn does the work but `finalize` isn't called per-item — the **Codex no-response queue-drain** (just fixed fail-closed in `dfeaa2d6`: a queue turn that commits without a `### Re:` body now interrupts instead of silently advancing) and, this session, my own **batching** (doing several items, finalizing once — only the matched head struck).
+
+The fix for the gap is what we're doing now: **continuous per-head draining** (the `/loop` auto-loop), so every head gets its own `finalize` and is struck as it's answered. The `dfeaa2d6` guard makes the no-finalize case impossible to do silently. If you want id-free items to also auto-strike, the lever is tagging them `do [#id]` so the `agent:done` strike path covers them — free-text completion has no reliable automatic signal.
+<!-- agent:boundary:43cf2f56 -->
 <!-- /agent:exchange -->
 
+
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#codex-queue-drain-no-response-body]~~
-- :pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
+- ~~:pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?~~
 - :pushpin: I did the update. Please verify [#late-ipc-patch-plugin-apply-fence] by looking in the logs.
 ---
 :pushpin: I'm unable to run monsterrodholders.md. I tried `agent-doc session interrupt-clear tasks/monsterrodholders.md` and `kill-pane`. But the next turn has this error.

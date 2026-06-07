@@ -915,11 +915,12 @@ pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
         .collect()
 }
 
-/// Collapse duplicate live `Prompt` entries that share the same trimmed text,
-/// keeping the first occurrence. Two identical live queue prompts are never a
-/// valid state — they only appear when a divergent IPC-buffer/snapshot CRDT or
-/// 3-way merge duplicates a queue line (see `#adoc-queue-ipc-drift`). Returns
-/// `None` when nothing changed so callers can avoid spurious mutations.
+/// Collapse duplicate live `Prompt` entries that target the same queue identity,
+/// keeping the first occurrence. We only collapse duplicates for explicit `do
+/// [#id]`/`do #id` identity prompts because that pattern is expected from CRDT
+/// merge replay and backlog sync, while still allowing user-authored duplicate
+/// free-text prompts to remain.
+///
 /// `Completed`/`Preset`/fence entries are left untouched.
 pub fn dedup_live_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -927,7 +928,8 @@ pub fn dedup_live_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
     let mut dropped = false;
     for entry in entries {
         if let QueueEntry::Prompt(prompt) = entry
-            && !seen.insert(prompt.text.trim().to_string())
+            && let Some(key) = dedup_key_for_prompt(prompt)
+            && !seen.insert(key)
         {
             dropped = true;
             continue;
@@ -935,6 +937,14 @@ pub fn dedup_live_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
         deduped.push(entry.clone());
     }
     if dropped { Some(deduped) } else { None }
+}
+
+fn dedup_key_for_prompt(prompt: &QueuePrompt) -> Option<String> {
+    let trimmed = prompt.text.trim().to_ascii_lowercase();
+    if !(trimmed.starts_with("do [#") || trimmed.starts_with("do #")) {
+        return None;
+    }
+    do_prompt_id(&trimmed)
 }
 
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
@@ -1507,10 +1517,25 @@ mod tests {
             deduped
                 .iter()
                 .filter(|e| matches!(e, QueueEntry::Completed(_)))
-                .count(),
+            .count(),
             1
         );
         assert!(deduped.iter().any(|e| matches!(e, QueueEntry::Preset(_))));
+    }
+
+    #[test]
+    fn dedup_live_prompts_preserves_free_text_duplicates() {
+        let entries = parse(concat!("- do deploy\n", "- do deploy\n")).unwrap();
+        let deduped = dedup_live_prompts(&entries);
+        assert!(
+            deduped.is_none(),
+            "free-text duplicate prompts should stay as user intent"
+        );
+        assert_eq!(
+            prompts(&entries).len(),
+            2,
+            "free-text duplicate prompts are intentionally preserved: {entries:?}"
+        );
     }
 
     #[test]

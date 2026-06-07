@@ -1383,15 +1383,25 @@ mod tests {
         run_git(&sup, &["commit", "-m", "add sub", "--no-verify"]);
         // Advance the submodule HEAD (S2) WITHOUT bumping the parent pointer.
         let subwt = sup.join("sub");
-        // The checked-out submodule's git repo (`super/.git/modules/sub`) does
-        // not inherit the parent's local identity, and a clean CI sandbox has no
-        // global identity, so set it here or the `s2` commit fails with exit 128.
-        run_git(&subwt, &["config", "user.email", "test@example.com"]);
-        run_git(&subwt, &["config", "user.name", "Test User"]);
+        // The checked-out submodule's git repo (`super/.git/modules/sub`) may not
+        // inherit the parent's local identity, and a clean CI sandbox has no global
+        // identity, so pass identity inline on this commit command.
         let content = "---\nsession: t\nagent_doc_format: template\n---\n\nv2\n";
         std::fs::write(subwt.join("doc.md"), content).unwrap();
         run_git(&subwt, &["add", "doc.md"]);
-        run_git(&subwt, &["commit", "-m", "s2", "--no-verify"]);
+        run_git(
+            &subwt,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test User",
+                "commit",
+                "-m",
+                "s2",
+                "--no-verify",
+            ],
+        );
         // Document itself is clean: snapshot == HEAD == working.
         let doc = subwt.join("doc.md");
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();

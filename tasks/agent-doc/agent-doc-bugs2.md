@@ -35,7 +35,23 @@ complete
 Compacted content:
 - Archived 3 response topic(s): #adoc-semantic-diff-nav; #adoc-harness-simworld; :pushpin: monsterrodholders.md queue responses are still not going into the exchange.
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:96bb6a28 -->
+Investigated the Monster Rod Holders missing-responses report without running the Monster queue.
+
+What happened:
+- The full Blog/Videos response was captured by agent-doc but the visible `tasks/monsterrodholders.md` exchange retained only a stub before compaction: `Implemented and deployed the Blog/Videos nav and Videos page update.`, followed by empty `Production apply/verification:` / `Verification:` headings.
+- The full response is still present in recovery artifacts, especially `src/boost-client/.agent-doc/captures/7b9f2a6394de97c213efeb3ec1e3d33b7b966229655f4720376409f6abef299f/cycle-1780874523718.json` and `src/boost-client/.agent-doc/pending/7b9f2a6394de97c213efeb3ec1e3d33b7b966229655f4720376409f6abef299f.md`.
+- The later compaction commit `ceaf68c` archived the visible exchange into `src/boost-client/.agent-doc/archives/7b9f2a6394de97c213efeb3ec1e3d33b7b966229655f4720376409f6abef299f-20260607-234152.md`, so the response is not lost, but it is not visible in the compacted document body.
+
+Fix/recovery performed:
+- Ran `agent-doc commit src/boost-client/tasks/monsterrodholders.md` from the parent repo. This cleared the prior parent/submodule commit-boundary interruption for the Monster session without claiming pane ownership or running the queue.
+- Re-ran `agent-doc session-check src/boost-client/tasks/monsterrodholders.md`; the parent pointer mismatch is gone. The remaining interruption is now the real unresolved Monster prompt: `Should we update the Google Search Console...` / Learn cannibalization, owned by Monster pane `%39`.
+
+Important boundary:
+- I did not claim the Monster session and did not run `agent-doc src/boost-client/tasks/monsterrodholders.md` from this pane.
+- Attempting `agent-doc write --commit tasks/monsterrodholders.md` inside `src/boost-client` correctly failed on pane ownership mismatch (`%39` vs this pane `%30`). That response repair should be run from the Monster owner pane if the operator wants the full captured Blog/Videos response replayed into the visible compacted document rather than only kept in the archive/capture artifacts.
+
+No source-code changes were needed for this investigation. The concrete current state is: recovered response artifacts exist, parent boundary is repaired, and the remaining Monster prompt must be answered in the Monster owner pane rather than from this agent-doc-bugs queue pane.
+<!-- agent:boundary:8f40fb78 -->
 <!-- /agent:exchange -->
 
 ## Queue

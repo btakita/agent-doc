@@ -45,7 +45,26 @@ Yes — done (marked `[x]`). The goal (get `opencode-tsift` publishing working a
 - The actual resolution was **OIDC trusted publishing** (no token at all): `opencode-tsift@0.1.63` bootstrapped to npm, `npm trust` configured (`btakita/tsift` → `release.yml`, verified via `npm trust list`), `release.yml` switched to OIDC (`id-token: write`), and the dead `NPM_TOKEN` secret deleted.
 
 Net result: every future `v*` release auto-publishes opencode-tsift via OIDC — no token, no OTP, no authenticator app. The npm-related review items (`#0y9e`, `#astnav-npm`, `#npm-auth-setup`) are effectively satisfied by this too; `#npm-publish-verify`'s last piece (a CI OIDC publish) will exercise itself on the next version bump.
-<!-- agent:boundary:55c44db4 -->
+
+### Re: Separate SQLite DBs for caches to avoid writer-lock contention? Is it even an issue with WAL? — opus-4-8
+
+Two questions, and the second one reframes the first. Short version: **with WAL, writer-lock contention is mostly a non-issue for these caches — and the current JSON design already beats a shared cache DB for the one case where contention *would* bite (multiple processes).**
+
+**What WAL actually fixes (and doesn't).** WAL's win is reader/writer concurrency: readers never block the writer and the writer never blocks readers. But WAL does **not** give you multiple concurrent *writers* — SQLite is still **one writer at a time per database file**, any journal mode. A second writer gets `SQLITE_BUSY` and waits out the `busy_timeout`. So WAL eliminates read-vs-write contention; it does nothing for write-vs-write.
+
+**Is write-write contention real for tsift's caches?** Barely, because of their access pattern. The community cache (and cycle-packet, conflict-matrix, token-index) are **compute-once-per-watermark, read-many**: you write a result once when the graph watermark changes, then just read it on lookups until the next change. Writes are rare and short. So even if they all shared one WAL database, reads would be free and the occasional write would almost never collide. Within a single process, contention here is theoretical.
+
+**Where it *would* bite — and why separation matters.** The real risk isn't the caches contending with *each other*; it's cache writes sharing a lock with something hot. Two cases:
+1. **Sharing `graph.db`.** If cache writes lived in the main graph projection DB, a cache write would queue behind the indexer's write lock (and a slow cache write could stall indexing), plus you'd entangle cache churn with graph VACUUM/bloat. So: **if caches were ever in SQLite, they belong in a DB separate from `graph.db`** — exactly the pattern tsift already uses for `findings.db` (kept separate so findings survive `graph-db refresh` and don't share the projection's lock/lifecycle). Among the caches themselves, one shared `cache.db` would be fine — no need for one DB per cache.
+2. **Multiple processes** (concurrent sessions, the agent-doc supervisor). This is tsift's actual contention story, and WAL only half-helps: reads are concurrent, but two processes computing/writing caches at once **serialize on the single writer lock** (`SQLITE_BUSY`, retries).
+
+**This is the case the current JSON design wins.** Content-addressed `(graph_watermark+tagpath) → <hash>.json` files have **no writer lock at all** — each computation writes its own distinct file, so N processes can populate the cache fully in parallel with zero `SQLITE_BUSY`, zero retry, zero shared fsync. A single `cache.db` would *reintroduce* a writer lock that the JSON layout avoids. For rebuildable, content-addressed, possibly-concurrently-written data, that's a real advantage, not just simplicity.
+
+**Bottom line.** Your instinct — "separate DBs to avoid contention" — is directionally right (isolate from `graph.db`), but JSON already takes it further: it removes the lock entirely. So:
+- Keep the caches as JSON files. For their pattern (rare writes, content-addressed, multi-process) that's the lower-contention option, not a compromise.
+- Reserve SQLite for what needs querying/transactions/incremental updates (`graph.db`, `findings.db`), and keep those as **separate** DBs (already done) so their write locks and refresh/VACUUM lifecycles don't cross.
+- WAL is the right mode for those query DBs (free concurrent reads while the indexer writes) — but it's not a reason to fold the caches into SQLite, because WAL doesn't help the write-write/multi-process case that the JSON files sidestep completely.
+<!-- agent:boundary:57f23e06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,8 +74,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Should we have separate sqlite databases for the community cache and other caches to avoid writer lock contention? Is the writer lock contention even an issue with WAL?
-- is [#rtsw] done?
+- Please repost answer to "Should we have separate sqlite databases for the community cache and other caches to avoid writer lock contention? Is the writer lock contention even an issue with WAL?"
 <!-- /agent:queue -->
 
 ## Backlog

@@ -386,6 +386,263 @@ fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&
     }
 }
 
+enum RepeatedQueueHeadRecovery {
+    Recovered { note: String },
+    NotRecoverable { note: String },
+}
+
+fn response_has_patch_markers(response: &str) -> bool {
+    response.contains("<!-- patch:") || response.contains("<!-- /patch:")
+}
+
+fn response_has_response_heading(response: &str) -> bool {
+    response
+        .lines()
+        .any(|line| line.trim_start().starts_with("### Re:"))
+}
+
+fn wrap_repeated_queue_response_patch(prompt: &str, response: &str) -> String {
+    let heading = prompt
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .unwrap_or("active queue head");
+    let mut patch = format!("<!-- patch:exchange -->\n### Re: {heading} — gpt-5\n\n");
+    patch.push_str(response.trim());
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    patch.push_str("<!-- /patch:exchange -->\n");
+    patch
+}
+
+fn repeated_queue_response_for_write(
+    file: &Path,
+    prompt: &str,
+    response: &str,
+) -> Result<std::result::Result<String, String>> {
+    if crate::write::response_explicitly_targets_active_queue_head(file, response)? {
+        return Ok(Ok(response.to_string()));
+    }
+    if response_has_patch_markers(response) || response_has_response_heading(response) {
+        return Ok(Err(format!(
+            "it already contained a patch block or `### Re:` heading, but that heading did not target the active queue head {prompt:?}"
+        )));
+    }
+    Ok(Ok(wrap_repeated_queue_response_patch(prompt, response)))
+}
+
+fn try_recover_repeated_queue_head_response(
+    file: &Path,
+    prompt: &str,
+    input: &StopInput,
+    last_prompt: Option<&str>,
+) -> Result<RepeatedQueueHeadRecovery> {
+    let payload = crate::replay_guard::classify_replay_payload(&input.last_assistant_message);
+    let response = match payload {
+        crate::replay_guard::ReplayPayloadClassification::Empty => {
+            return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+                note: capture_missing_stop_response(file, last_prompt),
+            });
+        }
+        crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+                note: capture_blocked_stop_payload(
+                    file,
+                    &input.last_assistant_message,
+                    &reason,
+                    last_prompt,
+                ),
+            });
+        }
+        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => response,
+    };
+
+    let response_to_write =
+        match repeated_queue_response_for_write(file, prompt, response.as_ref())? {
+            Ok(response) => response,
+            Err(reason) => {
+                return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+                    note: capture_blocked_stop_payload(
+                        file,
+                        &input.last_assistant_message,
+                        &reason,
+                        last_prompt,
+                    ),
+                });
+            }
+        };
+
+    crate::repair::save_pending(file, &response_to_write)?;
+    crate::ops_log::log_op(file, "codex_stop_repeated_queue_response_saved");
+    let mut note = format!(
+        " The hook replayed the last assistant response into `agent:exchange` for repeated queue head {:?}.",
+        prompt
+    );
+
+    let repair_outcome = crate::repair::run(file)?;
+    if repair_outcome.replayed_response() {
+        note.push_str(" The response was written through the normal repair/write path.");
+    } else if repair_outcome == crate::repair::RepairOutcome::AlreadyApplied {
+        note.push_str(" The response was already present and was adopted by repair.");
+    } else {
+        return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+            note: format!(
+                "{note} The repair path did not replay or adopt the response (outcome: {repair_outcome:?})."
+            ),
+        });
+    }
+
+    if active_auto_queue_prompt(file)?.as_deref() == Some(prompt) {
+        match crate::write::consume_queue_prompt_with_outcome(file) {
+            Ok(Some(outcome)) => {
+                note.push_str(&format!(
+                    " The hook consumed the completed queue head {:?} before commit.",
+                    outcome.consumed_text
+                ));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+                    note: format!(
+                        "{note} The hook wrote the response but could not consume the completed queue head: {err}."
+                    ),
+                });
+            }
+        }
+    }
+
+    if !crate::git::is_in_git_repo(file) {
+        return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+            note: format!(
+                "{note} The document is not in a git repository, so the hook could not finish the required commit boundary automatically."
+            ),
+        });
+    }
+
+    match crate::write::complete_required_closeout(file) {
+        Ok(true) => {
+            note.push_str(" The hook finished the commit boundary automatically.");
+        }
+        Ok(false) => {}
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!("codex_stop_repeated_queue_closeout_failed err={err}"),
+            );
+            return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
+                note: format!(
+                    "{note} The hook wrote the response but could not finish the required commit boundary: {err}."
+                ),
+            });
+        }
+    }
+
+    crate::ops_log::log_op(file, "codex_stop_repeated_queue_recovery_success");
+    Ok(RepeatedQueueHeadRecovery::Recovered { note })
+}
+
+fn repeated_queue_recovery_unavailable_response(
+    file: &Path,
+    prompt: &str,
+    note: &str,
+) -> StopResponse {
+    StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook requested auto-queue continuation for {}, but the queue head did not advance after the previous continuation request: {:?}. The hook could not safely replay the last assistant response.{} {}",
+            file.display(),
+            prompt,
+            note,
+            continuation_closeout_instruction(file, None)
+        ),
+    }
+}
+
+fn tracked_repeated_queue_recovery_response(
+    file: &Path,
+    cleanup_roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+    input: &StopInput,
+    prompt: &str,
+    note: String,
+) -> Result<StopResponse> {
+    let Some(next_prompt) = active_auto_queue_prompt(file)? else {
+        clear_state_across_roots(cleanup_roots, loaded_root, &input.session_id)?;
+        return Ok(StopResponse::Continue { continue_: true });
+    };
+    if next_prompt == prompt {
+        return Ok(StopResponse::Block {
+            decision: "block",
+            reason: format!(
+                "agent-doc Stop hook replayed a response for {}, but the queue head still did not advance: {:?}.{} {}",
+                file.display(),
+                prompt,
+                note,
+                continuation_closeout_instruction(file, None)
+            ),
+        });
+    }
+
+    let mut next_state = state.clone();
+    next_state.last_auto_queue_head = Some(next_prompt.clone());
+    next_state.updated_at = now_secs();
+    save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
+    let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
+    let context_reset_reason =
+        crate::session_accretion::queue_context_reset_reason(file, state.last_context_clear_at)
+            .ok()
+            .flatten();
+    Ok(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook recovered the previous queue response for {disp}.{note} The next queue prompt is {prompt:?}. {instruction}",
+            disp = file.display(),
+            note = note,
+            prompt = next_prompt,
+            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
+        ),
+    })
+}
+
+fn marker_repeated_queue_recovery_response(
+    file: &Path,
+    previous_prompt: &str,
+    note: String,
+) -> Result<StopResponse> {
+    let Some(next_prompt) = active_auto_queue_prompt(file)? else {
+        return Ok(StopResponse::Continue { continue_: true });
+    };
+    if next_prompt == previous_prompt {
+        return Ok(StopResponse::Block {
+            decision: "block",
+            reason: format!(
+                "agent-doc Stop hook replayed a response for {} from the durable continuation marker, but the queue head still did not advance: {:?}.{} {}",
+                file.display(),
+                previous_prompt,
+                note,
+                continuation_closeout_instruction(file, None)
+            ),
+        });
+    }
+    crate::queue_continuation::record_requested_head(file, &next_prompt)?;
+    let context_reset_reason = crate::session_accretion::queue_context_reset_reason(file, None)
+        .ok()
+        .flatten();
+    Ok(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook recovered the previous queue response for {disp} from the durable continuation marker.{note} The next queue prompt is {prompt:?}. {instruction}",
+            disp = file.display(),
+            note = note,
+            prompt = next_prompt,
+            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
+        ),
+    })
+}
+
 fn auto_queue_continuation_response(
     file: &Path,
     cleanup_roots: &[PathBuf],
@@ -397,15 +654,29 @@ fn auto_queue_continuation_response(
         return Ok(None);
     };
     if input.stop_hook_active && state.last_auto_queue_head.as_deref() == Some(&prompt) {
-        return Ok(Some(StopResponse::Stop {
-            continue_: false,
-            stop_reason: format!(
-                "agent-doc Stop hook requested auto-queue continuation for {}, but the queue head did not advance after the previous continuation request: {:?}. Run `agent-doc {}` manually or remove `auto` from the queue before ending the turn.",
-                file.display(),
-                prompt,
-                file.display()
-            ),
-        }));
+        return Ok(Some(
+            match try_recover_repeated_queue_head_response(
+                file,
+                &prompt,
+                input,
+                Some(state.last_prompt.as_str()),
+            )? {
+                RepeatedQueueHeadRecovery::Recovered { note } => {
+                    tracked_repeated_queue_recovery_response(
+                        file,
+                        cleanup_roots,
+                        loaded_root,
+                        state,
+                        input,
+                        &prompt,
+                        note,
+                    )?
+                }
+                RepeatedQueueHeadRecovery::NotRecoverable { note } => {
+                    repeated_queue_recovery_unavailable_response(file, &prompt, &note)
+                }
+            },
+        ));
     }
     let mut next_state = state.clone();
     next_state.last_auto_queue_head = Some(prompt.clone());
@@ -463,19 +734,30 @@ fn marker_fallback_continuation_response(
     };
 
     // Non-advancing-head guard: a repeated stop whose marker already requested
-    // this exact head must fail closed instead of looping forever.
+    // this exact head must either recover the in-pane response or fail closed
+    // without letting Codex send an unpersisted final answer.
     if input.stop_hook_active
         && marker.last_requested_head.as_deref() == Some(continuation.head_prompt.as_str())
     {
-        return Ok(Some(StopResponse::Stop {
-            continue_: false,
-            stop_reason: format!(
-                "agent-doc Stop hook requested auto-queue continuation for {} from the durable continuation marker, but the queue head did not advance: {:?}. Run `agent-doc {}` manually or remove `auto` from the queue before ending the turn.",
-                file.display(),
-                continuation.head_prompt,
-                file.display()
-            ),
-        }));
+        return Ok(Some(
+            match try_recover_repeated_queue_head_response(
+                &file,
+                &continuation.head_prompt,
+                input,
+                None,
+            )? {
+                RepeatedQueueHeadRecovery::Recovered { note } => {
+                    marker_repeated_queue_recovery_response(&file, &continuation.head_prompt, note)?
+                }
+                RepeatedQueueHeadRecovery::NotRecoverable { note } => {
+                    repeated_queue_recovery_unavailable_response(
+                        &file,
+                        &continuation.head_prompt,
+                        &note,
+                    )
+                }
+            },
+        ));
     }
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
@@ -2405,10 +2687,11 @@ agent-doc {}\n",
     }
 
     #[test]
-    fn stop_marker_fallback_fails_closed_when_head_does_not_advance() {
+    fn stop_marker_fallback_replays_plain_final_answer_when_head_does_not_advance() {
         // #codex-auto-queue-stalled-final-gate: a repeated stop (stop_hook_active)
-        // whose durable marker already requested this exact head must fail closed
-        // instead of looping forever.
+        // whose durable marker already requested this exact head must persist a
+        // plain Codex final answer into agent:exchange instead of allowing it to
+        // escape as chat-only text.
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy"]);
         init_git_repo(dir.path(), &doc);
@@ -2420,21 +2703,21 @@ agent-doc {}\n",
             session_id: "untracked-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Final answer.".to_string(),
+            last_assistant_message: "Final answer.\n\nVerification: Codex stop-hook simulation."
+                .to_string(),
             stop_hook_active: true,
         })
         .unwrap();
 
-        match response {
-            StopResponse::Stop {
-                continue_,
-                stop_reason,
-            } => {
-                assert!(!continue_);
-                assert!(stop_reason.contains("did not advance"), "{stop_reason}");
-            }
-            other => panic!("expected fail-closed Stop, got {other:?}"),
-        }
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: do [#seopdp] deploy — gpt-5"));
+        assert!(content.contains("Verification: Codex stop-hook simulation."));
+        assert!(!content.contains("- do [#seopdp] deploy"));
+        assert!(
+            crate::queue_continuation::detect(&doc).unwrap().is_none(),
+            "replayed response should drain the only active head"
+        );
     }
 
     #[test]
@@ -2480,7 +2763,7 @@ agent-doc {}\n",
     }
 
     #[test]
-    fn stop_fails_closed_when_auto_queue_continuation_makes_no_progress() {
+    fn stop_replays_plain_final_answer_when_auto_queue_continuation_makes_no_progress() {
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
         init_git_repo(dir.path(), &doc);
@@ -2503,24 +2786,74 @@ agent-doc {}\n",
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Done.".to_string(),
+            last_assistant_message: "Done.\n\nVerification: Codex stop-hook simulation."
+                .to_string(),
             stop_hook_active: true,
         })
         .unwrap();
 
         match response {
-            StopResponse::Stop {
-                continue_: false,
-                stop_reason,
-            } => {
+            StopResponse::Block { reason, .. } => {
                 assert!(
-                    stop_reason.contains("queue head did not advance"),
-                    "{stop_reason}"
+                    reason.contains("recovered the previous queue response"),
+                    "{reason}"
                 );
-                assert!(stop_reason.contains("do #fix1"), "{stop_reason}");
+                assert!(reason.contains("do #fix2"), "{reason}");
             }
-            other => panic!("expected fail-closed no-progress stop, got {other:?}"),
+            other => panic!("expected recovered no-progress block, got {other:?}"),
         }
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: do #fix1 — gpt-5"));
+        assert!(content.contains("Verification: Codex stop-hook simulation."));
+        assert!(content.contains("- ~~do #fix1~~"));
+        assert!(content.contains("- do #fix2"));
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
+    }
+
+    #[test]
+    fn stop_blocks_when_repeated_auto_queue_head_has_no_replayable_response() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: format!("agent-doc {}", doc.display()),
+                last_auto_queue_head: Some("do #fix1".to_string()),
+                last_context_clear_at: None,
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: String::new(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("could not safely replay"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
+                assert!(reason.contains("do #fix1"), "{reason}");
+            }
+            other => panic!("expected repeated-head recovery block, got {other:?}"),
+        }
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("### Re: do #fix1 — gpt-5"));
+        assert!(content.contains("- do #fix1"));
+        assert!(!content.contains("- ~~do #fix1~~"));
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
     }
 
     #[test]

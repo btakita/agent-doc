@@ -88,20 +88,24 @@ Recovered the missing queue-head closeout body for `do [#39c5]`.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- do [#ipc2]
+- do [#yxjw]
+- do [#ipc3]
+- do [#vd5v]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
-- [ ] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
-- [ ] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
-- [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
+- [/] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [/] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
+- [/] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed

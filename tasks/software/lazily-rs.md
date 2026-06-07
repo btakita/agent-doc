@@ -41,7 +41,7 @@ agent_doc_pipeline:
 Compacted content:
 - Archived 7 response topic(s): recovery closeout; recovery closeout; do [#ipc1] / do [#39c5]; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:f431567b -->
+<!-- agent:boundary:93aa8c06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,11 +49,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#ipc2]
-- do [#yxjw]
-- do [#ipc3]
-- do [#vd5v]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

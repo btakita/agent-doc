@@ -167,6 +167,11 @@ No escalated permissions were used. Confidence is high for the implemented IPC a
 
 > **Queue prompt:**
 >
+> Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
+
+
+> **Queue prompt:**
+>
 > What is the benefit of a SHM ring buffer over a SHM blob arena?
 
 
@@ -181,7 +186,7 @@ For agent-doc / tsift IPC, the better architecture is usually both together: rin
 So the benefit of the ring buffer over the blob arena is event sequencing and backpressure. The benefit of the blob arena over the ring buffer is large-payload storage. They compose cleanly: ring for control, arena for bytes.
 
 No code changed for this answer.
-<!-- agent:boundary:82bcb77d -->
+<!-- agent:boundary:6f799a18 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,7 +198,8 @@ No code changed for this answer.
 - ~~What is the benefit of a SHM ring buffer?~~
 - ~~Implement a SHM blob arena for IPC transport.~~
 - ~~What is the benefit of a SHM ring buffer over a SHM blob arena?~~
-- Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
+- ~~Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?~~
+- Are there existing 
 <!-- /agent:queue -->
 
 ## Backlog

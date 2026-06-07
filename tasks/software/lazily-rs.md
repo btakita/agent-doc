@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#ipc4]
+
+
+> **Queue prompt:**
+>
 > [#ipc8]
 
 
@@ -80,7 +85,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:2d5b8e65 -->
+<!-- agent:boundary:23a2011f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,7 +94,7 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#ipc4]
+- ~~do [#ipc4]~~
 - do [#ipc5]
 - do [#ipc6]
 - do [#ipc7]

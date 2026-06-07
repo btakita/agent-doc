@@ -49,7 +49,11 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#ipc2]
+- do [#yxjw]
+- do [#ipc3]
+- do [#vd5v]
 <!-- /agent:queue -->
 
 ## Backlog

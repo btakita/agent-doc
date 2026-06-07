@@ -37,7 +37,8 @@ Operational task document for agent-loop workspace management.
 Compacted content:
 - Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-<!-- agent:boundary:adda181a -->
+❯ Commit uncommitted changes in agent-loop. Reconcile with origin...preferably via rebase. Why are there conflicts?
+<!-- agent:boundary:bd35b011 -->
 <!-- /agent:exchange -->
 ###
 <!--

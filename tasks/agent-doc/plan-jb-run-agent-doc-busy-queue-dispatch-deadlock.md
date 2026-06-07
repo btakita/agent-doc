@@ -2,10 +2,24 @@
 
 ## Status
 
-Plan only — **do not implement** (per the `#agent-doc-bug` preset: create a plan,
-add to the agent-doc-bugs2 backlog, do not implement the fix). The fix touches the
-live-pane route busy path and needs a live Codex pane to verify, so implementation
-is gated.
+**Update 2026-06-02:** operator issued `do [#jb-busy-inactive-queue-dispatch]`,
+superseding the plan-only status for the **deterministic** scope. Split the work:
+
+- **Implementable + unit-testable now (no live pane):**
+  (a) Fix-direction bullet 2 — explicit `Run Agent Doc` that finds a runnable
+  `agent:queue auto` head while `queue_active:false` on a busy owned pane must
+  activate the queue + arm the idle-drain watcher, OR fail closed with a typed
+  deferred/busy diagnostic; it must never record `keep_alive` +
+  `queue_continuation_required=false` as a silent no-op.
+  (b) Fix-direction bullet 3 — emit the deferred-queued operator feedback.
+  Both are route.rs / session-check / queue_continuation.rs logic with
+  deterministic SimWorld coverage.
+- **Still gated (live two-session Codex pane):** the Verification → Live repro.
+
+The sibling idle-drain watcher already shipped for the `queue_active:true`
+route-appended case (`spawn_idle_queue_watch_thread` / `idle_queue_drain_decision`,
+submodule 4b3f4835); this item extends the *same* watcher to the
+`queue_active:false` pre-existing-head case rather than building a new mechanism.
 
 ## Report
 
@@ -21,6 +35,33 @@ authoritative actor was mid-turn. Route log:
 
 Symptom: the dispatch never runs ("deadlock") — the prompt is queued but is not
 delivered after the pane returns to idle.
+
+## Fresh Repro: Pre-existing inactive queue head
+
+2026-06-02 correction: the live report was on
+`/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`,
+not `agent-doc-bugs2.md`.
+
+Observed state after JB `Run Agent Doc`:
+
+- Session `a9421282-fd96-4943-9af5-3561ed5cb799`, harness `codex`,
+  actor generation 255, pane `%61`.
+- The document had an uncommitted user-added queue head:
+  `- [#shipstationaudit]. #spec-test-commit-push` under `agent:queue auto`.
+- Frontmatter still had `queue_active: false`.
+- `agent-doc session status` reported the actor projection as `ready`, but the
+  live pane as `alive-busy` / `prompt_ready=false`.
+- The latest session log event was
+  `route_owned_reap_decision policy=auto decision=keep_alive
+  reason=live_pane_busy_blocked_prompt`.
+- `agent-doc session-check` returned ok with `queue_continuation_required=false`.
+- `tmux capture-pane -pt %61` showed a real active Codex turn, not stale idle
+  scrollback.
+
+This is a sibling of the route-appended prompt case, but the queue head already
+exists and is inactive. The route-owned busy keep-alive path neither activates the
+queue nor installs an idle-drain continuation, so the operator sees "Run Agent
+Doc" do nothing even though there is a runnable queue head in the document.
 
 ## What the code does (grounded)
 
@@ -66,6 +107,11 @@ delivered after the pane returns to idle.
   prompt-bearing sibling of `#opencode-active-turn-reopen-auto-retry-on-idle`
   (which covers only the plain, no-prompt reopen). Must keep the
   no-inject-into-active-turn invariant.
+- Cover the pre-existing inactive-head variant: when explicit `Run Agent Doc`
+  sees a runnable `agent:queue auto` head while `queue_active:false` and the owned
+  pane is busy, it must either activate the queue and arm the same idle-drain
+  watcher, or fail closed with a typed deferred/busy diagnostic. It must not
+  silently keep the pane alive with `queue_continuation_required=false`.
 - Surface explicit operator feedback from the JB plugin that the run was **deferred
   and queued** (not dispatched), with the queue position, so a busy-pane run does
   not read as a silent success/hang.

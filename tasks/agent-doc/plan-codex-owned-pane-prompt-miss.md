@@ -35,6 +35,50 @@ session-check backstop — `check_prompt_only_exchange_tail_guard` + the
 remaining piece is a live Stop-hook assertion); (3) live Codex same-pane
 verification with a real unresolved exchange prompt.
 
+**Fresh recurrence (2026-06-02, #owned-pane-prompt-recur):** the empty-cycle
+abandonment path is fixed, but the owner-pane handoff still did not become an
+executable current-turn contract. From the Codex owner pane `%61`, running:
+
+```text
+agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+```
+
+against an unresolved exchange prompt:
+
+```text
+ShipStation is being blocked from calling apis on WP. #spec-test-commit-push-deploy
+```
+
+printed the recursive guard:
+
+```text
+recursive direct invocation would deadlock
+```
+
+and correctly reported that the empty preflight cycle was abandoned, but no
+in-pane response was written for the ShipStation prompt. This keeps the
+remaining live/Stop-hook work urgent: the guard diagnostic is terminal, but the
+same owner turn must either process the named `owned_pane_self_invocation`
+contract and persist a response, or fail the final gate before a normal chat
+closeout.
+
+**Fresh recurrence (2026-06-03, boost-client `#shipstationaudit`):** the same
+Codex owner pane again received:
+
+```text
+agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+```
+
+`agent-doc` first reported the prior response was already committed, then
+printed `Submitting to codex...` and failed with
+`recursive direct invocation would deadlock` for current pane `%61` /
+generation `255`. The terminal diagnostic was correct and no empty preflight
+cycle remained, but the unresolved document work (`do [#shipstationaudit]`
+plus `#agent-doc-bug`) still had to be processed manually by the in-pane
+Codex turn. This confirms the remaining gap: the owned-pane self-invocation
+result is diagnostic-only in live Codex and still needs to become an
+executable current-turn contract or a final-gate blocker before chat closeout.
+
 ## Problem
 
 Live repro from `src/boost-client/tasks/monsterrodholders.md` on 2026-05-30:

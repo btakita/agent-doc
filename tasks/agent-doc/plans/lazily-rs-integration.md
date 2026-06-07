@@ -187,8 +187,9 @@ Within a CLI run, all slots compute at most once. Within an Actor, slots persist
 - `GlobalConfigSlot` (Slot<Arc<Config>>) — reads `~/.config/agent-doc/config.toml` once per CLI run; in ActorContext, invalidates on file-watcher event
 - `SessionRegistrySlot` (Slot<Arc<SessionRegistry>>) — depends on `ProjectRootSlot`; loads `sessions.json` once; invalidates on file-watcher event
 - Wire into route.rs, sync.rs, resync.rs, gc.rs callers that currently call `sessions::load()` multiple times
+- **Cross-document safety (added 2026-06-02, after `#xdoc-route-sweep-commits-sibling-docs`):** `SessionRegistrySlot` caches the **fleet-wide** `sessions.json` (every document's pane↔owner binding), unlike the per-document slots Q2 settled on. A long-lived ActorContext must treat it as authority-sensitive: any **ownership / route / closeout-sweep** decision must read a registry fresh as of the current `sessions.json` mtime/epoch (clear-on-mtime-change, not only on a debounced watcher event) or read through to disk. A stale `SessionRegistrySlot` would let an actor act on an out-of-date pane↔document binding — the exact stale-binding class behind the lazily-rs cross-document contamination. The owner-agnostic sweep (`#xdoc-route-sweep-commits-sibling-docs`) must not consult a cached binding; its owner gate and this slot must share one fresh-as-of-mtime read. Pairs with the admin DETECT surface in `#ipc-admin-api`.
 
-**Verification:** `cargo test` full suite passes; no behavior change.
+**Verification:** `cargo test` full suite passes; no behavior change. Add a regression that an ownership decision through `SessionRegistrySlot` returns fresh bindings after a `sessions.json` mtime bump (does not serve a stale pane↔owner mapping).
 
 ## Risks and Mitigations
 

@@ -12,12 +12,12 @@ links:
 - ./bob-remeika.md
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
-  '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
-  '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
+  '#commit-push': commit all uncommitted files
+  '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue: stop
 ---
 
 ## Status
@@ -83,9 +83,7 @@ Shipped the **un-gated half** of #zwws phase 6, then `update spec + tests` and `
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~[#67v2a]~
-- ~[#zwws-phase6-dashboard]~
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

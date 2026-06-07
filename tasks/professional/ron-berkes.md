@@ -201,7 +201,9 @@ Escalation: none.
 /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/
 -->
 
-<!-- agent:pending -->
+## Backlog
+
+<!-- agent:backlog -->
 - [ ] [#r16r] Start MRH WordPress optimization (admin access: vtac1)
 - [ ] [#9g9d] Research Liquid Web dedicated WordPress hosting vs alternatives
 - [ ] [#d2p6] Set up Cloudflare CDN for MonsterRodHolders.com
@@ -212,7 +214,7 @@ Escalation: none.
 - [ ] [#d2qw] Investigate RealWeeds.com / MonsterOutdoors.com acquisition opportunity
 - [ ] [#tnz5] Wait for Steve to reach out directly
 - [ ] [#13fw] Draft Julian API integration proposal (factory reports, revenue share model)
-<!-- /agent:pending -->
+<!-- /agent:backlog -->
 
 ## Completed / Reaped
 

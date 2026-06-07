@@ -170,6 +170,32 @@ Targets the 2026-06-01 symptom (wrong document surfaced in the navigated pane).
 - Emit a precise diagnostic when the guard trips: `focused file=F surfaced
   pane=%N owns=G (mismatch)` so JB logs name the contaminating document.
 
+### Phase 3c - execution-context contamination guard (run/write/stream/preflight)
+
+Targets the 2026-06-02 confirmation that Phase 3b's *display* guard is not
+enough. The binary logs `cross_document_execution_context` (origin=run/write/
+stream, `current_pane=%N pane_owns=<other document>`) proving that agent-doc
+cycles for document `F` physically EXECUTE inside a tmux pane owned by a
+different live document: `agent-doc-bugs2.md` cycles ran inside `lazily-rs.md`'s
+`%71`/`%73`, and separately inside `monsterrodholders.md`'s pane. Phase 3b
+guards which pane is *surfaced/focused*; this phase guards where a cycle *runs*.
+
+- At the `run` / `write` / `stream` / `preflight` entry, when the executing tmux
+  pane's registered owned-file differs from the cycle's target document, the
+  binary must not silently proceed. Promote the existing best-effort
+  `cross_document_execution_context` LOG into an actionable guard: either
+  re-home the cycle to the target document's own owner pane, or fail closed with
+  `executing_pane_owns_other_document file=F pane=%N owns=G` plus the recovery
+  command — never commit a cycle for `F` from inside `G`'s pane.
+- Caching constraint for the not-yet-implemented lazily-rs `#lr-actor-10`
+  (GlobalConfigSlot + SessionRegistrySlot on the long-lived ActorContext): a
+  cached session registry MUST invalidate on registry mtime/epoch change.
+  `RunContext` is per-invocation (per-document) today and is NOT the current
+  cause, but a process-global SessionRegistrySlot without invalidation would
+  cache stale pane↔document bindings and could *introduce* this contamination
+  class — so that slot must ship with an explicit `invalidate` hook keyed to
+  registry change, mirroring the existing `RunContext::invalidate_*` pattern.
+
 ### Phase 4 - regression coverage and specs
 
 - Add JetBrains tests for:
@@ -200,3 +226,8 @@ Targets the 2026-06-01 symptom (wrong document surfaced in the navigated pane).
 - Navigating to `F` or running manual `Sync Tmux Layout` never surfaces a pane
   bound to a different document; the navigated pane always owns `F`, autostarts a
   new owner for `F`, or fails closed naming the contaminating document.
+- An agent-doc `run`/`write`/`stream`/`preflight` cycle for `F` never commits
+  from inside a tmux pane owned by a different live document; it re-homes to
+  `F`'s owner or fails closed with `executing_pane_owns_other_document` proof.
+  This closes the execution-context facet of `#jb-tsift-pane-sync`, not just the
+  display/surfacing facet.

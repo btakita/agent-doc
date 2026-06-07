@@ -75,6 +75,44 @@ repair request, an active free-text queue head, and a planning-only
    the preset while the normal cycle still preserves the unresolved queue head
    if execution is deferred by a bug-capture-only turn.
 
+## Shared Primitive (cluster consolidation, 2026-06-02)
+
+Auditing the lazily-rs queue cluster shows four backlog items all close on the
+**same** missing mechanism — implementation-plan item 3 above. Build it once:
+
+- `#lr-queue-response-miss` — a *seen* free-text queue head needs committed-
+  response / consume / explicit-deferral proof. (Shares this exact plan file.)
+- `#lr-queue-patchback-miss` (this plan) — same, plus the mixed `#agent-doc-bug`
+  capture must not bury the runnable head.
+- `#manual-queue-head-loss` — a free-text head lost *before* it was recorded as
+  an active head (the adding cycle stalled).
+- `#lr-queue-repair-adopt` — an adopted `write --commit` response must consume
+  the *matching* free-text head atomically with the commit.
+
+**Already shipped (do not re-implement):**
+- Item 2 (plan deferral proof) → `plan_backlog_only_deferral_warning`
+  (`src/plan.rs:422`, commit `4d0184e3`) names suppressed runnable directives.
+- Item 4 (missed-response repair → `write --commit`, not empty child dispatch)
+  → `run.rs:430` + the "empty response — nothing to write" path.
+
+**The one remaining primitive — free-text queue-head provenance + proof:**
+1. At preflight, record each active `agent:queue` head that is NOT a `do [#id]`
+   directive: its normalized text, a content hash, and a source tag
+   (user-authored vs generated/convergence). Persist alongside
+   `cycle_state.active_queue_heads` (which today only carries `do [#id]` ids, so
+   `check_queue_head_removal_guard` early-returns on free-text heads —
+   `session_check.rs:2459`).
+2. At closeout, for each recorded free-text head require one of: a committed
+   `### Re:` response whose heading/body answers that head; a binary-owned
+   consume of that exact head; or the head still present with a concrete
+   deferral reason in the response. Else fail closed naming the head.
+3. The same provenance record lets `write --commit` adoption consume the matching
+   free-text head atomically (`#lr-queue-repair-adopt`) and lets the stall case
+   restore a head that was never recorded (`#manual-queue-head-loss`).
+
+Implementing 1–3 retires the open facet of all four items. `#lr-queue-response-
+miss` and this plan are effectively the same work item.
+
 ## Tests
 
 - `plan` regression: mixed `#agent-doc-bug` plus active preset queue head emits

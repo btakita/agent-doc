@@ -53,7 +53,7 @@ Proof notes: changed paths are limited to this session document. No code was cha
 <!--
 -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

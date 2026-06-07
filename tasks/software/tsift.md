@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -118,7 +118,48 @@ flowchart TD
 **The one genuine gap = the Ontology Graph.** To match MemGraphRAG, tsift would materialize an ontology layer: node-kind and edge-kind *types* (and their permitted relations) as a small queryable schema graph, letting retrieval start from abstract types and prune by schema constraints. The ontology source could be the code's `NodeKind`/edge-kind enums, the authored-node types from `#trt1`, or your Existence Lang ontology. Queued as gated `#memgraphrag-ont` (needs a decision on the ontology source).
 
 Net: tsift already implements the bottom two of the three layers well — it's a **Fact + Evidence** graph today. The missing piece to be a full tri-layer MemGraphRAG is the typed ontology backbone on top.
-<!-- agent:boundary:d0acd9a7 -->
+
+### Re: Triage review → backlog, consolidate, prioritize — opus-4-8
+
+> **Queue prompt:**
+>
+> Please look at the review items. Move actionable steps into the backlog. Create new backlog items and/or Consolidate items if it makes sense. After backlog items are in remove the review items. Use auto-dag to prioritize. re [#memgraphrag-ont]: I want to use #trt1 and code NodeKind/edge-kind enums to be the source of the ontology. The source may include existence-lang if used in the project(s). But existence-lang is not always used. If a dynamically generated existence-lang ontology is useful as a basis for the ontology layer, use it. Otherwise, we can use an efficient representation for the MemGraphRag.
+
+
+Done. Reviewed all 13 review items, consolidated into a curated 6-item backlog, **emptied the review block**, and prioritized via `auto-dag`. The 13 originals were reaped out (archived).
+
+**Dropped as already done** (memory: opencode-tsift is published via OIDC trusted publishing, `NPM_TOKEN` deleted; `opencode-tsift@0.1.63` is on npm):
+- `#0y9e`, `#astnav-npm`, `#npm-auth-setup`, `#npm-publish-verify` — npm auth + publish complete.
+
+**Consolidated:**
+- `#surrealbulk` now absorbs `#surrealbulk-close` + `#surreal-batch-bfs` + `#surreal-fixture` → one SurrealDB-perf item (bulk load + frontier + fixture + benchmark closeout).
+- `#e2e-install` absorbs `#full-e2e-verify` → one fresh-project verification item.
+
+**Kept actionable:** `#trt1` (findings graph layer), `#rankdefault` (now also folds in the shipped `#memgraphrag1` decay ranking), `#7qky` (gated — flagged **agent-doc-scoped**, should be driven from an agent-doc session, not tsift).
+
+**`#memgraphrag-ont` — ungated + source decided** per your call: base ontology = **code `NodeKind`/edge-kind enums + `#trt1` authored-node types**; optionally fold in a **dynamically-generated existence-lang ontology when a project actually uses existence-lang** (not always present); otherwise an efficient internal representation. No longer gated.
+
+**Prioritized order** (auto-dag lanes + dependency: foundational first):
+
+```mermaid
+flowchart TD
+  T[#trt1 findings graph layer] --> O[#memgraphrag-ont ontology layer]
+  T --> R[#rankdefault + memgraphrag1 decay]
+  O --> R
+  S[#surrealbulk SurrealDB perf]
+  E[#e2e-install opencode verify]
+  Q[#7qky codex reads · gated · agent-doc-scoped]
+```
+
+1. `#trt1` — foundational (authored nodes; unblocks the fuller ontology + unified ranking)
+2. `#memgraphrag-ont` — ontology backbone (builds on #trt1)
+3. `#rankdefault` — unified decay-aware ranking over the merged graph
+4. `#surrealbulk` — SurrealDB projection perf (independent)
+5. `#e2e-install` — live verification (independent)
+6. `#7qky` — gated, agent-doc-scoped (last)
+
+Review block is now empty; backlog is the single source of actionable work.
+<!-- agent:boundary:7e63c53b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,14 +168,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Please look at the review items. Move actionable steps into the backlog. Create new backlog items and/or Consolidate items if it makes sense. After backlog items are in remove the review items. Use auto-dag to prioritize. re [#memgraphrag-ont]: I want to use #trt1 and code NodeKind/edge-kind enums to be the source of the ontology. The source may include existence-lang if used in the project(s). But existence-lang is not always used. If a dynamically generated existence-lang ontology is useful as a basis for the ontology layer, use it. Otherwise, we can use an efficient representation for the MemGraphRag.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#memgraphrag-ont] Materialize a Semantic Ontology Graph layer (MemGraphRAG arxiv 2606.00610 third layer). Today tsift node/edge kinds are conventions on rows, not first-class queryable type-nodes with valid inter-type relations; tsift is a Fact+Evidence graph but lacks the ontology backbone. Add a small typed schema graph (node-kind/edge-kind types + permitted relations) so retrieval can start from abstract types and prune by schema constraints. Ontology source TBD: code NodeKind/edge-kind enums, #trt1 authored-node types, or Existence Lang ontology. GATED on the ontology-source decision; relates to #trt1 and #memgraphrag2.<!-- /agent:backlog -->
+- [ ] [#trt1] Findings graph layer: add authored Finding/Decision/Note nodes to GraphStore, anchored by stable symbol-handle/tagpath edges (not line numbers), provenance+confidence+freshness gated on community_graph_watermark for staleness; retrieval via context-pack/search injection + a /graph-menu command; opt-in/passive capture from agent-doc session archives; graph store as source of truth, md/html as on-demand projection. Foundational for #memgraphrag-ont and #memgraphrag2. Spec: src/tsift/specs/memgraphrag-direction.md + SPEC.md.
+- [ ] [#memgraphrag-ont] Materialize a Semantic Ontology Graph layer (MemGraphRAG arxiv 2606.00610 third layer) so node/edge KINDS become first-class queryable type-nodes with permitted inter-type relations, letting retrieval start from abstract types and prune by schema. ONTOLOGY SOURCE (decided): code NodeKind/edge-kind enums + #trt1 authored-node types as the base; optionally fold in a dynamically-generated existence-lang ontology when a project actually uses existence-lang (not always present) -- otherwise fall back to an efficient internal representation. Builds on #trt1; relates to #memgraphrag2.
+- [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output once quality gates pass; compare ranked vs unranked on real backlog/code queries (useful-hit density, duplicate-name precision, handle coverage, latency, emitted tokens). Also integrate the shipped #memgraphrag1 decay-weighted memory ranking so memory + code share one ranking over the unified graph.
+- [ ] [#surrealbulk] SurrealDB projection performance (consolidates surrealbulk + surrealbulk-close + surreal-batch-bfs + surreal-fixture): replace per-row upsert loops with bulk/transactional row load + one-pass secondary-index rebuild; add batch frontier expansion; record SurrealDB samples in graph-db-performance-history.json fixture; re-run backend-eval benchmarks, update SPEC.md/BENCHMARKS.md table, measure refresh vs load separately.
+- [ ] [#e2e-install] E2E verify opencode-tsift install in a fresh opencode project: opencode plugin opencode-tsift && opencode then /tsift-status returns healthy (consolidates e2e-install + full-e2e-verify). Live-verify only; npm publish + OIDC auth already done (opencode-tsift@0.1.63 on npm).
+- [/] [#7qky] [recommended] AGENT-DOC-SCOPED (drive from an agent-doc session, not tsift): re-measure Codex redundant runbook reads after the v0.34.0 retain-dont-reread nudge accumulates live Codex sessions; compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate does not drop, build a session-scoped content-dedup LEDGER in a shared LEAF crate (register(id,hash)/should_deliver->Full|Stub; exemptions via hash-change+compaction; session-id from harness). GATED on accumulating post-nudge Codex sessions.<!-- /agent:backlog -->
 
 ## Review
 

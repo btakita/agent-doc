@@ -370,18 +370,23 @@ All posted under **MRHadmin** (Author ID 1) — the site's primary admin account
 ---
 
 Email draft has been updated with these findings. Ready to review.
-<!-- agent:boundary:7f94db12 -->
+<!-- agent:boundary:c7afd85a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
-- [x] Deep-dive into specific product pricing — 57 products across 13 categories
-- [x] Competitor analysis — Driftmaster, Fish Bite, SmackDown, Bee Ready
-- [x] Customer review aggregation — Amazon 5.0/5, forums overwhelmingly positive
-- [x] Security assessment of WordPress spam compromise — HIGH risk, admin account compromised
-- [x] Certified resellers directory analysis — 22 resellers, 15 states
-- [x] Site structure report email to Ron Berkes — drafted
-- [ ] Update email draft with complete research findings
-- [ ] Send email (awaiting user approval)
+<!-- agent:pending -->
+- [ ] [#9avm] Update email draft with complete research findings
+- [ ] [#zq3b] Send email (awaiting user approval)
 <!-- /agent:pending -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-06-07 [#b2b4] Deep-dive into specific product pricing — 57 products across 13 categories
+- 2026-06-07 [#1aeb] Competitor analysis — Driftmaster, Fish Bite, SmackDown, Bee Ready
+- 2026-06-07 [#ef81] Customer review aggregation — Amazon 5.0/5, forums overwhelmingly positive
+- 2026-06-07 [#5feq] Security assessment of WordPress spam compromise — HIGH risk, admin account compromised
+- 2026-06-07 [#f9vy] Certified resellers directory analysis — 22 resellers, 15 states
+- 2026-06-07 [#bx9a] Site structure report email to Ron Berkes — drafted
+<!-- /agent:done -->

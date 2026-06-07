@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -167,6 +167,11 @@ sync/follow-up root cause recorded.
 
 > **Queue prompt:**
 >
+> do [#md-ast-document-model]
+
+
+> **Queue prompt:**
+>
 > do [#recursion-guard-wedge-escape]
 
 
@@ -209,32 +214,12 @@ Immediate implementation direction:
 
 Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
 handled
-<!-- agent:boundary:2c7aa48f -->
+<!-- agent:boundary:a9af9765 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- ~~:pushpin: do [#ipc-typing-duplication-family]~~
-- ~~:pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.~~
-- ~~do [#ipc-listener-dewedge-direct-disk]~~
-- ~~do [#jb-busy-active-turn-stall-live-verify]~~
-- ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
-- ~~do [#test-submodule-worktree-git-identity]~~
-- ~~do [#multi-session-shared-build-isolation]~~
-- ~~do [#sync-fast-pane-hotpath]~~
-- ~~do [#queue-dedup-destroys-intentional-duplicates]~~
-- ~~do [#codex-mcp-server-root-fix]~~
-- ~~do [#live-verify-batch]~~
-- ~~do [#automated-completion-detection]~~
-- ~~do [#monsterrod-queue-items-deleted-live]~~
-- ~~do [#clear-blocked-by-own-drafted-clear-command]~~
-- ~~do [#tmux-status-turn-in-progress]~~
-- ~~do [#stale-busy-self-heal-live-verify]~~
-- ~~do [#partial-staging-closeout-guard]~~
-- ~~do [#jb-file-cache-conflict-syntax-loss]~~
-- ~~do [#recursion-guard-wedge-escape]~~
-- do [#md-ast-document-model]
 <!-- /agent:queue -->
 ###
 <!--
@@ -260,7 +245,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#md-ast-document-model] [recommended] #agent-doc-bug ROOT-CAUSE fix for the queue/dedup/live-buffer data-loss family: model the document as a structured AST + structured CRDT (queue/backlog/exchange items as typed nodes with stable ids) instead of text lines, so consume/dedup/reorder/enqueue act on the dispatched node by id and IPC patches become node-keyed (drift-resilient). DEPENDENCY DECISION: extract a focused markdown-ast crate (tree-sitter-md, matching tsift) shared by agent-doc + tsift; do NOT make tsift a hard dependency of agent-doc (too heavy; tsift markdown AST is embedded in tsift-graph behind lang-markdown, no standalone unit; layering/build-cycle risk). Plan: tasks/agent-doc/plan-md-ast-document-model.md (phases #md-ast-crate-extract, #md-ast-component-overlay, #md-ast-crdt-schema, #md-ast-mutations-node-keyed, #md-ast-ipc-node-patches, #md-ast-realtime-watcher). Subsumes #queue-dedup-destroys-intentional-duplicates, overlaps #ipc-listener-dewedge-direct-disk, enables #queue-enqueue-action.
+1. [ ] [#md-ast-document-model] deferred
 2. [ ] [#jb-file-cache-conflict-syntax-loss] deferred
 3. [ ] [#recursion-guard-wedge-escape] deferred
 4. [ ] [#partial-staging-closeout-guard] deferred

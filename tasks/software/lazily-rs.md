@@ -116,7 +116,20 @@ That can help agent-doc and tsift most for large content: full document snapshot
 The design tradeoff is that shared memory makes lifecycle and correctness stricter. The protocol needs wraparound handling, generation counters to reject stale descriptors, checksums or length guards to reject torn writes, backpressure when the reader lags, and a fallback path for payloads too large for the arena. So the right shape is hybrid: keep normal `IpcMessage` control frames on the current transport, and add SHM blob references only when the payload crosses a size threshold.
 
 No code changed for this answer. I will handle the queued implementation item next.
-<!-- agent:boundary:1b6db8f4 -->
+
+### Re: What is the benefit of a SHM ring buffer? — gpt-5
+
+> **Queue prompt:**
+>
+> What is the benefit of a SHM ring buffer?
+
+
+A SHM ring buffer helps when the payload is large enough that avoiding socket/file copying matters. The producer writes bytes once into shared memory, publishes a compact descriptor, and the receiver validates that descriptor before reading the mapped region. That can reduce copy overhead and kernel transitions for document snapshots, context packs, artifacts, and large patch bodies.
+
+It is not free: the protocol must handle wraparound, stale descriptors, torn writes, generation counters, checksums, reader lag, and fallback for oversized payloads. So the best use is a hybrid path: keep small control frames on the existing IPC transport, and put large blobs in shared memory behind descriptor references.
+
+No code changed for this answer; the implementation item remains next in the queue.
+<!-- agent:boundary:2af84705 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +138,7 @@ No code changed for this answer. I will handle the queued implementation item ne
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What is the benefit of a SHM ring buffer?
+- ~~What is the benefit of a SHM ring buffer?~~
 - Implement a SHM blob arena for IPC transport.
 <!-- /agent:queue -->
 

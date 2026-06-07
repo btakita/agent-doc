@@ -61,7 +61,36 @@ I would keep this out of CRDT territory at first. Agent-doc, tsift, and the edit
 Top backlog item: `#ipc4`. I added it as the next actionable lazily-rs step: implement the pure `lazily-ipc` protocol types behind `ipc = ["serde"]`, with serde round-trip tests, epoch gap/resync tests, and permission-filtered snapshot/delta construction. After that, the next integration layer should model an agent-doc/tsift process-state schema on top of those protocol types.
 
 Verification: inspected `src/lazily-rs/README.md`, `Cargo.toml`, `SPEC.md`, `src/distributed.rs`, and `src/signaling_client.rs` with fresh tsift context. No crate code changed, so I did not run the full test suite.
-<!-- agent:boundary:1190f01f -->
+
+### Re: shared-memory IPC and #ipc4 — gpt-5
+
+> **Queue prompt:**
+>
+> Can lazily-rs support shared memory IPC?
+
+
+Yes, lazily-rs can support shared-memory IPC, but the boundary should be framed protocol messages in shared memory, not a live `Context` shared across process address spaces. Each process should keep its own local `Context` / `ThreadSafeContext`; a shared-memory ring buffer can carry serialized `IpcMessage::Snapshot` and `IpcMessage::Delta` frames. That keeps ownership, permissions, epoch ordering, and resync semantics explicit.
+
+Implemented `#ipc4` in `src/lazily-rs` and pushed it to `lazily-rs` `origin/main` as `3142cd5 feat: add lazily ipc protocol types`.
+
+Changed paths:
+
+- `Cargo.toml`: added `ipc = ["serde"]`.
+- `src/lib.rs`: exports the IPC surface under `ipc` and reuses distributed identifiers/permissions when `ipc` is enabled.
+- `src/ipc.rs`: added `Snapshot`, `NodeSnapshot`, `NodeState`, `EdgeSnapshot`, `Delta`, `DeltaOp`, `DeltaApplyStatus`, `IpcMessage`, `IpcSink`, and `IpcSource`.
+- `tests/ipc.rs`: added serde round-trip, epoch gap/resync, and permission-filtering tests.
+- `SPEC.md`: documented the implemented IPC surface and clarified shared-memory IPC as a transport direction.
+- `Makefile`: added `test-ipc` and included it in `make check`.
+
+Verification:
+
+- `cargo fmt --all` passed.
+- `cargo test --locked --features ipc --test ipc` passed: 5 tests.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` ran the Rust suite through fmt, clippy, build, default tests, tokio, async, loom, distributed, ipc, and signaling-client successfully, then failed at the existing `benchmark-check` step because this checkout has no `target/criterion` Criterion estimates. The failure was `no Criterion estimates found under target/criterion; run without --no-run`.
+- Latest GitHub Actions `CI` run on `main` was green.
+
+Install/escalation: no install step applies here because `lazily` is a library crate with no binary install target. No escalated permissions were used. Confidence is high for the pure protocol/API work; the remaining local verification caveat is only the benchmark artifact prerequisite.
+<!-- agent:boundary:512ed226 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,13 +100,13 @@ Verification: inspected `src/lazily-rs/README.md`, `Cargo.toml`, `SPEC.md`, `src
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~~What are #next-step for lazily-rs ipc? I want to use lazily-rs to support agent-doc IPC and IPC with tsift. Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?~~
-- Can lazily-rs support shared memory IPC?
+- ~~Can lazily-rs support shared memory IPC?~~
+- do [#ipc4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc4] Implement lazily-ipc pure protocol types (`Snapshot`, `Delta`, `DeltaOp`, `IpcSink`, `IpcSource`) behind `ipc = ["serde"]`, with serde round-trip tests, gap/resync tests, and permission-filtered snapshot/delta construction.
 <!-- /agent:backlog -->
 
 ## Review

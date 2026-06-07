@@ -157,7 +157,8 @@ Response for this turn is deferred to the dedicated follow-up implementation ite
 > do [#codex-mcp-server-root-fix]
 
 Queued for follow-up implementation. Root cause remains structural and is already captured in the existing plan.
-<!-- agent:boundary:e9a973c0 -->
+sync/follow-up root cause recorded.
+<!-- agent:boundary:dde6f72e -->
 <!-- /agent:exchange -->
 
 ## Queue

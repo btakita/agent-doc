@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Per-item enqueue markers populate `agent:queue` (`#queue-enqueue-action`).**
+  Open backlog/icebox/pending items containing `:inbox_tray:`, `/enqueue`, or a
+  Markdown-decorated `enqueue` token such as `**enqueue**` now append `do [#id]`
+  to `agent:queue` without requiring the whole component to carry a `queue`
+  attribute. The path is idempotent, excludes gated/done/unmarked items, works in
+  both preflight and `agent-doc queue sync`, and lets explicit markers bypass the
+  plain active-loop fresh-item hold. Tests
+  `active_enqueue_item_ids_returns_marked_open_items`,
+  `run_queue_maintenance_enqueue_marker_populates_queue_without_backlog_attr`,
+  `collect_backlog_queue_sync_reads_enqueue_markers_without_attr`, and
+  `sync_accepts_enqueue_marker_without_queue_attr`. Spec
+  `specs/07-orchestration-commands.md`.
+
 - **Session memory retrieval (`#agent-doc-memgraphrag-retrieval`).**
   `agent-doc memory index/search` now indexes current session tracked work
   (`agent:backlog`, `agent:review`, `agent:icebox`, `agent:done` including

@@ -3,7 +3,7 @@
 //! CLI subcommands for managing the `agent:queue` component.
 //!
 //! - `agent-doc queue sync <FILE>` — one-shot sync from backlog items with
-//!   `queue` attribute into `agent:queue`.
+//!   `queue` attribute or per-item enqueue markers into `agent:queue`.
 //! - `agent-doc queue consume <FILE> [--count N]` — explicitly strike the
 //!   leading N free-text queue head(s) the agent has already answered.
 
@@ -135,10 +135,13 @@ pub fn sync(file: &Path) -> Result<()> {
 
     let mut mode: Option<queue::BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
+    let mut enqueue_ids: Vec<String> = Vec::new();
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
+        let body = &content[comp.open_end..comp.close_start];
+        enqueue_ids.extend(pending::active_enqueue_item_ids(body));
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
@@ -148,14 +151,17 @@ pub fn sync(file: &Path) -> Result<()> {
         if mode.is_none() {
             mode = Some(comp_mode);
         }
-        let body = &content[comp.open_end..comp.close_start];
         ids.extend(pending::active_item_ids(body));
     }
+    if mode.is_none() && !enqueue_ids.is_empty() {
+        mode = Some(queue::BacklogQueueSyncMode::Append);
+    }
+    ids.extend(enqueue_ids);
 
     let Some(effective_mode) = mode else {
         bail!(
-            "{}: no agent:backlog/agent:icebox component carries a `queue` attribute. \
-             Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) to enable sync.",
+            "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
+             Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) or mark an item with `:inbox_tray:` / `/enqueue`.",
             file.display()
         );
     };
@@ -209,6 +215,40 @@ pub fn sync(file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_accepts_enqueue_marker_without_queue_attr() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] :inbox_tray: add me\n",
+            "- [ ] [#beta] leave me alone\n",
+            "- [/] [#gated] /enqueue blocked\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        sync(&doc).expect("enqueue marker should append to queue");
+        let result = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            result.contains("- do [#alpha]"),
+            "marked item should be queued:\n{result}"
+        );
+        assert!(
+            !result.contains("- do [#beta]"),
+            "unmarked item must not be queued:\n{result}"
+        );
+        assert!(
+            !result.contains("- do [#gated]"),
+            "gated marker must not be queued:\n{result}"
+        );
+    }
 
     #[test]
     fn consume_strikes_multiple_answered_free_text_heads() {

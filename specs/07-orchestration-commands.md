@@ -292,7 +292,7 @@ field remains accepted as input for backward compatibility.
   (Claude `/loop`, Codex Stop-hook, OpenCode auto-loop instruction surfaces) are
   tracked separately.
 
-### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`)
+### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`, `#queue-enqueue-action`)
 
 An `agent:backlog` or `agent:icebox` component may carry a `queue` attribute so
 the binary keeps `agent:queue` populated from the source backlog instead of
@@ -309,11 +309,18 @@ requiring a manual `--pending-reorder` + hand-regenerated queue each cycle:
   as the active-backlog `do [#id]` list, in backlog order. Any other queue
   content (manual presets, fences, struck items) is dropped; use `append` /
   `prepend` to preserve manual queue content.
+- Per-item enqueue markers — an open backlog/icebox/pending item containing
+  `:inbox_tray:`, `/enqueue`, or a Markdown-decorated `enqueue` token such as
+  `**enqueue**` is appended to `agent:queue` as `do [#id]` even when the component
+  does not carry the `queue` attribute.
 
 Semantics:
 
 - "Active" backlog items are open `[ ]` items with an id. Gated (`[/]`) and done
   (`[x]`) items are excluded — they are not actionable queue targets.
+- Per-item enqueue markers are idempotent and opt in only the marked open item:
+  unmarked siblings are ignored, gated/done marked items are excluded, and
+  existing active or struck `do [#id]` queue entries are not duplicated.
 - The sync runs in `run_queue_maintenance` **before** activation resolution, so a
   freshly synced queue can auto-activate on the same cycle when the queue opening
   tag carries `auto`. The `queue` attribute populates/maintains the queue; it
@@ -327,7 +334,8 @@ Semantics:
   - **plain persisted-active** (no `go`/`start`) — freshly-added backlog ids are
     *held* out of the running loop (only ids already present as queue heads sync),
     so an agent capturing follow-ups mid-loop cannot amplify the queue unboundedly
-    or churn `pending_done_guard`. Held ids join on the next activation.
+    or churn `pending_done_guard`. Held ids join on the next activation. Explicit
+    per-item enqueue markers bypass this hold for the marked id.
   - **go-mode** (`queue: go`/`start`, the continuous-backlog-loop opt-in) — fresh
     backlog `queue`-attr ids *append immediately* (not only when the queue drains),
     so the `queue` attribute populates the live queue as intended. Append/Prepend
@@ -337,10 +345,11 @@ Semantics:
   carry the attribute; the first queue-tagged component's mode wins and active
   ids from every queue-tagged source are taken in document order.
 - The pure logic lives in `queue::sync_backlog_into_queue` (with
-  `queue::BacklogQueueSyncMode`) and `pending::active_item_ids`. The `queue` key
-  is a recognized backlog/icebox attribute (the `tagpath` agent-doc lint accepts
-  bare `queue` and `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value`
-  on an unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
+  `queue::BacklogQueueSyncMode`) and `pending::active_item_ids` /
+  `pending::active_enqueue_item_ids`. The `queue` key is a recognized backlog/icebox
+  attribute (the `tagpath` agent-doc lint accepts bare `queue` and
+  `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value` on an
+  unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
 - **Priority interplay (`#backlog-priority-attribute`).** A bare `priority`
   attribute on the source backlog/icebox marker stable-sorts its items by their
   per-item `priority=<1..9>` token before the sync runs (in `run_pending_maintenance`,

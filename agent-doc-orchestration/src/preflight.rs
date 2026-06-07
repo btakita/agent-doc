@@ -3361,16 +3361,25 @@ fn queue_entry_do_id(entry: &crate::queue::QueueEntry) -> Option<String> {
     }
 }
 
+struct BacklogQueueSyncRequest {
+    mode: crate::queue::BacklogQueueSyncMode,
+    ids: Vec<String>,
+    enqueue_ids: Vec<String>,
+}
+
 fn collect_backlog_queue_sync(
     components: &[crate::component::Component],
     content: &str,
-) -> Option<(crate::queue::BacklogQueueSyncMode, Vec<String>)> {
+) -> Option<BacklogQueueSyncRequest> {
     let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
+    let mut enqueue_ids: Vec<String> = Vec::new();
     for comp in components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
+        let body = &content[comp.open_end..comp.close_start];
+        enqueue_ids.extend(crate::pending::active_enqueue_item_ids(body));
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
@@ -3380,10 +3389,17 @@ fn collect_backlog_queue_sync(
         if mode.is_none() {
             mode = Some(comp_mode);
         }
-        let body = &content[comp.open_end..comp.close_start];
         ids.extend(crate::pending::active_item_ids(body));
     }
-    mode.map(|m| (m, ids))
+    if mode.is_none() && !enqueue_ids.is_empty() {
+        mode = Some(crate::queue::BacklogQueueSyncMode::Append);
+    }
+    ids.extend(enqueue_ids.iter().cloned());
+    mode.map(|m| BacklogQueueSyncRequest {
+        mode: m,
+        ids,
+        enqueue_ids,
+    })
 }
 
 /// Build an id→priority-rank map from active `agent:backlog` / `agent:icebox`
@@ -3473,8 +3489,17 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog` /
     // `agent:icebox` component carries a `queue` attribute, regenerate the queue
     // `do [#id]` prompts from its active items BEFORE activation so a freshly
-    // synced queue can auto-activate on the same cycle.
-    if let Some((mode, mut backlog_ids)) = collect_backlog_queue_sync(&components, &content) {
+    // synced queue can auto-activate on the same cycle. Per-item enqueue markers
+    // (#queue-enqueue-action) append marked ids without requiring the component
+    // attribute.
+    if let Some(sync_request) = collect_backlog_queue_sync(&components, &content) {
+        let mode = sync_request.mode;
+        let enqueue_ids: std::collections::HashSet<String> = sync_request
+            .enqueue_ids
+            .iter()
+            .map(|id| id.trim().to_ascii_lowercase())
+            .collect();
+        let mut backlog_ids = sync_request.ids;
         // Drop ids already in `agent:done` so completed refs are never
         // re-injected into the queue (#ynra). A lingering active backlog `[ ]`
         // bullet whose id is also archived in `agent:done` would otherwise be
@@ -3537,7 +3562,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 .map(|id| id.to_ascii_lowercase())
                 .collect();
             let before = backlog_ids.len();
-            backlog_ids.retain(|id| existing_queue_ids.contains(&id.trim().to_ascii_lowercase()));
+            backlog_ids.retain(|id| {
+                let key = id.trim().to_ascii_lowercase();
+                existing_queue_ids.contains(&key) || enqueue_ids.contains(&key)
+            });
             let held = before - backlog_ids.len();
             if held > 0 {
                 eprintln!(
@@ -3582,7 +3610,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_warnings.push(PreflightWarning {
                     code: "backlog_queue_sync_pending".to_string(),
                     message: format!(
-                        "{}: agent:backlog carries `queue` attribute but the queue had 0 live prompts before this sync. \
+                        "{}: a backlog/icebox/pending queue sync request populated an empty queue. \
                          The binary synced {} item(s) this cycle. \
                          For manual one-shot sync outside binary preflight: `agent-doc queue sync <FILE>`.",
                         file.display(),
@@ -5888,6 +5916,58 @@ mod tests {
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
             state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_enqueue_marker_populates_queue_without_backlog_attr() {
+        // #queue-enqueue-action: a single marked backlog item appends to the
+        // queue without a component-level `queue` attr. Explicit markers bypass
+        // the active-loop fresh-item hold because the user is directly enqueueing
+        // that one id.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#running]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] :inbox_tray: queue this now\n",
+            "- [ ] [#beta] leave this unqueued\n",
+            "- [/] [#gated] :inbox_tray: blocked\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(state.synced_queue_ids, vec!["alpha".to_string()]);
+        assert!(
+            updated.contains("- do [#running]"),
+            "running head stays:\n{updated}"
+        );
+        assert!(
+            updated.contains("- do [#alpha]"),
+            "marked item should append:\n{updated}"
+        );
+        assert!(
+            !updated.contains("- do [#beta]"),
+            "unmarked item must not append:\n{updated}"
+        );
+        assert!(
+            !updated.contains("- do [#gated]"),
+            "gated marked item must not append:\n{updated}"
         );
     }
 
@@ -9427,10 +9507,31 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         let components = crate::component::parse(content).unwrap();
-        let (mode, ids) = collect_backlog_queue_sync(&components, content)
+        let request = collect_backlog_queue_sync(&components, content)
             .expect("backlog with queue attr should produce a sync request");
-        assert_eq!(mode, crate::queue::BacklogQueueSyncMode::Sync);
-        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Sync);
+        assert_eq!(request.ids, vec!["a".to_string(), "b".to_string()]);
+        assert!(request.enqueue_ids.is_empty());
+    }
+
+    #[test]
+    fn collect_backlog_queue_sync_reads_enqueue_markers_without_attr() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] :inbox_tray: one\n",
+            "- [/] [#g] :inbox_tray: gated\n",
+            "- [ ] [#b] unmarked\n",
+            "- [ ] [#c] **enqueue** marked\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = crate::component::parse(content).unwrap();
+        let request = collect_backlog_queue_sync(&components, content)
+            .expect("enqueue markers should produce an append request");
+        assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Append);
+        assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
     }
 
     #[test]

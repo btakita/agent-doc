@@ -1310,6 +1310,35 @@ pub fn active_item_ids(body: &str) -> Vec<String> {
         .collect()
 }
 
+fn item_has_enqueue_marker(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains(":inbox_tray:") || lower.split_whitespace().any(token_is_enqueue_marker)
+}
+
+fn token_is_enqueue_marker(token: &str) -> bool {
+    let trimmed =
+        token.trim_matches(|ch: char| matches!(ch, '[' | ']' | '(' | ')' | ':' | ',' | '.' | ';'));
+    matches!(
+        trimmed,
+        "/enqueue" | "**enqueue**" | "__enqueue__" | "*enqueue*" | "_enqueue_" | "`enqueue`"
+    )
+}
+
+/// Active open backlog item ids marked for one-shot queue insertion.
+///
+/// `:inbox_tray:`, `/enqueue`, and Markdown-decorated `enqueue` markers let
+/// an item opt into queue population without requiring the whole component to
+/// carry the `queue` attribute.
+pub fn active_enqueue_item_ids(body: &str) -> Vec<String> {
+    PendingLayout::parse(body)
+        .items()
+        .into_iter()
+        .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .filter(|item| item_has_enqueue_marker(&item.text))
+        .map(|item| item.id.clone())
+        .collect()
+}
+
 /// Rank an item's priority from a `priority=<1..9>` token anywhere in its text
 /// (`#backlog-priority-attribute`). `1` is the highest priority and sorts first;
 /// `9` is the lowest numbered priority. An item with no valid `priority=` token
@@ -2153,6 +2182,23 @@ mod tests {
     #[test]
     fn active_item_ids_empty_for_empty_body() {
         assert!(active_item_ids("").is_empty());
+    }
+
+    #[test]
+    fn active_enqueue_item_ids_returns_marked_open_items() {
+        let body = concat!(
+            "- [ ] [#inbox] :inbox_tray: one\n",
+            "- [/] [#gated] :inbox_tray: blocked\n",
+            "- [x] [#done] **enqueue** finished\n",
+            "- [ ] [#bold] **enqueue** two\n",
+            "- [ ] [#slash] /enqueue three\n",
+            "- [ ] [#plain] enqueue should not be a marker\n",
+            "- [ ] untracked :inbox_tray: no id\n",
+        );
+        assert_eq!(
+            active_enqueue_item_ids(body),
+            vec!["inbox", "bold", "slash"]
+        );
     }
 
     #[test]

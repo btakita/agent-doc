@@ -182,7 +182,30 @@ Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; targeted `r
 Verification: no source files changed, so no test/build suite was run; the answer was checked against the current controller, sessions registry, and SQLite state-store paths.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:715be5ed -->
+
+### Re: agent-doc monsterrodholders.md queue response persistence — gpt-5
+
+> **Queue prompt:**
+>
+> agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.
+
+
+Root cause: the repeated Codex Stop-hook guard treated “same auto-queue head requested twice” as a terminal `StopResponse::Stop`. In Codex that lets the current chat answer escape instead of forcing a document write. The durable-marker fallback had the same behavior, which matches the monsterrodholders failure shape: the hook asked for an in-pane queue continuation, the model produced a normal final answer, then the second Stop allowed finalization without replaying that answer into `agent:exchange`.
+
+Fix: repeated-head handling now recovers before it blocks or continues. When `last_assistant_message` is replayable, the hook validates it with `replay_guard`, wraps plain final text as a targeted `patch:exchange` headed by the active queue prompt, saves it to the pending ledger, replays it through the normal repair/write path, consumes the completed queue head, and finishes the required commit boundary. If the queue still has another head, the hook blocks for that next head; if the queue drains, it allows the Stop. Empty, transcript-shaped, or ambiguously headed payloads now block with diagnostics instead of allowing a chat-only final.
+
+Harness coverage: yes, Codex harness behavior needs to be simulated. I added direct stop-hook unit regressions for tracked state, durable-marker fallback, and empty payloads, plus a CLI integration reproduction that drives `agent-doc hook codex-user-prompt-submit` followed by two `agent-doc hook codex-stop` calls against a template/CRDT Codex queue doc. That is more precise than putting this specific JSON/Stop behavior only into abstract SimWorld; `make check` still ran the existing SimWorld medium corpus.
+
+Proof:
+- changed_paths: `src/agent-doc/agent-doc-orchestration/src/codex_hook.rs`; `src/agent-doc/tests/codex_hook_integration.rs`
+- commit: `src/agent-doc` commit `b5ee9400` (`fix: replay repeated codex queue responses`), pushed to `origin/main`
+- commands: `cargo fmt --check`; `cargo test -q -p agent-doc-orchestration codex_hook -- --nocapture`; `cargo test -q --test codex_hook_integration -- --nocapture`; `cargo check -q -p agent-doc-orchestration`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main`
+- verification: `make check` passed, including clippy, 3940 nextest tests, doctests, and the medium SimWorld ignored corpus; latest GitHub Actions CI was green (`27101683287`)
+- confidence: high
+- escalation: none
+
+No additional backlog follow-up is needed because the replay path, fail-closed empty-payload path, durable-marker path, real Codex CLI reproduction, full local check, and submodule push are complete.
+<!-- agent:boundary:369d2589 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -190,7 +213,8 @@ Escalation: none.
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?~~
 - ~~"The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.~~
-- agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.
+- ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
+- Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
 <!-- /agent:queue -->

@@ -55,14 +55,20 @@ cargo test -p agent-doc-orchestration owned_pane_queue_wedge_halt_diagnostic_nam
 ```
 
 All three passed. Source CI for `src/agent-doc` `9df1244f` was already green in run `27088129850`, so this was a stale backlog/queue mirror and is now done.
-<!-- agent:boundary:b703134e -->
+<!-- agent:boundary:ac25c5a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
-- :round_pushpin: do [#partial-staging-closeout-guard]
+- do [#jb-file-cache-conflict-syntax-loss]
+- do [#recursion-guard-wedge-escape]
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
+- do [#multi-session-shared-build-isolation]
+- do [#sync-fast-pane-hotpath]
+- :round_pushpin: do [#partial-staging-closeout-guard]5
 - :round_pushpin: do [#codex-mcp-server-root-fix]
 - :round_pushpin: do [#live-verify-batch]
 - :round_pushpin: do [#automated-completion-detection]
@@ -70,12 +76,6 @@ All three passed. Source CI for `src/agent-doc` `9df1244f` was already green in 
 - :round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]
 - :round_pushpin: do [#tmux-status-turn-in-progress]
 - :round_pushpin: do [#stale-busy-self-heal-live-verify]
-- do [#jb-file-cache-conflict-syntax-loss]
-- do [#jb-busy-active-turn-stall-live-verify]
-- do [#adoc-route-busy-fix-superproject-pointer-push]
-- do [#multi-session-shared-build-isolation]
-- do [#sync-fast-pane-hotpath]
-- ~~do [#recursion-guard-wedge-escape]~~
 - ~~do [#queue-dedup-destroys-intentional-duplicates]~~
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->

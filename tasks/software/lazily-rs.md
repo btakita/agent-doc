@@ -59,7 +59,16 @@ The lazily-rs queue is now stopped, the active queue body is empty, and `agent-d
 
 I also removed the stale live review copy of `#39c5`; that item is already archived in `tasks/software/lazily-rs.done.md`, and its reappearance was blocking the closeout guard.
 
-<!-- agent:boundary:cf8e7de1 -->
+### Re: do [#ipc1] / do [#39c5]
+
+Closeout recovery for the cycle that consumed `do [#ipc1]` and `do [#39c5]`.
+
+- `#ipc1` is already archived in `tasks/software/lazily-rs.done.md` as `Design lazily-serde feature gate`.
+- `#39c5` is already archived in `tasks/software/lazily-rs.done.md` as `Implement RemoteOp enum + per-peer permission allowlist`.
+
+The live queue is stopped and empty. The bad repeated-dispatch behavior observed for this session matched the stale-busy idle queue reinjection bug fixed in `src/agent-doc` commit `62a92827`.
+
+<!-- agent:boundary:15530142 -->
 <!-- /agent:exchange -->
 ###
 <!--

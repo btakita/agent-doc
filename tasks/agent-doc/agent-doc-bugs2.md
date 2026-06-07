@@ -46,13 +46,22 @@ Implemented per-item queue enqueue markers.
 - Explicit marked ids bypass the plain active-loop fresh-item hold; broad `queue` attr sync still keeps that hold.
 
 Verification: focused enqueue tests passed, `make check` passed locally, and `cargo install --path .` succeeded. Code was committed and pushed in `src/agent-doc` as `9486cc19 Add per-item queue enqueue markers`. I also pushed `f6bb1596 Use published tsift-memory dependency` after CI exposed the prior session-memory path dependency was not available on GitHub runners. Latest CI run `27084625586` was in progress when the user asked not to wait; treating CI as passive regression monitoring.
-<!-- agent:boundary:9e02d568 -->
+
+### Re: #queue-enqueue-action closeout recovery — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#queue-enqueue-action]
+
+
+Recovered the previous closeout after the editor-buffer guard interrupted finalize. The implementation response is already present above; this binary-owned write supplies the same-cycle `--done queue-enqueue-action` proof so the id-backed queue head can be reaped cleanly.
+<!-- agent:boundary:bb6b0bbb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#queue-enqueue-action]
+- ~~:pushpin: do [#queue-enqueue-action]~~
 - :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
 - :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
 - :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
@@ -128,7 +137,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-1. [/] [#agent-doc-memgraphrag-retrieval] #agent-doc-bug feature: semantic retrieval (MemGraphRag) over agent-doc session history + backlog/review/done, via a shared library crate extracted from tsift (tsift-graph/tsift-memory/tsift-index/tsift-search are already crate-separated, so depend on the lean subset, NOT the tsift CLI). PRIMARY use = alternative to gating many review items: at capture time detect already-tracked / already-fixed items by semantic similarity (backlog+review dedup), and let #automated-completion-detection query has-this-been-resolved-in-a-past-session. SECONDARY = surface deterministic codebase retrieval in preflight/plan to cut agent toolcalls, but keep the heavy codebase index in the tsift CLI (do not embed it in the per-cycle hot path). Relates #md-ast-document-model (shared-crate extraction pattern), #automated-completion-detection. Cross-ref tsift.md #tsift-shared-md-ast-and-memgraphrag-lib. Plan TBD.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

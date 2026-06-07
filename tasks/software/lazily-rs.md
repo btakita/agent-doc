@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -90,7 +90,7 @@ Verification:
 - Latest GitHub Actions `CI` run on `main` was green.
 
 Install/escalation: no install step applies here because `lazily` is a library crate with no binary install target. No escalated permissions were used. Confidence is high for the pure protocol/API work; the remaining local verification caveat is only the benchmark artifact prerequisite.
-<!-- agent:boundary:512ed226 -->
+<!-- agent:boundary:b1f09d8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,10 +98,7 @@ Install/escalation: no install step applies here because `lazily` is a library c
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~What are #next-step for lazily-rs ipc? I want to use lazily-rs to support agent-doc IPC and IPC with tsift. Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?~~
-- ~~Can lazily-rs support shared memory IPC?~~
-- do [#ipc4]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

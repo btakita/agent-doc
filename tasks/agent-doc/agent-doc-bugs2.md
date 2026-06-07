@@ -109,13 +109,46 @@ Repo/CI:
 - Latest `CI` after the source push is `in_progress` for `95057fe2`; the previous latest `CI` run on `main` was green. I did not wait on the pending run, per the local runbook.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:692c60a0 -->
+
+### Re: single-process actor control plane — gpt-5
+
+> **Queue prompt:**
+>
+> Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?
+
+
+Yes, but I would define the target as one project-local control process with explicit in-process actor boundaries, not one flattened blocking loop. The current contract already points in that direction: `.agent-doc/state.db` is authoritative, `session-actors.json` and `sessions.json` are projections, and route/start/sync/admin should ask the project controller before trusting compatibility state. The remaining IPC should become an external ingress and supervisor/harness boundary, not the main way controller, session, and supervisor facts coordinate with each other.
+
+The shape I would aim for:
+- One project controller daemon owns actor records, generation/CAS rules, supervisor leases, dispatch attempts, queue routing decisions, operator commands, and the admin API.
+- Inside that process, keep separate tasks: a store/controller task, one session task per document, supervisor/PTY tasks for live harness children, and a dedicated real-time dispatch task.
+- Internal coordination should use typed channels and bounded queues. Local sockets stay for CLI/editor/MCP entrypoints and for compatibility with existing supervisor injection while the migration is underway.
+- Harnesses still remain child processes, and tmux remains the layout/event substrate. The consolidation is about control-plane state and dispatch authority, not replacing the harness or tmux.
+
+A real-time dispatch actor is the right front door. It should accept route/run/editor/admin requests quickly, validate document/session/pane/generation, classify the operation, record the minimal audit event, and then hand the slow work to the relevant actor or worker. That gives us low-latency behavior without losing proof. Slow work includes readiness polling, tmux capture, supervisor start/restart, projection emission, log cleanup, document closeout repair, Git checks, and tsift/context work.
+
+For reliability, the hot path should not wait on JSON projection locks. It should mutate an in-memory authoritative actor store under one owner and persist through SQLite WAL with monotonic event records. Projection files should be emitted after committed state and treated as cache outputs. For side effects that send pane input or change ownership, the dispatch attempt or ownership transition should be durably reserved before the side effect crosses the pane/supervisor boundary; otherwise a controller restart can lose why input was sent. Projections, dashboards, and derived diagnostics can lag.
+
+The admin API can be sufficient if it is actor-backed instead of projection-scraping. The existing `admin list`, `admin detect`, and dashboard direction are the right read-only base. The mutating surface should eventually cover bounded `stop`, `restart`, `clear`, `rebind/claim`, `drain queue`, `recover stale starting`, and `doctor --repair` operations, all through the same generation checks and supervisor lease state used by route. That prevents plugins and CLI commands from inventing separate pane heuristics.
+
+Main risk: one controller process becomes the project control-plane failure domain. That is acceptable if restart is cheap and replayable: bootstrap from SQLite, mark stale supervisor leases, re-emit projections, and require fresh readiness proof before any dispatch. It is better than several semi-authoritative processes racing through IPC, JSON files, and tmux probes.
+
+So the answer is yes: consolidate authoritative state and actor management into a single project-local process, keep actor boundaries inside it, add a fast non-blocking dispatch actor, and keep durable state in SQLite/WAL with JSON as projection only.
+
+Session note: exchange accretion is at warn level, but the active queue should keep draining; I did not compact without an explicit auto-compact opt-in.
+
+Changed paths: none outside this session document.
+Commands: `tsift status`; `agent-doc --version`; `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; targeted `rg`/`sed` inspection of `specs/08a-session-actor-contract.md`, `specs/07-session-tmux-commands.md`, `src/queue_dispatch.rs`, `agent-doc-orchestration/src/project_controller.rs`, `agent-doc-orchestration/src/admin.rs`, and `agent-doc-orchestration/src/session_actor.rs`.
+Verification: no source files changed, so no test/build suite was run; the answer was checked against the current actor contract and command/admin surfaces.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:0fe3be91 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?
+- ~~Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?~~
 - "The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.
 - agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.

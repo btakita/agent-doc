@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -461,7 +461,7 @@ Verification already run in this overall drain: source make check, source make t
 
 ## Queue
 
-<!-- agent:queue auto priority -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 ###
 <!--

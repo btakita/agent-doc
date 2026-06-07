@@ -35,7 +35,29 @@ Completed default-fast focus behavior. agent-doc focus now uses the former fast 
 Compacted content:
 - Archived 10 response topic(s): do [#md-ast-document-model]; There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?; [#md-ast-realtime-node-events]; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:69dd0995 -->
+❯ Is the `agent:queue` token inefficient across many turns? We seem to be burning too many token with long queue runs. I'm concerned about many turns accumulating context. Should we run `/clear` in between each task if a certain context threshold is exceeded? At least 1 compaction should also cause `/clear` between turn if many-turn token inefficiency is an issue. #spec-test-build-install-commit-push
+Yes. The expensive part is not the `agent:queue` token itself; it is carrying the same already-loaded agent conversation across many automatic queue turns. I implemented the reset policy in code.
+
+What changed:
+- Direct `agent-doc run` now checks session accretion after each clean queue item closeout. If the document is at warn/block accretion, the next queue prompt starts in a fresh backend session instead of resuming the existing one.
+- Recent exchange compaction also forces at least one fresh context before queue continuation. Direct `run` records its own fresh backend dispatch so a compaction-only reset does not repeat forever when the compacted document is otherwise healthy.
+- Codex Stop-hook continuation now blocks with explicit `/clear` guidance when the already-loaded Codex pane should not answer the next queue head. After a tracked `/clear` or `/new`, normal in-pane continuation is allowed again.
+- Added the `#queue-context-reset` spec and regression coverage for the decision function, Codex hook behavior, and CLI argv behavior (`--resume old-session` on the first item, no `--resume` and `--fork-session` after the threshold trips).
+
+Verification:
+- `cargo test -q -p agent-doc-orchestration queue_context_reset`
+- `cargo test -q -p agent-doc-orchestration compaction`
+- `cargo test -q --test run_integration run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`
+- `cargo check -q -p agent-doc-orchestration`
+- `make check` (clippy, 3935 nextest tests, doctests, medium simulator)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- Latest GitHub Actions CI on `main`: success (`fix: refuse cross-document pane aliases`, run `27099579913`).
+
+Commits:
+- `src/agent-doc`: `9e6fce83 fix: reset queue context after accretion` (pushed to `btakita/agent-doc main`).
+- Parent repo submodule pointer: `7749e01b chore: update agent-doc submodule` (will be pushed with this session closeout commit).
+<!-- agent:boundary:33dc1fd9 -->
 <!-- /agent:exchange -->
 
 ## Queue

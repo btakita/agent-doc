@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -129,7 +129,7 @@ flowchart LR
 **What to *not* copy:** the multi-agent orchestration layer. tsift's role is the retrieval/memory substrate that *multiple* harnesses share — the cross-agent coordination belongs in agent-doc / the harnesses, not in tsift. tsift already gets the "multi-agent memory" benefit for free via `session_id`/`imported_from`.
 
 Both new items are **gated** — they're a direction proposal, not auto-executable work (I left them off the active go-queue deliberately; otherwise go-mode would try to build them this loop, as just happened with #3dhp). Say the word and I'll un-gate #memgraphrag1 (decay retrieval) as the lowest-risk first step.
-<!-- agent:boundary:dd8559d9 -->
+<!-- agent:boundary:120db0b6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +138,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- document the MemGraphRAG direction in a md document.
+- [#memgraphrag1]
+- [#memgraphrag2]
 <!-- /agent:queue -->
 
 ## Backlog

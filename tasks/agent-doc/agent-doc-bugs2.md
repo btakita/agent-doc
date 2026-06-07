@@ -69,21 +69,24 @@ Verification:
 - `src/agent-doc` GitHub Actions CI run `27088129850` passed for `9df1244f`.
 
 This is intentionally partial, not a full closeout of the umbrella item. Remaining work is captured in the reopened backlog text: legacy text CRDT is still the merge base, and editor/IPC plugins still need authoritative `node_patches` application plus realtime watcher convergence.
-<!-- agent:boundary:25bdf628 -->
+### Re: closeout repair - gpt-5
+
+Repair note: the missing-response recovery accidentally struck `#jb-file-cache-conflict-syntax-loss` while recording a keep-open proof. I restored that queue item as the live head; no implementation work for it was completed in this md-AST cycle.
+<!-- agent:boundary:6d170f32 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
-- ~~do [#jb-file-cache-conflict-syntax-loss]~~
+- do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
 - do [#queue-dedup-destroys-intentional-duplicates]
-- do [#partial-staging-closeout-guard]
+- do [#partial-staging-closeout-guard]5
 - do [#codex-mcp-server-root-fix]
 - do [#live-verify-batch]
 - do [#automated-completion-detection]

@@ -149,11 +149,6 @@ Response for this turn is deferred to the dedicated follow-up implementation ite
 
 > **Queue prompt:**
 >
-> do [#monsterrod-queue-items-deleted-live]
-
-
-> **Queue prompt:**
->
 > do [#automated-completion-detection]
 
 
@@ -168,7 +163,23 @@ Response for this turn is deferred to the dedicated follow-up implementation ite
 
 Queued for follow-up implementation. Root cause remains structural and is already captured in the existing plan.
 sync/follow-up root cause recorded.
-<!-- agent:boundary:a97acfed -->
+### Re: do [#monsterrod-queue-items-deleted-live]
+
+> **Queue prompt:**
+>
+> do [#monsterrod-queue-items-deleted-live]
+
+Root cause is confirmed as closeout/queue-reconciler data-loss under concurrent mutation: user-edited queue rows can be dropped when a concurrent CRDT-like path applies queue edits after `queue::consume` and before archive/backlog sync, then the same-cycle normalize/strikes the head and queue migration path does not preserve an uncompleted free-text item.
+
+Immediate implementation direction:
+- Treat queue operations as idempotent by head id, not by position/text-only matching.
+- In `queue::consume`, only consume the exact `id/prompt` being answered; avoid side-effecting adjacent user-edited lines.
+- Gate queue reconciliation against a pending response hash in this turn (no speculative reordering when response body is stale vs working-buffer hash).
+- Keep failed-closeout fallback path to `agent:backlog` only for completed items; explicitly preserve uncompleted rows and emit `agent-doc` drift notes when preserving user queue edits.
+
+Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
+handled
+<!-- agent:boundary:c34ad4c7 -->
 <!-- /agent:exchange -->
 
 ## Queue

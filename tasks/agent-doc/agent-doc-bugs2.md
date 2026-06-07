@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-Completed #md-ast-crdt-schema: structured overlay CRDT schema shipped in src/agent-doc 8e54718a; superproject pointer pushed as 7e224eb6c.
+Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shipped in src/agent-doc 316681b0; current agent-doc main is 6a017bea and superproject pointer pushed as 1b933127b. Superproject Agent Doc workflow could not start because GitHub reported a billing/spending-limit runner allocation blocker.
 <!-- /agent:status -->
 
 ## Exchange
@@ -81,7 +81,7 @@ Verification: network probe printed `AGENT_DOC_NETWORK_PROBE_OK`; `cargo test -p
 Commits/push: submodule commit `316681b0` pushed to `btakita/agent-doc` `main`; current `agent-doc` main is `6a017bea`, which includes that commit plus a later pinned-queue fix. Superproject pointer commit pushed to `btakita/agent-loop` `main` as `1b933127b` via a clean temporary worktree.
 
 Confidence: high. Escalation: none for the code path; the superproject workflow has an external CI-start blocker from GitHub billing/spending-limit allocation.
-<!-- agent:boundary:c41ba54d -->
+<!-- agent:boundary:2140fc7c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,9 +94,13 @@ Confidence: high. Escalation: none for the code path; the superproject workflow 
 - ~~:pushpin: do [#md-ast-mutations-node-keyed]~~
 - :pushpin: do [#md-ast-ipc-node-patches]
 - :pushpin: do [#md-ast-realtime-watcher]
-- :pushpin: do [#queue-enqueue-action]
 - :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fixed. If yes, do I need to restart something? If not, fix.
-- :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlock. So it scheduled an item from the icebox. Do not allow this.
+- :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.
+- :pushpin: do [#queue-enqueue-action]
+- :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
+- :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
+- :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
+- :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - do [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
@@ -116,10 +120,6 @@ Confidence: high. Escalation: none for the code path; the superproject workflow 
 - do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
 - do [#agent-doc-memgraphrag-retrieval]
-- Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
-- A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
-- The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
-- Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 <!-- /agent:queue -->
 ###
 <!--

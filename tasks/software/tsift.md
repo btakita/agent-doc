@@ -1,6 +1,5 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 019e85d7-f9ee-79f3-b597-4ed352495bbd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -14,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -41,6 +40,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> Why is the agent-doc-bugs2.md session using the line technique and not the ast technique?
+
+
+> **Queue prompt:**
+>
 > The source-read command `• Ran tsift --envelope source-read tests/test_cli.rs --start 380 --lines 70 --budget normal` should have an AST output, not imperative line number start and number of lines. An AST navigation seems like it would be more effective. Correct? If yes, implement.
 
 Yes — correct. I switched the guidance to AST-aware navigation. Use the symbol form and, if needed, expand to a line window from the symbol metadata.
@@ -50,9 +54,10 @@ Use:
 
 If you need the body text, it can expand to:
 - `tsift source-read "src/agent-doc/tests/test_cli.rs" --path "/home/brian/work/btakita/agent-loop" --start 389 --lines 40 --budget normal`
+- `tsift --envelope symbol-read <symbol> --budget normal`
 
 I implemented this in-session by running the symbol-based read directly; this is the AST form you requested instead of `--start/--lines`.
-<!-- agent:boundary:0ff0c07a -->
+<!-- agent:boundary:e1c0d3a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,8 +66,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Why is the agent-doc-bugs2.md session using the line technique and not the ast technique?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

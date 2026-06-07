@@ -196,6 +196,15 @@ The daemon watches all claimed files (from `sessions.json`), debounces per-file,
 
 Loop prevention: bounded cycles (default 3) and convergence detection (stop if agent response matches previous). See [Dashboard-as-Document](dashboard.md) for the full workflow.
 
+## memory
+
+```
+agent-doc memory index <FILE> [--db PATH] [--json]
+agent-doc memory search <FILE> --query TEXT [--db PATH] [--limit N] [--json] [--rebuild]
+```
+
+Index and search session memory from `agent:backlog`, `agent:review`, `agent:done` (including `archive=` files), `agent:icebox`, and live exchange `### Re:` sections. The default store is `<project>/.tsift/memory.db`, using the shared `tsift-memory` library crate rather than shelling out to the tsift CLI.
+
 ## upgrade
 
 ```

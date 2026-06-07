@@ -93,6 +93,7 @@ pub mod hooks;
 pub use agent_doc_core::ipc_corruption;
 pub mod auto_dag;
 pub mod lint_gate;
+pub mod memory_cmd;
 pub mod pending;
 pub mod pending_cmd;
 pub mod preflight;

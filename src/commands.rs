@@ -195,6 +195,16 @@ fn all_commands() -> Vec<CommandInfo> {
         "Gather cycle/patch diagnostics from logs, captures, hooks, and actor state",
     ));
     cmds.push(cmd(
+        "/agent-doc memory index",
+        "<FILE> [--db PATH] [--json]",
+        "Index session tracked work and exchange history into .tsift/memory.db",
+    ));
+    cmds.push(cmd(
+        "/agent-doc memory search",
+        "<FILE> --query TEXT [--db PATH] [--limit N] [--json] [--rebuild]",
+        "Search indexed session memory plus current tracked work",
+    ));
+    cmds.push(cmd(
         "/agent-doc skill install",
         "",
         "Install Claude Code skill definition",

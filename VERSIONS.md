@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Session memory retrieval (`#agent-doc-memgraphrag-retrieval`).**
+  `agent-doc memory index/search` now indexes current session tracked work
+  (`agent:backlog`, `agent:review`, `agent:icebox`, `agent:done` including
+  repo-relative `.done.md` archives) plus live exchange response summaries into
+  `.tsift/memory.db` through the shared `tsift-memory` library crate. Search
+  combines persisted memory with the current document and ranks locally for
+  already-tracked / already-fixed dedupe checks without embedding tsift's heavy
+  codebase index in the per-cycle hot path. Tests `memory_cmd::*`; specs
+  `SPEC.md`, `specs/07-core-commands.md`.
+
 - **Watch daemon emits node-keyed document events (`#md-ast-realtime-watcher`).**
   The markdown AST crate now exposes `events::diff_node_events`, producing
   insert, remove, replace, move, strike, and unstrike events keyed by the same

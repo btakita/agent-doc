@@ -1,0 +1,747 @@
+//! Agent-doc session memory indexing and retrieval.
+//!
+//! This is the first agent-doc consumer of the shared `tsift-memory` crate:
+//! the CLI writes tracked session work into `.tsift/memory.db` and performs a
+//! deterministic lexical ranking pass over current + persisted events. The
+//! ranking is intentionally local and cheap; heavier codebase indexing stays
+//! in the tsift CLI.
+
+use anyhow::{Context, Result, bail};
+use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use tsift_memory::{
+    MEMORY_CONTRACT_VERSION, MemoryEvent, MemoryEventKind, MemoryInsertResult, MemoryStore,
+    default_memory_db_path, read_memory_events,
+};
+
+use crate::component;
+use crate::fs_util;
+use crate::pending::{self, PendingItem, PendingListMarker, PendingState};
+use crate::snapshot;
+
+const TRACKED_WORK_IMPORT_SOURCE: &str = "agent-doc:tracked-work";
+const EXCHANGE_IMPORT_SOURCE: &str = "agent-doc:exchange";
+const MAX_EVENT_READ_LIMIT: usize = 20_000;
+const MAX_RESPONSE_BODY_CHARS: usize = 2_000;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryIndexReport {
+    pub contract_version: String,
+    pub session_path: String,
+    pub memory_db_path: String,
+    pub planned_events: usize,
+    pub inserted_events: usize,
+    pub already_present_events: usize,
+    pub component_counts: BTreeMap<String, usize>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemorySearchResult {
+    pub score: f64,
+    pub id: String,
+    pub kind: String,
+    pub source_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemorySearchReport {
+    pub contract_version: String,
+    pub session_path: String,
+    pub memory_db_path: String,
+    pub query: String,
+    pub indexed_current_events: usize,
+    pub searched_events: usize,
+    pub results: Vec<MemorySearchResult>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionEvents {
+    events: Vec<MemoryEvent>,
+    component_counts: BTreeMap<String, usize>,
+    warnings: Vec<String>,
+}
+
+pub fn run_index(file: &Path, db: Option<&Path>, json: bool) -> Result<()> {
+    let db_path = resolve_memory_db_path(file, db)?;
+    let report = index_session(file, &db_path)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "Indexed {} event(s) into {} ({} inserted, {} already present)",
+            report.planned_events,
+            report.memory_db_path,
+            report.inserted_events,
+            report.already_present_events
+        );
+        for (component, count) in &report.component_counts {
+            println!("- {component}: {count}");
+        }
+        for warning in &report.warnings {
+            eprintln!("[memory] warning: {warning}");
+        }
+    }
+    Ok(())
+}
+
+pub fn run_search(
+    file: &Path,
+    query: &str,
+    db: Option<&Path>,
+    limit: usize,
+    json: bool,
+    rebuild: bool,
+) -> Result<()> {
+    let db_path = resolve_memory_db_path(file, db)?;
+    let report = search_session_memory(file, &db_path, query, limit, rebuild)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "Memory search for {:?} in {}",
+            report.query, report.memory_db_path
+        );
+        if report.results.is_empty() {
+            println!("No matches.");
+        }
+        for result in &report.results {
+            let item = result
+                .item_id
+                .as_deref()
+                .map(|id| format!(" #{id}"))
+                .unwrap_or_default();
+            let component = result
+                .component
+                .as_deref()
+                .map(|c| format!(" [{c}]"))
+                .unwrap_or_default();
+            println!(
+                "- {:.3}{}{} {}",
+                result.score, component, item, result.source_ref
+            );
+            println!("  {}", result.text.replace('\n', " "));
+        }
+        for warning in &report.warnings {
+            eprintln!("[memory] warning: {warning}");
+        }
+    }
+    Ok(())
+}
+
+pub fn index_session(file: &Path, db_path: &Path) -> Result<MemoryIndexReport> {
+    let session = collect_session_events(file)?;
+    let mut store = MemoryStore::open_or_create(db_path)?;
+    let results = store.insert_events(&session.events)?;
+    let (inserted_events, already_present_events) = count_insert_results(&results);
+    Ok(MemoryIndexReport {
+        contract_version: MEMORY_CONTRACT_VERSION.to_string(),
+        session_path: display_path(file),
+        memory_db_path: display_path(db_path),
+        planned_events: session.events.len(),
+        inserted_events,
+        already_present_events,
+        component_counts: session.component_counts,
+        warnings: session.warnings,
+    })
+}
+
+pub fn search_session_memory(
+    file: &Path,
+    db_path: &Path,
+    query: &str,
+    limit: usize,
+    rebuild: bool,
+) -> Result<MemorySearchReport> {
+    if query.trim().is_empty() {
+        bail!("memory search query must not be empty");
+    }
+    if rebuild {
+        let _ = index_session(file, db_path)?;
+    }
+
+    let session = collect_session_events(file)?;
+    let mut events = read_memory_events(db_path, MAX_EVENT_READ_LIMIT)?;
+    events.extend(session.events.clone());
+    let events = dedupe_events(events);
+    let mut results = rank_events(query, &events);
+    results.truncate(limit.max(1));
+
+    Ok(MemorySearchReport {
+        contract_version: MEMORY_CONTRACT_VERSION.to_string(),
+        session_path: display_path(file),
+        memory_db_path: display_path(db_path),
+        query: query.to_string(),
+        indexed_current_events: session.events.len(),
+        searched_events: events.len(),
+        results,
+        warnings: session.warnings,
+    })
+}
+
+fn count_insert_results(results: &[MemoryInsertResult]) -> (usize, usize) {
+    let inserted = results.iter().filter(|result| result.inserted).count();
+    (inserted, results.len().saturating_sub(inserted))
+}
+
+fn collect_session_events(file: &Path) -> Result<SessionEvents> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read session document {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let doc_hash = snapshot::doc_hash(&canonical)
+        .unwrap_or_else(|_| snapshot::doc_hash_from_str(&canonical.to_string_lossy()));
+    let session_ref = display_path(&canonical);
+    let components = component::parse(&content).context("failed to parse session components")?;
+    let mut events = Vec::new();
+    let mut component_counts = BTreeMap::new();
+    let mut warnings = Vec::new();
+
+    for comp in &components {
+        let body = comp.content(&content);
+        if component::is_backlog_component(&comp.name)
+            || component::is_review_component(&comp.name)
+            || component::is_icebox_component(&comp.name)
+        {
+            let state_override = None;
+            let new_events =
+                tracked_work_events(&session_ref, &doc_hash, &comp.name, body, state_override);
+            bump_count(&mut component_counts, &comp.name, new_events.len());
+            events.extend(new_events);
+        } else if component::is_backlog_done_component(&comp.name) {
+            let new_events = tracked_work_events(
+                &session_ref,
+                &doc_hash,
+                &comp.name,
+                body,
+                Some(PendingState::Done),
+            );
+            bump_count(&mut component_counts, &comp.name, new_events.len());
+            events.extend(new_events);
+            if let Some(archive) = comp.attrs.get("archive") {
+                match read_done_archive(file, archive) {
+                    Ok(Some((archive_path, archive_content))) => {
+                        let source = format!("{}", archive_path.display());
+                        let archive_events =
+                            done_archive_events(&source, &doc_hash, &comp.name, &archive_content);
+                        bump_count(
+                            &mut component_counts,
+                            &format!("{}:archive", comp.name),
+                            archive_events.len(),
+                        );
+                        events.extend(archive_events);
+                    }
+                    Ok(None) => warnings.push(format!("done archive not found: {archive}")),
+                    Err(err) => warnings.push(err.to_string()),
+                }
+            }
+        } else if comp.name == "exchange" {
+            let new_events = response_summary_events(&session_ref, &doc_hash, body);
+            bump_count(&mut component_counts, &comp.name, new_events.len());
+            events.extend(new_events);
+        }
+    }
+
+    Ok(SessionEvents {
+        events,
+        component_counts,
+        warnings,
+    })
+}
+
+fn tracked_work_events(
+    session_ref: &str,
+    doc_hash: &str,
+    component: &str,
+    body: &str,
+    state_override: Option<PendingState>,
+) -> Vec<MemoryEvent> {
+    let (_, items, _) = pending::parse_items(body);
+    items
+        .into_iter()
+        .filter(|item| !item.id.is_empty() || !item.text.trim().is_empty())
+        .map(|item| tracked_work_event(session_ref, doc_hash, component, item, state_override))
+        .collect()
+}
+
+fn done_archive_events(
+    session_ref: &str,
+    doc_hash: &str,
+    component: &str,
+    body: &str,
+) -> Vec<MemoryEvent> {
+    let archive_items = parse_done_archive_items(body);
+    if archive_items.is_empty() {
+        return tracked_work_events(
+            session_ref,
+            doc_hash,
+            component,
+            body,
+            Some(PendingState::Done),
+        );
+    }
+    archive_items
+        .into_iter()
+        .map(|item| {
+            tracked_work_event(
+                session_ref,
+                doc_hash,
+                component,
+                item,
+                Some(PendingState::Done),
+            )
+        })
+        .collect()
+}
+
+fn parse_done_archive_items(body: &str) -> Vec<PendingItem> {
+    let mut items = Vec::new();
+    let mut current: Option<PendingItem> = None;
+
+    for line in body.lines() {
+        if let Some((date, id, text)) = parse_done_archive_line(line) {
+            if let Some(item) = current.take() {
+                items.push(item);
+            }
+            current = Some(PendingItem {
+                marker: PendingListMarker::Bullet,
+                id,
+                state: PendingState::Done,
+                gate_type: None,
+                text: format!("{date} {text}"),
+                continuation: String::new(),
+            });
+        } else if let Some(item) = current.as_mut()
+            && (line.starts_with(' ') || line.starts_with('\t'))
+        {
+            item.continuation.push_str(line);
+            item.continuation.push('\n');
+        }
+    }
+
+    if let Some(item) = current {
+        items.push(item);
+    }
+    items
+}
+
+fn parse_done_archive_line(line: &str) -> Option<(String, String, String)> {
+    let rest = line.strip_prefix("- ")?;
+    if !looks_like_iso_date_prefix(rest) {
+        return None;
+    }
+    let date = rest[..10].to_string();
+    let after_date = &rest[11..];
+    let after_id = after_date.strip_prefix("[#")?;
+    let end = after_id.find(']')?;
+    let id = after_id[..end].trim();
+    if id.is_empty() {
+        return None;
+    }
+    let text = after_id[end + 1..].trim_start();
+    Some((date, id.to_string(), text.to_string()))
+}
+
+fn looks_like_iso_date_prefix(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() > 11
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b' '
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+fn tracked_work_event(
+    session_ref: &str,
+    doc_hash: &str,
+    component: &str,
+    item: PendingItem,
+    state_override: Option<PendingState>,
+) -> MemoryEvent {
+    let state = state_override.unwrap_or(item.state);
+    let state_str = pending_state_str(state);
+    let mut text = format!("#{} {}", item.id, item.text.trim());
+    if !item.continuation.trim().is_empty() {
+        text.push('\n');
+        text.push_str(item.continuation.trim());
+    }
+    let item_id = if item.id.is_empty() {
+        format!("anon:{}", snapshot::doc_hash_from_str(&text))
+    } else {
+        item.id.clone()
+    };
+    let text_hash = snapshot::doc_hash_from_str(&text);
+    let source_ref = format!("{session_ref}#{component}:{item_id}");
+    MemoryEvent::new(MemoryEventKind::ImportedObservation, source_ref, text)
+        .with_session_id(session_ref.to_string())
+        .with_metadata("agent_doc_surface", "tracked_work")
+        .with_metadata("component", component)
+        .with_metadata("item_id", item_id.clone())
+        .with_metadata("state", state_str)
+        .with_import(
+            TRACKED_WORK_IMPORT_SOURCE,
+            format!("{doc_hash}:{component}:{item_id}:{text_hash}"),
+        )
+}
+
+fn response_summary_events(session_ref: &str, doc_hash: &str, body: &str) -> Vec<MemoryEvent> {
+    response_sections(body)
+        .into_iter()
+        .map(|(index, heading, text)| {
+            let event_text = trim_chars(&format!("{heading}\n{text}"), MAX_RESPONSE_BODY_CHARS);
+            let text_hash = snapshot::doc_hash_from_str(&event_text);
+            MemoryEvent::new(
+                MemoryEventKind::ResponseSummary,
+                format!("{session_ref}#exchange:{index}"),
+                event_text,
+            )
+            .with_session_id(session_ref.to_string())
+            .with_metadata("agent_doc_surface", "exchange")
+            .with_metadata("component", "exchange")
+            .with_metadata("heading", heading)
+            .with_import(
+                EXCHANGE_IMPORT_SOURCE,
+                format!("{doc_hash}:exchange:{index}:{text_hash}"),
+            )
+        })
+        .collect()
+}
+
+fn response_sections(body: &str) -> Vec<(usize, String, String)> {
+    let mut sections = Vec::new();
+    let mut current_heading: Option<String> = None;
+    let mut current_body = String::new();
+
+    for line in body.lines() {
+        if line.starts_with("### Re:") {
+            if let Some(heading) = current_heading.take() {
+                let index = sections.len() + 1;
+                sections.push((index, heading, current_body.trim().to_string()));
+                current_body.clear();
+            }
+            current_heading = Some(line.trim_start_matches('#').trim().to_string());
+        } else if current_heading.is_some() && !line.starts_with("<!-- agent:boundary:") {
+            current_body.push_str(line);
+            current_body.push('\n');
+        }
+    }
+    if let Some(heading) = current_heading {
+        let index = sections.len() + 1;
+        sections.push((index, heading, current_body.trim().to_string()));
+    }
+    sections
+}
+
+fn read_done_archive(file: &Path, archive: &str) -> Result<Option<(PathBuf, String)>> {
+    if archive.trim().is_empty() {
+        bail!("agent:done archive= must not be empty");
+    }
+    if !archive.ends_with(".done.md") {
+        bail!("agent:done archive={archive} must point to a .done.md file");
+    }
+    let relative = Path::new(archive);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        bail!("agent:done archive={archive} must be repo-relative");
+    }
+    let root = fs_util::find_project_root_canonical(file)
+        .with_context(|| format!("failed to find project root for {}", file.display()))?;
+    let target = root.join(relative);
+    if let Ok(canonical_target) = target.canonicalize()
+        && !canonical_target.starts_with(&root)
+    {
+        bail!("agent:done archive={archive} resolves outside the project root");
+    }
+    match std::fs::read_to_string(&target) {
+        Ok(content) => Ok(Some((target, content))),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", target.display())),
+    }
+}
+
+fn resolve_memory_db_path(file: &Path, db: Option<&Path>) -> Result<PathBuf> {
+    if let Some(db) = db {
+        return Ok(db.to_path_buf());
+    }
+    let root = fs_util::find_project_root_canonical(file)
+        .or_else(|| std::env::current_dir().ok())
+        .with_context(|| format!("failed to resolve memory DB root for {}", file.display()))?;
+    Ok(default_memory_db_path(&root))
+}
+
+fn rank_events(query: &str, events: &[MemoryEvent]) -> Vec<MemorySearchResult> {
+    let query_tokens = tokenize(query);
+    let query_lower = query.trim().to_ascii_lowercase();
+    let mut ranked = events
+        .iter()
+        .filter_map(|event| {
+            let score = score_event(&query_tokens, &query_lower, event);
+            (score > 0.0).then(|| search_result(score, event))
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.source_ref.cmp(&b.source_ref))
+            .then_with(|| a.text.cmp(&b.text))
+    });
+    ranked
+}
+
+fn score_event(query_tokens: &BTreeSet<String>, query_lower: &str, event: &MemoryEvent) -> f64 {
+    let event_text = format!(
+        "{} {} {}",
+        event.source_ref,
+        event.text,
+        event
+            .metadata
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let event_lower = event_text.to_ascii_lowercase();
+    let event_tokens = tokenize(&event_text);
+    let overlap = query_tokens.intersection(&event_tokens).count();
+    let mut score = if query_tokens.is_empty() {
+        0.0
+    } else {
+        overlap as f64 / query_tokens.len() as f64
+    };
+
+    if !query_lower.is_empty() && event_lower.contains(query_lower) {
+        score += 1.0;
+    }
+    if let Some(item_id) = event.metadata.get("item_id")
+        && query_tokens.contains(&item_id.to_ascii_lowercase())
+    {
+        score += 1.5;
+    }
+    if event
+        .metadata
+        .get("agent_doc_surface")
+        .is_some_and(|surface| surface == "tracked_work")
+    {
+        score += 0.05;
+    }
+    score
+}
+
+fn search_result(score: f64, event: &MemoryEvent) -> MemorySearchResult {
+    MemorySearchResult {
+        score,
+        id: event.stable_id(),
+        kind: event.kind.as_str().to_string(),
+        source_ref: event.source_ref.clone(),
+        component: event.metadata.get("component").cloned(),
+        item_id: event.metadata.get("item_id").cloned(),
+        state: event.metadata.get("state").cloned(),
+        text: trim_chars(&event.text, 320),
+    }
+}
+
+fn tokenize(text: &str) -> BTreeSet<String> {
+    let mut tokens = BTreeSet::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            current.push(ch.to_ascii_lowercase());
+        } else {
+            push_token(&mut tokens, &mut current);
+        }
+    }
+    push_token(&mut tokens, &mut current);
+    tokens
+}
+
+fn push_token(tokens: &mut BTreeSet<String>, current: &mut String) {
+    if current.len() >= 2 {
+        tokens.insert(std::mem::take(current));
+    } else {
+        current.clear();
+    }
+}
+
+fn dedupe_events(events: Vec<MemoryEvent>) -> Vec<MemoryEvent> {
+    let mut by_key = HashMap::new();
+    for event in events {
+        let key = (
+            event.source_ref.clone(),
+            event.text.clone(),
+            event.metadata.get("item_id").cloned(),
+        );
+        by_key.entry(key).or_insert(event);
+    }
+    by_key.into_values().collect()
+}
+
+fn pending_state_str(state: PendingState) -> &'static str {
+    match state {
+        PendingState::Open => "open",
+        PendingState::Gated => "gated",
+        PendingState::Done => "done",
+    }
+}
+
+fn bump_count(counts: &mut BTreeMap<String, usize>, key: &str, amount: usize) {
+    if amount > 0 {
+        *counts.entry(key.to_string()).or_insert(0) += amount;
+    }
+}
+
+fn trim_chars(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in text.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn display_path(path: &Path) -> String {
+    path.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_doc(root: &Path, body: &str) -> PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc_dir = root.join("tasks");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        let doc = doc_dir.join("session.md");
+        std::fs::write(&doc, body).unwrap();
+        doc
+    }
+
+    #[test]
+    fn collect_session_events_reads_backlog_review_done_archive_and_exchange() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#oldfix] historical cache fix\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"---
+agent_doc_session: test
+---
+
+## Exchange
+<!-- agent:exchange -->
+### Re: cache fix
+
+Shipped cache repair.
+<!-- /agent:exchange -->
+
+## Backlog
+<!-- agent:backlog -->
+- [ ] [#cachefix] Repair cache duplication
+<!-- /agent:backlog -->
+
+## Review
+<!-- agent:review -->
+- [/] [#shipcheck] Await release verification
+<!-- /agent:review -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+
+        let session = collect_session_events(&doc).unwrap();
+        assert!(
+            session
+                .events
+                .iter()
+                .any(|event| event.metadata.get("item_id") == Some(&"cachefix".to_string()))
+        );
+        assert!(
+            session
+                .events
+                .iter()
+                .any(|event| event.metadata.get("item_id") == Some(&"shipcheck".to_string()))
+        );
+        assert!(
+            session
+                .events
+                .iter()
+                .any(|event| event.metadata.get("item_id") == Some(&"oldfix".to_string()))
+        );
+        assert!(
+            session
+                .events
+                .iter()
+                .any(|event| event.kind == MemoryEventKind::ResponseSummary)
+        );
+    }
+
+    #[test]
+    fn search_ranks_current_tracked_work_by_query_terms() {
+        let tmp = tempdir().unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:backlog -->
+- [ ] [#memrag] Add semantic retrieval over backlog history
+- [ ] [#routes] Fix tmux route timeout
+<!-- /agent:backlog -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let report = search_session_memory(&doc, &db, "semantic backlog retrieval", 5, true)
+            .expect("search should succeed");
+        assert_eq!(
+            report.results.first().and_then(|r| r.item_id.as_deref()),
+            Some("memrag")
+        );
+    }
+
+    #[test]
+    fn index_session_writes_tsift_memory_events() {
+        let tmp = tempdir().unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:backlog -->
+- [ ] [#dedupe] Detect duplicate backlog item
+<!-- /agent:backlog -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let report = index_session(&doc, &db).unwrap();
+        assert_eq!(report.inserted_events, 1);
+        let events = read_memory_events(&db, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].metadata.get("agent_doc_surface"),
+            Some(&"tracked_work".to_string())
+        );
+    }
+}

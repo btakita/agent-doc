@@ -854,6 +854,11 @@ enum Commands {
         #[arg(long)]
         rebuild: bool,
     },
+    /// Index/search agent-doc session memory through the shared tsift-memory crate
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
     /// Archive old exchanges / compact component content
     Compact {
         /// Path to the session document
@@ -1258,6 +1263,41 @@ enum OpsAction {
         /// Emit JSON instead of a human-readable report
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// Index backlog/review/done/icebox/exchange surfaces into .tsift/memory.db
+    Index {
+        /// Path to the session document
+        file: PathBuf,
+        /// Memory DB path (default: <project>/.tsift/memory.db)
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Emit JSON instead of a human-readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search indexed session memory plus current document tracked work
+    Search {
+        /// Path to the session document
+        file: PathBuf,
+        /// Free-text query
+        #[arg(long)]
+        query: String,
+        /// Memory DB path (default: <project>/.tsift/memory.db)
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Max results to print
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Emit JSON instead of a human-readable summary
+        #[arg(long)]
+        json: bool,
+        /// Index the current document before searching
+        #[arg(long)]
+        rebuild: bool,
     },
 }
 
@@ -2344,6 +2384,26 @@ fn main() -> anyhow::Result<()> {
             json,
             rebuild,
         ),
+        Commands::Memory { action } => match action {
+            MemoryAction::Index { file, db, json } => {
+                agent_doc_orchestration::memory_cmd::run_index(&file, db.as_deref(), json)
+            }
+            MemoryAction::Search {
+                file,
+                query,
+                db,
+                limit,
+                json,
+                rebuild,
+            } => agent_doc_orchestration::memory_cmd::run_search(
+                &file,
+                &query,
+                db.as_deref(),
+                limit,
+                json,
+                rebuild,
+            ),
+        },
         Commands::Compact {
             file,
             keep,

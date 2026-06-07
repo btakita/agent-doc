@@ -85,6 +85,18 @@ Two modes:
 - `--id` accepts either `sqlarcidx` or `#sqlarcidx`.
 - `--rebuild` refreshes the derived index before search.
 
+## memory
+
+`agent-doc memory index <FILE> [--db PATH] [--json]`
+
+`agent-doc memory search <FILE> --query TEXT [--db PATH] [--limit N] [--json] [--rebuild]`
+
+- `memory index` writes first-class agent-doc session memory events into `<project>/.tsift/memory.db` by default.
+- Indexed surfaces are current `agent:backlog`, `agent:review`, `agent:icebox`, `agent:done` (including repo-relative `.done.md` archives), and live exchange `### Re:` response sections.
+- `memory search` searches indexed events plus the current document's parsed tracked work so dedupe/review checks can detect already-tracked or already-fixed items before a full agent cycle.
+- The implementation uses the shared `tsift-memory` library crate directly. The heavy codebase index remains in the tsift CLI and is not part of the per-cycle hot path.
+- `--rebuild` indexes the current document before searching; `--json` emits the same report fields used by automation.
+
 ## reset
 
 `agent-doc reset <FILE>` clears the saved session id and deletes the snapshot/CRDT state for the document. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds both sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.

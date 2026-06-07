@@ -2999,19 +2999,73 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             }
         }
 
-        let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body)?;
-        if !removed_items.is_empty() {
-            let removed_ids: Vec<String> = removed_items.iter().map(|i| i.id.clone()).collect();
+        let mut removed_items = Vec::new();
+        if should_reap_ops_proof_completions(surface) {
+            let ops_proof_completions = ops_proof_completion_candidates(&current_body);
+            if !ops_proof_completions.is_empty() {
+                let evidence_by_id: HashMap<String, String> = ops_proof_completions
+                    .iter()
+                    .map(|candidate| (candidate.id.clone(), candidate.evidence.clone()))
+                    .collect();
+                let ids: HashSet<String> = ops_proof_completions
+                    .iter()
+                    .map(|candidate| candidate.id.clone())
+                    .collect();
+                let (after_ops_proof_reap, mut ops_proof_items) =
+                    crate::pending::op_take_active_items_by_ids(&current_body, &ids);
+                if !ops_proof_items.is_empty() {
+                    let removed_ids: Vec<String> =
+                        ops_proof_items.iter().map(|i| i.id.clone()).collect();
+                    for item in &mut ops_proof_items {
+                        item.state = crate::pending::PendingState::Done;
+                        item.gate_type = None;
+                    }
+                    eprintln!(
+                        "[preflight] {}: auto-completed {} ops-proof item(s): {}",
+                        surface_label,
+                        ops_proof_items.len(),
+                        removed_ids.join(", ")
+                    );
+                    for item in &ops_proof_items {
+                        let evidence = evidence_by_id
+                            .get(&item.id)
+                            .map(String::as_str)
+                            .unwrap_or("ops_proof");
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "auto_complete_ops_proof file={} id={} surface={} evidence={}",
+                                file.display(),
+                                item.id,
+                                surface_label,
+                                evidence
+                            ),
+                        );
+                    }
+                    let _ = crate::cycle_state::record_pending_done_ids(file, &removed_ids);
+                    let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
+                    let _ = crate::cycle_state::mark_pending_mutations(file);
+                    current_body = after_ops_proof_reap;
+                    mutated = true;
+                    removed_items.extend(ops_proof_items);
+                }
+            }
+        }
+
+        let (after_reap, reaped_items) = crate::pending::reap_with_items(&current_body)?;
+        if !reaped_items.is_empty() {
+            let removed_ids: Vec<String> = reaped_items.iter().map(|i| i.id.clone()).collect();
             eprintln!(
                 "[preflight] {}: reaped {} item(s): {}",
                 surface_label,
-                removed_items.len(),
+                reaped_items.len(),
                 removed_ids.join(", ")
             );
             let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
             current_body = after_reap;
             mutated = true;
         }
+        removed_items.extend(reaped_items);
 
         // Priority sort (#backlog-priority-attribute): when the component marker
         // carries `priority`, stable-sort items by their per-item `priority=<1..9>`
@@ -3199,6 +3253,125 @@ fn maintenance_surface_label(surface: &str) -> &str {
 
 fn should_reap_already_done_mirrors(surface: &str) -> bool {
     is_backlog_component(surface) || is_review_component(surface)
+}
+
+fn should_reap_ops_proof_completions(surface: &str) -> bool {
+    is_backlog_component(surface) || is_review_component(surface)
+}
+
+struct OpsProofCompletion {
+    id: String,
+    evidence: String,
+}
+
+fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofCompletion> {
+    let (_, items, _) = crate::pending::parse_items(body);
+    items
+        .iter()
+        .filter(|item| !matches!(item.state, crate::pending::PendingState::Done))
+        .filter_map(|item| {
+            classify_ops_proof_completion(item).map(|evidence| OpsProofCompletion {
+                id: item.id.clone(),
+                evidence,
+            })
+        })
+        .collect()
+}
+
+fn classify_ops_proof_completion(item: &crate::pending::PendingItem) -> Option<String> {
+    if item.id.is_empty() {
+        return None;
+    }
+    let text = format!("{} {}", item.text, item.continuation);
+    let upper = text.to_ascii_uppercase();
+    if !has_ops_completion_marker(&upper) || has_ops_completion_blocker(&upper) {
+        return None;
+    }
+
+    let has_commit = contains_commit_hash(&text);
+    let has_ci = contains_successful_ci_proof(&upper);
+    if !has_commit && !has_ci {
+        return None;
+    }
+
+    Some(
+        match (has_commit, has_ci) {
+            (true, true) => "commit+ci",
+            (true, false) => "commit",
+            (false, true) => "ci",
+            (false, false) => unreachable!(),
+        }
+        .to_string(),
+    )
+}
+
+fn has_ops_completion_marker(upper: &str) -> bool {
+    ["DONE", "SHIPPED", "IMPLEMENTED", "COMPLETE", "COMPLETED"]
+        .iter()
+        .any(|marker| contains_ascii_word(upper, marker))
+}
+
+fn has_ops_completion_blocker(upper: &str) -> bool {
+    const BLOCKER_PHRASES: &[&str] = &[
+        "COULD NOT",
+        "CAN NOT",
+        "CANNOT",
+        "CAN'T",
+        "FALSE CLOSEOUT",
+        "FOLLOW-UP",
+        "FOLLOW UP",
+        "FOLLOWUPS",
+        "NOT DONE",
+        "NOT SHIPPED",
+        "NOT IMPLEMENTED",
+        "SUB-PART",
+        "SUBPART",
+    ];
+    const BLOCKER_WORDS: &[&str] = &[
+        "PARTIAL",
+        "REMAINING",
+        "REOPENED",
+        "DEFERRED",
+        "BLOCKED",
+        "BLOCKER",
+        "TODO",
+        "WIP",
+        "PARTLY",
+        "FAILING",
+        "FAILED",
+    ];
+
+    BLOCKER_PHRASES.iter().any(|phrase| upper.contains(phrase))
+        || BLOCKER_WORDS
+            .iter()
+            .any(|word| contains_ascii_word(upper, word))
+}
+
+fn contains_successful_ci_proof(upper: &str) -> bool {
+    contains_ascii_word(upper, "CI")
+        && ["GREEN", "PASSED", "PASSING", "SUCCESS", "SUCCEEDED"]
+            .iter()
+            .any(|word| contains_ascii_word(upper, word))
+}
+
+fn contains_commit_hash(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| {
+            (7..=40).contains(&token.len())
+                && token.chars().all(|c| c.is_ascii_hexdigit())
+                && token.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F'))
+        })
+}
+
+fn contains_ascii_word(haystack: &str, needle: &str) -> bool {
+    haystack.match_indices(needle).any(|(idx, _)| {
+        let before = idx
+            .checked_sub(1)
+            .and_then(|pos| haystack.as_bytes().get(pos).copied());
+        let after = haystack.as_bytes().get(idx + needle.len()).copied();
+        before.is_none_or(|b| !b.is_ascii_alphanumeric())
+            && after.is_none_or(|b| !b.is_ascii_alphanumeric())
+    })
 }
 
 fn tracked_body_for_reorder(content: &str) -> Option<&str> {
@@ -8265,6 +8438,74 @@ mod tests {
         assert!(snapshot_after.contains("## Completed / Reaped"));
         assert!(snapshot_after.contains("<!-- agent:done -->"));
         assert!(snapshot_after.contains("[#reap1] Reap me"));
+    }
+
+    #[test]
+    fn pending_maintenance_auto_reaps_ops_proof_done_items() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#doneci] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals stale busy state\n",
+            "- [ ] [#partial] #agent-doc-bug PARTIAL SHIPPED 9df1244f: committed first slice. REMAINING: live proof gate\n",
+            "- [ ] [#reopened] #agent-doc-bug REOPENED false closeout: previous closeout DONE 1234567 (CI 1 green)\n",
+            "- [ ] [#noproof] DONE: lacks deterministic proof\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#reviewdone] SHIPPED abcdef1 (CI 2 passed): review-gated shipped marker\n",
+            "- [/] [#reviewkeep] Needs release review\n",
+            "<!-- /agent:review -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.review_count, 1);
+        assert_eq!(report.review_gated_count, 1);
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let backlog_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_backlog_component(&c.name))
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        let review_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_review_component(&c.name))
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+
+        assert!(!backlog_after.contains("[#doneci]"));
+        assert!(!review_after.contains("[#reviewdone]"));
+        assert!(backlog_after.contains("[#partial]"));
+        assert!(backlog_after.contains("[#reopened]"));
+        assert!(backlog_after.contains("[#noproof]"));
+        assert!(review_after.contains("[#reviewkeep]"));
+        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("[#doneci] #agent-doc-bug DONE 7b60fcdc"));
+        assert!(file_after.contains("[#reviewdone] SHIPPED abcdef1"));
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snapshot_after.contains("- [ ] [#doneci]"));
+        assert!(!snapshot_after.contains("- [/] [#reviewdone]"));
+        assert!(snapshot_after.contains("[#partial]"));
+        assert!(snapshot_after.contains("[#reopened]"));
+        assert!(snapshot_after.contains("[#noproof]"));
+        assert!(snapshot_after.contains("[#reviewkeep]"));
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("auto_complete_ops_proof"));
+        assert!(log.contains("id=doneci"));
+        assert!(log.contains("id=reviewdone"));
     }
 
     #[test]

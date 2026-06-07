@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Preflight auto-completes deterministic ops-proof tracked work.** During
+pending maintenance, active `agent:backlog` and `agent:review` items with
+explicit completion markers plus commit or successful-CI proof are promoted to
+done, removed from the active surface, archived, recorded in cycle state, and
+logged as `auto_complete_ops_proof`. Blocker language such as partial,
+remaining, reopened, deferred, false-closeout, or follow-up work keeps items
+active. Test `pending_maintenance_auto_reaps_ops_proof_done_items`.
+
 - **Preflight reaps stale active mirrors for archived done ids.** During pending
 maintenance, active `agent:backlog` and `agent:review` items whose ids already
 exist in inline `agent:done` or the configured external `agent:done archive=...`

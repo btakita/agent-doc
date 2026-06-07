@@ -59,7 +59,7 @@ Verification:
 - `cargo test -p tsift-md-ast` passed.
 - `make check` passed on the final narrowed diff.
 - Latest GitHub Actions CI check was `completed success` for workflow `CI` on `main` at run `27082060444`.
-<!-- agent:boundary:6aa3d13e -->
+<!-- agent:boundary:a486b1ed -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +70,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~~do "*Phase 2c (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."~~
-- [#trt1inject]
+- ~~[#trt1inject]~~
 - [#trt1watermark]
 - [#trt1capture]
 - [#trt1project]
@@ -79,7 +79,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#trt1inject] Inject retrieved authored findings (tsift memory findings) into context-pack/search output so finding/decision/note nodes surface during retrieval. tsift-cli level (tsift-digest does not depend on tsift-sqlite): after build_context_pack_report, query findings anchored to the packed symbols and attach. Builds on shipped memory findings (ffaca42).
 - [ ] [#trt1watermark] Staleness gating on authored-finding freshness via community_graph_watermark: mark findings whose observed_at_unix predates the current watermark as stale in findings/injection output.
 - [ ] [#trt1capture] Opt-in/passive capture of findings from agent-doc session archives: parse .agent-doc archives, extract authored finding/decision/note items, upsert via authored_node_projection. Opt-in only.
 - [ ] [#trt1project] md/html on-demand projection of the findings graph (graph store stays source of truth); render finding/decision/note nodes + annotates edges grouped by anchor.

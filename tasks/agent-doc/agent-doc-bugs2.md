@@ -146,14 +146,25 @@ Implemented and pushed the agent-doc root fix:
 The lazily state is repaired: no queue-drain loop, queue empty, replacement backlog items present.
 
 I also wrote the closeout into `tasks/agent-doc/agent-doc-bugs2.md`, but that document’s own final gate is still blocked by an older stale cycle guard over many existing queued backlog items. I did not gate or remove those unrelated queue items. The superproject push was rejected because local `main` is 145 commits ahead and 15 behind with many unrelated dirty files, so I left that rebase/push alone.
-<!-- agent:boundary:112706c4 -->
+
+### Re: commit all uncommitted changes in agent-doc - gpt-5
+
+Committed and pushed the dirty `src/agent-doc` worktree.
+
+Details:
+- `src/agent-doc` was on `d4b2746f` with 33 tracked modified files and no `Cargo.lock` drift.
+- `git diff --check` passed.
+- `make check` passed locally in `src/agent-doc`.
+- Committed all tracked agent-doc changes as `6734be4a` (`Commit pending agent-doc worktree changes`) and pushed to `btakita/agent-doc` `main`.
+- Agent-doc CI run `27086116344` passed (`make check` and `make tmux-ci`).
+- Updated the parent `btakita/agent-loop` `src/agent-doc` gitlink to `6734be4a` in parent commit `709f80dc9` and pushed it.
+- Parent `btakita/agent-loop` still has no workflow named `CI`; its `Agent Doc` run `27086218882` failed immediately with `check` and `tmux-ci` jobs containing `steps: []`, matching the existing parent workflow failure pattern.
+<!-- agent:boundary:077413a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Please investigate the lazily-rs session. It is not behaving correctly.~~
-- ~~commit all uncommitted changes in agent-doc~~
 - :pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.
 - :pushpin: Please fix the root cause of the lazily-rs session issues.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
@@ -241,4 +252,4 @@ What are #next-steps to fix bugs?
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
-/
+

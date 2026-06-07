@@ -76,7 +76,25 @@ Flipping `ranked_output_default` to `true` without that study would violate the 
 3. Only then flip `ranked_output_default` → `true`, update the gate + `lib.rs:24441` test, and integrate the shipped `#memgraphrag1` decay ranking into the unified scoring so memory + code share one ranking.
 
 Stopping the auto-drain here — a gate decision needs your eyeball, and I'd rather not auto-flip a quality-gated default. `#surrealbulk` and `#trt1phase2` remain queued; say the word (or run the quality study) and I'll proceed. I also reordered the backlog so `#trt1phase2` (deferred follow-on) sits below `#rankdefault`/`#surrealbulk` again — my earlier `--pending-add` had prepended it ahead of your groomed priority.
-<!-- agent:boundary:6232f1f8 -->
+
+### Re: Can tree-sitter-md be a tsift dependency? — opus-4-8
+
+**Yes — it already is one, and it's actively used.** The `agent-doc-bugs2.md` session is right:
+
+- `packages/tsift-graph/Cargo.toml`: `tree-sitter-md = "0.5"`, optional behind `lang-markdown = ["dep:tree-sitter-md"]`, which is in tsift's **default** feature set.
+- `packages/tsift-graph/src/lang.rs:91`: `Self::Markdown => tree_sitter_md::LANGUAGE.into()`, with full markdown symbol extraction (heading→section spans, zero-based line mapping; ~lines 440–527).
+
+So "if yes, use `tree-sitter-md`" is already satisfied on the tsift side — tsift parses `.md` via `tree-sitter-md` today.
+
+**The real ask (the shared lib).** `agent-doc-bugs2.md` wants `tree-sitter-md` AST + CRDT for the live document with "a focused `tree-sitter-md` crate shared by both, no hard tsift dep." Today tsift's md-AST logic is **welded into `tsift-graph`** (which drags in the whole graph/index stack), so agent-doc can't reuse it without a heavy/cyclic dependency. The fix is to extract a small leaf crate.
+
+Updated backlog **`#tsift-shared-md-ast-and-memgraphrag-lib`** with a plan at `src/tsift/plans/shared-md-ast-memgraphrag-lib.md`:
+1. Extract a leaf `tsift-md-ast` crate (just the `tree-sitter-md` parse + heading/section model) out of `tsift-graph/src/lang.rs`; `tsift-graph` depends down onto it.
+2. Stabilize a serializable section AST + incremental reparse entry point for a CRDT-backed live document.
+3. agent-doc depends on `tsift-md-ast` (no agent-doc→tsift hard dep — both depend on the leaf, same dependency-direction discipline as the `#7qky` ledger); **MemGraphRag stays optional**, in tsift's graph stack, not the leaf.
+
+I captured + planned it rather than executing the crate extraction unprompted — it's a multi-phase architectural move spanning agent-doc. Say `do #tsift-shared-md-ast-and-memgraphrag-lib` and I'll run phase 1 (the tsift-side extraction). The agent-doc integration (phase 3) belongs in the `agent-doc-bugs2.md` `#md-ast-document-model` session.
+<!-- agent:boundary:2346e3a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,13 +103,15 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Can `tree-sitter-md` be a dependency for tsift? The agent-doc-bugs2.md session thinks so. If yes, use `tree-sitter-md`.
+- [#tsift-shared-md-ast-and-memgraphrag-lib]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsift-shared-md-ast-and-memgraphrag-lib] agent-doc wants to depend on tsift for (1) a shared tree-sitter-md markdown-AST crate (extract from tsift-graph lang-markdown so agent-doc gets the same incremental, error-tolerant block AST WITHOUT a hard dep on the whole tsift CLI) and (2) MemGraphRag exposed as a library subset (tsift-graph/tsift-memory/tsift-index/tsift-search) for semantic retrieval over agent-doc session history/backlog. Define + publish the lean crate boundaries so agent-doc can depend on just that subset. Cross-ref agent-doc tasks/agent-doc/plan-md-ast-document-model.md and agent-doc-bugs2.md #agent-doc-memgraphrag-retrieval.
+- [ ] [#tsift-shared-md-ast-and-memgraphrag-lib] Extract a leaf tsift-md-ast crate (tree-sitter-md parse + heading/section model) out of tsift-graph/src/lang.rs so both tsift-graph and agent-doc can depend on it with NO agent-doc->tsift hard dep; MemGraphRag stays optional in the tsift graph stack. Plan: src/tsift/plans/shared-md-ast-memgraphrag-lib.md. Context: agent-doc-bugs2.md #md-ast-document-model. tree-sitter-md is already a used tsift dep (tsift-graph Cargo.toml + lang.rs:91); this is the extraction-for-sharing follow-on.
 - [ ] [#surrealbulk] SurrealDB projection performance (consolidates surrealbulk + surrealbulk-close + surreal-batch-bfs + surreal-fixture): replace per-row upsert loops with bulk/transactional row load + one-pass secondary-index rebuild; add batch frontier expansion; record SurrealDB samples in graph-db-performance-history.json fixture; re-run backend-eval benchmarks, update SPEC.md/BENCHMARKS.md table, measure refresh vs load separately.
 - [/] [#e2e-install] E2E verify opencode-tsift install in a fresh opencode project: opencode plugin opencode-tsift && opencode then /tsift-status returns healthy (consolidates e2e-install + full-e2e-verify). Live-verify only; npm publish + OIDC auth already done (opencode-tsift@0.1.63 on npm).
 - [ ] [#trt1phase2] #trt1 follow-on phases (core authored findings nodes shipped in b300196): context-pack/search injection of authored finding/decision/note nodes; community_graph_watermark staleness gating on finding freshness; opt-in/passive capture of findings from agent-doc session archives; md/html on-demand projection of the findings graph. Builds on shipped authored_node_projection + finding-add + ontology layer.

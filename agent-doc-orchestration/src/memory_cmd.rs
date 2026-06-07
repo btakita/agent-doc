@@ -7,7 +7,7 @@
 //! in the tsift CLI.
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use tsift_memory::{
@@ -64,11 +64,33 @@ pub struct MemorySearchReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemanticCompletionMatch {
+    pub score: f64,
+    pub candidate_source: String,
+    pub candidate_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_id: Option<String>,
+    pub candidate_text: String,
+    pub matched_done_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_done_id: Option<String>,
+    pub matched_done_text: String,
+}
+
 #[derive(Debug, Clone)]
 struct SessionEvents {
     events: Vec<MemoryEvent>,
     component_counts: BTreeMap<String, usize>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionCandidate {
+    source: String,
+    source_ref: String,
+    item_id: Option<String>,
+    text: String,
 }
 
 pub fn run_index(file: &Path, db: Option<&Path>, json: bool) -> Result<()> {
@@ -186,6 +208,177 @@ pub fn search_session_memory(
         results,
         warnings: session.warnings,
     })
+}
+
+pub fn semantic_completion_matches(
+    file: &Path,
+    db: Option<&Path>,
+    limit: usize,
+) -> Result<Vec<SemanticCompletionMatch>> {
+    let candidates = collect_completion_candidates(file)?;
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let db_path = resolve_memory_db_path(file, db)?;
+    let session = collect_session_events(file)?;
+    let mut events = read_memory_events(&db_path, MAX_EVENT_READ_LIMIT)?;
+    events.extend(session.events.clone());
+    let done_events = dedupe_events(events)
+        .into_iter()
+        .filter(is_done_tracked_work_event)
+        .collect::<Vec<_>>();
+    if done_events.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        let ranked = rank_events(&candidate.text, &done_events);
+        for result in ranked {
+            if result.score < 0.8 {
+                break;
+            }
+            if candidate.item_id.is_some() && candidate.item_id == result.item_id {
+                continue;
+            }
+            let key = (
+                candidate.source_ref.clone(),
+                result.source_ref.clone(),
+                result.item_id.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            matches.push(SemanticCompletionMatch {
+                score: result.score,
+                candidate_source: candidate.source.clone(),
+                candidate_ref: candidate.source_ref.clone(),
+                candidate_id: candidate.item_id.clone(),
+                candidate_text: trim_chars(&candidate.text, 320),
+                matched_done_ref: result.source_ref,
+                matched_done_id: result.item_id,
+                matched_done_text: result.text,
+            });
+            break;
+        }
+    }
+
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.candidate_ref.cmp(&b.candidate_ref))
+            .then_with(|| a.matched_done_ref.cmp(&b.matched_done_ref))
+    });
+    matches.truncate(limit.max(1));
+    Ok(matches)
+}
+
+pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -> String {
+    let candidate_id = candidate
+        .candidate_id
+        .as_deref()
+        .map(|id| format!(" #{id}"))
+        .unwrap_or_default();
+    let done_id = candidate
+        .matched_done_id
+        .as_deref()
+        .map(|id| format!(" #{id}"))
+        .unwrap_or_else(|| " completed work".to_string());
+    format!(
+        "semantic completion candidate: {}{} may already be resolved by{} ({:.3}) at {}; candidate={:?}; match={:?}",
+        candidate.candidate_source,
+        candidate_id,
+        done_id,
+        candidate.score,
+        candidate.matched_done_ref,
+        candidate.candidate_text,
+        candidate.matched_done_text
+    )
+}
+
+fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read session document {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let session_ref = display_path(&canonical);
+    let components = component::parse(&content).context("failed to parse session components")?;
+    let mut candidates = Vec::new();
+
+    for comp in &components {
+        let body = comp.content(&content);
+        if component::is_backlog_component(&comp.name) || component::is_review_component(&comp.name)
+        {
+            let (_, items, _) = pending::parse_items(body);
+            for item in items {
+                if item.state == PendingState::Done || item.text.trim().is_empty() {
+                    continue;
+                }
+                let item_id = (!item.id.is_empty()).then_some(item.id.clone());
+                let id_ref = item_id.clone().unwrap_or_else(|| {
+                    format!("anon:{}", snapshot::doc_hash_from_str(item.text.trim()))
+                });
+                let mut text = item.text.trim().to_string();
+                if !item.continuation.trim().is_empty() {
+                    text.push('\n');
+                    text.push_str(item.continuation.trim());
+                }
+                candidates.push(CompletionCandidate {
+                    source: comp.name.clone(),
+                    source_ref: format!("{session_ref}#{}:{id_ref}", comp.name),
+                    item_id,
+                    text,
+                });
+            }
+        } else if comp.name == "queue" {
+            let Ok(entries) = crate::queue::parse(body) else {
+                continue;
+            };
+            for (index, entry) in entries.iter().enumerate() {
+                let crate::queue::QueueEntry::Prompt(prompt) = entry else {
+                    continue;
+                };
+                if queue_prompt_target_id(&prompt.text).is_some() || prompt.text.trim().is_empty() {
+                    continue;
+                }
+                candidates.push(CompletionCandidate {
+                    source: "queue".to_string(),
+                    source_ref: format!("{session_ref}#queue:{index}"),
+                    item_id: None,
+                    text: prompt.text.trim().to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(candidates)
+}
+
+fn is_done_tracked_work_event(event: &MemoryEvent) -> bool {
+    event
+        .metadata
+        .get("agent_doc_surface")
+        .is_some_and(|surface| surface == "tracked_work")
+        && event
+            .metadata
+            .get("state")
+            .is_some_and(|state| state == "done")
+}
+
+fn queue_prompt_target_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect::<String>();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
 }
 
 fn count_insert_results(results: &[MemoryInsertResult]) -> (usize, usize) {
@@ -720,6 +913,38 @@ Shipped cache repair.
         assert_eq!(
             report.results.first().and_then(|r| r.item_id.as_deref()),
             Some("memrag")
+        );
+    }
+
+    #[test]
+    fn semantic_completion_matches_done_archive_for_free_text_queue_prompt() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#cachefix] Repair cache duplication\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- Repair cache duplication
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches = semantic_completion_matches(&doc, Some(&db), 5).unwrap();
+        let first = matches.first().expect("expected semantic match");
+        assert_eq!(first.candidate_source, "queue");
+        assert_eq!(first.candidate_id, None);
+        assert_eq!(first.matched_done_id.as_deref(), Some("cachefix"));
+        assert!(first.score >= 0.8, "{first:?}");
+        assert!(
+            format_semantic_completion_warning(first).contains("semantic completion candidate")
         );
     }
 

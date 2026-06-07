@@ -240,6 +240,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     if let Some(deferral) = plan_backlog_only_deferral_warning(execution_scope, &prompt_diff_text) {
         warnings.push(deferral);
     }
+    match agent_doc_orchestration::memory_cmd::semantic_completion_matches(file, None, 5) {
+        Ok(matches) => {
+            warnings.extend(
+                matches
+                    .iter()
+                    .map(agent_doc_orchestration::memory_cmd::format_semantic_completion_warning),
+            );
+        }
+        Err(err) => warnings.push(format!("semantic completion retrieval unavailable: {err}")),
+    }
     let mut manual_packet_only = false;
     let graph_targets = prompt_targets
         .iter()
@@ -1059,6 +1069,42 @@ Done.
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
             plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_warns_on_semantic_completion_match_for_free_text_queue() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#cachefix] Repair cache duplication\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+queue_active: true
+---
+
+<!-- agent:queue auto -->
+- Repair cache duplication
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert_eq!(plan.prompt_targets, vec!["Repair cache duplication"]);
+        assert!(
+            plan.warnings.iter().any(|warning| {
+                warning.contains("semantic completion candidate") && warning.contains("#cachefix")
+            }),
+            "{:?}",
+            plan.warnings
         );
     }
 

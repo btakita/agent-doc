@@ -2782,6 +2782,24 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             pending_callbacks.len()
         );
     }
+    match crate::memory_cmd::semantic_completion_matches(file, None, 5) {
+        Ok(matches) => {
+            for semantic_match in matches {
+                warnings.push(PreflightWarning {
+                    code: "semantic_completion_match".to_string(),
+                    message: crate::memory_cmd::format_semantic_completion_warning(&semantic_match),
+                    document_agent: None,
+                    active_harness: None,
+                });
+            }
+        }
+        Err(err) => warnings.push(PreflightWarning {
+            code: "semantic_completion_retrieval_unavailable".to_string(),
+            message: format!("semantic completion retrieval unavailable: {err}"),
+            document_agent: None,
+            active_harness: None,
+        }),
+    }
 
     let agent_model =
         resolve_agent_model(frontmatter_model.as_deref(), &harness, &global_config.model);

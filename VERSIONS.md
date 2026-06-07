@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Preflight/plan propose semantic completion matches.** The shared
+`tsift-memory` session-memory path now exposes advisory semantic completion
+candidates for open backlog/review items and free-text queue prompts that are
+highly similar to done-state memory events. `preflight` emits
+`semantic_completion_match` warnings and `plan` includes the same warning text;
+the signal is proposal-only and does not mark work done. Tests
+`semantic_completion_matches_done_archive_for_free_text_queue_prompt` and
+`build_plan_warns_on_semantic_completion_match_for_free_text_queue`.
+
 - **Preflight auto-completes deterministic ops-proof tracked work.** During
 pending maintenance, active `agent:backlog` and `agent:review` items with
 explicit completion markers plus commit or successful-CI proof are promoted to

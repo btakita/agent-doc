@@ -174,7 +174,12 @@ CI:
 Confidence: high for the Stop-hook regression and the reopened backlog state. The two reopened parent tasks intentionally remain open; they now need real implementation/verification before any future closeout.
 
 Escalation: none.
-<!-- agent:boundary:2543977b -->
+
+### Re: closeout recovery — gpt-5
+
+Recovered the failed finalize boundary from the prior write attempt. `agent-doc repair --apply-recovery` abandoned the empty preflight cycle, and this closeout persists the already-applied response, reopened backlog items, done archive update, prompt-prefix repair, and queue strike for `#repair-false-closeouts` without adding more source changes.
+
+<!-- agent:boundary:79976090 -->
 <!-- /agent:exchange -->
 
 ## Queue

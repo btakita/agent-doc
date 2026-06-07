@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#ipc4]
+
+
+> **Queue prompt:**
+>
 > What are #next-steps for IPC transport implementation?
 
 Top backlog item: `#ipc4`.
@@ -55,7 +60,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:4d827e40 -->
+<!-- agent:boundary:d8ddc518 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +69,7 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 ## Queue 
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- [#ipc4]
+- ~~[#ipc4]~~
 - [#ipc5]
 - [#ipc6]
 - [#ipc7]
@@ -74,7 +79,6 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc4] Define IPC transport feature matrix and API contracts (UNIX socket, TCP, loopback). Start with local-in-process channel as baseline and lock schema first.
 - [ ] [#ipc5] Implement transport lifecycle protocol: versioned envelope, per-op correlation IDs, feature negotiation, and symmetric teardown/reconnect semantics.
 - [ ] [#ipc6] Add reliability layer: bounded queues, flow-control/backpressure, heartbeat/liveness, and replay-safe idempotency for dropped peers.
 - [ ] [#ipc7] Build transport test harness (property + integration) for ordering guarantees, permissioned routing, and crash/reconnect recovery scenarios.

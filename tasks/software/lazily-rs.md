@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -38,7 +38,7 @@ queue: stop
 Compacted content:
 - Archived 1 response topic(s): [#k03k] Fix async_context.rs get_async concurrency race
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:72011dc2 -->
+<!-- agent:boundary:bc20d35e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,8 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- What are #next-step for lazily-rs ipc? I want to use lazily-rs to support agent-doc IPC and IPC with tsift. Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 <!-- /agent:queue -->
 
 ## Backlog

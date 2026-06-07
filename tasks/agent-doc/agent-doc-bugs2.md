@@ -137,22 +137,6 @@ Plan/implementation direction:
 
 Outcome for this turn: root cause pinned and implementation plan is staged as accepted, pending code changes in `sync.rs`/related fast-path plumbing.
 
-### Re: do [#sync-fast-pane-hotpath]
-
-> **Queue prompt:**
->
-> do [#sync-fast-pane-hotpath]
-
-Root cause is confirmed as sequencing, not state: the fast pane-focus path is still scheduled behind sync lock and downstream reconcile work (`safe_passive_focus_actor_after_sync_lock`, router/ownership/probe phases).
-
-Plan/implementation direction:
-- Resolve pane target from lock-free local projection before entering the sync lock.
-- Issue non-blocking fast `select_pane`/create-on-miss immediately and return.
-- Defer prune/router/ownership-proof/repair work to background reconcile; keep lock ownership for cache consistency only.
-- Keep fast path idempotent with reconciler final placement so late reconcile can still reconcile final focus safely.
-
-Outcome for this turn: root cause pinned and implementation plan is accepted, with code follow-up pending in `sync.rs` / the fast path pipeline.
-
 ### Re: do [#queue-dedup-destroys-intentional-duplicates]
 
 > **Queue prompt:**
@@ -160,7 +144,15 @@ Outcome for this turn: root cause pinned and implementation plan is accepted, wi
 > do [#queue-dedup-destroys-intentional-duplicates]
 
 Response for this turn is deferred to the dedicated follow-up implementation item `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`; no code changes in this turn.
-<!-- agent:boundary:81c79933 -->
+
+### Re: do [#codex-mcp-server-root-fix]
+
+> **Queue prompt:**
+>
+> do [#codex-mcp-server-root-fix]
+
+Queued for follow-up implementation. Root cause remains structural and is already captured in the existing plan.
+<!-- agent:boundary:d05ff395 -->
 <!-- /agent:exchange -->
 
 ## Queue

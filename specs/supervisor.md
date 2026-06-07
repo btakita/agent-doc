@@ -451,10 +451,13 @@ distinct from the one-shot restart auto-trigger:
   idle-over-busy condition has held for `STALE_BUSY_RECONCILE_TICKS` consecutive
   polls (~2s debounce so a turn still spinning up is never cut short), the watch
   transitions the actor back to `ready` (`caller=supervisor reason=idle_pane_reconcile`,
-  persisted through `mark_lifecycle`), resets the prompt latch and dispatch
-  dedup, and logs `idle_queue_watch_stale_busy_reconciled`. The next idle tick
-  then drains any active head normally. This recovers the wedge with no pane
-  kill and no operator `session status`/`session clear`.
+  persisted through `mark_lifecycle`), resets the prompt latch, and logs
+  `idle_queue_watch_stale_busy_reconciled`. It must preserve the dispatch dedup
+  for the current head: if the injected command returned without consuming the
+  same active head, the next idle tick must skip it as `SkipAlreadyDispatched`
+  instead of re-injecting `agent-doc <FILE>` in a loop. The dedup clears only when
+  there is no active head or the head advances. This recovers the wedge with no
+  pane kill and no operator `session status`/`session clear`.
 
 Live end-to-end verification (a real busy Codex/Claude pane returning to idle and
 draining the route-appended head with no duplicate injection into the active

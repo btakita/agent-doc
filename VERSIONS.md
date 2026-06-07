@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Idle queue stale-busy recovery preserves same-head dedup.** The supervisor
+  idle-queue watcher no longer clears `last_dispatched` while reconciling a
+  stale busy actor over an idle pane. This stops a stuck active head from
+  repeatedly injecting `agent-doc <FILE>` after each reconcile tick, while still
+  allowing dispatch when the head drains or advances. Test
+  `stale_busy_reconcile_preserves_already_dispatched_head_dedup`; spec
+  `specs/supervisor.md`.
+
 - **Completed queue items can be marked in place.** Explicit done IDs now mark
   matching `agent:queue` prompts completed even when the matching queue item is
   not part of the active contiguous head-consumption range. This preserves the

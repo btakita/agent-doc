@@ -1353,6 +1353,14 @@ fn stale_busy_idle_reconcile_decision(
         && consecutive_idle_busy_ticks >= STALE_BUSY_RECONCILE_TICKS
 }
 
+fn reconcile_stale_busy_idle_queue_state(
+    last_dispatched: Option<String>,
+    idle_busy_ticks: &mut u32,
+) -> Option<String> {
+    *idle_busy_ticks = 0;
+    last_dispatched
+}
+
 fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
     // Primary: parse terminal screen for the structured permission dialog
     let output = child_output_for_detection(shared);
@@ -1705,11 +1713,15 @@ fn spawn_idle_queue_watch_thread(
                         "idle_pane_reconcile",
                     );
                     // Reset the one-shot prompt latch so a later genuine
-                    // busy→ready edge still fires normally, and clear the
-                    // dispatch dedup so the now-ready actor can drain its head.
+                    // busy→ready edge still fires normally. Preserve the
+                    // dispatch dedup: if the injected command returned without
+                    // consuming the same active head, re-firing it every
+                    // stale-busy reconcile tick loops the owner pane.
                     shared.prompt_visible_once.store(false, Ordering::Relaxed);
-                    idle_busy_ticks = 0;
-                    last_dispatched = None;
+                    last_dispatched = reconcile_stale_busy_idle_queue_state(
+                        last_dispatched,
+                        &mut idle_busy_ticks,
+                    );
                     log_event(
                         &mut session_log,
                         &format!(
@@ -5335,6 +5347,26 @@ Done.
             false,
             STALE_BUSY_RECONCILE_TICKS
         ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {
+        let mut idle_busy_ticks = STALE_BUSY_RECONCILE_TICKS;
+        let last_dispatched = reconcile_stale_busy_idle_queue_state(
+            Some("do [#learn-ohio-duplicate-gate]".to_string()),
+            &mut idle_busy_ticks,
+        );
+
+        assert_eq!(idle_busy_ticks, 0);
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                Some("do [#learn-ohio-duplicate-gate]"),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        );
     }
 
     #[test]

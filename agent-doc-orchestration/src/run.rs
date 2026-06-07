@@ -1443,7 +1443,7 @@ fn apply_template_response(
         (content_ours, state)
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
-        let base_state = crate::crdt::CrdtDoc::from_text(baseline).encode_state();
+        let base_state = snapshot::crdt_merge_base_state(file, baseline)?.state;
         let (merged, state) =
             merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
         (merged, Some(state))

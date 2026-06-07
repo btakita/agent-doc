@@ -29,6 +29,9 @@
 //! - `delete_pre_response(doc)`: remove pre-response snapshot if present.
 //! - `load_crdt(doc)`: acquire CRDT advisory lock, return CRDT state bytes or `None`.
 //! - `save_crdt(doc, state)`: acquire CRDT advisory lock, atomically write legacy text state bytes.
+//! - `crdt_merge_base_state(doc, fallback_markdown)`: build the merge-base
+//!   CRDT state from the structured overlay sidecar when it matches the current
+//!   cycle baseline, falling back to `fallback_markdown` otherwise.
 //! - `save_document_crdt(doc, state, markdown)`: persist both the legacy text
 //!   state and the structured markdown-overlay state derived from the same
 //!   runtime markdown snapshot.
@@ -37,9 +40,10 @@
 //! ## Agentic Contracts
 //! - All writes (snapshot, pre-response, CRDT) are atomic: written to a temp file in the
 //!   same directory then renamed, ensuring no partial reads under concurrent access.
-//! - `load`, `save`, `delete`, `load_crdt`, `save_crdt`, `save_document_crdt`,
-//!   and `delete_crdt` are all flock-protected — safe to call from concurrent
-//!   processes on the same document.
+//! - `load`, `save`, `delete`, `load_crdt`, `save_crdt`,
+//!   `crdt_merge_base_state`, `save_document_crdt`, and `delete_crdt` are all
+//!   flock-protected — safe to call from concurrent processes on the same
+//!   document.
 //! - `resolve` prefers the snapshot file unconditionally when it exists. Git is only used
 //!   as a recovery fallback. This prevents false baselines after a step-0b commit.
 //! - `doc_hash` is deterministic and stable: same canonical path → same hash across runs.
@@ -721,11 +725,112 @@ pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
     write_crdt_state(&path, state)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrdtMergeBaseSource {
+    Overlay,
+    FallbackNoOverlay,
+    FallbackOverlayDecodeError,
+    FallbackOverlayProjectionMismatch,
+}
+
+impl CrdtMergeBaseSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CrdtMergeBaseSource::Overlay => "overlay",
+            CrdtMergeBaseSource::FallbackNoOverlay => "fallback_no_overlay",
+            CrdtMergeBaseSource::FallbackOverlayDecodeError => "fallback_overlay_decode_error",
+            CrdtMergeBaseSource::FallbackOverlayProjectionMismatch => {
+                "fallback_overlay_projection_mismatch"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CrdtMergeBase {
+    pub state: Vec<u8>,
+    pub source: CrdtMergeBaseSource,
+}
+
+/// Build the CRDT merge base for a write cycle.
+///
+/// The structured overlay sidecar is authoritative when it decodes and its
+/// markdown projection matches the explicit cycle baseline. If the overlay is
+/// absent or stale, use the known baseline text; using arbitrary stale CRDT
+/// sidecars here can replay old content as a fresh concurrent insertion.
+pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<CrdtMergeBase> {
+    let path = overlay_crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    let overlay_bytes = crate::fs_util::read_optional_bytes(&path)
+        .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))?;
+
+    let (markdown, source) = match overlay_bytes {
+        None => (
+            fallback_markdown.to_string(),
+            CrdtMergeBaseSource::FallbackNoOverlay,
+        ),
+        Some(bytes) => match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(
+            &bytes,
+            Some(fallback_markdown),
+        )
+        .and_then(|overlay| overlay.to_markdown())
+        {
+            Ok(markdown) if markdown == fallback_markdown => {
+                (markdown, CrdtMergeBaseSource::Overlay)
+            }
+            Ok(markdown) => {
+                crate::ops_log::log_op(
+                    doc,
+                    &format!(
+                        "crdt_merge_base_overlay_stale file={} overlay_len={} fallback_len={}",
+                        doc.display(),
+                        markdown.len(),
+                        fallback_markdown.len()
+                    ),
+                );
+                (
+                    fallback_markdown.to_string(),
+                    CrdtMergeBaseSource::FallbackOverlayProjectionMismatch,
+                )
+            }
+            Err(err) => {
+                crate::ops_log::log_op(
+                    doc,
+                    &format!(
+                        "crdt_merge_base_overlay_decode_error file={} error={}",
+                        doc.display(),
+                        err
+                    ),
+                );
+                (
+                    fallback_markdown.to_string(),
+                    CrdtMergeBaseSource::FallbackOverlayDecodeError,
+                )
+            }
+        },
+    };
+
+    crate::ops_log::log_op(
+        doc,
+        &format!(
+            "crdt_merge_base file={} source={} len={}",
+            doc.display(),
+            source.as_str(),
+            markdown.len()
+        ),
+    );
+
+    Ok(CrdtMergeBase {
+        state: crate::crdt::CrdtDoc::from_text(&markdown).encode_state(),
+        source,
+    })
+}
+
 /// Persist both CRDT runtime states for the same markdown snapshot.
 ///
-/// The legacy text CRDT remains the merge engine's base state. The overlay CRDT
-/// is the structured document model sidecar used by node-keyed queue, backlog,
-/// exchange, and editor-integration operations.
+/// The overlay CRDT is the authoritative structured merge-base sidecar when its
+/// markdown projection matches the active cycle baseline. The legacy text CRDT
+/// is still persisted for older binaries and editor plugins.
 pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
     save_crdt(doc, legacy_state)?;
     let overlay_state =
@@ -1076,6 +1181,63 @@ mod tests {
         assert_eq!(overlay.to_markdown().unwrap(), markdown);
         let components = overlay.to_components().unwrap();
         assert!(components.iter().any(|component| component.name == "queue"));
+    }
+
+    #[test]
+    fn crdt_merge_base_state_prefers_matching_overlay_projection() {
+        let (_dir, doc) = setup();
+        let markdown = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#overlay-base]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        save_document_crdt(&doc, &stale_legacy, markdown).unwrap();
+
+        let base = crdt_merge_base_state(&doc, markdown).unwrap();
+
+        assert_eq!(base.source, CrdtMergeBaseSource::Overlay);
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&base.state)
+                .unwrap()
+                .to_text(),
+            markdown
+        );
+    }
+
+    #[test]
+    fn crdt_merge_base_state_falls_back_when_overlay_projection_is_stale() {
+        let (_dir, doc) = setup();
+        let baseline = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#baseline]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let stale_overlay = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#stale]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let overlay_state =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(stale_overlay)
+                .encode_state();
+        save_overlay_crdt(&doc, &overlay_state).unwrap();
+
+        let base = crdt_merge_base_state(&doc, baseline).unwrap();
+
+        assert_eq!(
+            base.source,
+            CrdtMergeBaseSource::FallbackOverlayProjectionMismatch
+        );
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&base.state)
+                .unwrap()
+                .to_text(),
+            baseline
+        );
     }
 
     #[test]

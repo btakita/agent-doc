@@ -7962,7 +7962,7 @@ pub fn run_stream(
                 (content_ours.clone(), doc.encode_state())
             } else {
                 eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
-                let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+                let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
                 match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)
                 {
                     Ok(merged) => merged,
@@ -8246,7 +8246,7 @@ pub fn run_stream(
         // from, giving clean diffs. Using a stale stored state causes character-level
         // interleaving when the agent replaces component content while the user
         // appends within the same region (lazily-rs.md corruption bug).
-        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
         // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
         match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
             Ok(merged) => merged,
@@ -8702,7 +8702,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         // sidecar may be stale relative to that baseline when the editor timed
         // out while the user was typing, and using it here can replay old
         // document content as a fresh concurrent insertion.
-        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
         match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
             Ok(merged) => merged,
             Err(e) => {
@@ -9148,7 +9148,16 @@ fn content_ours_merged_with_disk_edits(
         return on_disk_content;
     }
 
-    let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+    let base_state = match snapshot::crdt_merge_base_state(file, base) {
+        Ok(base) => base.state,
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: failed to load overlay CRDT merge base, falling back to baseline text: {}",
+                e
+            );
+            crate::crdt::CrdtDoc::from_text(base).encode_state()
+        }
+    };
     match merge::merge_contents_crdt(Some(&base_state), content_ours, &on_disk_content) {
         Ok((merged, _)) => merged,
         Err(e) => {

@@ -116,9 +116,12 @@ Only genuinely suspicious fragments trigger the recheck delay.
 
 ## Merge Call Path Diagram
 
-All write-back paths converge through `merge_contents_crdt()` before reaching the CRDT layer:
+All write-back paths build an overlay-aware merge base, then converge through `merge_contents_crdt()` before reaching the CRDT layer:
 
 ```
+                         snapshot::crdt_merge_base_state()
+                                       ▲
+                                       │
                                   crdt::merge()
                                        ▲
                                        │
@@ -140,7 +143,7 @@ All write-back paths converge through `merge_contents_crdt()` before reaching th
 - **`agent-doc repair`** (legacy alias: `recover`): Repairs orphaned stream responses from `.agent-doc/pending/` and repairs stale document-cycle state after an interrupted run.
 - **`agent-doc stream`**: The real-time streaming path. Timer-based flush loop writes cumulative agent output to the document every 200ms.
 
-All three converge through `merge_contents_crdt()` which handles CRDT state loading, merging, and persistence.
+All three prefer the structured `.overlay.yrs` markdown projection as the merge base when it matches the active cycle baseline. If the overlay sidecar is missing, corrupt, or stale, the merge falls back to the explicit baseline text and logs the fallback reason before calling `merge_contents_crdt()`.
 
 ## Truncation Detection
 

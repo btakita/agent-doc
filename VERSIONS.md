@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Structured overlay CRDT is the merge-base authority
+  (`#md-ast-crdt-merge-base`).** Template/CRDT merge paths now derive their
+  text CRDT base from the structured `.overlay.yrs` sidecar when its markdown
+  projection matches the active cycle baseline. If the overlay sidecar is
+  absent, corrupt, or stale relative to the explicit baseline, the merge falls
+  back to the baseline text and logs the fallback reason. Tests
+  `crdt_merge_base_state_prefers_matching_overlay_projection` and
+  `crdt_merge_base_state_falls_back_when_overlay_projection_is_stale`.
+
 - **Safe-passive sync pre-locks the pane handoff.** `sync --no-autostart
   --focus <file>` now selects a live local actor projection before waiting on
   `.agent-doc/sync.lock`, so a contended reconcile no longer gates the visible
@@ -87,9 +96,9 @@ install --harness codex` writes `[mcp_servers.agent-doc]` into
   socket-ack repair, compact, commit-refresh, reset/rebuild, and closeout
   recovery paths now save a structured `.agent-doc/crdt/<hash>.overlay.yrs`
   sidecar from the same markdown snapshot as the legacy text `.yrs` merge
-  state. The legacy state remains the current merge engine base, while the
-  overlay state gives node-keyed component operations an authoritative runtime
-  document model. Tests
+  state. The overlay projection is now the preferred merge base when it matches
+  the active cycle baseline, while the legacy state remains for older binaries
+  and editor plugins. Tests
   `document_crdt_save_persists_legacy_and_overlay_state` and
   `ensure_initialized_migrates_after_move_with_existing_session`.
 

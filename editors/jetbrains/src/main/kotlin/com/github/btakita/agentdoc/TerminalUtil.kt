@@ -1121,12 +1121,15 @@ object TerminalUtil {
         return isLatestRunStillBootingShape(lower) && lower.contains("(active codex turn)")
     }
 
-    private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
-        val lower = output.lowercase()
-        return lower.contains("dispatch-only") &&
-            lower.contains("pane still shows") &&
-            (lower.contains("opencode active turn") || lower.contains("active codex turn"))
-    }
+private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
+    val lower = output.lowercase()
+    val hasActiveTurnCue = lower.contains("opencode active turn") ||
+        lower.contains("active codex turn") ||
+        lower.contains("active claude turn")
+    return lower.contains("dispatch-only") &&
+        hasActiveTurnCue &&
+        (lower.contains("pane still shows") || lower.contains("pane is busy on an active"))
+}
 
     private fun isDispatchOnlyBusyActorWaitTimeout(output: String): Boolean {
         val lower = output.lowercase()

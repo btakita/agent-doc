@@ -208,6 +208,22 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `active-turn skip-wait route refusal is reported as still running immediately`() {
+        val relativePath = "tasks/monsterrodholders.md"
+        val output = """
+            Error: authoritative actor generation 242 for $relativePath owns pane %30 but dispatch-only route will not inject a new trigger because the pane is busy on an active codex turn (Working (1m 34s - esc to interrupt)); restore an idle prompt and retry
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("still running"))
+        assertTrue(message.contains(relativePath))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
     fun `opencode active turn direct blocker is reported as still running not persistent failure`() {
         val relativePath = "tasks/software/tsift.md"
         val output = """

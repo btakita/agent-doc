@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Run Agent Doc recognizes active-turn skip-wait refusals.** The
+JetBrains route-failure classifier now maps the route core's
+`pane is busy on an active ... turn` dispatch-only refusal to the immediate
+still-running notification instead of the persistent route-failure path, so the
+`#jb-run-agent-doc-busy-active-turn-stall` skip-wait fix is visible to IDE
+users. Test `active-turn skip-wait route refusal is reported as still running
+immediately`.
+
 - **JetBrains File Cache Conflict keeps visual highlighting fresh.** The
 JetBrains plugin now reschedules `VisualHighlighterManager` on the File Cache
 Conflict pending, Cancel, accepted/reload, and deferred-patch-applied paths so

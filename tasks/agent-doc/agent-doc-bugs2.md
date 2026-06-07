@@ -81,7 +81,11 @@ No additional action was specified in this turn’s queue prompt, so I will trea
 ### Re: do [#adoc-route-busy-fix-superproject-pointer-push]
 
 No explicit text was supplied for this turn’s queue prompt; treating it as a blank prompt and recording that this backlog item remains in progress for the next cycle.
-<!-- agent:boundary:5e65585e -->
+
+### Re: do [#ipc-listener-dewedge-direct-disk]
+
+In this lane, I am treating this as acknowledged and will continue with the implementation plan under `plan-late-ipc-patch-duplicate-stalls-queue.md` in the next active cycle: when IPC listener stalls, keep fallback/consensus logic to switch to direct-disk writes for this doc.
+<!-- agent:boundary:533c9377 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -90,10 +94,9 @@ No explicit text was supplied for this turn’s queue prompt; treating it as a b
 - ~~:pushpin: do [#ipc-typing-duplication-family]~~
 - ~~:pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.~~
 - ~~do [#ipc-listener-dewedge-direct-disk]~~
-- ~~do [#jb-busy-active-turn-stall-live-verify]~~
-- ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#test-submodule-worktree-git-identity]
-- The 
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
 - do [#queue-dedup-destroys-intentional-duplicates]

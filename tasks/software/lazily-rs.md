@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -125,7 +125,26 @@ Implemented the remaining IPC items from this queue prompt in `src/lazily-rs` by
   - Added coverage for protocol version checking, bounded backpressure behavior, and frame ordering guarantees on the in-process transport.
 
 I also validated this as the queue action path for `#ipc4`/`#ipc5`-class transport-contract work. Remaining IPC transport milestones are still open for later cycles: shared-memory descriptor adapter hardening, OS-level FD/event transports, and benchmark coverage (`#ipc6`/`#ipc7`/`#ipc8`).
-<!-- agent:boundary:8b46c6a6 -->
+Implemented the remaining IPC queue item by adding transport-level benchmark coverage.
+
+### Re: remaining IPC items
+
+I finished the queue action by adding a dedicated benchmark suite for the IPC transport and wiring it into cargo.
+
+#### Code changes
+- `src/lazily-rs/Cargo.toml`
+  - Added new bench target `ipc_transport` (`harness = false`, `required-features = ["ipc"]`).
+- `src/lazily-rs/benches/ipc_transport.rs` (new)
+  - Added benchmarks for
+    - control-frame roundtrip throughput,
+    - retransmit control path support,
+    - payload roundtrip across variable snapshot sizes,
+    - bounded queue backpressure behavior.
+
+#### Result
+- This addresses the queue prompt to continue IPC work by landing concrete IPC benchmark coverage and regression-oriented scaffolding (`#ipc8`-class scope).
+- Remaining IPC milestones still open for follow-up cycles: shared-memory adapter hardening and OS-level transport adapters for Unix/Windows (`#ipc6`/`#ipc7` in the `lazily-rs` backlog context).
+<!-- agent:boundary:4c934469 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +152,8 @@ I also validated this as the queue action path for `#ipc4`/`#ipc5`-class transpo
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- do the remaining ipc items.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -81,7 +81,55 @@ Go-mode pulled my own `[recommended]` item `#3dhp` into the queue, so I did the 
 **Conclusion: don't do a blanket swap.** The data that's actually large is binary SQLite/SurrealDB, where serialization format is irrelevant. The JSON caches total a few MB and are each read at most once per command. The single worthwhile target is `token-index.json` (4.6MB), and only if a cold-start profile shows its read/parse is hot — in which case **gzip is already used elsewhere in the tree** (`.json.gz` projection caches) and is the lower-risk lever; `postcard`/`bincode` beat msgpack if you want a true binary format.
 
 I've rewritten `#3dhp` to record these numbers and dropped it to a measurement-gated low priority rather than implementing anything — no code change is warranted on the evidence.
-<!-- agent:boundary:738d76cd -->
+
+### Re: Can tsift become a mem graph RAG? (arxiv 2606.00610) — opus-4-8
+
+> **Queue prompt:**
+>
+> Please read https://arxiv.org/pdf/2606.00610. Can tsift become a mem graph rag?
+
+
+Read the paper. **MemGraphRAG** = Graph-RAG + a persistent *memory graph* of agent interactions + temporal *decay* on retrieval + a multi-agent framework, evaluated on multi-hop QA (HotpotQA / 2Wiki / MuSiQue) vs GraphRAG/RAPTOR/LightRAG.
+
+**Verdict: yes — tsift is already ~70% of the way there**, and the rest is mostly already on the backlog. The three pillars all have an existing home:
+
+| MemGraphRAG pillar | tsift today | Gap |
+|---|---|---|
+| **Graph** (node/edge schema, hierarchical traversal) | `GraphStore` over SQLite/SurrealDB — symbols/edges, communities, callers/callees, `provenance_json`/`freshness_json` | none — substrate exists |
+| **Memory** (agent interactions, decision history) | `tsift-memory`: `MemoryEvent` stream (PromptTarget/ToolCall/ResponseSummary/CloseoutProof…), `GraphProjection` (events→graph), budgeted `MemoryQueryPlan`, cross-session `MemoryHandoffPlan`, claude-mem import | memory graph is **separate** from the code graph |
+| **RAG** (retrieval + context aggregation) | hybrid BM25 + structural search, `context-pack` injection | retrieval has **no temporal decay** |
+| **Decay / recency** | `observed_at_unix` on events, `community_graph_watermark` staleness | not wired into ranking |
+| **Multi-agent** | tsift is the *shared substrate* for Claude/Codex/OpenCode harnesses (`session_id`, `imported_from`) | orchestration isn't (and shouldn't be) tsift's job |
+
+```mermaid
+flowchart LR
+  subgraph Harnesses["agents (Claude / Codex / OpenCode)"]
+    AD[agent-doc sessions]
+  end
+  subgraph tsift["tsift = mem graph RAG substrate"]
+    ME[tsift-memory: MemoryEvent stream]
+    GP[GraphProjection]
+    GS[GraphStore: code symbols + edges + communities]
+    RET[hybrid retrieval + context-pack]
+    ME --> GP
+    GP -. "#memgraphrag2 unify" .-> GS
+    GS --> RET
+    ME -. "#memgraphrag1 decay" .-> RET
+    AD -->|closeout capture| ME
+  end
+  RET --> Harnesses
+```
+
+**What's genuinely new vs what tsift has:**
+
+1. **Authored memory nodes anchored to code** — already specced as backlog **#trt1** (Finding/Decision/Note nodes on stable symbol-handle/tagpath edges, provenance+confidence+freshness, opt-in capture from agent-doc archives). That *is* the mem-graph roadmap; don't duplicate it.
+2. **Temporal decay-weighted retrieval** — the paper's signature mechanism, and the one thing tsift lacks. The fields exist (`observed_at_unix`, watermark); they just aren't in the ranking. Queued as **#memgraphrag1** (coordinate with **#rankdefault**).
+3. **One graph, not two** — today `tsift-memory`'s `GraphProjection` and the code `GraphStore` are separate. Merging them so memory events and code symbols share a single retrieval surface is the architectural step that earns the "mem graph RAG" label. Queued as **#memgraphrag2** (depends on #trt1).
+
+**What to *not* copy:** the multi-agent orchestration layer. tsift's role is the retrieval/memory substrate that *multiple* harnesses share — the cross-agent coordination belongs in agent-doc / the harnesses, not in tsift. tsift already gets the "multi-agent memory" benefit for free via `session_id`/`imported_from`.
+
+Both new items are **gated** — they're a direction proposal, not auto-executable work (I left them off the active go-queue deliberately; otherwise go-mode would try to build them this loop, as just happened with #3dhp). Say the word and I'll un-gate #memgraphrag1 (decay retrieval) as the lowest-risk first step.
+<!-- agent:boundary:dd8559d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,15 +138,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~Is there a more efficient way to serialize the data such as msgpack, instead of JSON?~~
-- [#3dhp]
-- Please read https://arxiv.org/pdf/2606.00610. Can tsift become a mem graph rag?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#memgraphrag1] Decay-weighted memory retrieval (MemGraphRAG arxiv 2606.00610 core mechanism). tsift-memory MemoryEvent already carries observed_at_unix, but MemoryQueryPlan ranking (packages/tsift-memory/src/lib.rs ~1473) has no temporal decay. Add recency/decay weighting to memory retrieval scoring, reusing existing freshness_json + community_graph_watermark staleness signals; coordinate with #rankdefault ranked_neighborhood so memory + code share one ranking. GATED on user decision to pursue the mem-graph-rag direction.
+- [/] [#memgraphrag2] Unify tsift-memory GraphProjection (packages/tsift-memory/src/lib.rs ~1416, memory events to graph) with the code GraphStore so authored memory nodes (#trt1 Finding/Decision/Note) and code symbols live in ONE queryable graph surface (context-pack/search injection). The architectural move that makes tsift a true mem-graph-RAG: memory stream + code graph + decay retrieval over a single substrate. GATED on #trt1 and a product decision.
 <!-- /agent:backlog -->
 
 ## Review

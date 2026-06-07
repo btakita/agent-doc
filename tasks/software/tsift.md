@@ -36,7 +36,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - ****Archived 13 response topic(s): Does a runbook re-read duplicate context across turns?; Would "retain-don't-reread" be implemented in the skill-harness?; Is the soft-discipline effective at reducing redundant runbook reads?; 10 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:68fb2712 -->
+
+### Re: is [#rtsw] done? — opus-4-8
+
+Yes — done (marked `[x]`). The goal (get `opencode-tsift` publishing working and automated) is fully achieved, though the *mechanism* ended up different from what #rtsw originally proposed:
+
+- #rtsw assumed the fix was a **granular npm token**. That turned out wrong — the `btakita` account enforces 2FA-bypass, so classic *and* granular tokens both hit `E403` (verified locally and in CI). Tokens are a dead end for this account.
+- The actual resolution was **OIDC trusted publishing** (no token at all): `opencode-tsift@0.1.63` bootstrapped to npm, `npm trust` configured (`btakita/tsift` → `release.yml`, verified via `npm trust list`), `release.yml` switched to OIDC (`id-token: write`), and the dead `NPM_TOKEN` secret deleted.
+
+Net result: every future `v*` release auto-publishes opencode-tsift via OIDC — no token, no OTP, no authenticator app. The npm-related review items (`#0y9e`, `#astnav-npm`, `#npm-auth-setup`) are effectively satisfied by this too; `#npm-publish-verify`'s last piece (a CI OIDC publish) will exercise itself on the next version bump.
+<!-- agent:boundary:55c44db4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,7 +62,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rtsw] Fix opencode-tsift npm publish E403: the gh NPM_TOKEN (from passage btak/NPM_TOKEN) is a classic/automation token, which cannot bypass npm's 2FA-for-publish. Generate a Granular Access Token at npmjs.com (read+write for opencode-tsift, 'bypass 2FA' enabled), replace the gh NPM_TOKEN secret, then re-run the failed 'publish OpenCode npm plugin' job on the v0.1.63 Release run (no re-tag needed). Vars/secret are otherwise correct (TSIFT_ENABLE_NPM_PUBLISH=true). Supersedes the auth half of #npm-auth-setup.
 <!-- /agent:backlog -->
 
 ## Review

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: start
 ---
 
 ## Status
@@ -31,13 +31,15 @@ v0.12.0 published to crates.io — tagpath-core split release complete
 Compacted content:
 - Archived 1 response topic(s): Can tagpath benefit from using lazily-rs?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:11996b13 -->
+<!-- agent:boundary:ffb8359f -->
 <!-- /agent:exchange -->
+
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- What are #next-steps to use lazily-rs to improve tagpath performance?
 <!-- /agent:queue -->
 
 ## Backlog

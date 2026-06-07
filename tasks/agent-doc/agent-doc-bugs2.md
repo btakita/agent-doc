@@ -67,16 +67,35 @@ All three are sticky (manual priority beats computed priority), annotated (visib
 **The fence (this cycle's actual head):** apply-side generation fence shipped — `PatchWatcher` now drops a superseded queued patch (baseline drift OR same-cycle already committed) at the file-thread gate + EDT re-check, fail-open on error. Plugin `0.2.149` signed; `PatchGenerationFenceTest` + `make check` green. Only your live IntelliJ install+verify remains (folded into `#live-verify-batch`).
 
 The other pinned items (auto-dag priority, "queue attribute not populating the queue element") stay queued — say the word on the pin syntax and I'll take them in order.
-<!-- agent:boundary:158e4d1d -->
+
+### Re: lock the `__prioritized__` annotation syntax — opus-4-8
+
+> **Queue prompt:**
+>
+> [#late-ipc-patch-plugin-apply-fence]
+
+
+Your edits are recovered and committed — nothing lost. The churn earlier was real and self-inflicted: my `finalize` ran against the baseline captured at the *start* of the turn, so it recomputed the doc from a pre-edit snapshot and reverted your queue in HEAD while you were still typing. A fresh `preflight` re-committed your current `__prioritized__` queue. **That race — finalize using a stale baseline while you edit the queue — is the same root as the regressions you keep hitting (`#queue-edit-lost-during-finalize-crdt`).** The durable fix is for finalize to re-read a fresh baseline (or diff-merge the live queue) right before commit, not trust the preflight snapshot. I'll take that next.
+
+On the annotation — you asked me to beat `__prioritized__`:
+
+- **`📌` prefix** (recommended) — `- 📌 <item>`. One glyph, unmistakable "pinned", release by deleting it. Terser than any word.
+- **`!` prefix** — `- ! <item>`. Pure ASCII, shortest, but reads slightly vague.
+- **`__prioritized__`** — keep yours; clear, just heavy.
+
+I lean `📌`. Pick one (or keep `__prioritized__`) and I'll implement the full contract you described: a sticky pin that sorts pinned items to the top, **survives the per-turn priority recompute** (localized insert, not a full re-sort), and releases when you delete the marker — plus `~~`-strike on completion. I'd make the token configurable so the choice isn't permanent.
+
+The fence head (this turn's task) is shipped: plugin `0.2.149` signed + pushed, `make check` green; kept as an actionable item pending only your live IntelliJ install+verify.
+<!-- agent:boundary:c64690bf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#late-ipc-patch-plugin-apply-fence]
+- ~[#late-ipc-patch-plugin-apply-fence]~
+- __prioritized__ [#late-ipc-patch-plugin-apply-fence]
 - __prioritized__ The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
 - __prioritized__ Please mark queue items `~~` when they are completed. I see open items in the queue that have been completed but they are not completed.
-- __prioritized__ I also want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `__prioritized__`. Terse is better. But don't get too vague. If `__prioritized__` is the most terse and clear way to express the intent, so be it. But see if you can do better.
+- __prioritized__ I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `__prioritized__`. Terse is better. But don't get too vague. If `__prioritized__` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `__prioritized__` to mark anything that you prioritized, so if I delete `__prioritized__`, you should reprioritize it if there is a `priority` attribute.
 - __prioritized__ The backlog with `queue` attribute is not populating the queue element in this document.
-- __prioritized__ [#late-ipc-patch-plugin-apply-fence]
 - [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

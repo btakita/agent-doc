@@ -130,7 +130,49 @@ Verification: no code changed; current `tsift source-read --help` confirms AST p
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:a77b914f -->
+❯ Should I run `agent-doc interrupt-clear tasks/agent-doc/agent-doc-bugs2.md` to clear the interrupt state to refresh the new session?
+### Re: clearing the agent-doc-bugs2 interrupt — gpt-5
+
+Do not run `agent-doc interrupt-clear tasks/agent-doc/agent-doc-bugs2.md`; that command does not exist in the installed `agent-doc 0.34.0` CLI.
+
+For the state I can see, the matching command is:
+
+```bash
+agent-doc cancel /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+
+That command is specifically for abandoning an empty orphaned `preflight_started` cycle after a cancelled/interrupted run. It matches the current `agent-doc-bugs2.md` diagnosis: `session-check` still reports cycle `cycle-1780855445300` stuck at `preflight_started`, with no write/commit afterward and IPC proof diagnostic `no_ack`.
+
+After that, rerun:
+
+```bash
+agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+
+If the old `--line` / `--count` style still appears after `cancel` plus a fresh run, the stale part is probably the live harness context/pane, not the agent-doc cycle state. Then restart or compact that specific `agent-doc-bugs2.md` session rather than using `agent-doc reset`. I would reserve `reset --from-current` for snapshot/CRDT corruption, because it is broader than what this interrupted preflight state needs.
+
+No actionable follow-up item needs backlog capture for this turn.
+
+Changed paths: none besides this agent-doc response.
+
+Commands run:
+- `tsift status`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent_doc_plan` for this session
+- `agent_doc_session_check` / `agent-doc session-check` for `tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc interrupt-clear --help`
+- `agent-doc --help`
+- `agent-doc cancel --help`
+- `agent-doc repair --help`
+- `agent-doc reset --help`
+
+Verification: no code changed; `agent-doc interrupt-clear --help` fails as an unrecognized subcommand, while `agent-doc cancel --help` describes the exact orphaned `preflight_started` recovery case shown by `session-check`.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:c6eb060f -->
 <!-- /agent:exchange -->
 ###
 <!--

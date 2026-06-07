@@ -82,6 +82,7 @@ version = "0.34.0"
 dependencies = [
  "tree-sitter",
  "tree-sitter-md",
+ "yrs",
 ]
 
 [[package]]

@@ -136,6 +136,8 @@ A document has four concurrent representations during a write cycle:
 | **File on disk** | The document file | Editor (auto-save) | Last editor save. Lags behind the editor buffer. Used by non-IPC write paths. |
 | **Editor buffer** | Editor memory | Editor (Document API) | Live content including unsaved edits. IPC writes target this via the Document API, preserving cursor position and undo history. |
 
+CRDT sidecar state is versioned. Legacy states store the whole markdown document in a Yrs text root named `content`. The structured markdown AST overlay stores `agent_doc_overlay.schema_version = 1`, a `markdown` projection, and a `components` Yrs array whose entries are component maps (`name`, `attrs`, byte span, `items`). Item entries are maps (`id`, `text`, `raw`, byte span, `kind`, `struck`, `pinned`, `agent_pinned`); `kind` is itself a map with `type` and optional `checkbox`. Loading an old `content` state migrates by reparsing that markdown through the component overlay, while empty legacy state can use the current markdown file as a fallback.
+
 **Consistency invariants:**
 - After preflight step 2b: `baseline == snapshot` (minus boundary markers)
 - After `agent-doc write`: `snapshot == baseline + response` (content_ours)

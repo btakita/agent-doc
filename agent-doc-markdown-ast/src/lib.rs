@@ -12,6 +12,7 @@
 //! tree with stable ids is the substrate that lets later phases key those
 //! operations on node identity instead of text.
 
+pub mod crdt;
 pub mod overlay;
 
 use std::hash::{Hash, Hasher};

@@ -44,6 +44,8 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **Code range exclusion:** Component marker detection uses pulldown-cmark for CommonMark-compliant code range detection, replacing the previous regex-based approach. Markers inside inline code spans or fenced code blocks are excluded and never treated as component boundaries.
 
+**Structured overlay CRDT:** The markdown AST crate owns a structured Yrs schema for the agent component overlay. The root map `agent_doc_overlay` stores `schema_version`, the visible markdown projection, and a `components` array; each component is a map with byte span metadata and an `items` array; each item is a map with stable `id`, normalized text, raw text, pin/strike flags, and kind metadata. New structured states must not rely on the legacy single `content` `Text` root for component identity, and legacy `content` states are migrated by reparsing their markdown projection into this schema.
+
 **Standard component names:**
 
 | Component | Default `patch` | Description |

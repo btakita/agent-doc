@@ -140,9 +140,86 @@ fn mcp_serve_handles_initialize_list_and_read() {
             .iter()
             .any(|tool| tool["name"] == "agent_doc_finalize")
     );
+    assert!(
+        responses[1]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "agent_doc_preflight")
+    );
+    assert!(
+        responses[1]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "agent_doc_plan")
+    );
     assert_eq!(
         responses[2]["result"]["structuredContent"]["content"],
         "MCP body\n"
+    );
+}
+
+#[test]
+fn mcp_serve_handles_preflight_probe_and_plan() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = template_doc(
+        "Session",
+        "❯ Please inspect\n<!-- agent:boundary:1234abcd -->\n",
+        "",
+        "",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, &content);
+
+    let preflight = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_preflight",
+            "arguments": {
+                "file": doc.display().to_string(),
+                "probe": true
+            }
+        }
+    });
+    let plan = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_plan",
+            "arguments": {
+                "file": doc.display().to_string()
+            }
+        }
+    });
+
+    let assert = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["mcp", "serve"])
+        .write_stdin(format!("{preflight}\n{plan}\n"))
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let responses: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["result"]["isError"], false);
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["report"]["no_changes"],
+        true
+    );
+    assert_eq!(responses[1]["result"]["isError"], false);
+    assert_eq!(
+        responses[1]["result"]["structuredContent"]["plan"]["execution_scope"],
+        "normal"
     );
 }
 

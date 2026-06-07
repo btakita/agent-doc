@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -116,6 +117,31 @@ fn tools_list_result() -> Value {
                 }
             },
             {
+                "name": "agent_doc_preflight",
+                "title": "Run agent-doc preflight",
+                "description": "Run preflight for a session document and return its JSON report plus captured diagnostics.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the session document." },
+                        "probe": { "type": "boolean", "description": "When true, run preflight as a side-effect-free probe." }
+                    },
+                    "required": ["file"]
+                }
+            },
+            {
+                "name": "agent_doc_plan",
+                "title": "Build agent-doc plan",
+                "description": "Derive the structured post-preflight planning record for a session document.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the session document." }
+                    },
+                    "required": ["file"]
+                }
+            },
+            {
                 "name": "agent_doc_session_check",
                 "title": "Check agent-doc session state",
                 "description": "Inspect closeout state and active queue continuation for a session document.",
@@ -182,6 +208,8 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
 
     let result = match name {
         "agent_doc_read" => tool_read(&args),
+        "agent_doc_preflight" => tool_preflight(&args),
+        "agent_doc_plan" => tool_plan(&args),
         "agent_doc_session_check" => tool_session_check(&args),
         "agent_doc_finalize" => tool_finalize(&args),
         _ => {
@@ -208,6 +236,70 @@ fn tool_read(args: &Map<String, Value>) -> Result<Value> {
         "content": content,
     });
     Ok(tool_success_result(content, structured))
+}
+
+fn tool_preflight(args: &Map<String, Value>) -> Result<Value> {
+    let file = required_path_arg(args, "file")?;
+    let probe = bool_arg(args, "probe", false)?;
+    let mut command =
+        Command::new(std::env::current_exe().context("failed to resolve agent-doc binary")?);
+    command.arg("preflight");
+    if probe {
+        command.arg("--probe");
+    }
+    command.arg(&file);
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run preflight for {}", file.display()))?;
+    let stdout = String::from_utf8(output.stdout).context("preflight stdout was not UTF-8")?;
+    let stderr = String::from_utf8(output.stderr).context("preflight stderr was not UTF-8")?;
+    if !output.status.success() {
+        bail!(
+            "preflight failed for {} with status {}{}\n{}",
+            file.display(),
+            output.status,
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nstdout:\n{}", stdout.trim_end())
+            },
+            stderr.trim_end()
+        );
+    }
+
+    let report: Value = serde_json::from_str(stdout.trim())
+        .with_context(|| format!("preflight for {} did not return JSON", file.display()))?;
+    let structured = json!({
+        "ok": true,
+        "file": file.display().to_string(),
+        "probe": probe,
+        "report": report,
+        "stderr": stderr,
+    });
+    let text = if stderr.trim().is_empty() {
+        serde_json::to_string_pretty(&structured)?
+    } else {
+        format!(
+            "{}\n{}",
+            stderr.trim_end(),
+            serde_json::to_string_pretty(&structured)?
+        )
+    };
+    Ok(tool_success_result(text, structured))
+}
+
+fn tool_plan(args: &Map<String, Value>) -> Result<Value> {
+    let file = required_path_arg(args, "file")?;
+    let plan = crate::plan::build(&file)?;
+    let structured = json!({
+        "ok": true,
+        "file": file.display().to_string(),
+        "plan": plan,
+    });
+    Ok(tool_success_result(
+        serde_json::to_string_pretty(&structured)?,
+        structured,
+    ))
 }
 
 fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
@@ -459,6 +551,8 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         assert!(names.contains(&"agent_doc_read"));
+        assert!(names.contains(&"agent_doc_preflight"));
+        assert!(names.contains(&"agent_doc_plan"));
         assert!(names.contains(&"agent_doc_session_check"));
         assert!(names.contains(&"agent_doc_finalize"));
     }

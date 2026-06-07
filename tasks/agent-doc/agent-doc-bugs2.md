@@ -21,7 +21,8 @@ queue: start
 ## Status
 
  <!-- agent:status patch=replace -->
-Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) — matches captured review `#jb-monsterrod-route-ready-wait-stall`: the `[route]` error is the dispatch-only busy ready-wait (gen 281 owns pane %1, busy actor didn't reach a dispatch-ready prompt within 60s). It's **fail-open-after-wait, not a hang** — the route waited then declined to inject into a busy turn. Fix (surface a "waiting for pane (60s)" status in JB so it doesn't look like a stall) is captured in `#jb-monsterrod-route-ready-wait-stall` + `#jb-run-agent-doc-busy-feedback-live-verify`. Struck as duplicate. Heads 1-6 done (2 fixes CI-green + plans/captures).
+
+Completed #md-ast-crdt-schema: structured overlay CRDT schema shipped in src/agent-doc 8e54718a; superproject pointer pushed as 7e224eb6c.
 <!-- /agent:status -->
 
 ## Exchange
@@ -73,9 +74,8 @@ Verification:
 - `make check`
 - `cargo install --path .`
 - GitHub Actions CI run `27082388018` succeeded on `main` for `8e54718a`; both `make check` and `make tmux-ci` passed.
-<!-- agent:boundary:0f2bcc47 -->
+<!-- agent:boundary:f0ce30a4 -->
 <!-- /agent:exchange -->
-
 
 ## Queue
 

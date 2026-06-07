@@ -143,15 +143,33 @@ Draining your pinned queue top-down. Shipped this turn, each `make check`-green 
 4. **backlog `queue` attr populates the queue in go-mode** (`1645112d`) — your `queue: start` (go-mode) is a continuous-backlog-loop opt-in, so freshly-added backlog `queue`-attr ids now append to the live queue immediately, not only when it drains. (Plain non-go active queues still hold fresh ids to prevent mid-loop amplification.) Verified live: the log now reads `go-mode active queue — appending fresh backlog queue-attr id(s)`.
 
 **Still open from your list:** the **bold-markdown rendering** in the JB + VSCode plugins (`**bold**` shown bold inline in the editor) — that's pure editor UI styling in two editors, the one item I can't self-verify (visual appearance), so I'm taking it next as its own focused build. Your `:pushpin: I did the update. Please verify [#late-ipc-patch…]` item still wants your `idea.log` check for `generation fence: dropping superseded patch`.
-<!-- agent:boundary:e90c3124 -->
+<!-- agent:boundary:032032e3 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Add :pushpin:/:round_pushpin: + **pin**/_pin_ as an alias to **prioritized**/_prioritized_.~~
 - :pushpin: The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
 - :pushpin: The backlog with `queue` attribute is not populating the queue element in this document.
 - :pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
 - :pushpin: I did the update. Please verify [#late-ipc-patch-plugin-apply-fence] by looking in the logs.
+---
+:pushpin: I'm unable to run monsterrodholders.md. I tried `agent-doc session interrupt-clear tasks/monsterrodholders.md` and `kill-pane`. But the next turn has this error.
+```
+• I used the safe restart path instead of the recursive direct command:
+
+  agent-doc start tasks/monsterrodholders.md
+
+  That launched a replacement owner, but it entered a loop repeatedly injecting agent-doc tasks/monsterrodholders.md
+  into pane %35. I stopped only the duplicate foreground process tree I started. No new commits or file changes were
+  created during that loop; boost-client is still clean against origin/main except for the pre-existing dirty nested
+  src/monsterrodholders-dev/AGENTS.md.
+
+  agent-doc session clear tasks/monsterrodholders.md refused because pane %35 is still actively busy. The next stronger
+  recovery is intentional interruption:
+
+  agent-doc session interrupt-clear tasks/monsterrodholders.md
+```
+---
 - [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

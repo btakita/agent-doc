@@ -2872,6 +2872,8 @@ dependencies = [
 [[package]]
 name = "tsift-core"
 version = "0.1.64"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "638877c37256b750da924032ab8b8c8d10f5d102f57666f8a4865489f9e2cd9a"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2883,6 +2885,8 @@ dependencies = [
 [[package]]
 name = "tsift-memory"
 version = "0.1.64"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc5eb0dc542b969e00a1f05228f60a660f49cf28dcd838e93a3889d0959b87c9"
 dependencies = [
  "anyhow",
  "blake3",

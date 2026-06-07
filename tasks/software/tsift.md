@@ -63,7 +63,25 @@ Even there I'd hold off on msgpack specifically:
 - **For size alone, zstd over the existing JSON** often beats a format swap and is orthogonal — you keep JSON's debuggability.
 
 Queued this as a `[recommended]` backlog item (scoped to those two caches, gated on a profile) so it doesn't get applied as a blanket find-and-replace.
-<!-- agent:boundary:0421c4de -->
+
+### Re: #3dhp cache-encoding — measured, not worth a swap — opus-4-8
+
+Go-mode pulled my own `[recommended]` item `#3dhp` into the queue, so I did the measurement it was gated on instead of blindly implementing a format swap. On-disk audit of `.tsift/` (455MB total):
+
+| Artifact | Size | Format | msgpack helps? |
+|---|---|---|---|
+| `surrealkv` clogs (backend-eval) | 162MB+ | binary | no — already binary |
+| `graph.db` | 141MB | SQLite | no — native rows |
+| `index.db` (+ per-crate) | 20MB+ | SQLite | no — native rows |
+| `search-cache/token-index.json` | **4.6MB** | JSON | maybe — only real target |
+| `conflict-matrix-cache/graph` | 1.2MB | JSON | marginal |
+| `community-cache/*` | ~130KB ×4 | JSON | negligible |
+| `backend-eval-cache/*.json.gz` | 3.2MB | **gzip'd JSON** | already compressed |
+
+**Conclusion: don't do a blanket swap.** The data that's actually large is binary SQLite/SurrealDB, where serialization format is irrelevant. The JSON caches total a few MB and are each read at most once per command. The single worthwhile target is `token-index.json` (4.6MB), and only if a cold-start profile shows its read/parse is hot — in which case **gzip is already used elsewhere in the tree** (`.json.gz` projection caches) and is the lower-risk lever; `postcard`/`bincode` beat msgpack if you want a true binary format.
+
+I've rewritten `#3dhp` to record these numbers and dropped it to a measurement-gated low priority rather than implementing anything — no code change is warranted on the evidence.
+<!-- agent:boundary:bec0d18e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,13 +92,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~~Is there a more efficient way to serialize the data such as msgpack, instead of JSON?~~
+- [#3dhp]
 - Please read https://arxiv.org/pdf/2606.00610. Can tsift become a mem graph rag?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3dhp] [recommended] Cache encoding: only the opaque disk caches (packages/tsift-cli/src/community_detection.rs read/write_community_detection_cache, conflict_matrix.rs disk cache) are msgpack candidates — they use serde_json to_vec/from_slice → fs::write and are never SQL-queried. Do NOT touch the SQLite graph columns (properties_json/provenance_json/freshness_json) — they are queried via json_each/json_extract; nor the --json/--envelope stdout (harness API contract); nor session JSONL parsing (external format). Gate on a profile showing serialization is hot; if so prefer postcard/bincode (schema-driven, smaller/faster than msgpack for internal blobs) or zstd over the existing JSON. Measure cache blob sizes first.
+- [ ] [#3dhp] [recommended] Cache encoding (MEASURED, low priority). On-disk audit: bulk of .tsift is binary SQLite/SurrealDB (graph.db 141MB, index.db 20MB, surrealkv clogs 162MB+) — msgpack irrelevant there. Largest plain-JSON cache is search-cache/token-index.json (4.6MB BM25 token index) — the ONLY worthwhile target. conflict-matrix/graph cache ~1.2MB, community-cache ~130KB (community_detection.rs/conflict_matrix.rs to_vec/from_slice → fs::write, never SQL-queried). Note: backend-eval projection caches already ship .json.gz, so gzip is the existing lever. Do NOT touch SQLite json_each columns / --json|--envelope stdout / session JSONL. Action only if a cold-start profile shows token-index.json read/parse is hot; then prefer gzip (already in tree) or postcard/bincode over msgpack. Otherwise leave as JSON.
 <!-- /agent:backlog -->
 
 ## Review

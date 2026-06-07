@@ -358,7 +358,25 @@ The six `#spcp-*` items were added to the backlog and then completed through the
 Yes, the original non-add was an `#agent-doc-bug`. The failure mode was not that the response text was unclear; it was that finalize/retry and queue closeout could leave the exchange claiming backlog capture while the pending mutation did not reliably survive. That is now tracked and fixed by agent-doc `e5cfa31c` (`fix: preserve retry backlog closeouts`), with regression coverage for visible-response retry plus `--pending-add` and interspersed done-id queue consumption.
 
 No new backlog item is needed for this prompt.
-<!-- agent:boundary:21a029f5 -->
+
+### Re: backlog boundary accumulation — gpt-5
+
+> **Queue prompt:**
+>
+> `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
+
+
+I checked the current document and this is not reproducing now.
+
+Current state:
+- exactly one escaped `agent:boundary` marker exists in `tasks/agent-doc/agent-doc-bugs2.md`
+- that boundary is at the `agent:exchange` tail
+- `agent:backlog` contains no boundary marker
+
+The relevant source paths also point the right way: boundary append/reposition code is scoped to `agent:exchange`, while backlog mutation is handled through pending/backlog item operations. So the right invariant is: one live exchange boundary, zero backlog boundaries. If a boundary appears inside `agent:backlog` again, that should be treated as a fresh `#agent-doc-bug` with the concrete pre/post document diff, because the current document no longer carries the artifact.
+
+No new backlog item is needed from this closeout.
+<!-- agent:boundary:8e4c705f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -377,7 +395,7 @@ No new backlog item is needed for this prompt.
 - ~~:round_pushpin: do [#adoc-pending-retry-loss]~~
 - ~~agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.~~
 - ~~"#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?~~
-- `agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.
+- ~~`agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.~~
 - Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?

@@ -65,30 +65,30 @@ Commits and push:
 
 CI:
 - Latest `src/agent-doc` CI after the push is running as `27087033562` for `b76a3099`; the previous `main` CI run `27086772914` was green.
-<!-- agent:boundary:6677104a -->
+<!-- agent:boundary:467bc8d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#ipc-listener-dewedge-direct-disk]~~
-- do [#jb-busy-active-turn-stall-live-verify]
-- do [#adoc-route-busy-fix-superproject-pointer-push]
-- ~~do [#test-submodule-worktree-git-identity]~~
-- do [#multi-session-shared-build-isolation]
-- do [#sync-fast-pane-hotpath]
-- do [#queue-dedup-destroys-intentional-duplicates]
+- do [#md-ast-document-model]
+- do [#jb-file-cache-conflict-syntax-loss]
+- do [#recursion-guard-wedge-escape]
+- do [#partial-staging-closeout-guard]
 - do [#codex-mcp-server-root-fix]
 - do [#live-verify-batch]
 - do [#automated-completion-detection]
+- do [#stale-busy-after-auto-inject-no-clear]
 - do [#monsterrod-queue-items-deleted-live]
 - do [#clear-blocked-by-own-drafted-clear-command]
 - do [#tmux-status-turn-in-progress]
 - do [#stale-busy-self-heal-live-verify]
-- do [#partial-staging-closeout-guard]
-- do [#jb-file-cache-conflict-syntax-loss]
-- do [#recursion-guard-wedge-escape]
-- do [#md-ast-document-model]
+- do [#jb-run-preempt-followups]
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
+- do [#multi-session-shared-build-isolation]
+- do [#sync-fast-pane-hotpath]
+- do [#queue-dedup-destroys-intentional-duplicates]
 <!-- /agent:queue -->
 ###
 <!--

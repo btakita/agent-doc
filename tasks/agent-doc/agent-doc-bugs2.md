@@ -35,13 +35,35 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 2 response topic(s): backlog queue priority markers; A backlog with queue attribute should immediately add to the queue and prioritize using auto-dag when priority is pre...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f50fcc67 -->
+
+### Re: monsterrodholders.md cycling between sessions - gpt-5
+
+Checked and repaired the current state.
+
+Findings:
+- The Boost Client actor registry currently has one live owner for `src/boost-client/tasks/monsterrodholders.md`: Codex pane `%35`, generation 300, state `ready`.
+- The apparent cycle was not two live owners fighting. The active interruption was `session-check` failing `#queue-clear-unrun-items`: six runnable queue heads had been recorded for the cycle but were missing from `agent:queue` while their backlog items were still open.
+- The outer `tasks/research/monsterrodholders.md` session is clean; the interrupted document was the Boost Client task file.
+
+Fix:
+- Restored the dropped queue heads in `src/boost-client/tasks/monsterrodholders.md`:
+  `#learn-winter-pillar`, `#learn-rig-skipjack-spokes`, `#learn-flathead-night-guide`, `#learn-first10-crosslink-refresh`, `#learn-region-triage`, and `#learn-boat-evidence-gate`.
+- Applied the closeout recovery so HEAD and the visible document agree.
+- Pushed `btakita/boost-client` to `8c8310d` and updated the parent gitlink in `btakita/agent-loop` at `3b9351a24`.
+
+Verification:
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/research/monsterrodholders.md` passes.
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` passes and now reports next queue prompt `do [#learn-ohio-duplicate-gate]`.
+- `btakita/boost-client` has no GitHub Actions workflows named/listed, so there was no remote Boost Client CI to inspect.
+- Parent `btakita/agent-loop` `Agent Doc` run `27085543043` still fails immediately with jobs `check` and `tmux-ci` containing `steps: []`, matching the existing runner/infrastructure-shaped failure on prior gitlink pushes.
+<!-- agent:boundary:375a99a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.~~
+- :pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]

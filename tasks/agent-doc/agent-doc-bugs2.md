@@ -142,14 +142,54 @@ Commands: `tsift status`; `agent-doc --version`; `agent_doc_preflight`; `agent_d
 Verification: no source files changed, so no test/build suite was run; the answer was checked against the current actor contract and command/admin surfaces.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:0fe3be91 -->
+
+### Re: fast session state and durable projections — gpt-5
+
+> **Queue prompt:**
+>
+> "The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.
+
+
+Yes, session tracking should stop depending on a synchronous `sessions.json` read/modify/write lock. The current code already has the better authority model: `handle_attach_pane` calls `project_binding_in`, which stores the actor record through the project controller SQLite path. The latency problem is that `store_actor_record` still emits `session-actors.json` synchronously and, for start/eviction cases, also projects back into `sessions.json`. That makes compatibility files part of the attach/start critical path even though the spec says they are projections.
+
+The better split is:
+- Authoritative hot state: controller-owned in-memory actor/session map.
+- Durable authority: SQLite `state.db`, with WAL enabled and one controller-owned writer connection.
+- Compatibility projections: `session-actors.json`, `sessions.json`, and layout JSON emitted from committed state by a projection worker.
+- Diagnostics: projection lag/drift recorded in SQLite and `ops.log`, but not allowed to make actor authority stale.
+
+`JSON` is the wrong format for the durable coordination record. It is fine as a human-inspectable projection, but it has the exact bad properties we are seeing: whole-file rewrites, external locks, no native compare-and-swap, poor concurrent writer behavior, and no cheap append/audit story. SQLite is the right durable store for actor/session state because it gives us transactions, indexed lookup by document/session/pane/generation, dispatch-attempt audit rows, and WAL behavior that avoids a custom file-lock protocol.
+
+`lazily-rs` still fits, but as the in-memory/materialized state layer, not as another durable truth beside SQLite. The controller can keep a lazily-backed actor pool/cache keyed by document id, session id, pane id, and supervisor lease. Mutations go through a single controller actor that updates memory immediately, records the minimal SQLite event, and publishes change notifications to projection/admin/dashboard tasks. Reads for route/focus/admin then hit memory first and only fall back to SQLite on controller restart or cache miss.
+
+I would not make every durable write background. For any operation that changes ownership or sends input to a pane, we need a minimal durable reservation before the side effect crosses the pane/supervisor boundary: actor transition, dispatch attempt, operator command acceptance, or supervisor lease state. Otherwise a crash can leave the pane changed with no durable explanation. What can be background is everything derived: `sessions.json`, `session-actors.json`, dashboard models, drift checks, log summaries, and projection validation.
+
+The fast path should look like this:
+1. Request enters the controller/dispatch actor.
+2. Controller validates generation/session/pane against in-memory state.
+3. Controller applies the mutation in memory and writes a small SQLite transaction through its single writer.
+4. Dispatch returns or proceeds with pane/supervisor input.
+5. Projection workers coalesce and emit JSON snapshots without holding up attach/route.
+
+That should make `handle_attach_pane` effectively independent of `sessions.json` lock latency. `sessions.json` can trail by a few milliseconds because any normal path that needs authority should ask the controller or read SQLite, not rely on that projection. Legacy readers can still see the projection, and drift becomes a diagnostic instead of a source of truth.
+
+One concrete adjustment I would make to the current SQLite layer: `open_state_db` currently initializes schema but does not appear to set `journal_mode=WAL`, `busy_timeout`, or a tuned `synchronous` mode. The controller-owned writer should set those once and reuse the connection rather than opening a fresh connection for each actor mutation. That gives SQLite room to be the durable WAL instead of forcing agent-doc to build a parallel WAL around JSON.
+
+Session note: exchange accretion remains at warn level, but the active queue should keep draining; I did not compact without an explicit auto-compact opt-in.
+
+Changed paths: none outside this session document.
+Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; targeted `rg`/`sed` inspection of `handle_attach_pane`, `project_binding_in`, `store_actor_record`, `project_sessions_projection_for_actor`, `sessions::load_in`, `sessions::save_in`, and SQLite state-store initialization/transaction code.
+Verification: no source files changed, so no test/build suite was run; the answer was checked against the current controller, sessions registry, and SQLite state-store paths.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:715be5ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?~~
-- "The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.
+- ~~"The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.~~
 - agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?

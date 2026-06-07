@@ -515,6 +515,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
 
+            // Generation fence (#late-ipc-patch-plugin-apply-fence): drop a patch
+            // whose generation token proves it is superseded — its cycle already
+            // committed, or the live doc moved on from the baseline it targeted —
+            // instead of applying it late and re-materializing a duplicate Re block.
+            if (isPatchGenerationSuperseded(patch)) {
+                LOG.info("[patch-watcher] generation fence: dropping superseded patch: ${patchFile.name}")
+                patchFile.delete()
+                return
+            }
+
             // patch_id dedup: if socket IPC already applied this logical write, skip.
             if (isAlreadyApplied(patch.patchId)) {
                 LOG.info("[patch-watcher] dedup: patch_id ${patch.patchId} already applied via socket — deleting: ${patchFile.name}")
@@ -535,6 +545,14 @@ class PatchWatcher(private val project: Project) : Disposable {
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
+                    patchFile.delete()
+                    return@invokeLater
+                }
+                // Re-check the generation fence under EDT: the producing cycle may
+                // have committed (or a later cycle rewritten the doc) between the
+                // file-thread check and this EDT dispatch.
+                if (isPatchGenerationSuperseded(patch)) {
+                    LOG.info("[patch-watcher] generation fence (EDT): dropping superseded patch: ${patchFile.name}")
                     patchFile.delete()
                     return@invokeLater
                 }
@@ -1423,6 +1441,95 @@ class PatchWatcher(private val project: Project) : Disposable {
             return bytes.joinToString("") { "%02x".format(it) }
         }
 
+        /** Compute SHA256 hex of content bytes — mirrors debounce::content_hash in the Rust binary. */
+        fun contentHash(content: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val bytes = digest.digest(content.toByteArray(Charsets.UTF_8))
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
+
+        /**
+         * Apply-side generation fence (`#late-ipc-patch-plugin-apply-fence`).
+         *
+         * A queued file patch tagged by the binary
+         * ([queue_file_ipc_reposition_boundary] in write.rs) carries a generation
+         * token: `cycle_id` (the cycle that produced it) and `baseline_hash`
+         * (SHA-256 of the live doc the patch targeted). A LATE applier — this
+         * watcher, possibly running minutes after the producing cycle committed —
+         * must DROP a patch whose generation is already superseded instead of
+         * re-applying it and re-materializing a duplicate `### Re:` block:
+         *
+         *  - **cycle already committed:** the document's persisted `cycle_state`
+         *    advanced the SAME `cycle_id` this patch was produced in to
+         *    `committed`. The cycle is closed; replaying its reposition can only
+         *    duplicate (mirrors the write-side `try_ipc` `already_committed` guard).
+         *  - **baseline drift:** the live doc no longer hashes to `baseline_hash`.
+         *    A later cycle rewrote the doc, so the patch targets a stale baseline.
+         *
+         * Fails OPEN: returns false on any IO/parse error or when the patch
+         * carries no generation token, so a legitimate patch is never dropped
+         * because state could not be read.
+         */
+        fun isPatchGenerationSuperseded(patch: IpcPatch, liveContent: String?): Boolean {
+            // Baseline drift: live doc moved on from the baseline this patch targeted.
+            if (patch.baselineHash != null && liveContent != null) {
+                if (contentHash(liveContent) != patch.baselineHash) {
+                    LOG.info(
+                        "[patch-watcher] generation fence: baseline drift (live doc moved on from queued baseline) for ${patch.file}",
+                    )
+                    return true
+                }
+            }
+            // Cycle already committed: the producing cycle is closed.
+            if (patch.cycleId != null && cycleAlreadyCommitted(patch.file, patch.cycleId)) {
+                LOG.info(
+                    "[patch-watcher] generation fence: cycle ${patch.cycleId} already committed for ${patch.file}",
+                )
+                return true
+            }
+            return false
+        }
+
+        /** EDT/file-thread variant that reads the live doc content from disk. */
+        private fun isPatchGenerationSuperseded(patch: IpcPatch): Boolean {
+            if (patch.baselineHash == null && patch.cycleId == null) return false
+            val liveContent = try {
+                val f = File(patch.file)
+                if (f.exists()) f.readText() else null
+            } catch (e: Exception) {
+                LOG.debug("[patch-watcher] generation fence: could not read live doc ${patch.file}: ${e.message}")
+                null
+            }
+            return isPatchGenerationSuperseded(patch, liveContent)
+        }
+
+        /**
+         * Mirror of `flow::closeout::cycle_already_committed`: true when the
+         * document's persisted cycle_state has the SAME `cycle_id` and phase
+         * `committed`. Reads `.agent-doc/state/cycles/<doc-hash>.json`.
+         */
+        fun cycleAlreadyCommitted(docPath: String, cycleId: String): Boolean {
+            var dir: File? = File(docPath).parentFile
+            while (dir != null) {
+                val agentDocDir = File(dir, ".agent-doc")
+                if (agentDocDir.isDirectory) {
+                    val stateFile = File(agentDocDir, "state/cycles/${docHash(docPath)}.json")
+                    if (!stateFile.exists()) return false
+                    return try {
+                        val root = com.google.gson.JsonParser.parseString(stateFile.readText()).asJsonObject
+                        val stateCycleId = root.get("cycle_id")?.asString
+                        val phase = root.get("phase")?.asString
+                        stateCycleId == cycleId && phase == "committed"
+                    } catch (e: Exception) {
+                        LOG.debug("[patch-watcher] generation fence: could not read cycle_state for $docPath: ${e.message}")
+                        false
+                    }
+                }
+                dir = dir.parentFile
+            }
+            return false
+        }
+
         fun getInstance(project: Project): PatchWatcher {
             return instances.getOrPut(project) {
                 PatchWatcher(project).also { it.start() }
@@ -1461,6 +1568,19 @@ data class IpcPatch(
      * patch alone cannot add/remove an opening-tag attribute.
      */
     val queueAuto: Boolean? = null,
+    /**
+     * Generation token (`#late-ipc-patch-plugin-apply-fence`). The cycle that
+     * produced this patch. A LATE applier drops the patch when the document's
+     * persisted `cycle_state` already advanced this same cycle to `committed`.
+     */
+    val cycleId: String? = null,
+    /**
+     * Generation token (`#late-ipc-patch-plugin-apply-fence`). SHA-256 hex of
+     * the live document the patch targeted at queue time
+     * (`debounce::content_hash`). A LATE applier drops the patch when the live
+     * doc no longer hashes to this value — the doc moved on to a later cycle.
+     */
+    val baselineHash: String? = null,
 )
 
 data class ComponentPatch(
@@ -1965,6 +2085,8 @@ fun parsePatchJson(json: String): IpcPatch? {
         val expectedContentHash = root.get("expected_content_hash")?.asString
         val expectedContentLen = root.get("expected_content_len")?.asInt
         val queueAuto = root.get("queue_auto")?.let { if (it.isJsonNull) null else it.asBoolean }
+        val cycleId = root.get("cycle_id")?.let { if (it.isJsonNull) null else it.asString }
+        val baselineHash = root.get("baseline_hash")?.let { if (it.isJsonNull) null else it.asString }
         return IpcPatch(
             file,
             patches,
@@ -1979,6 +2101,8 @@ fun parsePatchJson(json: String): IpcPatch? {
             expectedContentHash,
             expectedContentLen,
             queueAuto,
+            cycleId,
+            baselineHash,
         )
     } catch (e: Exception) {
         return null

@@ -74,15 +74,44 @@ Findings:
 Fix:
 - Expanded `#automated-completion-detection` so the durable root fix explicitly covers opportunistic completions that leave stale queue/review mirrors, including semantic matches from queue free text to `agent:done` / session history.
 - This current prompt is answered; no additional backlog item is needed beyond the tightened `#automated-completion-detection` scope.
-<!-- agent:boundary:bd75961c -->
+
+### Re: Please investigate the lazily-rs session. It is not behaving correctly.
+
+Investigated and repaired the lazily-rs session.
+
+Findings:
+
+- The earlier repeated `idle_queue_watch_drain` behavior matched the stale-busy idle queue dedupe bug fixed in `src/agent-doc` commit `62a92827`.
+- The lazily session then remained wedged because `session-check` kept reporting `missing_response_body` even after committed recovery responses existed. Root cause: `check_committed_without_response_body_guard` only trusted committed `### Re:` bodies when the stale cycle still had `capture_id` / `response_sha256`; this cycle had lost that metadata.
+- Fixed that root cause in `agent-doc` commit `d4b2746f` (`Fix missing-response recovery without capture metadata`) and pushed it to `btakita/agent-doc` `main`.
+
+Current lazily-rs state:
+
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md --codex-final-gate` passes.
+- The lazily queue is empty.
+- The review follow-up was closed by moving concrete replacement items for `#ipc2`, `#yxjw`, `#ipc3`, and `#vd5v` into backlog.
+- The session actor is closed/missing from registry, with supervisor healthy; there is no current queue-drain loop.
+
+Verification:
+
+- Focused tests: `cargo test -p agent-doc-orchestration committed_without_response_body_guard -- --nocapture` passed.
+- FlowCore guard: `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture` passed.
+- Full `make check` passed before the final rebase: 3,877 tests passed, 233 skipped.
+- Installed the rebased local `agent-doc` binary from `d4b2746f`.
+- CI was listed once after pushing, per your instruction to skip waiting: `27086037667` was `in_progress` for `Fix missing-response recovery without capture metadata`.
+
+Note: I attempted to push the superproject, but `agent-loop/main` is 145 local commits ahead and 15 behind `origin/main` with many unrelated dirty files. I did not autostash/rebase that dirty superproject. The `agent-doc` code fix itself is pushed.
+
+<!-- agent:boundary:ed495789 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.~~
-- ~~:pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.~~
 - :pushpin: Please investigate the lazily-rs session. It is not behaving correctly.
+- commit all uncommitted changes in agent-doc
+- :pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.
+- :pushpin: Please fix the root cause of the lazily-rs session issues.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,7 +63,7 @@ Both gated items are implemented, tested, built/installed, committed, and pushed
 **Scope notes:** staged only my 4 files (left the submodule's pre-existing dirty `AGENTS.md`/`.opencode/`/`BENCHMARKS.md` untouched). Did **not** bump the version or publish — the preset was build+install+commit+push, not release; a publish would need a coordinated version bump (which also clears the `publish:check` red). The agent-loop superproject's `src/tsift` pointer now trails `188bd5b` if you want to bump it.
 
 Remaining toward full MemGraphRAG: `#trt1` (authored Finding/Decision/Note node types) and folding decay ranking into `#rankdefault` over the now-merged graph.
-<!-- agent:boundary:5752c333 -->
+<!-- agent:boundary:8d788807 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +72,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Commit all uncommitted tsift changes.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -38,7 +38,24 @@ queue: start
 Compacted content:
 - Archived 1 response topic(s): #ipc5 transport contract + benchmark matrix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:f02b34ec -->
+
+### Re: IPC transport implementation — gpt-5
+
+> **Queue prompt:**
+>
+> What are #next-steps for IPC transport implementation?
+
+Top backlog item: `#ipc4`.
+
+Proposed next steps (prioritized):
+- First, lock a transport contract and feature matrix so implementation work is testable (`#ipc4`).
+- Then define a transport protocol envelope with versioned operations and lifecycle semantics (`#ipc5`).
+- Next, implement reliability/backpressure/reconnect guarantees (`#ipc6`).
+- After transport correctness, build test coverage for ordering, permissions, and failure recovery (`#ipc7`).
+- Close with transport-specific benchmarks and regression guards (`#ipc8`).
+
+I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
+<!-- agent:boundary:d0559646 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,13 +63,17 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps for IPC transport implementation?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc4] Define IPC transport feature matrix and API contracts (UNIX socket, TCP, loopback). Start with local-in-process channel as baseline and lock schema first.
+- [ ] [#ipc5] Implement transport lifecycle protocol: versioned envelope, per-op correlation IDs, feature negotiation, and symmetric teardown/reconnect semantics.
+- [ ] [#ipc6] Add reliability layer: bounded queues, flow-control/backpressure, heartbeat/liveness, and replay-safe idempotency for dropped peers.
+- [ ] [#ipc7] Build transport test harness (property + integration) for ordering guarantees, permissioned routing, and crash/reconnect recovery scenarios.
+- [ ] [#ipc8] Add benchmark suite: cross-process latency/throughput, fanout scaling, and end-to-end snapshot update time across transport variants.
 <!-- /agent:backlog -->
 
 ## Review

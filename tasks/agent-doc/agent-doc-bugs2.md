@@ -167,6 +167,11 @@ sync/follow-up root cause recorded.
 
 > **Queue prompt:**
 >
+> do [#clear-blocked-by-own-drafted-clear-command]
+
+
+> **Queue prompt:**
+>
 > do [#monsterrod-queue-items-deleted-live]
 
 Root cause is confirmed as closeout/queue-reconciler data-loss under concurrent mutation: user-edited queue rows can be dropped when a concurrent CRDT-like path applies queue edits after `queue::consume` and before archive/backlog sync, then the same-cycle normalize/strikes the head and queue migration path does not preserve an uncompleted free-text item.
@@ -179,7 +184,7 @@ Immediate implementation direction:
 
 Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
 handled
-<!-- agent:boundary:c34ad4c7 -->
+<!-- agent:boundary:ef1bb38e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,7 +203,7 @@ handled
 - ~~do [#live-verify-batch]~~
 - ~~do [#automated-completion-detection]~~
 - ~~do [#monsterrod-queue-items-deleted-live]~~
-- do [#clear-blocked-by-own-drafted-clear-command]
+- ~~do [#clear-blocked-by-own-drafted-clear-command]~~
 - do [#tmux-status-turn-in-progress]
 - do [#stale-busy-self-heal-live-verify]
 - do [#partial-staging-closeout-guard]
@@ -236,7 +241,7 @@ What are #next-steps to fix bugs?
 4. [ ] [#partial-staging-closeout-guard] [recommended] #agent-doc-bug closeout guard for partial change-set staging: a turn that edits source + tests can commit a partial set (e.g. queue.rs ~~ render change committed but its test-assertion fixes left unstaged) so local make check passes against the working tree while CI fails against the committed tree only. Observed live this session: 1645112d CI red, fixed dcb734eb. Add a heuristic/guard that flags when committed output-format changes leave companion test files (matching changed string literals) unstaged, or warns the staged diff is not self-consistent. Same "regressions when I work on agent-doc" class.
 5. [ ] [#automated-completion-detection] deferred
 6. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
-7. [ ] [#clear-blocked-by-own-drafted-clear-command] #agent-doc-bug 2026-06-06: `agent-doc session clear <FILE>` is refused because the pane composer holds protected "drafted prompt input" whose tail IS the clear command itself (reason=drafted prompt input, current_command=agent-doc, tail="❯ agent-doc session clear ..."). The guard is self-defeating: the only drafted line blocking the clear is the clear command the operator just typed. Fix: exclude agent-doc control commands (session clear/interrupt-clear/stop) from the protected-prompt set so clear proceeds; keep protecting genuine drafted prompt content. Immediate recovery exists: `agent-doc session interrupt-clear <FILE>`. Plan: tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md
+7. [ ] [#clear-blocked-by-own-drafted-clear-command] deferred
 8. [ ] [#tmux-status-turn-in-progress] #agent-doc-bug 2026-06-06: tmux status line is blank while a managed turn is active; should show "agent-doc: turn in progress" when the actor is busy and clear back to idle on ready. Drive it from the supervisor busy<->ready transitions (transition_actor_state + the new idle-queue-watch stale-busy self-heal) so the indicator never diverges from actor state. Overlaps #claude-busy-status-during-active-turn, #jb-stale-busy-idle-footer. Plan: tasks/agent-doc/plan-tmux-status-turn-in-progress.md
 9. [ ] [#stale-busy-self-heal-live-verify] [recommended] #agent-doc-bug live-verify the idle-queue-watch stale-busy self-heal (7b60fcdc): drive a managed Codex auto-loop into the wedge (auto_trigger_inject recursive agent-doc -> recursion-guard abandon -> actor left busy over idle composer), then confirm the supervisor logs idle_queue_watch_stale_busy_reconciled within ~2s and the queue resumes draining with no pane kill and no session status/clear. Could not repro the exact prompt-redraw-split wedge non-disruptively this cycle.
 10. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md

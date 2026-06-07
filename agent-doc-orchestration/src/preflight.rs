@@ -9514,6 +9514,10 @@ mod tests {
         let high = queue_region.find("do [#high]").unwrap();
         let low = queue_region.find("do [#low]").unwrap();
         assert!(
+            queue_region.contains(":round_pushpin: do [#high]"),
+            "auto-promoted queue item should carry an agent-priority marker:\n{queue_region}"
+        );
+        assert!(
             high < low,
             "priority=1 must sort before priority=5 in queue:\n{queue_region}"
         );

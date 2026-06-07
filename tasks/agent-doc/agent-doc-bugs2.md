@@ -91,7 +91,29 @@ Why (I checked tsift's actual layout):
 Plan written: **`tasks/agent-doc/plan-md-ast-document-model.md`** (committed `76c6c386c`). It frames this as the root-cause fix for the data-loss family and breaks it into six phased ids (`#md-ast-crate-extract` → overlay → crdt-schema → node-keyed mutations → ipc node-patches → realtime watcher), noting which existing bugs each phase subsumes (`#queue-dedup-destroys-intentional-duplicates`, the wrong-head/head-mismatch consume failures, `#ipc-listener-dewedge-direct-disk`, and the watcher that unblocks `#queue-enqueue-action`).
 
 Honoring your **`stop`**: I'm halting the queue here rather than draining further, so you can review the plan and decide whether to start with `#md-ast-crate-extract`.
-<!-- agent:boundary:17bb8601 -->
+
+### Re: shipped #queue-consume-pushpin-normalization (the bug that kept blocking this queue) — opus-4-8
+
+Fixed and live (`1750e345`, origin/main, `make check` green, built + installed). queue-consume compared the snapshot head text against the document head text **raw**, so a head that differed only by a `:pushpin:` prefix (snapshot unpinned, live document pinned — the exact thing that errored 3× this session) failed the equality check and blocked every commit. Added `queue::strip_priority_markers` and normalize both sides before the head-equality check. This is why this turn's closeout finally goes through without a `reset` dance.
+
+### Re: Should preflight recognize queue reorders, with realtime hooks + a fallback watcher that knows my edits vs yours? — opus-4-8
+
+Yes, and this is squarely `#md-ast-document-model`:
+- **Reorder detection** becomes trivial once items are nodes with stable ids: a reorder is the *same id set in a new order* (an id-permutation), which is unambiguous — today's text diff cannot tell a reorder from edit+delete+insert. (Phase `#md-ast-mutations-node-keyed`.)
+- **"My edits vs your edits" = provenance.** A structured yrs CRDT tags every change with an **origin** (yrs updates carry an origin/client-id). So the model can attribute each node/op to *operator* vs *agent* natively — that is exactly what lets a watcher react to "the user typed this" without confusing it with an agent write. (Folded into the plan as node provenance; it also underpins provenance-aware dedup, fixing `#queue-dedup-destroys-intentional-duplicates` properly.)
+- **Realtime hooks + fallback watcher:** the CRDT model emits change events (yrs observers) for editors on the IPC path; the file watcher is the fallback for editors without live IPC. (Phase `#md-ast-realtime-watcher`.)
+
+### Re: Other markdown-AST candidates? High-performance for realtime; custom vs library; is tsift's MemGraphRag useful here? — opus-4-8
+
+- **Candidates:** `tree-sitter-md` (incremental, error-tolerant), `comrak` / `pulldown-cmark` (fast CommonMark, but full reparse, not built for mid-edit-invalid states), `markdown-rs`.
+- **For realtime, `tree-sitter-md` is the right pick** (and it matches tsift): it reparses only the *changed region* on each keystroke and is **error-tolerant** — it produces a usable tree even while you are mid-token, which a CommonMark batch parser is not designed for. That incrementality is the performance property realtime needs.
+- **Don't write a custom markdown parser.** Use `tree-sitter-md` for the block grammar and layer your **agent-component overlay** (the typed queue/backlog/exchange item nodes + ids + CRDT schema) on top. The only "custom" part is that thin overlay — not the markdown parsing.
+- **MemGraphRag is a different layer — not the document model.** It is tsift's *semantic retrieval* substrate (graph + embeddings for search/RAG). Useful to agent-doc only if you later want semantic search *across* session history/backlog ("find related past bugs"). The live document model needs a *structural* AST + CRDT, not a RAG graph. Keep them separate: `tree-sitter-md` AST + CRDT for the live document; MemGraphRag optional, for cross-document retrieval.
+
+(Q1 — tsift hard-dep vs extracted crate — answered last turn: extract a focused `tree-sitter-md` crate shared by both, no hard tsift dep. Plan: `tasks/agent-doc/plan-md-ast-document-model.md`.)
+
+I left Q2/Q3 in the queue rather than risk striking your `stop` control with a multi-head consume; they are answered here. Honoring `stop` — halting after this.
+<!-- agent:boundary:4f91ade3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,12 +121,14 @@ Honoring your **`stop`**: I'm halting the queue here rather than draining furthe
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#md-ast-document-model]. I like using the tsift markdown AST. Should tsift be a hard dependency for agent-doc or should we extract a separate crate for the markdown AST?
 - :pushpin: Preflight should recognize when I reorder the queue items. Perhaps we should have a realtime document event hooks and fallback watcher that updates the document model and can understand what my edits are vs your edits?
+- :pushpin: Should tsift + agent-doc use one of the other markdown AST candidates instead? I want something high performance since we are becoming realtime. And can support our document model. Is a custom md ast the best way to achieve that or another existing library? Note that tsift is working on a MemGraphRag implementation. Would that be useful for agent-doc?
 - :pushpin: stop
 - :pushpin: do [#queue-enqueue-action]
 - :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
 - :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
 - :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
+- :pushpin: do [#queue-consume-pushpin-normalization]
 - do [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
@@ -123,8 +147,6 @@ Honoring your **`stop`**: I'm halting the queue here rather than draining furthe
 - do [#partial-staging-closeout-guard]
 - do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
-- Would it also make sense for agent-doc to have an AST model of the md file...like what tsift does? Would an AST model be more reliable and sharable with IPC?
-- Support :inbox_tray:/**enqueue** to add a backlog or icebox item into the queue. Ideally this action occurs from a watcher that can pick up
 <!-- /agent:queue -->
 ###
 <!--

@@ -137,7 +137,38 @@ Existing verification/coverage I checked:
 Confidence: medium-high. The missing-exchange class is already guarded in code, and the live document now points at a specific unanswered prompt/recovery path. I did not mutate `src/boost-client/tasks/monsterrodholders.md` from this pane because that would take over a separate document's owner-turn work.
 
 Escalation: none.
-<!-- agent:boundary:bad9adee -->
+Answered `#adoc-auto-dag-priority`.
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#adoc-auto-dag-priority]
+
+
+The auto-DAG priority path is implemented in the current `agent-doc` submodule: preflight collects backlog/icebox `after=#id` dependencies, runs `queue::sort_prompts_by_dag` ahead of the plain pin/priority sorter, and preserves the documented rule that a dependency blocker outranks a pin while edge-free queues fall back to pin/priority ordering.
+
+I added the missing high-level preflight regression in `agent-doc-orchestration/src/preflight.rs`: `run_queue_maintenance_auto_dag_intersperses_blocker_with_pinned_batch`. The test builds a physically pinned queue batch plus a later `:round_pushpin:` setup blocker, then asserts queue maintenance rewrites the order so the blocker lands between the operator-pinned items required by the DAG.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc` submodule pointer
+
+Commits pushed:
+- `btakita/agent-doc` `8e1d0827` (`test: cover auto dag priority preflight ordering`)
+- `btakita/agent-loop` `077e1b310` (`chore: update agent-doc submodule`)
+
+Verification:
+- `cargo fmt`
+- `cargo test -q -p agent-doc-orchestration run_queue_maintenance_auto_dag_intersperses_blocker_with_pinned_batch`
+- `cargo test -q -p agent-doc-orchestration dag_`
+- `cargo check -q -p agent-doc-orchestration`
+- `make check` (3,951 tests passed, doctests passed, closeout sim medium target passed)
+- `git diff --check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- `gh run list --workflow CI --limit 1` showed latest CI success: run `27108046228`, `2026-06-07T23:27:50Z`
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:f3d4d879 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -146,7 +177,8 @@ Escalation: none.
 - ~~[#adoc-semantic-diff-nav]~~
 - ~~:round_pushpin: [#adoc-harness-simworld]~~
 - ~~:pushpin: monsterrodholders.md queue responses are still not going into the exchange.~~
-- :round_pushpin: [#adoc-auto-dag-priority]
+- ~~:round_pushpin: [#adoc-auto-dag-priority]~~
+- A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.
 - If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
 <!-- /agent:queue -->
 ###
@@ -173,7 +205,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->
 
 ## Review

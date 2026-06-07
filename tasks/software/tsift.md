@@ -118,7 +118,31 @@ Marked `#tsift-shared-md-ast-and-memgraphrag-lib` done — the shareable leaf is
 **Remaining (not blocking):**
 - *Phase 2 (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item.
 - *Phase 3 (agent-doc, out of tsift scope):* wire agent-doc's document model onto `tsift-md-ast` — belongs in `agent-doc-bugs2.md` `#md-ast-document-model`.
-<!-- agent:boundary:233b0f45 -->
+
+### Re: do #trt1phase2 — opus-4-8
+
+> **Queue prompt:**
+>
+> [#trt1phase2]
+
+
+`#trt1phase2` bundled four distinct features, so I decomposed it (per the one-ID-per-phase guidance) and shipped the foundational slice — the **findings retrieval primitive** the rest build on. Committed + pushed (`btakita/tsift` `main` `ffaca42`).
+
+**Shipped: `tsift memory findings`** (`tsift-cli`)
+- Queries authored `finding`/`decision`/`note` nodes from the shared graph via `SqliteGraphStore::nodes_by_kind`, newest-first by `observed_at_unix`, with optional `--kind` / `--anchor` / `--query` (lexical) filters and `--limit`.
+- Returns `{id, kind, text, anchor_handle, confidence, observed_at_unix}`.
+- Test covers kind/anchor/lexical filters, ordering, limit, and missing-db; `make check` Rust-green (only the pre-existing npm publish:check red); installed + live-verified (add → retrieve).
+
+Now `finding-add` writes authored findings and `findings` reads them back — the read/write loop for the `#trt1` findings graph is closed.
+
+**Marked `#trt1phase2` done** (decomposed). Queued the four remaining phases as per-phase items:
+- `#trt1inject` — inject retrieved findings into `context-pack` / search output (builds directly on `memory findings`; tsift-cli level since tsift-digest doesn't depend on tsift-sqlite).
+- `#trt1watermark` — staleness gating on finding freshness via `community_graph_watermark`.
+- `#trt1capture` — opt-in/passive capture of findings from agent-doc session archives.
+- `#trt1project` — md/html on-demand projection of the findings graph.
+
+Next queued item drains on your re-invoke (the go-queue holds the prioritized backlog).
+<!-- agent:boundary:969fd4dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,15 +153,20 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~~[#tsift-shared-md-ast-and-memgraphrag-lib]~~
-- [#trt1phase2]
+- ~~[#trt1phase2]~~
+- do "*Phase 2 (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."
+- ~~[#surrealbulk]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#trt1inject] Inject retrieved authored findings (tsift memory findings) into context-pack/search output so finding/decision/note nodes surface during retrieval. tsift-cli level (tsift-digest does not depend on tsift-sqlite): after build_context_pack_report, query findings anchored to the packed symbols and attach. Builds on shipped memory findings (ffaca42).
+- [ ] [#trt1watermark] Staleness gating on authored-finding freshness via community_graph_watermark: mark findings whose observed_at_unix predates the current watermark as stale in findings/injection output.
+- [ ] [#trt1capture] Opt-in/passive capture of findings from agent-doc session archives: parse .agent-doc archives, extract authored finding/decision/note items, upsert via authored_node_projection. Opt-in only.
+- [ ] [#trt1project] md/html on-demand projection of the findings graph (graph store stays source of truth); render finding/decision/note nodes + annotates edges grouped by anchor.
 - [ ] [#surrealbulk] SurrealDB projection performance (consolidates surrealbulk + surrealbulk-close + surreal-batch-bfs + surreal-fixture): replace per-row upsert loops with bulk/transactional row load + one-pass secondary-index rebuild; add batch frontier expansion; record SurrealDB samples in graph-db-performance-history.json fixture; re-run backend-eval benchmarks, update SPEC.md/BENCHMARKS.md table, measure refresh vs load separately.
 - [/] [#e2e-install] E2E verify opencode-tsift install in a fresh opencode project: opencode plugin opencode-tsift && opencode then /tsift-status returns healthy (consolidates e2e-install + full-e2e-verify). Live-verify only; npm publish + OIDC auth already done (opencode-tsift@0.1.63 on npm).
-- [ ] [#trt1phase2] #trt1 follow-on phases (core authored findings nodes shipped in b300196): context-pack/search injection of authored finding/decision/note nodes; community_graph_watermark staleness gating on finding freshness; opt-in/passive capture of findings from agent-doc session archives; md/html on-demand projection of the findings graph. Builds on shipped authored_node_projection + finding-add + ontology layer.
 - [/] [#7qky] [recommended] AGENT-DOC-SCOPED (drive from an agent-doc session, not tsift): re-measure Codex redundant runbook reads after the v0.34.0 retain-dont-reread nudge accumulates live Codex sessions; compare to baseline (Claude 11.4% / Codex 12.6% / OpenCode 5.3%). If Codex rate does not drop, build a session-scoped content-dedup LEDGER in a shared LEAF crate (register(id,hash)/should_deliver->Full|Stub; exemptions via hash-change+compaction; session-id from harness). GATED on accumulating post-nudge Codex sessions.<!-- /agent:backlog -->
 
 ## Review

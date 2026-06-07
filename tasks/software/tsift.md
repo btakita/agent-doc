@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,7 +56,7 @@ So the practical split I would use:
 For tsift specifically, the best early use would be artifact-heavy commands: `digest-runner`, `session-review`, `context-pack`, maybe large search/explain previews. For agent-doc, the best early use would be patch/sidecar payload indirection while preserving the existing commit-boundary invariants. That would improve payload handling without weakening the proof model.
 
 Bottom line: the blob arena likely benefits tsift IPC with agent-doc if it is designed as an immutable, content-addressed payload layer. SHM ring buffer should wait until correctness and recovery are locked down and measurement shows transport throughput is actually the limiting factor.
-<!-- agent:boundary:32cc4493 -->
+<!-- agent:boundary:c74eadfd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,8 +65,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- In lazily-rs, I'm implementing IPC support. This includes a blob arena for IPC transport in progress and potentially a SHM ring buffer for IPC transport. Would this benefit tsift IPC with agent-doc?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Can the "durable file fallback" live in the os shm directory? Would this be a valid cross platform solution?
 <!-- /agent:queue -->
 
 ## Backlog

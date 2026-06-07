@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -106,7 +106,17 @@ For agent-doc / tsift, I would use a hybrid transport:
 So yes, shared memory is promising for large content, especially repeated document/context exchange between agent-doc, the editor, and tsift. I would not make it the default first transport. The safer next step is an `IpcTransport` benchmark harness comparing socket, file-backed, and shared-memory blob-reference paths at representative sizes: 4 KB, 64 KB, 1 MB, and 10 MB.
 
 No code changed in this cycle.
-<!-- agent:boundary:c541e389 -->
+
+### Re: SHM ring buffer benefit — gpt-5
+
+The benefit of a shared-memory ring buffer is mostly avoiding kernel-mediated byte movement for large or frequent payloads. Instead of writing a large document/context pack into a socket or temp file and having the receiver copy it back out, the producer writes bytes into a shared region and sends a compact descriptor: offset, length, epoch, generation, and checksum/type metadata. The receiver validates the descriptor and reads the bytes from the mapped region.
+
+That can help agent-doc and tsift most for large content: full document snapshots, context packs, artifact logs, and patch payloads. It is less useful for small control messages, where sockets are simpler and likely fast enough.
+
+The design tradeoff is that shared memory makes lifecycle and correctness stricter. The protocol needs wraparound handling, generation counters to reject stale descriptors, checksums or length guards to reject torn writes, backpressure when the reader lags, and a fallback path for payloads too large for the arena. So the right shape is hybrid: keep normal `IpcMessage` control frames on the current transport, and add SHM blob references only when the payload crosses a size threshold.
+
+No code changed for this answer. I will handle the queued implementation item next.
+<!-- agent:boundary:1b6db8f4 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -319,7 +319,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (#lazily-missing-response-recovery): one regression test name
         // proves recovered committed exchange bodies clear the same guard even
         // after stale cycle capture metadata was lost.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 84,
+        // +4 (#partial-staging-closeout-guard): one session-check guard call
+        // site, one guard function, one ops-log diagnostic, and one regression
+        // test name for dirty companion source/test changes with overlapping
+        // changed string literals after a partial manual commit.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 88,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

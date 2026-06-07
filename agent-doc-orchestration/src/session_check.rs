@@ -328,6 +328,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_pending_done_guard(file, &rc)?,
             check_expect_done_or_gate_guard(file, &rc)?,
             check_partial_closeout_state_guard(file)?,
+            check_partial_staging_closeout_guard(file)?,
             check_blocked_closeout_followup_guard(file, &rc)?,
             check_gated_phase_split_guard(file, &rc)?,
             check_queue_audit_partial_completion_guard(file)?,
@@ -3163,6 +3164,351 @@ fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
     ]))
 }
 
+#[derive(Debug, Clone)]
+struct PartialStagingFinding {
+    repo: std::path::PathBuf,
+    committed_paths: Vec<String>,
+    dirty_paths: Vec<String>,
+    literals: Vec<String>,
+}
+
+/// `#partial-staging-closeout-guard`: a manual repo commit can accidentally
+/// stage only the source half of a source+test change. Local verification then
+/// passes against the dirty worktree while CI sees only the partial commit.
+/// This guard is WARN-only and narrow: it requires a latest-commit source/test
+/// path relationship plus overlapping changed string literals in tracked
+/// uncommitted or staged companion changes.
+fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardResult> {
+    let findings = partial_staging_closeout_findings(file)?;
+    if findings.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let mut lines = Vec::new();
+    for finding in findings.iter().take(3) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "partial_staging_closeout_guard_fired file={} repo={} committed_paths={} dirty_paths={} literals={}",
+                file.display(),
+                finding.repo.display(),
+                finding.committed_paths.join(","),
+                finding.dirty_paths.join(","),
+                finding.literals.join("|")
+            ),
+        );
+        lines.push(format!(
+            "[session-check] warn: possible partial staging closeout in {} — latest commit changed {}, but tracked uncommitted companion changes remain in {} with overlapping changed string literal(s): {}.",
+            finding.repo.display(),
+            preview_items(&finding.committed_paths, 4),
+            preview_items(&finding.dirty_paths, 4),
+            preview_items(&finding.literals, 3)
+        ));
+    }
+    if findings.len() > 3 {
+        lines.push(format!(
+            "[session-check] warn: {} additional partial staging candidate(s) omitted.",
+            findings.len() - 3
+        ));
+    }
+    lines.push(
+        "[session-check] hint: commit the companion changes, revert them, or rerun verification against the committed tree before reporting CI-ready closeout."
+            .to_string(),
+    );
+    Ok(GuardResult::Warn(lines))
+}
+
+fn partial_staging_closeout_findings(file: &Path) -> Result<Vec<PartialStagingFinding>> {
+    let mut findings = Vec::new();
+    for repo in partial_staging_candidate_repos(file)? {
+        if let Some(finding) = partial_staging_finding_for_repo(&repo)? {
+            findings.push(finding);
+        }
+    }
+    Ok(findings)
+}
+
+fn partial_staging_candidate_repos(file: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let start = if file.is_dir() {
+        file
+    } else {
+        file.parent().unwrap_or_else(|| Path::new("."))
+    };
+    let Some(root) = git_toplevel(start)? else {
+        return Ok(Vec::new());
+    };
+
+    let mut repos = vec![root.clone()];
+    if let Some(status) = git_stdout(
+        &root,
+        &["status", "--porcelain=v1", "--ignore-submodules=none"],
+    )? {
+        for line in status.lines() {
+            let Some(rel) = parse_porcelain_path(line) else {
+                continue;
+            };
+            let candidate = root.join(rel);
+            if !candidate.is_dir() {
+                continue;
+            }
+            if let Some(subroot) = git_toplevel(&candidate)?
+                && subroot != root
+            {
+                repos.push(subroot);
+            }
+        }
+    }
+
+    repos.sort();
+    repos.dedup();
+    Ok(repos)
+}
+
+fn partial_staging_finding_for_repo(repo: &Path) -> Result<Option<PartialStagingFinding>> {
+    if git_stdout(repo, &["rev-parse", "--verify", "HEAD^"])?.is_none() {
+        return Ok(None);
+    }
+
+    let committed_paths = git_name_lines(
+        repo,
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMRT",
+            "HEAD^",
+            "HEAD",
+        ],
+    )?
+    .into_iter()
+    .filter(|path| is_partial_staging_relevant_path(path))
+    .collect::<Vec<_>>();
+    if committed_paths.is_empty() {
+        return Ok(None);
+    }
+
+    let mut dirty_paths = git_name_lines(repo, &["diff", "--name-only", "--diff-filter=ACMRT"])?;
+    dirty_paths.extend(git_name_lines(
+        repo,
+        &["diff", "--cached", "--name-only", "--diff-filter=ACMRT"],
+    )?);
+    dirty_paths = dirty_paths
+        .into_iter()
+        .filter(|path| is_partial_staging_relevant_path(path))
+        .collect::<Vec<_>>();
+    dirty_paths.sort();
+    dirty_paths.dedup();
+    if dirty_paths.is_empty() || !partial_staging_paths_look_related(&committed_paths, &dirty_paths)
+    {
+        return Ok(None);
+    }
+
+    let committed_diff =
+        git_stdout(repo, &["diff", "--unified=0", "HEAD^", "HEAD"])?.unwrap_or_default();
+    let mut dirty_diff = git_stdout(repo, &["diff", "--unified=0"])?.unwrap_or_default();
+    if let Some(cached) = git_stdout(repo, &["diff", "--cached", "--unified=0"])? {
+        if !dirty_diff.is_empty() && !cached.is_empty() {
+            dirty_diff.push('\n');
+        }
+        dirty_diff.push_str(&cached);
+    }
+
+    let committed_literals = extract_changed_string_literals(&committed_diff);
+    let dirty_literals = extract_changed_string_literals(&dirty_diff);
+    let mut overlap = committed_literals
+        .intersection(&dirty_literals)
+        .cloned()
+        .collect::<Vec<_>>();
+    overlap.sort();
+    if overlap.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(PartialStagingFinding {
+        repo: repo.to_path_buf(),
+        committed_paths,
+        dirty_paths,
+        literals: overlap,
+    }))
+}
+
+fn git_toplevel(start: &Path) -> Result<Option<std::path::PathBuf>> {
+    let Some(stdout) = git_stdout(start, &["rev-parse", "--show-toplevel"])? else {
+        return Ok(None);
+    };
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(std::path::PathBuf::from(trimmed)))
+}
+
+fn git_name_lines(repo: &Path, args: &[&str]) -> Result<Vec<String>> {
+    let Some(stdout) = git_stdout(repo, args)? else {
+        return Ok(Vec::new());
+    };
+    Ok(stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+fn git_stdout(repo: &Path, args: &[&str]) -> Result<Option<String>> {
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run git {:?} in {}", args, repo.display()))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+fn parse_porcelain_path(line: &str) -> Option<String> {
+    if line.len() < 4 {
+        return None;
+    }
+    let status = &line[..2];
+    if status == "??" {
+        return None;
+    }
+    let raw = line[3..].trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim();
+    Some(path.trim_matches('"').to_string())
+}
+
+fn is_partial_staging_relevant_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    if normalized.starts_with(".agent-doc/")
+        || normalized.starts_with(".git/")
+        || normalized.ends_with(".lock")
+    {
+        return false;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let Some(ext) = lower.rsplit('.').next() else {
+        return false;
+    };
+    matches!(
+        ext,
+        "rs" | "kt"
+            | "kts"
+            | "java"
+            | "py"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "go"
+            | "rb"
+            | "swift"
+            | "md"
+            | "txt"
+            | "snap"
+            | "json"
+            | "toml"
+            | "yaml"
+            | "yml"
+    )
+}
+
+fn partial_staging_paths_look_related(committed: &[String], dirty: &[String]) -> bool {
+    if committed
+        .iter()
+        .any(|committed_path| dirty.iter().any(|dirty_path| dirty_path == committed_path))
+    {
+        return true;
+    }
+    let dirty_has_test = dirty.iter().any(|path| path_looks_test_like(path));
+    let committed_has_source = committed.iter().any(|path| !path_looks_test_like(path));
+    dirty_has_test && committed_has_source
+}
+
+fn path_looks_test_like(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    lower.starts_with("tests/")
+        || lower.contains("/tests/")
+        || lower.starts_with("test/")
+        || lower.contains("/test/")
+        || lower.ends_with("_test.rs")
+        || lower.ends_with("_tests.rs")
+        || lower.ends_with(".snap")
+        || lower
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.contains("test"))
+}
+
+fn extract_changed_string_literals(diff: &str) -> std::collections::BTreeSet<String> {
+    let mut literals = std::collections::BTreeSet::new();
+    for line in diff.lines() {
+        if !(line.starts_with('+') || line.starts_with('-'))
+            || line.starts_with("+++")
+            || line.starts_with("---")
+        {
+            continue;
+        }
+        for literal in extract_string_literals_from_line(&line[1..]) {
+            if interesting_changed_literal(&literal) {
+                literals.insert(literal);
+            }
+        }
+    }
+    literals
+}
+
+fn extract_string_literals_from_line(line: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '"' && ch != '`' {
+            continue;
+        }
+        let quote = ch;
+        let mut escaped = false;
+        let mut literal = String::new();
+        for next in chars.by_ref() {
+            if escaped {
+                literal.push(next);
+                escaped = false;
+                continue;
+            }
+            if quote == '"' && next == '\\' {
+                escaped = true;
+                continue;
+            }
+            if next == quote {
+                break;
+            }
+            literal.push(next);
+        }
+        result.push(literal);
+    }
+    result
+}
+
+fn interesting_changed_literal(literal: &str) -> bool {
+    let trimmed = literal.trim();
+    trimmed.len() >= 4 && trimmed.chars().any(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn preview_items(items: &[String], limit: usize) -> String {
+    let mut preview = items
+        .iter()
+        .take(limit)
+        .map(|item| format!("`{}`", item))
+        .collect::<Vec<_>>();
+    if items.len() > limit {
+        preview.push(format!("...(+{})", items.len() - limit));
+    }
+    preview.join(", ")
+}
+
 /// Tight list of "blocked / still needs future action" phrases that, combined
 /// with a directed id gated this cycle, indicate a `do [#id]` closeout reported
 /// the work is still incomplete and needs more agent execution — distinct from
@@ -5385,8 +5731,8 @@ Body\n\
     }
 
     #[test]
-    fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata(
-    ) {
+    fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata()
+     {
         // Recovery may commit a visible `### Re:` after the original queue-drain
         // cycle lost its capture metadata. The committed exchange body is still
         // sufficient proof that the missing-response closeout has been repaired.
@@ -8398,6 +8744,130 @@ Body\n\
             check_partial_closeout_state_guard(&doc).unwrap(),
             GuardResult::None
         ));
+    }
+
+    fn partial_staging_git(root: &std::path::Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn setup_partial_staging_repo(root: &std::path::Path) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+
+        partial_staging_git(root, &["init"]);
+        partial_staging_git(root, &["config", "user.email", "test@example.com"]);
+        partial_staging_git(root, &["config", "user.name", "Test"]);
+
+        let doc = root.join("doc.md");
+        let doc_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n";
+        fs::write(&doc, doc_content).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(doc_content), Some(doc_content)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(doc_content),
+            Some(doc_content),
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("src/render.rs"),
+            "pub fn render() -> &'static str { \"old queue output\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("tests/render_test.rs"),
+            "#[test]\nfn render_output() { assert_eq!(agent::render(), \"old queue output\"); }\n",
+        )
+        .unwrap();
+        partial_staging_git(
+            root,
+            &["add", "doc.md", "src/render.rs", "tests/render_test.rs"],
+        );
+        partial_staging_git(root, &["commit", "-m", "initial", "--no-verify"]);
+
+        doc
+    }
+
+    fn commit_partial_staging_source_change(root: &std::path::Path) {
+        fs::write(
+            root.join("src/render.rs"),
+            "pub fn render() -> &'static str { \"new queue output\" }\n",
+        )
+        .unwrap();
+        partial_staging_git(root, &["add", "src/render.rs"]);
+        partial_staging_git(root, &["commit", "-m", "source only", "--no-verify"]);
+    }
+
+    #[test]
+    fn partial_staging_closeout_guard_warns_on_dirty_companion_test_literal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = setup_partial_staging_repo(root);
+
+        commit_partial_staging_source_change(root);
+
+        fs::write(
+            root.join("tests/render_test.rs"),
+            "#[test]\nfn render_output() { assert_eq!(agent::render(), \"new queue output\"); }\n",
+        )
+        .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        let joined = report.warnings.join("\n");
+        assert!(joined.contains("partial staging closeout"), "{joined}");
+        assert!(joined.contains("src/render.rs"), "{joined}");
+        assert!(joined.contains("tests/render_test.rs"), "{joined}");
+        assert!(joined.contains("new queue output"), "{joined}");
+    }
+
+    #[test]
+    fn partial_staging_closeout_guard_warns_on_dirty_same_file_literal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = setup_partial_staging_repo(root);
+
+        commit_partial_staging_source_change(root);
+        fs::write(
+            root.join("src/render.rs"),
+            "pub fn render() -> &'static str { \"new queue output\" /* missed cleanup */ }\n",
+        )
+        .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        let joined = report.warnings.join("\n");
+        assert!(joined.contains("partial staging closeout"), "{joined}");
+        assert!(joined.contains("src/render.rs"), "{joined}");
+        assert!(joined.contains("new queue output"), "{joined}");
+    }
+
+    #[test]
+    fn partial_staging_closeout_guard_quiet_when_committed_tree_is_clean() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = setup_partial_staging_repo(root);
+
+        commit_partial_staging_source_change(root);
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        let joined = report.warnings.join("\n");
+        assert!(!joined.contains("partial staging closeout"), "{joined}");
     }
 
     #[test]

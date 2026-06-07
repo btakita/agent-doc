@@ -79,7 +79,7 @@ Recovered the missing queue-head closeout body for `do [#ipc1]`.
 Recovered the missing queue-head closeout body for `do [#39c5]`.
 
 `#39c5` is already archived in `tasks/software/lazily-rs.done.md`, and its stale live review copy has been removed. This closes the second completed head recorded by cycle `cycle-1780815606517` without reintroducing either completed item into the live backlog or review lists.
-<!-- agent:boundary:c7aa5eb7 -->
+<!-- agent:boundary:0229c98d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,24 +88,20 @@ Recovered the missing queue-head closeout body for `do [#39c5]`.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- do [#ipc2]
-- do [#yxjw]
-- do [#ipc3]
-- do [#vd5v]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
+- [ ] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
+- [ ] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
-- [/] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
-- [/] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
-- [/] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed

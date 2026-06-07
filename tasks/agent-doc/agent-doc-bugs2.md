@@ -29,60 +29,12 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-014135.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-021129.md`*
 
 Compacted content:
-- Archived 7 response topic(s): apply-side generation fence (#late-ipc-patch-plugin-apply-fence); concurrent queue edit + `__override-priority__` design; lock the `__prioritized__` annotation syntax; 4 more
+- Archived 3 response topic(s): queue-populate confirmed + fence verified in logs; monsterrod queue responses + `~~`-not-struck + nested bold/italic; do [#codex-queue-drain-no-response-body]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: queue-populate confirmed + fence verified in logs — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: The backlog with `queue` attribute is not populating the queue element in this document.
-
-
-**`:pushpin: backlog `queue` attr not populating** — fixed and confirmed live. The go-mode append (`1645112d`) is working: your backlog now populates the queue — this cycle's queue tail shows `do [#ipc-typing-duplication-family]`, `do [#codex-mcp-server-root-fix]`, `do [#live-verify-batch]`, `do [#partial-staging-closeout-guard]`, etc. appended from `agent:backlog`. Before the fix those were held out; now they flow in under `queue: start`.
-
-**`:pushpin: verify [#late-ipc-patch-plugin-apply-fence] in the logs** — done, I checked `idea.log` (IntelliJ 2026.1):
-- **Agent Doc 0.2.150 is the loaded plugin** — the version carrying both the apply-side fence (0.2.149) and bold rendering (0.2.150).
-- **PatchWatcher is active** (77 log lines; latest 21:41 doing `dedup`, `repositionBoundary`, VCS refresh) — patches applying normally.
-- **Zero `generation fence: dropping superseded patch` lines.** The fence only logs when a superseded patch arrives late; its silence means no late-patch duplicate race has occurred since install — no duplicate `### Re:` blocks. That's the healthy outcome. The fence *logic* is proven by `PatchGenerationFenceTest` + CI; watching it actively fire needs a forced timed-out-reposition race.
-
-Both in good shape. **Bold rendering** (also in 0.2.150 + lib-installed cdylib) should be visually live — a glance at any `**bold**` here confirms it your side.
-
-**Next from your pins:** your refinement — bold **and** italic **and** combined `**_bold italic_**` — I render `**bold**` and `*italic*` today but a `**_x_**` nest renders bold-only (outer strong span consumes the inner). Queued `#editor-nested-bold-italic-rendering` to fix the nesting next. Also queued behind it: your `~~`-not-struck observation (likely heads not consumed when finalize ran on a different head) and the **monsterrodholders unrunnable** recursion/interrupt-clear report.
-
-### Re: monsterrod queue responses + `~~`-not-struck + nested bold/italic — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: THe monsterrodholders.md session queue responses are still not being written into the backlog. But it shows up in the status.
-
-
-**`:pushpin: monsterrodholders responses not written, only status** — this is the already-tracked `#codex-queue-drain-no-response-body` (backlog #7, plan `tasks/agent-doc/plan-codex-final-response-not-written.md`). The Codex auto-loop drains heads and commits status/queue/backlog mutations but writes **zero `### Re:` bodies** to `agent:exchange` — exactly your "shows in status, not in the doc" symptom. It's a Codex-harness closeout bug, so I can't reproduce or verify a fix from *this* Claude session on `agent-doc-bugs2.md` (different harness + document). The binary-owned fix per the plan: queue-drain closeout must require the assistant `### Re:` body, and `session-check` must assert a committed queue turn contains a response body. I can take that in a focused cycle — say the word and I'll drive the plan here (it's an agent-doc binary fix, verifiable with SimWorld coverage even without a live Codex pane).
-
-**`:pushpin: `~~`-not-struck — "perhaps finalize not being called?"** — close. The cause is **one head consumed per `finalize`**: when I batch implementation across several items and finalize once, only the *matched head* is struck; other items whose work was done stay open `[ ]` because no finalize consumed *their* head. Your hypothesis is right in spirit — the strike is tied to finalize consuming that specific head, not to the work being done. The fix is the multi-head/strike-completed-on-drain path (relates to `#multi-head-consume-one-per-finalize`); I'll fold a "strike all heads whose backlog id is done" pass into the queue maintenance. Queuing it.
-
-**Nested bold/italic — shipped** (`3d894bf3`, `--done`): `**_bold italic_**` now emits both a Bold span and an inner Italic span (independent consumed-maps), so the inner text renders bold+italic; `**bold**` and `*italic*` already worked. cdylib rebuilt + lib-installed (no plugin reinstall needed — no `.kt` changed), `make check` green.
-
-### Re: do [#codex-queue-drain-no-response-body] — shipped — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#codex-queue-drain-no-response-body]
-
-
-Done (`dfeaa2d6` on `origin/main`, `make check` green, installed + release-built). Implemented Proposed-Fix #4 from `plan-codex-final-response-not-written.md` — the part that directly kills the symptom you keep hitting ("queue advances, status changes, but no responses appear").
-
-**The gap, precisely:** `session-check`'s `check_committed_without_response_body_guard` already caught "committed work, no response body" — but it trusted the capture record (`capture_id`/`response_sha256`) as proof the body landed. The Codex queue-drain bug *sets* that capture record while committing only `status`/`queue`/`backlog`, so the guard skipped it and the drain ran silently with zero `### Re:` in `agent:exchange`.
-
-**The fix:** for a queue-drain turn (a queue head was recorded this cycle) that did binary-owned work, capture metadata is no longer sufficient — the committed `agent:exchange` must actually contain a `### Re:` body (`committed_exchange_has_response_body`), else the turn **fails closed** with the `agent-doc write --commit` recovery command. So a Codex drain that drops the response now surfaces an interruption + recovery instead of silently advancing. Non-queue turns are unchanged (still trust the capture record). Tests cover both the fires-case (only a `### Session Summary`, zero `### Re:`) and the passes-case (body present).
-
-**What's still open (separate cycle, tracked in the plan):** the *earlier* Codex-harness interception — Proposed-Fix #1/#2 (stop-hook owned-pane recursion gate + mandatory `finalize` before the chat answer completes) and #3/#5 (write-recovery adopting an already-visible body + follow-up-prompt preservation). Those prevent the drop at the source; this cycle makes the drop **impossible to miss** (fail-closed at closeout), which is the higher-leverage half.
-
-I staged both changed files together this time (`session_check.rs` + the FlowCore `test_cli.rs` budget bump) — no repeat of the partial-staging CI miss.
-<!-- agent:boundary:e70fad35 -->
+<!-- agent:boundary:ef2befe4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->

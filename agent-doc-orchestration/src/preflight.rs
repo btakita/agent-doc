@@ -3723,6 +3723,20 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
     let mut source_queue_priority = false;
+    let mut queue_tag_attrs_normalized = false;
+
+    let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
+    let normalized_queue_tag = crate::queue::normalize_queue_tag_attrs(raw_queue_tag);
+    if normalized_queue_tag != raw_queue_tag {
+        let mut rebuilt = String::with_capacity(current_content.len());
+        rebuilt.push_str(&current_content[..comp.open_start]);
+        rebuilt.push_str(&normalized_queue_tag);
+        rebuilt.push_str(&current_content[comp.open_end..]);
+        current_content = rebuilt;
+        mutated = true;
+        queue_tag_attrs_normalized = true;
+        eprintln!("[preflight] queue: normalized malformed queue marker attributes");
+    }
 
     // `#ynra`: collect `agent:done` ids ONCE up front. The backlog→queue sync
     // below must never re-mint a `do [#id]` whose id is already completed
@@ -4361,6 +4375,21 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         && let Ok(Some(snap_content)) = snapshot::load(file)
     {
         let mut new_snap = snap_content.clone();
+
+        if queue_tag_attrs_normalized
+            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+        {
+            let raw_tag = &new_snap[snap_q.open_start..snap_q.open_end];
+            let normalized_tag = crate::queue::normalize_queue_tag_attrs(raw_tag);
+            if normalized_tag != raw_tag {
+                let mut rebuilt = String::with_capacity(new_snap.len());
+                rebuilt.push_str(&new_snap[..snap_q.open_start]);
+                rebuilt.push_str(&normalized_tag);
+                rebuilt.push_str(&new_snap[snap_q.open_end..]);
+                new_snap = rebuilt;
+            }
+        }
 
         if need_sync_newly_activated_queue_snapshot
             && let Ok(current_comps) = crate::component::parse(&current_content)
@@ -6408,6 +6437,57 @@ mod tests {
             updated_state.synced_queue_ids.contains(&"beta".to_string()),
             "beta must be a newly-synced queue id under go-mode: {:?}",
             updated_state.synced_queue_ids
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_normalizes_boolean_true_queue_attrs() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] run the alpha task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert!(
+            updated.contains(
+                "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->"
+            ),
+            "queue tag should be canonical:\n{updated}"
+        );
+        assert!(
+            !updated.contains("=true"),
+            "malformed attrs repaired:\n{updated}"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains(
+                "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->"
+            ),
+            "snapshot queue tag should be canonical:\n{snap}"
+        );
+        assert!(
+            !snap.contains("=true"),
+            "snapshot malformed attrs repaired:\n{snap}"
         );
     }
 

@@ -161,7 +161,7 @@ pub fn resolve_activation(
 
 /// Reconstruct an `<!-- agent:queue -->` opening tag without the `auto` attribute.
 pub fn strip_auto_from_tag(tag: &str) -> String {
-    tag.replace(" auto", "")
+    rewrite_queue_tag_attrs(tag, |token| token != "auto")
 }
 
 pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
@@ -900,9 +900,103 @@ pub fn marker_control(
 /// Reconstruct an `<!-- agent:queue -->` opening tag without any marker-side
 /// control token (`start` / `go` / `stop`). Mirrors [`strip_auto_from_tag`].
 pub fn strip_control_from_tag(tag: &str) -> String {
-    tag.replace(" start", "")
-        .replace(" go", "")
-        .replace(" stop", "")
+    rewrite_queue_tag_attrs(tag, |token| !matches!(token, "start" | "go" | "stop"))
+}
+
+/// Normalize malformed boolean marker attributes on an `agent:queue` opening tag.
+///
+/// Bare queue flags (`priority`, `go`, `start`, `stop`, `auto`) must render as
+/// tokens, not as `key=true`. Some editor/HTML serializers represent boolean
+/// attrs that way, and one malformed form has also appeared as
+/// `preset="#name"=true`. Normalize those spellings while preserving token order
+/// and quoted preset values.
+pub fn normalize_queue_tag_attrs(tag: &str) -> String {
+    rewrite_queue_tag_attrs(tag, |_| true)
+}
+
+fn rewrite_queue_tag_attrs(tag: &str, keep: impl Fn(&str) -> bool) -> String {
+    let Some((tokens, tail)) = queue_tag_tokens(tag) else {
+        return tag.to_string();
+    };
+    let tokens = tokens
+        .into_iter()
+        .filter_map(|token| {
+            let normalized = normalize_queue_tag_token(&token);
+            keep(queue_tag_token_key(&normalized)).then_some(normalized)
+        })
+        .collect::<Vec<_>>();
+    format!("<!-- {} -->{}", tokens.join(" "), tail)
+}
+
+fn queue_tag_tokens(tag: &str) -> Option<(Vec<String>, &str)> {
+    let close_idx = tag.find("-->")?;
+    let core = &tag[..close_idx + 3];
+    let tail = &tag[close_idx + 3..];
+    let inner = core
+        .trim_start_matches("<!--")
+        .trim_end_matches("-->")
+        .trim();
+    Some((split_marker_tokens(inner), tail))
+}
+
+fn split_marker_tokens(inner: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in inner.chars() {
+        if ch.is_whitespace() && quote.is_none() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            }
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn normalize_queue_tag_token(token: &str) -> String {
+    let Some((key, value)) = token.split_once('=') else {
+        return token.to_string();
+    };
+    if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
+        return key.to_string();
+    }
+    if key == "preset"
+        && let Some(stripped) = strip_malformed_true_suffix(value)
+    {
+        return format!("{key}={stripped}");
+    }
+    token.to_string()
+}
+
+fn queue_tag_token_key(token: &str) -> &str {
+    token.split_once('=').map(|(key, _)| key).unwrap_or(token)
+}
+
+fn is_queue_boolean_attr(key: &str) -> bool {
+    matches!(key, "auto" | "priority" | "go" | "start" | "stop")
+}
+
+fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
+    let stripped = value.strip_suffix("=true")?;
+    if (stripped.starts_with('"') && stripped.ends_with('"'))
+        || (stripped.starts_with('\'') && stripped.ends_with('\''))
+    {
+        Some(stripped)
+    } else {
+        None
+    }
 }
 
 pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
@@ -2177,6 +2271,10 @@ mod tests {
             "<!-- agent:queue preset=\"#p\" -->"
         );
         assert_eq!(
+            strip_control_from_tag("<!-- agent:queue preset=\"#p\"=true go=true -->"),
+            "<!-- agent:queue preset=\"#p\" -->"
+        );
+        assert_eq!(
             strip_control_from_tag("<!-- agent:queue start -->"),
             "<!-- agent:queue -->"
         );
@@ -2236,6 +2334,10 @@ mod tests {
             strip_auto_from_tag("<!-- agent:queue auto patch=append -->"),
             "<!-- agent:queue patch=append -->"
         );
+        assert_eq!(
+            strip_auto_from_tag("<!-- agent:queue auto=true priority=true -->"),
+            "<!-- agent:queue priority -->"
+        );
     }
 
     #[test]
@@ -2243,6 +2345,16 @@ mod tests {
         assert_eq!(
             strip_auto_from_tag("<!-- agent:queue -->"),
             "<!-- agent:queue -->"
+        );
+    }
+
+    #[test]
+    fn normalize_queue_tag_attrs_repairs_boolean_true_regression() {
+        assert_eq!(
+            normalize_queue_tag_attrs(
+                "<!-- agent:queue priority=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->"
+            ),
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->"
         );
     }
 

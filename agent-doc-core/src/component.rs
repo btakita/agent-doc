@@ -392,29 +392,93 @@ pub fn converge_queue_auto(doc: &str, want_auto: bool) -> Option<String> {
 /// absent per `want_auto`, preserving every other token (the `agent:queue` name,
 /// `patch=…`, etc.) and any trailing whitespace/newline after `-->`.
 fn set_auto_in_queue_tag(tag: &str, want_auto: bool) -> String {
-    let Some(close_idx) = tag.find("-->") else {
+    let Some((mut tokens, tail)) = queue_tag_tokens(tag) else {
         return tag.to_string();
     };
+    tokens = tokens
+        .into_iter()
+        .map(|token| normalize_queue_tag_token(&token))
+        .collect();
+    let has_auto = tokens.iter().any(|token| token == "auto");
+    if want_auto == has_auto {
+        return format!("<!-- {} -->{}", tokens.join(" "), tail);
+    }
+    if want_auto {
+        // Insert `auto` right after the `agent:queue` name token so it stays the
+        // first attribute (matches how route/queue activation writes the tag).
+        let insert_at = if tokens.is_empty() { 0 } else { 1 };
+        tokens.insert(insert_at, "auto".to_string());
+    } else {
+        tokens.retain(|token| token != "auto");
+    }
+    format!("<!-- {} -->{}", tokens.join(" "), tail)
+}
+
+fn queue_tag_tokens(tag: &str) -> Option<(Vec<String>, &str)> {
+    let close_idx = tag.find("-->")?;
     let core = &tag[..close_idx + 3];
     let tail = &tag[close_idx + 3..];
     let inner = core
         .trim_start_matches("<!--")
         .trim_end_matches("-->")
         .trim();
-    let mut tokens: Vec<&str> = inner.split_whitespace().collect();
-    let has_auto = tokens.contains(&"auto");
-    if want_auto == has_auto {
-        return tag.to_string();
+    Some((split_marker_tokens(inner), tail))
+}
+
+fn split_marker_tokens(inner: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in inner.chars() {
+        if ch.is_whitespace() && quote.is_none() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            }
+        }
+        current.push(ch);
     }
-    if want_auto {
-        // Insert `auto` right after the `agent:queue` name token so it stays the
-        // first attribute (matches how route/queue activation writes the tag).
-        let insert_at = if tokens.is_empty() { 0 } else { 1 };
-        tokens.insert(insert_at, "auto");
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn normalize_queue_tag_token(token: &str) -> String {
+    let Some((key, value)) = token.split_once('=') else {
+        return token.to_string();
+    };
+    if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
+        return key.to_string();
+    }
+    if key == "preset"
+        && let Some(stripped) = strip_malformed_true_suffix(value)
+    {
+        return format!("{key}={stripped}");
+    }
+    token.to_string()
+}
+
+fn is_queue_boolean_attr(key: &str) -> bool {
+    matches!(key, "auto" | "priority" | "go" | "start" | "stop")
+}
+
+fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
+    let stripped = value.strip_suffix("=true")?;
+    if (stripped.starts_with('"') && stripped.ends_with('"'))
+        || (stripped.starts_with('\'') && stripped.ends_with('\''))
+    {
+        Some(stripped)
     } else {
-        tokens.retain(|t| *t != "auto");
+        None
     }
-    format!("<!-- {} -->{}", tokens.join(" "), tail)
 }
 
 /// Valid name: `[a-zA-Z0-9][a-zA-Z0-9-]*`
@@ -1860,6 +1924,24 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(
             result,
             "<!-- agent:queue patch=append -->\n- do [#x]\n<!-- /agent:queue -->\n"
+        );
+    }
+
+    #[test]
+    fn converge_queue_auto_normalizes_boolean_attrs_without_corrupting_preset() {
+        let doc = concat!(
+            "<!-- agent:queue auto=true priority=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->\n",
+            "- do [#x]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let result = converge_queue_auto(doc, false).expect("tag normalized");
+        assert_eq!(
+            result,
+            concat!(
+                "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->\n",
+                "- do [#x]\n",
+                "<!-- /agent:queue -->\n",
+            )
         );
     }
 

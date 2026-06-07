@@ -267,6 +267,10 @@ frontmatter control:
 
 These marker tokens are recognized queue-only attributes (no
 `misplaced_component_attr` typo warning).
+They are canonicalized as bare tokens, never `key=true`: preflight repairs
+boolean-serialized forms such as `priority=true` / `go=true` and the malformed
+`preset="#name"=true` suffix back to `priority` / `go` and `preset="#name"` in
+both the visible document and snapshot before continuing queue maintenance.
 
 The route/dispatch path honors marker-side control identically to preflight: an
 inactive document (no `queue: start` / `queue_active: true`) whose `agent:queue`

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -94,7 +94,7 @@ Updated backlog **`#tsift-shared-md-ast-and-memgraphrag-lib`** with a plan at `s
 3. agent-doc depends on `tsift-md-ast` (no agent-doc→tsift hard dep — both depend on the leaf, same dependency-direction discipline as the `#7qky` ledger); **MemGraphRag stays optional**, in tsift's graph stack, not the leaf.
 
 I captured + planned it rather than executing the crate extraction unprompted — it's a multi-phase architectural move spanning agent-doc. Say `do #tsift-shared-md-ast-and-memgraphrag-lib` and I'll run phase 1 (the tsift-side extraction). The agent-doc integration (phase 3) belongs in the `agent-doc-bugs2.md` `#md-ast-document-model` session.
-<!-- agent:boundary:2346e3a3 -->
+<!-- agent:boundary:dadefecb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,8 +103,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Can `tree-sitter-md` be a dependency for tsift? The agent-doc-bugs2.md session thinks so. If yes, use `tree-sitter-md`.
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - [#tsift-shared-md-ast-and-memgraphrag-lib]
 <!-- /agent:queue -->
 

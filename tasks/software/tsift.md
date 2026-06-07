@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): agent-doc-bugs2 Read fallback; tsift source-read in agent-doc-bugs2; agent-doc-bugs2 source-read API style; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1c0ed1a3 -->
+<!-- agent:boundary:80fd8e02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +44,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Would column-based jsonl be more efficient than row-based json from a token perspective?
 <!-- /agent:queue -->
 
 ## Backlog

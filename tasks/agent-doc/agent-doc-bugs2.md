@@ -111,6 +111,11 @@ Confidence: high.
 
 ### Re: monsterrodholders completed queue items not writing into exchange
 
+> **Queue prompt:**
+>
+> :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fix. If yes, do I need to restart something? If not, fix.
+
+
 This did not require a new code fix. The queue-prompt echo behavior is already present in the current `agent-doc` binary, and this session already reinstalled that binary with `cargo install --path .`.
 
 The live `tasks/research/monsterrodholders.md` document had stale completed tracked items after closeout. I ran `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/research/monsterrodholders.md`; it repaired transcript prompt prefixes, backfilled missing ids/checkboxes, reaped six completed items (`b2b4`, `1aeb`, `ef81`, `5feq`, `f9vy`, `bx9a`), and committed `996b30799 agent-doc(monsterrodholders): 2026-06-07 01:38:10`.
@@ -118,13 +123,24 @@ The live `tasks/research/monsterrodholders.md` document had stale completed trac
 Verification: `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/research/monsterrodholders.md` now passes with `queue_continuation_required=false`.
 
 Restart guidance: no restart is needed for the repaired document state. If a long-running `agent-doc watch` daemon, editor plugin, or managed pane was started before the current binary install and still shows stale behavior, restart that process so it loads the updated binary and refreshed file state.
-<!-- agent:boundary:43c504dd -->
+
+### Re: #md-ast-realtime-watcher closeout update - gpt-5
+
+Final closeout update for `#md-ast-realtime-watcher`:
+
+- `src/agent-doc` is now at `8ccf4f2c Document watcher node-event spec`, pushed to `btakita/agent-doc/main`.
+- The parent repository gitlink was pushed to `btakita/agent-loop/main` as `a0570fac8 Update agent-doc submodule`, pointing at `8ccf4f2c`.
+- `btakita/agent-doc` CI run `27083820892` passed.
+- Superproject has no workflow named `CI`. Its latest `Agent Doc` run `27083990660` failed before either job started because GitHub reported the account billing/spending-limit runner allocation blocker. The `check` and `tmux-ci` jobs had no steps/logs.
+
+The current free-text queue head was intentionally left queued; this update is only the final pointer/CI record for the completed watcher item.
+<!-- agent:boundary:9c415569 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fix. If yes, do I need to restart something? If not, fix.
+- ~~:pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fix. If yes, do I need to restart something? If not, fix.~~
 - :pushpin: do [#agent-doc-memgraphrag-retrieval]
 - :pushpin: do [#queue-enqueue-action]
 - :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.

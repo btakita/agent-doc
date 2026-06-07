@@ -68,21 +68,13 @@ Verification:
 Commits pushed to `src/agent-doc`:
 - `1cc8e2ad Add node-keyed watch events`
 - `8ccf4f2c Document watcher node-event spec`
-<!-- agent:boundary:f41a2d60 -->
+<!-- agent:boundary:e2d577ec -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#md-ast-document-model]~~
-- ~~:pushpin: do [#md-ast-crate-extract]~~
-- ~~:pushpin: do [#md-ast-component-overlay]~~
-- ~~:pushpin: do [#md-ast-crdt-schema]~~
-- ~~:pushpin: do [#md-ast-mutations-node-keyed]~~
-- ~~:pushpin: do [#md-ast-ipc-node-patches]~~
-- ~~:pushpin: do [#md-ast-realtime-watcher]~~
 - :pushpin: agent-doc monsterrodholders.md completed queue items are not writing into the exchange. This may have been previous fix. If yes, do I need to restart something? If not, fix.
-- :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.
 - :pushpin: do [#agent-doc-memgraphrag-retrieval]
 - :pushpin: do [#queue-enqueue-action]
 - :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
@@ -91,6 +83,7 @@ Commits pushed to `src/agent-doc`:
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]
+- :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.
 - do [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

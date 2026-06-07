@@ -140,6 +140,15 @@ Confidence: high on the audit conclusion; medium on the exact repair path becaus
 Escalation / recommended next action:
 - Do not continue the auto queue from this contaminated state until the false closeouts are repaired.
 - I added `#repair-false-closeouts` to backlog to force that repair into the document instead of letting it remain an informal recommendation.
+❯ do #repair-false-closeouts. #spec-test-build-install-commit-push
+❯ Fix Stop hook (stopped) issue
+```
+• Stop hook (stopped)
+  stop: agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+  bugs2.md, but the cycle is still open. [session-check] INTERRUPTED: cycle `cycle-1780820802369` is `committed`
+  (commit_already_current), but the document still has unresolved prompt-bearing user changes with no new agent-doc
+  cycle started: prompt_target: do #repair-false-closeouts. #spec-test-build-install-commit-push
+```
 
 ### Re: do #repair-false-closeouts — gpt-5
 
@@ -179,15 +188,29 @@ Escalation: none.
 
 Recovered the failed finalize boundary from the prior write attempt. `agent-doc repair --apply-recovery` abandoned the empty preflight cycle, and this closeout persists the already-applied response, reopened backlog items, done archive update, prompt-prefix repair, and queue strike for `#repair-false-closeouts` without adding more source changes.
 
-<!-- agent:boundary:79976090 -->
+### Re: do #repair-false-closeouts - closeout persistence - gpt-5
+
+The repair remains implemented and verified. This persistence pass commits the visible recovery drift that followed the failed finalize boundary: the original prompt text is present in the exchange, the two false-closeout items are reopened and queued, `#repair-false-closeouts` is archived as done, and the prior response headings are marked against HEAD.
+
+Changed paths already shipped for the source fix: `src/agent-doc/agent-doc-orchestration/src/codex_hook.rs` and `src/agent-doc/specs/07-orchestration-commands.md` in submodule commit `0b7638cc`.
+
+Verification already completed for the source fix: `cargo test -p agent-doc-orchestration stop_hook_active_blocks_committed_cycle_fresh_prompt_instead_of_stopping -- --nocapture`, `cargo test -p agent-doc-orchestration stop_ -- --nocapture`, `cargo test -p agent-doc force_interrupt_clear_summary_reports_destructive_cleanup -- --nocapture`, `make check`, and `cargo install --path .` all passed.
+
+Repository proof: `src/agent-doc` commit `0b7638cc fix: recover codex stop fresh prompt cycles` was pushed to `origin/main`; parent pointer commit `ead679fc0 chore: update agent-doc pointer` was pushed to `origin/main`. The remaining parent changes in this pass are session-document recovery state only.
+<!-- agent:boundary:1c30eeeb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- ~~do [#md-ast-document-model]~~
-- ~~do [#jb-file-cache-conflict-syntax-loss]~~
+- do [#md-ast-document-model]
+- do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
+- do [#multi-session-shared-build-isolation]
+- do [#sync-fast-pane-hotpath]
+- do [#queue-dedup-destroys-intentional-duplicates]
 - do [#partial-staging-closeout-guard]
 - do [#codex-mcp-server-root-fix]
 - do [#live-verify-batch]
@@ -196,11 +219,6 @@ Recovered the failed finalize boundary from the prior write attempt. `agent-doc 
 - do [#clear-blocked-by-own-drafted-clear-command]
 - do [#tmux-status-turn-in-progress]
 - do [#stale-busy-self-heal-live-verify]
-- :round_pushpin: do [#jb-busy-active-turn-stall-live-verify]
-- :round_pushpin: do [#adoc-route-busy-fix-superproject-pointer-push]
-- :round_pushpin: do [#multi-session-shared-build-isolation]
-- :round_pushpin: do [#sync-fast-pane-hotpath]
-- :round_pushpin: do [#queue-dedup-destroys-intentional-duplicates]
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->
 ###

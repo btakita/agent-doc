@@ -63,7 +63,24 @@ Both gated items are implemented, tested, built/installed, committed, and pushed
 **Scope notes:** staged only my 4 files (left the submodule's pre-existing dirty `AGENTS.md`/`.opencode/`/`BENCHMARKS.md` untouched). Did **not** bump the version or publish — the preset was build+install+commit+push, not release; a publish would need a coordinated version bump (which also clears the `publish:check` red). The agent-loop superproject's `src/tsift` pointer now trails `188bd5b` if you want to bump it.
 
 Remaining toward full MemGraphRAG: `#trt1` (authored Finding/Decision/Note node types) and folding decay ranking into `#rankdefault` over the now-merged graph.
-<!-- agent:boundary:8d788807 -->
+
+### Re: Commit all uncommitted tsift changes — opus-4-8
+
+> **Queue prompt:**
+>
+> Commit all uncommitted tsift changes.
+
+
+Committed and pushed (`btakita/tsift` `main` `232c766`). The tsift submodule working tree is now clean. The 14 uncommitted files were all generated/doc surfaces (no source code):
+
+- **`AGENTS.md`** — `tsift init` code-navigation block refresh (marker `v0.1.62` → `v0.1.63`, added `source-read`/`symbol-read` entries).
+- **`.opencode/commands/*.md`** (12 files) — opencode command shortcuts from `tsift init --opencode`.
+- **`BENCHMARKS.md`** — graph-db `backend-eval` results (SQLite vs SurrealDB).
+
+Pushed to keep `main` consistent with the already-pushed feature commit `188bd5b`. Note: the `.opencode/commands/*.md` still carry `v=0.1.62` markers while `AGENTS.md` is at `v0.1.63` — a minor drift from a partial `tsift init` run. I committed them as-is per your request; re-run `tsift init --opencode` if you want the markers realigned.
+
+(The agent-loop superproject's `src/tsift` pointer now trails `232c766`.)
+<!-- agent:boundary:b7dc30e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +90,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Commit all uncommitted tsift changes.
+- ~~Commit all uncommitted tsift changes.~~
+- How does the https://arxiv.org/pdf/2606.00610 Ontology Graph, Fact Graph, and Passage Graph map onto tsift?
 <!-- /agent:queue -->
 
 ## Backlog

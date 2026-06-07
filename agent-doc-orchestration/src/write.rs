@@ -3173,15 +3173,58 @@ fn queue_consume_count_for_done_ids(
     count
 }
 
-fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> Result<Vec<String>> {
+struct QueuePromptNodeKeys {
+    keys: Vec<String>,
+    ast_backed: bool,
+}
+
+fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> Result<QueuePromptNodeKeys> {
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
-    Ok(nodes
+    let ast_keys = nodes
         .into_iter()
         .filter(|node| !node.item.struck)
         .take(count)
         .map(|node| node.node_key)
-        .collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    if ast_keys.len() >= count {
+        return Ok(QueuePromptNodeKeys {
+            keys: ast_keys,
+            ast_backed: true,
+        });
+    }
+
+    let components = component::parse(content)?;
+    let queue_component = components
+        .iter()
+        .find(|c| c.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
+    let prompt_texts = first_n_queue_prompt_texts(&entries, count);
+    if prompt_texts.len() < count {
+        anyhow::bail!(
+            "queue consume: document has {} prompt(s) but planned to consume {}",
+            prompt_texts.len(),
+            count
+        );
+    }
+
+    let keys = prompt_texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let hash = crate::ops_log::content_hash(text);
+            let short_hash = &hash[..hash.len().min(12)];
+            format!("queue:entry:{index}:{short_hash}")
+        })
+        .collect::<Vec<_>>();
+
+    Ok(QueuePromptNodeKeys {
+        keys,
+        ast_backed: false,
+    })
 }
 
 fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
@@ -3408,16 +3451,12 @@ fn plan_queue_prompt_consumption(
         )
     })?;
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
-    let node_consume_available = consumed_node_keys.len() == consume_count;
-    let node_ops = if node_consume_available {
-        consumed_node_keys
-            .iter()
-            .cloned()
-            .map(|node_key| IpcNodeOp::consume("queue", node_key))
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+    let node_ops = consumed_node_keys
+        .keys
+        .iter()
+        .cloned()
+        .map(|node_key| IpcNodeOp::consume("queue", node_key))
+        .collect::<Vec<_>>();
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
     let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
@@ -3429,10 +3468,10 @@ fn plan_queue_prompt_consumption(
         completed_entries
     };
     let new_body = crate::queue::render(&new_entries);
-    let mut current = if drained || !node_consume_available {
+    let mut current = if drained || !consumed_node_keys.ast_backed {
         comp.replace_content(content, &new_body)
     } else {
-        consume_queue_nodes_by_key(content, &consumed_node_keys)?
+        consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
     };
 
     if drained {
@@ -3473,7 +3512,6 @@ fn plan_queue_prompt_consumption(
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
     let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
     let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
-    let snapshot_node_consume_available = snapshot_node_keys.len() == consume_count;
     if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
             "queue consume: snapshot has {} prompt(s) available but document consumed {}",
@@ -3537,10 +3575,10 @@ fn plan_queue_prompt_consumption(
     }
 
     let mut new_snap =
-        if drained || snap_new_entries != new_entries || !snapshot_node_consume_available {
+        if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
             snap_queue.replace_content(&snap, &new_body)
         } else {
-            consume_queue_nodes_by_key(&snap, &snapshot_node_keys)?
+            consume_queue_nodes_by_key(&snap, &snapshot_node_keys.keys)?
         };
     if drained {
         if snap_has_auto

@@ -46,7 +46,7 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **Structured overlay CRDT:** The markdown AST crate owns a structured Yrs schema for the agent component overlay. The root map `agent_doc_overlay` stores `schema_version`, the visible markdown projection, and a `components` array; each component is a map with byte span metadata and an `items` array; each item is a map with stable `id`, normalized text, raw text, pin/strike flags, and kind metadata. New structured states must not rely on the legacy single `content` `Text` root for component identity, and legacy `content` states are migrated by reparsing their markdown projection into this schema.
 
-**Node-keyed mutations:** The markdown AST crate exposes component mutations keyed by item `id`: consume marks a node struck, dedup removes duplicate id-backed nodes while preserving free-text duplicates, reorder moves items by id, and enqueue inserts a new item relative to an existing id. These APIs are the phase-4 bridge away from text-line heuristics; callers should treat pin markers and strike markers as node attributes, not identity text.
+**Node-keyed mutations:** The markdown AST crate exposes component mutations keyed by semantic item identity plus occurrence, not absolute byte offsets: consume marks a node struck, dedup removes duplicate id-backed nodes while preserving free-text duplicates, reorder moves items by node key, and enqueue inserts relative to an existing node key. These APIs are the phase-4/5 bridge away from text-line heuristics; callers should treat pin markers and strike markers as node attributes, not identity text.
 
 **Standard component names:**
 

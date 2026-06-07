@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Markdown-AST IPC patches are node-addressed (`#md-ast-ipc-node-patches`).**
+  Queue closeout now derives semantic occurrence node keys for live queue items
+  and strikes non-draining queue heads through the AST mutation layer, so
+  intentional duplicate prompt text is not consumed by text matching. IPC
+  payloads retain legacy component `patches` while adding explicit `op` /
+  `node_id` metadata and a `node_patches` array for item-level insert, strike,
+  unstrike, replace, remove, and move operations. JetBrains and VS Code patch
+  DTOs accept the new fields. Tests
+  `queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity`,
+  `build_ipc_node_patches_json_tracks_strike_and_insert_by_node_key`,
+  `build_ipc_node_patches_json_tracks_reorder_without_text_matching`,
+  `build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds`, and
+  `parsePatchJson preserves node-addressed component patch fields`. Specs
+  `specs/02-document-format.md`, `specs/07-orchestration-commands.md`.
+
 - **Deprecated `queue_active:` frontmatter line no longer gets stuck in a
   document (`#queue-active-deprecated-line-stuck`).** `merge_queue_state`/`write`
   already drop the legacy `queue_active:` line when they re-serialize, but a doc

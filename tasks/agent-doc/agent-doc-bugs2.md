@@ -38,6 +38,11 @@ Compacted content:
 
 ### Re: monsterrodholders.md cycling between sessions - gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.
+
+
 Checked and repaired the current state.
 
 Findings:
@@ -56,14 +61,14 @@ Verification:
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` passes and now reports next queue prompt `do [#learn-ohio-duplicate-gate]`.
 - `btakita/boost-client` has no GitHub Actions workflows named/listed, so there was no remote Boost Client CI to inspect.
 - Parent `btakita/agent-loop` `Agent Doc` run `27085543043` still fails immediately with jobs `check` and `tmux-ci` containing `steps: []`, matching the existing runner/infrastructure-shaped failure on prior gitlink pushes.
-<!-- agent:boundary:375a99a5 -->
+<!-- agent:boundary:b92d5bfa -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.~~
-- :pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.
+- ~~:pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.~~
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]

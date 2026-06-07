@@ -249,12 +249,15 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   preserving the retry marker consumed by editor plugins. When the lock is still
   held by stale orphaned `agent-doc sync` processes for the same lock file, sync
   reaps those lock owners and retries acquisition before reporting contention.
-- In safe-passive editor mode, `sync --no-autostart --focus <file>` must acquire
-  the bounded `.agent-doc/sync.lock` before selecting a hidden controller actor
-  pane for the focused document. If that lock is contended, sync returns the
-  normal retry marker without changing tmux focus. Once the lock is held and the
-  actor binding matches the document session with an alive pane, sync selects
-  that pane before prune, ownership proof, or tmux-router reconciliation.
+- In safe-passive editor mode, `sync --no-autostart --focus <file>` may perform
+  a lock-free pre-lock handoff before acquiring the bounded
+  `.agent-doc/sync.lock`: select a live local actor projection immediately, or
+  try a nonblocking skip-wait pane provision when no local actor record exists.
+  If that lock is contended, sync returns the normal retry marker without
+  further tmux reconciliation or post-lock focus changes. Once the lock is held
+  and the actor binding matches the document session with an alive pane, sync
+  selects that pane before prune, ownership proof, or tmux-router
+  reconciliation.
 - Sync latency diagnostics must name the phase that crossed budget. The
   top-level phases include window resolution, prune, ownership proof,
   tmux-router reconcile, and safe-passive total; prune must also emit subphase
@@ -566,16 +569,19 @@ ownership-proof latency.
 Controller actor-binding responses must distinguish `bound` from `not_found`;
 an absent actor is a typed no-op for safe-passive focus, while a malformed
 controller response is a protocol error with the raw envelope in diagnostics.
-Safe-passive post-lock focus and safe-passive document binding must use the
-local actor projection when it is live, avoiding a controller RPC on the editor
-fast path. Document binding logs `controller_actor_lookup_skipped ...
-source=local_projection` and records an immediate `controller_actor_lookup`
-success sample when that fast path resolves. If sync must fall back to the
-controller actor-binding call, that result must be stored in the per-sync
-proof cache so later controller actor lookup, ownership proof, and synthetic
-registry construction do not pay for the same lookup again. The broad
-`window_resolution` bucket covers target session/window resolution only;
-post-lock focus is timed separately as `postlock_actor_focus`.
+Safe-passive pre-lock focus, post-lock focus, and safe-passive document binding
+must use the local actor projection when it is live, avoiding a controller RPC
+on the editor fast path. If no local actor record exists, the pre-lock focus
+path may try nonblocking skip-wait provisioning and must return without waiting
+when a startup lock is already held. Document binding logs
+`controller_actor_lookup_skipped ... source=local_projection` and records an
+immediate `controller_actor_lookup` success sample when that fast path resolves.
+If sync must fall back to the controller actor-binding call, that result must be
+stored in the per-sync proof cache so later controller actor lookup, ownership
+proof, and synthetic registry construction do not pay for the same lookup again.
+The broad `window_resolution` bucket covers target session/window resolution
+only; pre-lock and post-lock focus are timed separately as
+`prelock_actor_focus` and `postlock_actor_focus`.
 
 `agent-doc start` creates owner generations through the controller. `route`
 and `sync` read actor bindings through the controller before consulting

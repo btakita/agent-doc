@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Safe-passive sync pre-locks the pane handoff.** `sync --no-autostart
+  --focus <file>` now selects a live local actor projection before waiting on
+  `.agent-doc/sync.lock`, so a contended reconcile no longer gates the visible
+  pane switch. When no local actor record exists, sync tries skip-wait pane
+  provisioning through nonblocking startup locks and defers stale/dead/blocked
+  records to the existing locked guard path. Tests
+  `safe_passive_sync_focuses_local_projection_when_sync_lock_is_contended` and
+  `try_startup_lock_reports_busy_without_waiting`.
+
 - **Session-isolated self install.** `agent-doc self-install` now installs the
 current committed checkout from a temporary sibling git worktree, preserving
 relative Cargo path dependencies like `../agent-kit` while avoiding dirty files

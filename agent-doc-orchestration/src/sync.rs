@@ -200,6 +200,7 @@ const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_LOCK_WAIT_LATENCY_BUDGET: Duration = Duration::from_millis(100);
+const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET: Duration = Duration::from_millis(300);
 const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
@@ -464,25 +465,233 @@ fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> 
     )
 }
 
+fn safe_passive_focus_path_and_session(focus: Option<&str>) -> Option<(PathBuf, String)> {
+    let focus = focus?.trim();
+    if focus.is_empty() {
+        return None;
+    }
+    let focus_path = PathBuf::from(focus);
+    let session_id = frontmatter::read_session_id(&focus_path)?;
+    Some((focus_path, session_id))
+}
+
+fn safe_passive_local_actor_record_state(
+    focus_path: &Path,
+) -> Option<Option<crate::session_actor::ActorRecord>> {
+    let canonical = focus_path
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| focus_path.to_path_buf());
+    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy()).ok()
+}
+
+fn safe_passive_registry_pane_state(focus_path: &Path, session_id: &str) -> Option<Option<String>> {
+    let canonical = focus_path
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| focus_path.to_path_buf());
+    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    crate::sessions::lookup_in(&base_dir, session_id).ok()
+}
+
+fn safe_passive_select_prelock_pane(
+    tmux: &Tmux,
+    focus_path: &Path,
+    pane_id: &str,
+    source: &str,
+) -> Option<String> {
+    if let Err(err) = tmux.select_pane(pane_id) {
+        eprintln!(
+            "[sync] warning: failed safe-passive pre-lock focus of actor pane {} for {}: {}",
+            pane_id,
+            focus_path.display(),
+            err
+        );
+        sync_log(&format!(
+            "warning: safe_passive_prelock_actor_focus_failed file={} pane={} source={} err={}",
+            focus_path.display(),
+            pane_id,
+            source,
+            err
+        ));
+        return None;
+    }
+    eprintln!(
+        "[sync] safe_passive_prelock_actor_focus pane={} file={} source={}",
+        pane_id,
+        focus_path.display(),
+        source
+    );
+    sync_log(&format!(
+        "safe_passive_prelock_actor_focus file={} pane={} source={}",
+        focus_path.display(),
+        pane_id,
+        source
+    ));
+    Some(pane_id.to_string())
+}
+
+fn safe_passive_prelock_provision_focus_pane(
+    tmux: &Tmux,
+    focus_path: &Path,
+    session_id: &str,
+    window: Option<&str>,
+    col_args: &[String],
+) -> Option<String> {
+    if has_rename_debounce(focus_path) {
+        let message = format!(
+            "safe_passive_prelock_autostart_skipped file={} reason=rename_debounce",
+            focus_path.display()
+        );
+        eprintln!("[sync] {}", message);
+        sync_log(&message);
+        return None;
+    }
+
+    match skip_auto_start_for_recent_session_loss(focus_path, session_id) {
+        Ok(true) => return None,
+        Ok(false) => {}
+        Err(err) => {
+            let message = format!(
+                "warning: safe_passive_prelock_autostart_recent_loss_check_failed file={} err={}",
+                focus_path.display(),
+                err
+            );
+            eprintln!("[sync] {}", message);
+            sync_log(&message);
+            return None;
+        }
+    }
+
+    match passive_autostart_skip_reason(tmux, focus_path, session_id, None) {
+        Ok(Some(reason)) => {
+            let message = format!(
+                "safe_passive_prelock_autostart_skipped file={} reason={}",
+                focus_path.display(),
+                reason
+            );
+            eprintln!("[sync] {}", message);
+            sync_log(&message);
+            return None;
+        }
+        Ok(None) => {}
+        Err(err) => {
+            let message = format!(
+                "warning: safe_passive_prelock_autostart_skip_check_failed file={} err={}",
+                focus_path.display(),
+                err
+            );
+            eprintln!("[sync] {}", message);
+            sync_log(&message);
+            return None;
+        }
+    }
+
+    let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
+    let file_str = focus_path.to_string_lossy().to_string();
+    match route::try_provision_pane(
+        tmux,
+        focus_path,
+        session_id,
+        &file_str,
+        context_session.as_deref(),
+        col_args,
+    ) {
+        Ok(Some(pane_id)) => {
+            eprintln!(
+                "[sync] safe_passive_prelock_autostart pane={} file={}",
+                pane_id,
+                focus_path.display()
+            );
+            sync_log(&format!(
+                "safe_passive_prelock_autostart file={} pane={}",
+                focus_path.display(),
+                pane_id
+            ));
+            Some(pane_id)
+        }
+        Ok(None) => {
+            sync_log(&format!(
+                "safe_passive_prelock_autostart_skipped file={} reason=startup_lock_busy",
+                focus_path.display()
+            ));
+            None
+        }
+        Err(err) => {
+            let message = format!(
+                "warning: safe_passive_prelock_autostart_failed file={} err={}",
+                focus_path.display(),
+                err
+            );
+            eprintln!("[sync] {}", message);
+            sync_log(&message);
+            None
+        }
+    }
+}
+
+fn safe_passive_focus_actor_before_sync_lock(
+    tmux: &Tmux,
+    focus: Option<&str>,
+    window: Option<&str>,
+    col_args: &[String],
+) -> Option<String> {
+    let (focus_path, session_id) = safe_passive_focus_path_and_session(focus)?;
+    if let Some(pane_id) =
+        crate::focus::local_actor_projection_pane_for_document(&focus_path, &session_id, tmux)
+    {
+        return safe_passive_select_prelock_pane(tmux, &focus_path, &pane_id, "local_projection");
+    }
+
+    match safe_passive_local_actor_record_state(&focus_path)? {
+        Some(record) => {
+            sync_log(&format!(
+                "safe_passive_prelock_actor_focus_deferred file={} reason=local_actor_record_not_live record_session={} record_pane={} record_state={:?}",
+                focus_path.display(),
+                record.session_id,
+                record.pane_id,
+                record.state
+            ));
+            None
+        }
+        None => match safe_passive_registry_pane_state(&focus_path, &session_id)? {
+            Some(pane_id) if tmux.pane_alive(&pane_id) => {
+                safe_passive_select_prelock_pane(tmux, &focus_path, &pane_id, "sessions_registry")
+            }
+            Some(pane_id) => {
+                sync_log(&format!(
+                    "safe_passive_prelock_actor_focus_deferred file={} reason=registry_pane_not_live registry_pane={}",
+                    focus_path.display(),
+                    pane_id
+                ));
+                None
+            }
+            None => safe_passive_prelock_provision_focus_pane(
+                tmux,
+                &focus_path,
+                &session_id,
+                window,
+                col_args,
+            ),
+        },
+    }
+}
+
 fn safe_passive_focus_actor_after_sync_lock(
     tmux: &Tmux,
     focus: Option<&str>,
     proof_cache: &SyncProofCache,
 ) -> Option<String> {
-    let focus = focus?.trim();
-    if focus.is_empty() {
-        return None;
-    }
-    let focus_path = Path::new(focus);
-    let session_id = frontmatter::read_session_id(focus_path)?;
+    let (focus_path, session_id) = safe_passive_focus_path_and_session(focus)?;
     let (pane_id, generation, source) = if let Some(pane_id) =
-        crate::focus::local_actor_projection_pane_for_document(focus_path, &session_id, tmux)
+        crate::focus::local_actor_projection_pane_for_document(&focus_path, &session_id, tmux)
     {
         (pane_id, None, "local_projection")
     } else {
         let record = load_live_authoritative_actor_record_cached(
             tmux,
-            focus_path,
+            &focus_path,
             &session_id,
             proof_cache,
         )?;
@@ -3073,6 +3282,18 @@ fn run_with_options_internal(
         "sync::run_with_options start"
     );
     let sync_total_start = Instant::now();
+
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        let prelock_focus_start = Instant::now();
+        let _ = safe_passive_focus_actor_before_sync_lock(tmux, focus, window, col_args);
+        log_sync_latency(
+            focus,
+            "prelock_actor_focus",
+            prelock_focus_start.elapsed(),
+            SYNC_PRELOCK_ACTOR_FOCUS_BUDGET,
+            auto_start_mode,
+        );
+    }
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. Contention
@@ -9213,7 +9434,7 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_sync_does_not_focus_controller_actor_when_sync_lock_is_contended() {
+    fn safe_passive_sync_focuses_local_projection_when_sync_lock_is_contended() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -9302,8 +9523,8 @@ mod tests {
         fs2::FileExt::unlock(&holder).unwrap();
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            stale_pane,
-            "safe-passive editor sync must not focus a hidden actor pane when sync lock contention defers prune/reconcile"
+            active_pane,
+            "safe-passive editor sync should focus the known local actor pane before sync lock contention defers prune/reconcile"
         );
     }
 

@@ -77,6 +77,36 @@ fn route_bin_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[test]
+fn try_startup_lock_reports_busy_without_waiting() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    let doc = tmp.path().join("session.md");
+    std::fs::write(&doc, "---\nagent_doc_session: startup-lock-test\n---\n").unwrap();
+
+    let starting_dir = starting_dir_for(&doc).expect("project root should resolve");
+    std::fs::create_dir_all(&starting_dir).unwrap();
+    let hash = snapshot::doc_hash(&doc).unwrap();
+    let lock_path = starting_dir.join(format!("{hash}.lock"));
+    let held_doc_lock = open_start_lock(&lock_path).unwrap();
+    fs2::FileExt::lock_exclusive(&held_doc_lock).unwrap();
+
+    let start = std::time::Instant::now();
+    let acquired =
+        acquire_startup_locks(&doc, "startup-lock-test-session", StartupLockMode::Try).unwrap();
+    let elapsed = start.elapsed();
+
+    fs2::FileExt::unlock(&held_doc_lock).unwrap();
+    assert!(
+        matches!(acquired, StartupLockAcquire::Busy),
+        "try-mode startup locks should report a busy lock instead of waiting"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(100),
+        "try-mode startup lock acquisition should be bounded, elapsed={elapsed:?}"
+    );
+}
+
 fn test_cwd() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }

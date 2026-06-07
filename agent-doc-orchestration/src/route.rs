@@ -44,6 +44,10 @@
 //!   existence is needed (agent will start asynchronously). Computes `split_before` via
 //!   `is_first_column(file, col_args)` so new panes split in the correct direction for
 //!   their column position.
+//! - **`try_provision_pane(...)`**: Same skip-wait provisioning path, but uses
+//!   nonblocking startup locks and returns `Ok(None)` when a same-document or
+//!   same-session start is already in progress. Used by safe-passive sync's
+//!   pre-lock create-on-miss hot path.
 //! - **`is_first_column(file, col_args)`**: Returns true when `file` appears in the first
 //!   `--col` argument. Drives the `-dbh` (split before) vs `-dh` (split after) split direction
 //!   when creating a new pane. Returns false when `col_args` has fewer than 2 entries.
@@ -8290,6 +8294,29 @@ pub fn provision_pane(
     )
 }
 
+/// Like [`provision_pane`], but returns `Ok(None)` instead of blocking when a
+/// same-document or same-session startup is already in progress.
+pub fn try_provision_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+    col_args: &[String],
+) -> Result<Option<String>> {
+    let split_before = is_first_column(file, col_args);
+    auto_start_ext_with_lock_mode(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        context_session,
+        true,
+        split_before,
+        StartupLockMode::Try,
+    )
+}
+
 fn auto_start_ext(
     tmux: &Tmux,
     file: &Path,
@@ -8299,10 +8326,36 @@ fn auto_start_ext(
     skip_wait: bool,
     split_before: bool,
 ) -> Result<String> {
+    match auto_start_ext_with_lock_mode(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        context_session,
+        skip_wait,
+        split_before,
+        StartupLockMode::Blocking,
+    )? {
+        Some(pane) => Ok(pane),
+        None => anyhow::bail!("startup lock was busy in blocking startup mode"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn auto_start_ext_with_lock_mode(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+    skip_wait: bool,
+    split_before: bool,
+    startup_lock_mode: StartupLockMode,
+) -> Result<Option<String>> {
     let harness = resolve_harness_for_file(file);
     let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness);
     ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
-    auto_start_in_session(
+    auto_start_in_session_with_lock_mode(
         tmux,
         file,
         session_id,
@@ -8314,12 +8367,24 @@ fn auto_start_ext(
         None,
         None,
         false,
+        startup_lock_mode,
     )
 }
 
 struct StartupLocks {
     _doc: File,
     _session: File,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupLockMode {
+    Blocking,
+    Try,
+}
+
+enum StartupLockAcquire {
+    Acquired(Option<StartupLocks>),
+    Busy,
 }
 
 fn starting_dir_for(file: &Path) -> Option<std::path::PathBuf> {
@@ -8346,9 +8411,30 @@ fn open_start_lock(path: &Path) -> Result<File> {
         .with_context(|| format!("failed to open startup lock {}", path.display()))
 }
 
-fn acquire_startup_locks(file: &Path, session_name: &str) -> Result<Option<StartupLocks>> {
+fn lock_startup_file(lock: &File, lock_path: &Path, mode: StartupLockMode) -> Result<bool> {
+    match mode {
+        StartupLockMode::Blocking => {
+            lock.lock_exclusive().with_context(|| {
+                format!("failed to acquire startup lock {}", lock_path.display())
+            })?;
+            Ok(true)
+        }
+        StartupLockMode::Try => match lock.try_lock_exclusive() {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
+            Err(err) => Err(err)
+                .with_context(|| format!("failed to acquire startup lock {}", lock_path.display())),
+        },
+    }
+}
+
+fn acquire_startup_locks(
+    file: &Path,
+    session_name: &str,
+    mode: StartupLockMode,
+) -> Result<StartupLockAcquire> {
     let Some(starting_dir) = starting_dir_for(file) else {
-        return Ok(None);
+        return Ok(StartupLockAcquire::Acquired(None));
     };
 
     let doc_lock_path = if let Ok(hash) = snapshot::doc_hash(file) {
@@ -8360,22 +8446,19 @@ fn acquire_startup_locks(file: &Path, session_name: &str) -> Result<Option<Start
     let session_lock_path = starting_dir.join(session_start_lock_name(session_name));
 
     let doc_lock = open_start_lock(&doc_lock_path)?;
-    doc_lock
-        .lock_exclusive()
-        .with_context(|| format!("failed to acquire startup lock {}", doc_lock_path.display()))?;
+    if !lock_startup_file(&doc_lock, &doc_lock_path, mode)? {
+        return Ok(StartupLockAcquire::Busy);
+    }
 
     let session_lock = open_start_lock(&session_lock_path)?;
-    session_lock.lock_exclusive().with_context(|| {
-        format!(
-            "failed to acquire session startup lock {}",
-            session_lock_path.display()
-        )
-    })?;
+    if !lock_startup_file(&session_lock, &session_lock_path, mode)? {
+        return Ok(StartupLockAcquire::Busy);
+    }
 
-    Ok(Some(StartupLocks {
+    Ok(StartupLockAcquire::Acquired(Some(StartupLocks {
         _doc: doc_lock,
         _session: session_lock,
-    }))
+    })))
 }
 
 /// Resolve HarnessConfig from a file's frontmatter + global config.
@@ -8409,13 +8492,56 @@ fn auto_start_in_session(
     split_before: bool,
     harness: &HarnessConfig,
     startup_miss_handoff_blocked_pane: Option<&str>,
-    mut created_panes: Option<&mut Vec<String>>,
+    created_panes: Option<&mut Vec<String>>,
     dispatch_only: bool,
 ) -> Result<String> {
+    match auto_start_in_session_with_lock_mode(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        session_name,
+        skip_wait,
+        split_before,
+        harness,
+        startup_miss_handoff_blocked_pane,
+        created_panes,
+        dispatch_only,
+        StartupLockMode::Blocking,
+    )? {
+        Some(pane) => Ok(pane),
+        None => anyhow::bail!("startup lock was busy in blocking startup mode"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn auto_start_in_session_with_lock_mode(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    session_name: &str,
+    skip_wait: bool,
+    split_before: bool,
+    harness: &HarnessConfig,
+    startup_miss_handoff_blocked_pane: Option<&str>,
+    mut created_panes: Option<&mut Vec<String>>,
+    dispatch_only: bool,
+    startup_lock_mode: StartupLockMode,
+) -> Result<Option<String>> {
     // Serialize auto-starts for both the document and the target tmux session.
     // This prevents duplicate starts for the same file and split-target races
     // when two different documents provision concurrently into the same window.
-    let startup_locks = acquire_startup_locks(file, session_name)?;
+    let startup_locks = match acquire_startup_locks(file, session_name, startup_lock_mode)? {
+        StartupLockAcquire::Acquired(locks) => locks,
+        StartupLockAcquire::Busy => {
+            eprintln!(
+                "[route] startup lock busy for {} in session '{}' — provisioning already in progress",
+                file_path, session_name
+            );
+            return Ok(None);
+        }
+    };
     if let Some(existing) = sessions::lookup(session_id)?
         && tmux.pane_alive(&existing)
     {
@@ -8423,7 +8549,7 @@ fn auto_start_in_session(
             "[route] startup already provisioned pane {} for {} while waiting on locks",
             existing, file_path
         );
-        return Ok(existing);
+        return Ok(Some(existing));
     }
 
     // Use the document's own submodule root as the pane cwd when applicable,
@@ -8669,7 +8795,7 @@ fn auto_start_in_session(
                 ),
             );
             let _ = dispatch_start;
-            return Ok(dispatch_pane);
+            return Ok(Some(dispatch_pane));
         }
 
         let ack_timeout = fresh_route_start_ack_timeout();
@@ -8774,7 +8900,7 @@ fn auto_start_in_session(
         )?
     };
     let _ = file; // suppress unused warning
-    Ok(final_pane)
+    Ok(Some(final_pane))
 }
 
 fn agent_doc_start_bin() -> String {

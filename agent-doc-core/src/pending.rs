@@ -969,6 +969,28 @@ pub fn op_take_items_by_state(body: &str, state: PendingState) -> (String, Vec<P
     (rewritten.render(), taken)
 }
 
+/// Extract non-done items with ids in `ids`, returning the updated body and removed items.
+pub fn op_take_active_items_by_ids(
+    body: &str,
+    ids: &HashSet<String>,
+) -> (String, Vec<PendingItem>) {
+    if ids.is_empty() {
+        return (body.to_string(), Vec::new());
+    }
+    let ids: HashSet<String> = ids.iter().map(|id| normalize_pending_id(id)).collect();
+    let layout = PendingLayout::parse(body);
+    let mut taken = Vec::new();
+    let rewritten = layout.replace_items(|item| {
+        if !item.is_done() && ids.contains(&item.id) {
+            taken.push(item.clone());
+            None
+        } else {
+            Some(item.clone())
+        }
+    });
+    (rewritten.render(), taken)
+}
+
 pub fn canonicalize_preserving_non_item_lines(body: &str) -> String {
     PendingLayout::parse(body).render()
 }
@@ -2216,6 +2238,37 @@ mod tests {
                 ("b".to_string(), PRIORITY_RANK_UNSET)
             ]
         );
+    }
+
+    #[test]
+    fn op_take_active_items_by_ids_removes_open_and_gated_matches_only() {
+        let body = concat!(
+            "intro\n",
+            "- [ ] [#open] remove open\n",
+            "  child line\n",
+            "- [/] [#gated] remove gated\n",
+            "- [x] [#done] keep explicit done\n",
+            "- [ ] [#keep] keep open\n",
+        );
+        let ids: HashSet<String> = ["#open".to_string(), "gated".to_string(), "done".to_string()]
+            .into_iter()
+            .collect();
+
+        let (new_body, removed) = op_take_active_items_by_ids(body, &ids);
+
+        assert_eq!(
+            removed
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["open", "gated"]
+        );
+        assert!(!new_body.contains("[#open]"));
+        assert!(!new_body.contains("child line"));
+        assert!(!new_body.contains("[#gated]"));
+        assert!(new_body.contains("[#done] keep explicit done"));
+        assert!(new_body.contains("[#keep] keep open"));
+        assert!(new_body.starts_with("intro\n"));
     }
 
     #[test]

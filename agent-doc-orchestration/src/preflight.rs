@@ -2953,6 +2953,11 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
     // unnecessary working-tree rewrite.
     let mut snapshot_mutated = false;
     let mut saw_completed_before = false;
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        snapshot::find_project_root(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
+    let already_done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
 
     for surface in &tracked_surfaces {
         let components = crate::component::parse(&current_content)
@@ -2976,6 +2981,22 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             );
             current_body = after_backfill;
             mutated = true;
+        }
+
+        if should_reap_already_done_mirrors(surface) && !already_done_ids.is_empty() {
+            let (after_mirror_reap, mirror_items) =
+                crate::pending::op_take_active_items_by_ids(&current_body, &already_done_ids);
+            if !mirror_items.is_empty() {
+                let removed_ids: Vec<String> = mirror_items.iter().map(|i| i.id.clone()).collect();
+                eprintln!(
+                    "[preflight] {}: reaped {} already-done mirror item(s): {}",
+                    surface_label,
+                    mirror_items.len(),
+                    removed_ids.join(", ")
+                );
+                current_body = after_mirror_reap;
+                mutated = true;
+            }
         }
 
         let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body)?;
@@ -3169,9 +3190,15 @@ fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
 fn maintenance_surface_label(surface: &str) -> &str {
     if is_backlog_component(surface) {
         "pending"
+    } else if is_review_component(surface) {
+        "review"
     } else {
         "icebox"
     }
+}
+
+fn should_reap_already_done_mirrors(surface: &str) -> bool {
+    is_backlog_component(surface) || is_review_component(surface)
 }
 
 fn tracked_body_for_reorder(content: &str) -> Option<&str> {
@@ -6439,6 +6466,44 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_strikes_external_archive_done_queue_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            dir.path().join("session.done.md"),
+            "# Done\n\n- 2026-06-01 [#extdone] archived externally\n",
+        )
+        .unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#extdone]\n",
+            "- do [#fresh]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- ~~do [#extdone]~~"),
+            "externally-archived live queue mirror must be struck:\n{updated}"
+        );
+        assert!(
+            updated.contains("- do [#fresh]"),
+            "fresh live queue prompt must remain:\n{updated}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_backlog_sync_is_idempotent() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -8200,6 +8265,139 @@ mod tests {
         assert!(snapshot_after.contains("## Completed / Reaped"));
         assert!(snapshot_after.contains("<!-- agent:done -->"));
         assert!(snapshot_after.contains("[#reap1] Reap me"));
+    }
+
+    #[test]
+    fn pending_maintenance_reaps_inline_done_backlog_and_review_mirrors() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#done1] stale backlog mirror\n",
+            "- [ ] [#keep1] keep backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#done2] stale review mirror\n",
+            "- [/] [#keep2] keep review\n",
+            "<!-- /agent:review -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#done1] already archived backlog\n",
+            "- [x] [#done2] already archived review\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.review_count, 1);
+        assert_eq!(report.review_gated_count, 1);
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let file_components = crate::component::parse(&file_after).unwrap();
+        let file_backlog = file_components
+            .iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        let file_review = file_components
+            .iter()
+            .find(|c| c.name == "review")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        assert!(!file_backlog.contains("[#done1]"));
+        assert!(file_backlog.contains("[#keep1] keep backlog"));
+        assert!(!file_review.contains("[#done2]"));
+        assert!(file_review.contains("[#keep2] keep review"));
+        assert_eq!(file_after.matches("[#done1]").count(), 1);
+        assert_eq!(file_after.matches("[#done2]").count(), 1);
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        let snapshot_components = crate::component::parse(&snapshot_after).unwrap();
+        let snapshot_backlog = snapshot_components
+            .iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        let snapshot_review = snapshot_components
+            .iter()
+            .find(|c| c.name == "review")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        assert!(!snapshot_backlog.contains("[#done1]"));
+        assert!(!snapshot_review.contains("[#done2]"));
+        assert_eq!(snapshot_after.matches("[#done1]").count(), 1);
+        assert_eq!(snapshot_after.matches("[#done2]").count(), 1);
+    }
+
+    #[test]
+    fn pending_maintenance_reaps_external_done_archive_backlog_and_review_mirrors() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive_rel = "session.done.md";
+        let archive_path = dir.path().join(archive_rel);
+        let archive_content = concat!(
+            "# Done\n\n",
+            "- [x] [#extdone1] externally archived backlog\n",
+            "- [x] [#extdone2] externally archived review\n",
+        );
+        std::fs::write(&archive_path, archive_content).unwrap();
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#extdone1] stale backlog mirror\n",
+            "- [ ] [#fresh1] fresh backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#extdone2] stale review mirror\n",
+            "- [/] [#fresh2] fresh review\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert_eq!(report.review_count, 1);
+        assert_eq!(report.review_gated_count, 1);
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let file_components = crate::component::parse(&file_after).unwrap();
+        let file_backlog = file_components
+            .iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        let file_review = file_components
+            .iter()
+            .find(|c| c.name == "review")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        assert!(!file_backlog.contains("[#extdone1]"));
+        assert!(file_backlog.contains("[#fresh1] fresh backlog"));
+        assert!(!file_review.contains("[#extdone2]"));
+        assert!(file_review.contains("[#fresh2] fresh review"));
+        assert_eq!(
+            std::fs::read_to_string(&archive_path).unwrap(),
+            archive_content
+        );
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snapshot_after.contains("stale backlog mirror"));
+        assert!(!snapshot_after.contains("stale review mirror"));
+        assert!(snapshot_after.contains("[#fresh1] fresh backlog"));
+        assert!(snapshot_after.contains("[#fresh2] fresh review"));
     }
 
     #[test]

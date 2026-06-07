@@ -6,10 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Preflight reaps stale active mirrors for archived done ids.** During pending
+maintenance, active `agent:backlog` and `agent:review` items whose ids already
+exist in inline `agent:done` or the configured external `agent:done archive=...`
+are removed from the live tracked-work surface without appending duplicate done
+archive entries. Queue maintenance continues to exclude those ids from
+backlog-to-queue sync and now has explicit external-archive strike coverage.
+Tests
+`pending_maintenance_reaps_inline_done_backlog_and_review_mirrors`,
+`pending_maintenance_reaps_external_done_archive_backlog_and_review_mirrors`,
+and `run_queue_maintenance_excludes_external_archive_done_ids`.
+
 - **Codex installs now register the agent-doc MCP server.** `agent-doc skill
-  install --harness codex` writes `[mcp_servers.agent-doc]` into
-  `.codex/config.toml` and the Codex Stop hook prefers the
-  `agent_doc_preflight` / `agent_doc_plan` / `agent_doc_finalize` /
+install --harness codex` writes `[mcp_servers.agent-doc]` into
+`.codex/config.toml` and the Codex Stop hook prefers the
+`agent_doc_preflight` / `agent_doc_plan` / `agent_doc_finalize` /
   `agent_doc_session_check` continuation path when that server is configured,
   while preserving the existing in-pane CLI fallback for runs without MCP.
 

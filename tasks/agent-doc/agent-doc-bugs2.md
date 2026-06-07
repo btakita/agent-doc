@@ -35,7 +35,27 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 2 response topic(s): #queue-enqueue-action; #queue-enqueue-action closeout recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d9aa5301 -->
+
+### Re: backlog queue priority markers — gpt-5
+
+
+Implemented the queue priority marker behavior in `src/agent-doc`. No new follow-up backlog items are needed from this closeout.
+
+- Source components carrying both `queue` and `priority` now trigger queue priority/auto-DAG ordering for the synced `agent:queue` even when the queue marker itself has no `priority` token.
+- Automatically promoted queue prompts are visibly annotated with `:round_pushpin:`.
+- Priority route dispatches now insert with the operator `:pushpin:` marker and dedupe against equivalent bare queue prompts.
+- Updated `VERSIONS.md`, `specs/pending-system.md`, and `specs/07-orchestration-commands.md`.
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item`
+- `cargo test -p agent-doc-orchestration route_enqueue_priority_dispatch`
+- `cargo test -p agent-doc-orchestration annotate_agent_priority_promotions_marks_promoted_prompt`
+- `make check`
+- `cargo install --path .`
+
+Committed and pushed `src/agent-doc` commit `bd5cb6a6 Annotate prioritized queue promotions`. Latest CI listing after push: run `27085017356` was `in_progress`; per instruction, I did not wait on CI.
+<!-- agent:boundary:288728a2 -->
 <!-- /agent:exchange -->
 
 ## Queue

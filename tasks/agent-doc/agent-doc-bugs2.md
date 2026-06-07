@@ -29,85 +29,12 @@ Queue draining (`queue: go`). Head 7 (JB Run Agent Doc monsterrodholders stall) 
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-021129.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-022559.md`*
 
 Compacted content:
-- Archived 3 response topic(s): queue-populate confirmed + fence verified in logs; monsterrod queue responses + `~~`-not-struck + nested bold/italic; do [#codex-queue-drain-no-response-body]
+- Archived 4 response topic(s): `~~`-not-struck; verify [#late-ipc-patch-plugin-apply-fence] in logs; can't run monsterrodholders.md (recursion wedge); 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: `~~`-not-struck — your "finalize not called?" hypothesis is right — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
-
-
-You diagnosed it correctly. There are two strike paths, and the gap is exactly where finalize didn't run:
-
-1. **`do [#id]` items auto-strike** — `strike_done_queue_head_prompts` runs *every* preflight and strikes **any** queue prompt (anywhere in the queue, not just the head) whose `#id` is in `agent:done` or `agent:review` (gated). So once a backlog item is `--done`/gated, its queue line becomes `~~struck~~` on the next preflight. No id-item should sit completed-but-unstruck — and right now the open `do [#…]` lines in your queue are genuinely still-open backlog items, correctly unstruck.
-
-2. **Free-text items strike on consume** — a `:pushpin: <prose>` prompt has no id to match against `agent:done`, so it's struck only when a `finalize` cycle *consumes it as the head*. That's the gap you hit: when a turn does the work but `finalize` isn't called per-item — the **Codex no-response queue-drain** (just fixed fail-closed in `dfeaa2d6`: a queue turn that commits without a `### Re:` body now interrupts instead of silently advancing) and, this session, my own **batching** (doing several items, finalizing once — only the matched head struck).
-
-The fix for the gap is what we're doing now: **continuous per-head draining** (the `/loop` auto-loop), so every head gets its own `finalize` and is struck as it's answered. The `dfeaa2d6` guard makes the no-finalize case impossible to do silently. If you want id-free items to also auto-strike, the lever is tagging them `do [#id]` so the `agent:done` strike path covers them — free-text completion has no reliable automatic signal.
-
-### Re: verify [#late-ipc-patch-plugin-apply-fence] in logs — verified healthy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: I did the update. Please verify [#late-ipc-patch-plugin-apply-fence] by looking in the logs.
-
-
-Checked `idea.log` (IntelliJ 2026.1):
-- **Agent Doc 0.2.150 loaded** — the version with the apply-side fence (0.2.149) and bold rendering (0.2.150).
-- **PatchWatcher active** (77+ log lines: `dedup`, `repositionBoundary`, VCS refresh) — patches apply normally.
-- **Zero `generation fence: dropping superseded patch` lines** — no late-superseded-patch race has occurred since your install, so no duplicate `### Re:` block has materialized. That's the healthy outcome: the fence guards a rare condition and only logs when it has to drop one. The logic is proven by `PatchGenerationFenceTest` + CI.
-
-So the fence is loaded, live, and hasn't needed to fire — exactly what you want. To watch it actively drop a patch you'd have to force a timed-out-reposition race, which isn't reproducible on demand.
-
-### Re: can't run monsterrodholders.md (recursion wedge) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: I'm unable to run monsterrodholders.md. I tried `agent-doc session interrupt-clear tasks/monsterrodholders.md` and `kill-pane`. But the next turn has this error.
-> ```
-> • I used the safe restart path instead of the recursive direct command:
->
->   agent-doc start tasks/monsterrodholders.md
->
->   That launched a replacement owner, but it entered a loop repeatedly injecting agent-doc tasks/monsterrodholders.md
->   into pane %35. I stopped only the duplicate foreground process tree I started. No new commits or file changes were
->   created during that loop; boost-client is still clean against origin/main except for the pre-existing dirty nested
->   src/monsterrodholders-dev/AGENTS.md.
->
->   agent-doc session clear tasks/monsterrodholders.md refused because pane %35 is still actively busy. The next stronger
->   recovery is intentional interruption:
->
->   agent-doc session interrupt-clear tasks/monsterrodholders.md
-> ```
-
-
-That's a real wedge with two agent-doc bugs stacked, both now tracked. monsterrodholders.md is a different project (boost-client), so I won't operate on it from this session — but here's the diagnosis + recovery.
-
-**What's happening:**
-1. `agent-doc start tasks/monsterrodholders.md` run from the Codex pane that *already owns* the doc re-injects `agent-doc tasks/monsterrodholders.md` into the owner pane → the loop you saw (it spawned a replacement owner that kept injecting). The recursion guard should hard-refuse this, not spawn a looping replacement.
-2. `agent-doc session clear` refuses because pane %35 reads busy — and `interrupt-clear` didn't break it either.
-
-**Recovery (run from a shell that is NOT pane %35):**
-```
-tmux kill-pane -t %35              # kill the wedged owner pane
-agent-doc resync --fix             # drop the dead pane from sessions.json
-agent-doc session clear tasks/monsterrodholders.md   # now no busy pane blocks it
-```
-If a replacement owner respawned, `tmux list-panes -a -F '#{pane_id} #{pane_current_command}'` to find any lingering `agent-doc`/codex pane for that doc and `kill-pane` it too, then `agent-doc resync --fix` + `session clear`.
-
-**The proper fixes** (queued `#recursion-guard-wedge-escape`): (1) a recursive self-owned-pane `start` must fail closed with the external-recovery command instead of spawning a looping replacement; (2) `session clear --force` should kill the wedged owner + supervisor + clear the registry in one step. Overlaps `#clear-blocked-by-own-drafted-clear-command` and `plan-jb-run-preempt-autoloop-priority.md` sub-part 4.
-
-### Re: queue drain checkpoint — opus-4-8
-
-Drained the conversational/report queue items this pass (the `__prioritized__`/`:pushpin:` pin requests, auto-dag, `~~`-marking, queue-populate, bold/italic + nesting, the `#codex-queue-drain-no-response-body` fail-closed guard, the `~~`-not-struck diagnosis, the fence log-verification, and the monsterrodholders recursion-wedge recovery + `#recursion-guard-wedge-escape` capture).
-
-The remaining `agent:queue` is all heavy `do [#…]` implementation features — several are blocked on live IntelliJ/Codex verification (`#jb-busy-active-turn-stall-live-verify`, `#live-verify-batch`, `#stale-busy-self-heal-live-verify`) and one is a large rearchitecture (`#codex-mcp-server-root-fix`). I'll keep draining them one focused cycle at a time via the loop; the live-verify ones I'll keep as actionable backlog (your live env) rather than gate.
-<!-- agent:boundary:4f135f71 -->
+<!-- agent:boundary:bdef83e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -115,6 +42,7 @@ The remaining `agent:queue` is all heavy `do [#…]` implementation features —
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - do [#ipc-listener-dewedge-direct-disk]
 - A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
+- :pushpin: Every JB `File Cache Conflict` that is applied causes the md file to lose its plugin syntax highlighting...falling back to the default markdown syntax highlighting.
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#test-submodule-worktree-git-identity]

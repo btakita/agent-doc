@@ -57,13 +57,29 @@ Verification:
 Commits:
 - `src/agent-doc`: `9e6fce83 fix: reset queue context after accretion` (pushed to `btakita/agent-doc main`).
 - Parent repo submodule pointer: `7749e01b chore: update agent-doc submodule` (will be pushed with this session closeout commit).
-<!-- agent:boundary:33dc1fd9 -->
+❯ Is the `agent:queue` token inefficient across many turns? We seem to be burning too many token with long queue runs. I'm concerned about many turns accumulating context. Should we run `/clear` in between each task if a certain context threshold is exceeded (note there is overhead with the 1st turn)? At least 1 compaction should also cause `/clear` between turn if many-turn token inefficiency is an issue. Perhaps this is more of an issue with Codex + opencode than Claude? #spec-test-build-install-commit-push
+
+❯ I also want partial exchange compaction where entries in the exchange that are related to the upcoming run can remain but remove the unrelated entries. Use AST/semantic structure navigation to identify related entries for token efficiency if the entire document is not already in the context.
+
+❯ Claude seems efficient across multiple turns. Codex seems to burn through much context on each turn. opencode/glm seems in the middle of the pack. I typically compact the context >=~50% for all 3 agent harnesses.
+For the queue-context part: the implemented policy is threshold-based, not blindly every queue item. Once session accretion is warn/block, automatic queue continuation starts the next backend turn fresh. A recent exchange compaction forces at least one fresh context (`/clear`/`/new` for Codex Stop-hook, fresh backend session for direct `run`), then direct `run` treats that fresh backend dispatch as the reset so compaction alone does not cause repeated first-turn overhead.
+
+On harness differences: yes, this is more visible with Codex and opencode than Claude in practice. Claude tends to amortize multi-turn context more efficiently; Codex is more sensitive to already-loaded conversation growth, and opencode/GLM tends to land between those. The right control is still local session-accretion evidence (`exchange_lines`, response count, closeout churn, recent compaction), not a harness-name special case.
+
+For partial exchange compaction: I agree, but I did not fold that into this commit. It is a separate feature from queue-context reset. The shape I would implement next is:
+- `compact exchange` keeps the unresolved tail, boundary-adjacent prompt context, and entries semantically related to the upcoming prompt/queue head; unrelated entries are archived.
+- Related-entry selection should start from cheap structured signals: active prompt text, queue/backlog ids, mentioned files, symbols, command names, component names, and response headings. Only then should it use tsift/AST or semantic search handles to expand candidate entries, so we do not load the entire document just to decide what to keep.
+- The result should be deterministic and auditable: output should say which live entries were kept, which archive received the rest, and why each kept entry matched.
+- Tests should cover unresolved-tail preservation, queue-head/id matching, file/symbol matching, archive index continuity, and the no-prompt-bury rule.
+
+So the queue-context reset work is done and verified; partial semantic exchange compaction is the next implementation task, not completed in this cycle.
+<!-- agent:boundary:d871229c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process?
+- Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?
 - agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.
 - "The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.

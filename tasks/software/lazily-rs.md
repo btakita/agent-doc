@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -40,6 +40,11 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
 ### Re: IPC transport implementation — gpt-5
+
+> **Queue prompt:**
+>
+> do [#ipc8]
+
 
 > **Queue prompt:**
 >
@@ -100,7 +105,7 @@ Proposed next steps (prioritized):
 - Close with transport-specific benchmarks and regression guards (`#ipc8`).
 
 I’ll place these in backlog in that order. If you want, I can expand #ipc5 into explicit opcodes and state transitions next.
-<!-- agent:boundary:39d6f24e -->
+<!-- agent:boundary:ef8f0f08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,11 +114,6 @@ I’ll place these in backlog in that order. If you want, I can expand #ipc5 int
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~~do [#ipc4]~~
-- ~~do [#ipc5]~~
-- ~~do [#ipc6]~~
-- ~~do [#ipc7]~~
-- do [#ipc8]
 <!-- /agent:queue -->
 
 ## Backlog

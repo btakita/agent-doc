@@ -510,27 +510,38 @@ pub fn sync_backlog_into_queue(
 /// — the item reverts to its `priority`-attribute rank. There are two tiers, so
 /// operator priority always outranks agent priority:
 ///
-/// - [`PRIORITIZED_MARKER`] `__prioritized__` (double underscore) — **operator**
-///   pin. Top tier.
-/// - [`AGENT_PRIORITIZED_MARKER`] `_prioritized_` (single underscore) — **agent**
-///   pin, for items the agent prioritized. Middle tier: above unpinned items,
-///   never above operator pins. (`#queue-agent-vs-operator-pin-tier`.)
-pub const PRIORITIZED_MARKER: &str = "__prioritized__";
-pub const AGENT_PRIORITIZED_MARKER: &str = "_prioritized_";
+/// The marker is a markdown-emphasis wrap of the word `prioritized`, so it
+/// renders distinctly in the editor and is released by deleting it:
+///
+/// - **Operator** pin (top tier) — markdown **strong** emphasis:
+///   `**prioritized**` or the equivalent `__prioritized__`.
+/// - **Agent** pin (middle tier, above unpinned, never above operator pins;
+///   `#queue-agent-vs-operator-pin-tier`) — markdown *emphasis* (italic):
+///   `*prioritized*` or the equivalent `_prioritized_`.
+///
+/// Both asterisk and underscore spellings are accepted (markdown treats them as
+/// the same emphasis), so toggling between them does not change the tier.
+pub const PRIORITIZED_MARKERS: [&str; 2] = ["**prioritized**", "__prioritized__"];
+pub const AGENT_PRIORITIZED_MARKERS: [&str; 2] = ["*prioritized*", "_prioritized_"];
+/// Canonical single-spelling constants (markdown asterisk form).
+pub const PRIORITIZED_MARKER: &str = "**prioritized**";
+pub const AGENT_PRIORITIZED_MARKER: &str = "*prioritized*";
 
-/// True when `text` carries the **operator** pin marker (`__prioritized__`) at
-/// its head (after optional leading whitespace).
+/// True when `text` carries an **operator** (strong-emphasis) pin marker at its
+/// head (after optional leading whitespace), in either spelling.
 pub fn is_prioritized(text: &str) -> bool {
-    text.trim_start().starts_with(PRIORITIZED_MARKER)
+    let t = text.trim_start();
+    PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
-/// True when `text` carries the **agent** pin marker (`_prioritized_`) at its
-/// head but is not an operator pin. `__prioritized__` does not start with
-/// `_prioritized_` (second char differs: `_` vs `p`), so the two are cleanly
-/// separable; the explicit operator-pin guard is belt-and-suspenders.
+/// True when `text` carries an **agent** (italic-emphasis) pin marker at its
+/// head but is not an operator pin. A strong-emphasis wrap (`**x**` / `__x__`)
+/// never starts with its italic counterpart (`*x*` / `_x_`) — second char
+/// differs — so the tiers are cleanly separable; the operator-pin guard is
+/// belt-and-suspenders.
 pub fn is_agent_prioritized(text: &str) -> bool {
     let t = text.trim_start();
-    t.starts_with(AGENT_PRIORITIZED_MARKER) && !t.starts_with(PRIORITIZED_MARKER)
+    !is_prioritized(text) && AGENT_PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
@@ -1048,6 +1059,35 @@ mod tests {
         assert!(!is_agent_prioritized("__prioritized__ do [#x]")); // operator pin, not agent
         assert!(!is_prioritized("_prioritized_ do [#x]")); // agent pin is not operator pin
         assert!(!is_agent_prioritized("do [#x]"));
+    }
+
+    #[test]
+    fn pin_markers_accept_both_asterisk_and_underscore_emphasis() {
+        // Operator = strong emphasis (** / __); agent = italic emphasis (* / _).
+        assert!(is_prioritized("**prioritized** do [#x]"));
+        assert!(is_prioritized("__prioritized__ do [#x]"));
+        assert!(is_agent_prioritized("*prioritized* do [#x]"));
+        assert!(is_agent_prioritized("_prioritized_ do [#x]"));
+        // Strong emphasis is operator, never agent — for both spellings.
+        assert!(!is_agent_prioritized("**prioritized** do [#x]"));
+        assert!(!is_agent_prioritized("__prioritized__ do [#x]"));
+    }
+
+    #[test]
+    fn pin_tiers_with_asterisk_emphasis() {
+        let entries = parse(concat!(
+            "- do [#a]\n",
+            "- *prioritized* do [#b]\n",
+            "- **prioritized** do [#c]\n",
+        ))
+        .unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        assert_eq!(
+            render(&sorted),
+            "- **prioritized** do [#c]\n- *prioritized* do [#b]\n- do [#a]\n"
+        );
     }
 
     #[test]

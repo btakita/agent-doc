@@ -106,14 +106,16 @@ On the token: I kept `__prioritized__` (you're using it, it's unambiguous). Swap
 Still in your pinned queue, in order: **auto-dag priority** (the graph/linear ordering projection — the big one), **`~~`-on-complete marking**, the **backlog-`queue`-attr-not-populating** bug, and your new **bold-markdown rendering** request for the JB/VSCode plugins. Say go and I'll drain them in pinned order.
 
 Fence head is done (plugin `0.2.149` signed + pushed); kept as actionable pending only your live IntelliJ verify.
-<!-- agent:boundary:a96a28e4 -->
+<!-- agent:boundary:129668d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- **prioritized** I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `**prioritized**`. Terse is better. But don't get too vague. If `**prioritized**` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `**prioritized**` to mark anything that you prioritized, so if I delete `**prioritized**`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use `*prioritized*` for items that you prioritize and `**prioritized**` for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.
-- **prioritized** The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
-- **prioritized** The backlog with `queue` attribute is not populating the queue element in this document.
-- **prioritized** Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
+- :pin: I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `:pin:`. Terse is better. But don't get too vague. If `:pin:` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `:pin:` to mark anything that you prioritized, so if I delete `:pin:`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use `*prioritized*` for items that you prioritize and `:pin:` for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.
+- Add :pin:/_pin_ as an alias to **prioritized**/_prioritized_.
+- :pin: The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
+- :pin: The backlog with `queue` attribute is not populating the queue element in this document.
+- :pin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
+- :pin: I did the update. Please verify [#late-ipc-patch-plugin-apply-fence] by looking in the logs.
 - [#ipc-listener-dewedge-direct-disk]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]
@@ -121,7 +123,7 @@ Fence head is done (plugin `0.2.149` signed + pushed); kept as actionable pendin
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
 - do [#queue-dedup-destroys-intentional-duplicates]
-- The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**.
+- The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**. Add emoji support.
 <!-- /agent:queue -->
 ###
 <!--

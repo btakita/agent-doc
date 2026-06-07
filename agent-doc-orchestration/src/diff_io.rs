@@ -11,14 +11,15 @@ use std::path::Path;
 use crate::snapshot;
 use agent_doc_core::diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents};
 
-/// Diff result plus the stable current document content used to compute it.
+/// Diff result plus the exact snapshot/current document content used to compute it.
 pub struct ComputeResult {
     pub diff: Option<String>,
+    pub previous: String,
     pub current: String,
 }
 
 /// Compute a unified diff between the snapshot and the current document, and
-/// return the stable current content used to compute it.
+/// return the exact snapshot/current content used to compute it.
 ///
 /// Both snapshot and current content are comment-stripped before comparison.
 pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
@@ -67,6 +68,7 @@ pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
         }
         return Ok(ComputeResult {
             diff: None,
+            previous,
             current,
         });
     };
@@ -95,6 +97,7 @@ pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
             }
             return Ok(ComputeResult {
                 diff: None,
+                previous,
                 current,
             });
         }
@@ -109,6 +112,7 @@ pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
 
     Ok(ComputeResult {
         diff: Some(output),
+        previous,
         current,
     })
 }

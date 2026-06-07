@@ -17,6 +17,15 @@ Prompt-prefix normalization targets are narrower than prompt-target blocks: bare
 
 `flow::session_cycle` consumes the ordered prompt-bearing changes and owns the prompt-target list used by both `preflight` and `plan`. Command modules may still compute the underlying diff, but they must not derive a separate prompt-target order or pending-mutation closeout contract.
 
+`preflight.semantic_diff` is an additive structured view over the same snapshot/current pair as the unified diff. It must not replace `diff`, `annotated_diff`, or `prompt_bearing_changes`; those raw/debug surfaces remain authoritative escape hatches. The semantic view includes:
+
+- `changed_components` in stable sorted order, including agent components and the `frontmatter` pseudo-component
+- `component_changes` with before/after bounded navigation handles (`component:<before|after>:<name>:<occurrence>`) and line/byte spans
+- markdown-AST node events for component items (`insert`, `remove`, `replace`, `move`, `strike`, `unstrike`) keyed by stable `node_key` / `item_id`
+- prompt-bearing change previews in encounter order
+
+The semantic view is omitted when it would be empty. It must be bounded: preflight may include short previews, line/byte spans, handles, and node keys, but must not embed full component bodies or the full session document outside the existing raw diff fields.
+
 `boundary_artifact` is intentionally narrow: it applies only to actual response-heading `(HEAD)` reposition churn and `agent:boundary` marker churn. User prose that merely mentions `(HEAD)` remains ordinary prompt-bearing content and must not be collapsed to `no_changes`.
 
 > **Skill-level behavior:** The `/agent-doc` Claude Code skill strips HTML comments (`<!-- ... -->`) and link reference comments (`[//]: # (...)`) from both the snapshot and current content before diff comparison. Escaped-tail and prompt-drift scanners also ignore ordinary comment bodies, including transiently unterminated comment tails while the user is typing. This ensures that comments serve as a user scratchpad without triggering agent responses or repair moves. Duplicate-residue cleanup may scrub prompt-like post-exchange comment lines only when the line lacks every available ownership proof: it was not present in the pre-response baseline/snapshot and, for route, preflight, or final closeout, it was not already present in the visible current document used for that mutation. Assistant response text that quotes or mentions prompt-like scratch lines is not prompt ownership proof for comment cleanup. Cleanup must preserve the ordinary HTML comment container, including empty comment shells, and must not erase unrelated scratch lines mixed into the same multiline comment. Template normalization also removes a raw prompt tail after the latest `agent:boundary` when that tail exactly duplicates a prompt block already followed by an assistant response earlier in `agent:exchange`; this must run before preflight commit can reposition the boundary and make the stale tail look like new prompt-bearing diff. This stripping is performed by the skill workflow (SKILL.md §2), not by the CLI itself.

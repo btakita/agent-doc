@@ -60,15 +60,9 @@ All three passed. Source CI for `src/agent-doc` `9df1244f` was already green in 
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
-- do [#jb-file-cache-conflict-syntax-loss]
-- do [#recursion-guard-wedge-escape]
-- do [#jb-busy-active-turn-stall-live-verify]
-- do [#adoc-route-busy-fix-superproject-pointer-push]
-- do [#multi-session-shared-build-isolation]
-- do [#sync-fast-pane-hotpath]
-- :round_pushpin: do [#partial-staging-closeout-guard]5
+- :round_pushpin: do [#partial-staging-closeout-guard]
 - :round_pushpin: do [#codex-mcp-server-root-fix]
 - :round_pushpin: do [#live-verify-batch]
 - :round_pushpin: do [#automated-completion-detection]
@@ -76,6 +70,12 @@ All three passed. Source CI for `src/agent-doc` `9df1244f` was already green in 
 - :round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]
 - :round_pushpin: do [#tmux-status-turn-in-progress]
 - :round_pushpin: do [#stale-busy-self-heal-live-verify]
+- do [#jb-file-cache-conflict-syntax-loss]
+- do [#jb-busy-active-turn-stall-live-verify]
+- do [#adoc-route-busy-fix-superproject-pointer-push]
+- do [#multi-session-shared-build-isolation]
+- do [#sync-fast-pane-hotpath]
+- ~~do [#recursion-guard-wedge-escape]~~
 - ~~do [#queue-dedup-destroys-intentional-duplicates]~~
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->

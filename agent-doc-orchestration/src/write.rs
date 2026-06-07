@@ -3009,12 +3009,13 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     // still free text and completes on being answered. The old `queue_prompt_done_id(..).is_some()`
     // test matched any `#id` mention and wrongly left such heads un-strikable,
     // hanging the auto-queue (they have no single id to `--done`).
-    if let Some(id) = queue_prompt_done_id(&queue_head)
-        && topic_resolves_to_exact_id(&queue_head, &id)
+    let normalized_head = normalize_queue_prompt_text(&queue_head);
+    if let Some(id) = queue_prompt_done_id(&normalized_head)
+        && topic_resolves_to_exact_id(&normalized_head, &id)
     {
         return Ok(false);
     }
-    if crate::diff::detect_queue_trigger(&queue_head) {
+    if crate::diff::detect_queue_trigger(&normalized_head) {
         return Ok(false);
     }
     Ok(true)
@@ -3150,9 +3151,8 @@ fn normalize_queue_prompt_text(text: &str) -> String {
 fn display_queue_prompt_text(text: &str) -> String {
     text.lines()
         .map(|line| {
-            line.trim()
-                .trim_start_matches('❯')
-                .trim()
+            let line = line.trim().trim_start_matches('❯').trim();
+            crate::queue::strip_priority_markers(line)
                 .replace("[#", "#")
                 .replace(']', "")
         })
@@ -12932,6 +12932,16 @@ mod tests {
         );
         // A bare do[#id] head is NOT free text (needs an explicit completion flag).
         assert!(!queue_head_is_free_text_prompt(HALT_QUEUE_DOC).unwrap());
+        let pinned_do = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- :pushpin: do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(pinned_do).unwrap(),
+            "a pinned do[#id] head is still id-backed, not free text"
+        );
         // A #preset head carries an #id, so it is not free text either.
         let preset = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -13203,6 +13213,10 @@ Old.
         // Codex Stop-hook path: exact-topic match, or a topic that resolves to
         // EXACTLY the head id (#queue-head-consume-on-topic-id-regression).
         assert!(response_topic_matches_queue_head("do [#foo]", "do [#foo]"));
+        assert!(response_topic_matches_queue_head(
+            "do [#foo]",
+            ":pushpin: do [#foo]"
+        ));
         assert!(response_topic_matches_queue_head("#fix1", "do #fix1"));
         assert!(response_topic_matches_queue_head("#foo", "do [#foo]"));
         // Halt/modifier headings must NOT count as completion (#queue-strike-on-halt).
@@ -13218,6 +13232,8 @@ Old.
         // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
         assert!(queue_head_is_bare_do_directive("do [#foo]"));
         assert!(queue_head_is_bare_do_directive("do #foo"));
+        assert!(queue_head_is_bare_do_directive(":pushpin: do [#foo]"));
+        assert!(queue_head_is_bare_do_directive(":round_pushpin: do #foo"));
         // A synthetic/preset prompt carrying a trailing `#preset` id is NOT a
         // bare directive.
         assert!(!queue_head_is_bare_do_directive(

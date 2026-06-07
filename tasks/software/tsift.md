@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -161,7 +161,7 @@ Verification:
 - Post-fix `main` CI: success, `https://github.com/btakita/tsift/actions/runs/27083642494`.
 
 Root superproject pointer was committed locally as `ff5853573 chore: update tsift submodule to v0.1.64`. I did not push the root superproject because `main` is currently diverged (`ahead 42, behind 8`) with many pre-existing local changes; pushing that branch would involve unrelated history beyond this tsift release.
-<!-- agent:boundary:45d28fb5 -->
+<!-- agent:boundary:d0425f2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,9 +170,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~release + publish~~
-- continue [#7qky]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

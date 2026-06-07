@@ -167,6 +167,11 @@ sync/follow-up root cause recorded.
 
 > **Queue prompt:**
 >
+> do [#recursion-guard-wedge-escape]
+
+
+> **Queue prompt:**
+>
 > do [#jb-file-cache-conflict-syntax-loss]
 
 
@@ -204,7 +209,7 @@ Immediate implementation direction:
 
 Outcome for this turn: root cause pinned to cross-layer queue migration/drift, and implementation follow-up remains in `tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md`.
 handled
-<!-- agent:boundary:5801276c -->
+<!-- agent:boundary:2c7aa48f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -228,7 +233,7 @@ handled
 - ~~do [#stale-busy-self-heal-live-verify]~~
 - ~~do [#partial-staging-closeout-guard]~~
 - ~~do [#jb-file-cache-conflict-syntax-loss]~~
-- do [#recursion-guard-wedge-escape]
+- ~~do [#recursion-guard-wedge-escape]~~
 - do [#md-ast-document-model]
 <!-- /agent:queue -->
 ###
@@ -257,7 +262,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 1. [ ] [#md-ast-document-model] [recommended] #agent-doc-bug ROOT-CAUSE fix for the queue/dedup/live-buffer data-loss family: model the document as a structured AST + structured CRDT (queue/backlog/exchange items as typed nodes with stable ids) instead of text lines, so consume/dedup/reorder/enqueue act on the dispatched node by id and IPC patches become node-keyed (drift-resilient). DEPENDENCY DECISION: extract a focused markdown-ast crate (tree-sitter-md, matching tsift) shared by agent-doc + tsift; do NOT make tsift a hard dependency of agent-doc (too heavy; tsift markdown AST is embedded in tsift-graph behind lang-markdown, no standalone unit; layering/build-cycle risk). Plan: tasks/agent-doc/plan-md-ast-document-model.md (phases #md-ast-crate-extract, #md-ast-component-overlay, #md-ast-crdt-schema, #md-ast-mutations-node-keyed, #md-ast-ipc-node-patches, #md-ast-realtime-watcher). Subsumes #queue-dedup-destroys-intentional-duplicates, overlaps #ipc-listener-dewedge-direct-disk, enables #queue-enqueue-action.
 2. [ ] [#jb-file-cache-conflict-syntax-loss] deferred
-3. [ ] [#recursion-guard-wedge-escape] [recommended] #agent-doc-bug PART 1 SHIPPED (f24889fc origin/main): the `agent-doc start` entry now hard-refuses a recursive self-owned-pane start (run::recursive_codex_start_invocation_diagnostic, Codex-only via detect_harness, fires even under --force) instead of spawning a looping replacement owner; bail logs start_recursive_self_owned_pane_refused and prints an out-of-pane recovery path. REMAINING part 2: `agent-doc session clear`/`interrupt-clear` must offer a force path that kills the wedged owner pane + supervisor PID and clears the sessions registry in one command (today recovery is the multi-step session status then interrupt-clear from another pane). Overlaps #autoloop-command-preemption, plan-jb-run-preempt-autoloop-priority.md sub-part 4; relates #clear-blocked-by-own-drafted-clear-command.
+3. [ ] [#recursion-guard-wedge-escape] deferred
 4. [ ] [#partial-staging-closeout-guard] deferred
 5. [ ] [#automated-completion-detection] deferred
 6. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.

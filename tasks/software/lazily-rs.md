@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -53,7 +53,23 @@ Compacted content:
 - `agent-doc` executed successfully.
 - No queue prompt is currently active.
 - No document changes detected on this cycle.
-<!-- agent:boundary:52ff672d -->
+
+### Re: #ipc1 — Design lazily-serde feature gate
+
+Plan:
+1. Define trait surface:
+   - `Serialize`, `Deserialize`, and `Clone + Send + Sync + 'static` bounds on signal payload adapters where possible.
+   - Add a type-erased fallback (`Box<dyn ErasedValue>`) for dynamic graphs that cross process boundaries.
+2. Add compile-time feature flag `serde-lite` that keeps the public API type-safe by default and enables dynamic serialization only when enabled.
+3. Introduce explicit transport schemas:
+   - `enum SerializedSignal { Static { type_id, bytes }, Dynamic { schema_id, bytes } }`
+   - versioned envelope headers (`schema_version`, `origin`, `compat`) so older peers fail open/closed predictably.
+4. Add integration tests:
+   - feature-flag on/off behavior
+   - unknown schema/version rejection path
+   - zero-copy path preserved for static typed payloads.
+5. Document migration guide and compatibility caveats in `tasks/software/plan-lazily-rs-distributed-communication.md`.
+<!-- agent:boundary:d3eaaf19 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +77,13 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- do [#ipc1]
+- do [#39c5]
+- do [#ipc2]
+- do [#yxjw]
+- do [#ipc3]
+- do [#vd5v]
 <!-- /agent:queue -->
 
 ## Backlog

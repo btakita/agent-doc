@@ -376,7 +376,26 @@ Current state:
 The relevant source paths also point the right way: boundary append/reposition code is scoped to `agent:exchange`, while backlog mutation is handled through pending/backlog item operations. So the right invariant is: one live exchange boundary, zero backlog boundaries. If a boundary appears inside `agent:backlog` again, that should be treated as a fresh `#agent-doc-bug` with the concrete pre/post document diff, because the current document no longer carries the artifact.
 
 No new backlog item is needed from this closeout.
-<!-- agent:boundary:8e4c705f -->
+
+### Re: comprehensive SimWorld harness coverage — gpt-5
+
+> **Queue prompt:**
+>
+> Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
+
+
+Not fully covered yet.
+
+What exists today:
+- `src/sim_world.rs` has deterministic closeout SimWorld coverage, including fixed-seed recent failure classes, a wider medium seed corpus, malformed backlog lines, response write/commit boundary checks, boundary drift collapse, and fail-closed/recovery fault points.
+- The recent `e5cfa31c` change also added concrete finalize integration coverage for Codex-style visible-response retry plus `--pending-add`, and interspersed done-id queue consumption.
+
+Gap:
+- The SimWorld model is still not a comprehensive harness matrix. It does not yet model all Codex Stop-hook, Claude Code owner-pane/skill, and OpenCode PTY/TUI-specific closeout paths as first-class harness variants with full edge-case coverage.
+
+Captured backlog item:
+- [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
+<!-- agent:boundary:6625c93f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -396,7 +415,7 @@ No new backlog item is needed from this closeout.
 - ~~agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.~~
 - ~~"#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?~~
 - ~~`agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.~~
-- Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.
+- ~~Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.~~
 - `=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.
 - Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
 <!-- /agent:queue -->
@@ -424,6 +443,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
 - [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->
 

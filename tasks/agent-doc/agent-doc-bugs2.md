@@ -30,39 +30,17 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-060716.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-061834.md`*
 
 Compacted content:
-- Archived 6 response topic(s): #md-ast-realtime-watcher; #md-ast-realtime-watcher - gpt-5; monsterrodholders completed queue items not writing into exchange; 3 more
+- Archived 2 response topic(s): #queue-enqueue-action; #queue-enqueue-action closeout recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #queue-enqueue-action — gpt-5
-
-Implemented per-item queue enqueue markers.
-
-- Open backlog/icebox/pending items with `:inbox_tray:`, `/enqueue`, or Markdown-decorated `enqueue` tokens now append `do [#id]` into `agent:queue` without a component-level `queue` attribute.
-- Marker-only syncs default to append mode, dedupe through the existing queue sync path, and exclude gated, done, untracked, and unmarked items.
-- The preflight watcher path and explicit `agent-doc queue sync` command both use the same marker scanner.
-- Explicit marked ids bypass the plain active-loop fresh-item hold; broad `queue` attr sync still keeps that hold.
-
-Verification: focused enqueue tests passed, `make check` passed locally, and `cargo install --path .` succeeded. Code was committed and pushed in `src/agent-doc` as `9486cc19 Add per-item queue enqueue markers`. I also pushed `f6bb1596 Use published tsift-memory dependency` after CI exposed the prior session-memory path dependency was not available on GitHub runners. Latest CI run `27084625586` was in progress when the user asked not to wait; treating CI as passive regression monitoring.
-
-### Re: #queue-enqueue-action closeout recovery — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#queue-enqueue-action]
-
-
-Recovered the previous closeout after the editor-buffer guard interrupted finalize. The implementation response is already present above; this binary-owned write supplies the same-cycle `--done queue-enqueue-action` proof so the id-backed queue head can be reaped cleanly.
-<!-- agent:boundary:bb6b0bbb -->
+<!-- agent:boundary:d9aa5301 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#queue-enqueue-action]~~
-- :pushpin: Support :inbox_tray:/**enqueue** to add a backlog or icebox item ([#task-id]) into the queue without the need for `queue` to be set on `agent:backlog`. Ideally this action occurs from a watcher that can pick up this change when it happens and/or document events (CRDT of the document model) as the user types (or pastes) on the backlog item. I want to move agent-doc to be realtime, so a watcher can be valuable if it is reliable.
 - :pushpin: A backlog with `queue` attribute should immediately add to the queue. Prioritize both using auto-dag if `priority` attribute is present. A free-text addition to a queue should be have :pushpin: applied. Also, the queue items, if they were prioritized, are missing the :round_pushpin: annotation.
 - :pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
@@ -86,6 +64,7 @@ Recovered the previous closeout after the editor-buffer guard interrupted finali
 - do [#partial-staging-closeout-guard]
 - do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
+- do [#md-ast-document-model]
 <!-- /agent:queue -->
 ###
 <!--

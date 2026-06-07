@@ -204,6 +204,13 @@ fn timestamp() -> String {
     format!("{}", now)
 }
 
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     if let Some(f) = log {
         let _ = writeln!(f, "[{}] {}", timestamp(), msg);
@@ -354,6 +361,37 @@ enum IdleQueueDrainDecision {
     SkipAlreadyDispatched,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleQueueContextResetDecision {
+    Reset,
+    SkipNoActiveHead,
+    SkipNotIdle,
+    SkipAlreadyResetHead,
+    SkipNoResetNeeded,
+}
+
+fn idle_queue_context_reset_decision(
+    prompt_visible: bool,
+    active_head: Option<&str>,
+    last_context_reset_head: Option<&str>,
+    reset_required: bool,
+) -> IdleQueueContextResetDecision {
+    let Some(head) = active_head else {
+        return IdleQueueContextResetDecision::SkipNoActiveHead;
+    };
+    if !prompt_visible {
+        return IdleQueueContextResetDecision::SkipNotIdle;
+    }
+    if last_context_reset_head == Some(head) {
+        return IdleQueueContextResetDecision::SkipAlreadyResetHead;
+    }
+    if reset_required {
+        IdleQueueContextResetDecision::Reset
+    } else {
+        IdleQueueContextResetDecision::SkipNoResetNeeded
+    }
+}
+
 /// Pure idle-queue drain decision. Kept side-effect free so the busy→idle drain
 /// state machine is deterministically testable without a live pane.
 ///
@@ -384,6 +422,28 @@ fn idle_queue_drain_decision(
             IdleQueueDrainDecision::SkipAlreadyDispatched
         }
         Some(_) => IdleQueueDrainDecision::Dispatch,
+    }
+}
+
+fn record_context_clear_prompt_for_hooks(
+    shared: &SupervisorShared,
+    path: &Path,
+    harness: &crate::harness::HarnessConfig,
+    clear_cmd: &str,
+) {
+    if !matches!(harness.binary.as_str(), "codex" | "opencode") {
+        return;
+    }
+    let Some(runtime) = shared.actor_runtime.as_ref() else {
+        return;
+    };
+    if let Err(err) =
+        crate::codex_hook::record_external_prompt_for_file(path, &runtime.session_id, clear_cmd)
+    {
+        eprintln!(
+            "[agent-doc] idle-queue watch: failed to record context clear prompt for {}: {err:#}",
+            path.display()
+        );
     }
 }
 
@@ -1698,6 +1758,8 @@ fn spawn_idle_queue_watch_thread(
         .spawn(move || {
             let path = PathBuf::from(&file);
             let mut last_dispatched: Option<String> = None;
+            let mut last_context_clear_at: Option<u64> = None;
+            let mut last_context_reset_head: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             loop {
@@ -1820,6 +1882,16 @@ fn spawn_idle_queue_watch_thread(
                                     );
                                 }
                                 last_dispatched = None;
+                                last_context_clear_at = Some(current_epoch_secs());
+                                if let Some(head) = active_head.clone() {
+                                    last_context_reset_head = Some(head);
+                                }
+                                record_context_clear_prompt_for_hooks(
+                                    &shared,
+                                    &path,
+                                    &harness,
+                                    &clear_cmd,
+                                );
                                 clear_cooldown_logged = false;
                                 log_event(
                                     &mut session_log,
@@ -1845,6 +1917,91 @@ fn spawn_idle_queue_watch_thread(
                             }
                         }
                     }
+                }
+
+                let context_reset_reason = if clear_cooldown_active {
+                    None
+                } else {
+                    match crate::session_accretion::queue_context_reset_reason(
+                        &path,
+                        last_context_clear_at,
+                    ) {
+                        Ok(reason) => reason,
+                        Err(err) => {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
+                                    harness.binary,
+                                    path.display(),
+                                    err.to_string()
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: failed to inspect queue context reset policy for {}: {err:#}",
+                                path.display()
+                            );
+                            None
+                        }
+                    }
+                };
+                match idle_queue_context_reset_decision(
+                    prompt_visible,
+                    active_head.as_deref(),
+                    last_context_reset_head.as_deref(),
+                    context_reset_reason.is_some(),
+                ) {
+                    IdleQueueContextResetDecision::Reset => {
+                        let head = active_head.as_deref().unwrap_or("<unknown>");
+                        let clear_cmd = harness.context_clear_command();
+                        match auto_trigger_inject_command(&shared, &stop, clear_cmd) {
+                            AutoTriggerOutcome::Cancelled => return,
+                            AutoTriggerOutcome::Sent => {
+                                last_context_clear_at = Some(current_epoch_secs());
+                                last_context_reset_head = active_head.clone();
+                                last_dispatched = None;
+                                record_context_clear_prompt_for_hooks(
+                                    &shared,
+                                    &path,
+                                    &harness,
+                                    clear_cmd,
+                                );
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_reset harness={} cmd=\"{}\" head={:?} reason={:?}",
+                                        harness.binary,
+                                        clear_cmd,
+                                        head,
+                                        context_reset_reason.as_deref().unwrap_or("")
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: interleaved {} before active queue head {:?}: {}",
+                                    clear_cmd,
+                                    head,
+                                    context_reset_reason.as_deref().unwrap_or("fresh context required")
+                                );
+                                continue;
+                            }
+                            outcome => {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_reset_failed harness={} cmd=\"{}\" outcome={}",
+                                        harness.binary,
+                                        clear_cmd,
+                                        outcome.as_str()
+                                    ),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    IdleQueueContextResetDecision::SkipNoActiveHead
+                    | IdleQueueContextResetDecision::SkipNotIdle
+                    | IdleQueueContextResetDecision::SkipAlreadyResetHead
+                    | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
 
                 match idle_queue_drain_decision(
@@ -5339,6 +5496,38 @@ Done.
         assert_eq!(
             idle_queue_drain_decision(true, true, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipClearCooldown
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_dispatches_clear_once_per_head() {
+        assert_eq!(
+            idle_queue_context_reset_decision(true, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::Reset
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, Some("do [#a]"), Some("do [#a]"), true),
+            IdleQueueContextResetDecision::SkipAlreadyResetHead
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, Some("do [#b]"), Some("do [#a]"), true),
+            IdleQueueContextResetDecision::Reset
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_waits_for_idle_and_active_head() {
+        assert_eq!(
+            idle_queue_context_reset_decision(false, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::SkipNotIdle
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, None, None, true),
+            IdleQueueContextResetDecision::SkipNoActiveHead
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, Some("do [#a]"), None, false),
+            IdleQueueContextResetDecision::SkipNoResetNeeded
         );
     }
 

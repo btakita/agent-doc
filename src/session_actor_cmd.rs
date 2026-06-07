@@ -1561,10 +1561,8 @@ fn terminal_editor_command(command: &str) -> bool {
 /// (#opencode-clear-uses-new). Keep this aligned with the harness slash-command
 /// surfaces in `harness.rs` and the session/tmux command spec.
 fn harness_clear_command(harness: &str) -> &'static str {
-    match harness {
-        "opencode" => "/new",
-        _ => "/clear",
-    }
+    agent_doc_orchestration::harness::HarnessConfig::from_agent_name(harness)
+        .context_clear_command()
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {

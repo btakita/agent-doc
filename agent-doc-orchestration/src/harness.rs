@@ -149,6 +149,18 @@ impl HarnessConfig {
         self.binary == "opencode"
     }
 
+    /// Harness-native command that starts a fresh conversation context.
+    ///
+    /// Claude Code and Codex use `/clear`; OpenCode has no `/clear` command and
+    /// uses `/new` for the same operator-visible reset.
+    pub fn context_clear_command(&self) -> &'static str {
+        if self.binary == "opencode" {
+            "/new"
+        } else {
+            "/clear"
+        }
+    }
+
     /// Build the full arg list for a restart iteration.
     /// On first run, returns `base_args` unchanged.
     /// On restart, applies the `restart_behavior`.
@@ -2619,6 +2631,13 @@ Press Enter to restart, or 'q' to exit.
         assert!(claude.supports_enable_tool_search);
         assert!(!codex.supports_no_mcp);
         assert!(!codex.supports_enable_tool_search);
+    }
+
+    #[test]
+    fn context_clear_command_uses_new_for_opencode_only() {
+        assert_eq!(HarnessConfig::claude().context_clear_command(), "/clear");
+        assert_eq!(HarnessConfig::codex().context_clear_command(), "/clear");
+        assert_eq!(HarnessConfig::opencode().context_clear_command(), "/new");
     }
 
     #[test]

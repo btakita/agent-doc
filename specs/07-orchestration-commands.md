@@ -343,7 +343,11 @@ Semantics:
     backlog `queue`-attr ids *append immediately* (not only when the queue drains),
     so the `queue` attribute populates the live queue as intended. Append/Prepend
     stay idempotent and processed items drop out of `active_item_ids` once marked
-    `[/]`/`[x]`, so the queue stays bounded by the open backlog.
+    `[/]`/`[x]`, so the queue stays bounded by the open backlog. Context-accretion
+    thresholds must not stop this self-driving loop: direct `run` starts the next
+    queue item in a fresh backend session, while managed pane go-mode interleaves
+    the harness-native clear command (`/clear`, or OpenCode `/new`) at an idle gap
+    and then continues draining the same head.
 - `agent:backlog` and the legacy `pending` alias may carry the attribute; the
   first queue-tagged component's mode wins and active ids from every queue-tagged
   source are taken in document order. `agent:icebox queue` warns and does not

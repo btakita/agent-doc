@@ -428,6 +428,18 @@ distinct from the one-shot restart auto-trigger:
     cannot hot-loop the watch every idle tick.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
+- Before dispatching a head, the watch applies the same
+  `session_accretion::queue_context_reset_reason` policy as direct `agent-doc
+  run`. If the active queue should continue from fresh context and no manual
+  clear cooldown is pausing dispatch, the watch injects the harness-native
+  context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
+  OpenCode), records that clear for Codex/OpenCode hook state, latches the
+  current head as reset, and waits for a later idle tick to drain the same head.
+  The latch prevents a large exchange from clearing forever without dispatching;
+  once the head advances, another reset may be interleaved if the accretion
+  policy still requires it. A manual clear cooldown remains authoritative and
+  still suppresses passive dispatch until it is cleared by the existing operator
+  path.
 - On `Dispatch` it injects a harness-specific payload through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

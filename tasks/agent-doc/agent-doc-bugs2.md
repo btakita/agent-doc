@@ -104,6 +104,11 @@ Note: I attempted to push the superproject, but `agent-loop/main` is 145 local c
 
 ### Re: :pushpin: Please investigate the lazily-rs session. It is not behaving correctly. - gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: Please investigate the lazily-rs session. It is not behaving correctly.
+
+
 Investigated and repaired both the agent-doc root cause and the current lazily-rs session state.
 
 Findings:
@@ -124,13 +129,13 @@ Verification:
 - Agent-doc CI run `27085793181` passed (`make check` and `make tmux-ci`).
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now passes with `queue_continuation_required=false`.
 - Parent `btakita/agent-loop` has no workflow named `CI`; its `Agent Doc` run `27085892248` failed immediately with `check` and `tmux-ci` jobs containing `steps: []`, matching the existing runner/infra-shaped failure pattern.
-<!-- agent:boundary:87667596 -->
+<!-- agent:boundary:5005996f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Please investigate the lazily-rs session. It is not behaving correctly.
+- ~~:pushpin: Please investigate the lazily-rs session. It is not behaving correctly.~~
 - commit all uncommitted changes in agent-doc
 - :pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.
 - :pushpin: Please fix the root cause of the lazily-rs session issues.

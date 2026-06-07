@@ -33,55 +33,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-061732.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260607-062538.md`*
 
 Compacted content:
-- Archived 11 response topic(s): lazily-rs IPC state sharing; shared-memory IPC and #ipc4; shared-memory ring buffer performance; 8 more
+- Archived 1 response topic(s): #ipc5 transport contract + benchmark matrix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: #ipc5 transport contract + benchmark matrix — gpt-5
-
-> **Queue prompt:**
->
-> do [#ipc9]
-
-
-> **Queue prompt:**
->
-> do [#ipc8]
-
-
-> **Queue prompt:**
->
-> do [#ipc7]
-
-
-> **Queue prompt:**
->
-> do [#ipc6]
-
-
-> **Queue prompt:**
->
-> do [#ipc5]
-
-
-I resolved `#ipc5` as follows:
-
-- Define a new transport abstraction layer so `agent-doc-orchestration` and `tsift` IPC paths share one contract: `IpcTransport` with bounded async send/recv, startup handshake, shutdown, and metadata (`capabilities`, `buffer_size_hint`, `is_in_process`, `supports_fd_paths`, `supports_shared_memory`, `supports_mmap_blob_arena`).
-- Keep protocol messages transport-agnostic (`Envelope`, `Snapshot`, `Delta`, `Ack`, `Error`) and only expose out-of-band channels (`PayloadHint`, `FdBundle`) via optional capability-gated extensions.
-- Add four transport variants for benchmarking:
-  - `InProcessDirect`: same process callback / bounded queue.
-  - `UnixSocket`: Unix-domain socket + length-prefixed framing + optional SCM_RIGHTS for fd passing (where available).
-  - `SharedMemoryBlob`: memory arena + token-based handles for large blobs.
-  - `EventWakeup`: control socket/eventfd/socketpair wake source to measure wake/sleep overhead separately from data transport.
-- Benchmark matrix to execute before default selection: every transport × payload sizes `{4 KiB, 64 KiB, 1 MiB, 10 MiB}`.
-- For each cell record: median/p95 latency, throughput/sec, cpu+sys% by process, allocation count, wake count, FD descriptor deltas, and failure/retry behavior under short bursts.
-- Decision rule: default transport is the variant that wins the weighted aggregate score for each host class, with per-host caps for FD pressure and memory residency.
-- Next actions tied to queue chain:
-  - `#ipc6` implement concrete `ShmBlobArena` transport with memmap/shared-memory lifecycle and generation validation.
-  - `#ipc7`/`#ipc8` add FD/event parity (Linux socket/eventfd first, then platform fallback and Windows adapter) behind feature gating.
-<!-- agent:boundary:77987cd3 -->
+<!-- agent:boundary:14530a27 -->
 <!-- /agent:exchange -->
 ###
 <!--

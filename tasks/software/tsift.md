@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -52,7 +52,7 @@ If you need the body text, it can expand to:
 - `tsift source-read "src/agent-doc/tests/test_cli.rs" --path "/home/brian/work/btakita/agent-loop" --start 389 --lines 40 --budget normal`
 
 I implemented this in-session by running the symbol-based read directly; this is the AST form you requested instead of `--start/--lines`.
-<!-- agent:boundary:7ca1f989 -->
+<!-- agent:boundary:0ff0c07a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +61,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Why is the agent-doc-bugs2.md session using the line technique and not the ast technique?
 <!-- /agent:queue -->
 
 ## Backlog

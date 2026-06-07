@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue overwrite guard tracks free-text queue items.** The
+  `#queue-user-edit-overwrite` detector now compares parsed `agent:queue`
+  prompt entries by count instead of relying on prompt-target diff
+  classification, so user-added free-text queue bullets adjacent to the current
+  head are recorded before a `content_ours` IPC adoption can silently delete
+  them. Tests
+  `dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items`,
+  `..._empty_when_items_are_owned`, and `..._counts_duplicate_user_items`.
+
 - **Backlog queue priority visibly annotates promotions.** A backlog/icebox
   component carrying both `queue` and `priority` now triggers queue priority /
   auto-DAG ordering for the synced `agent:queue` even when the queue marker

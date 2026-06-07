@@ -557,13 +557,41 @@ fn queue_component_text(doc: &str) -> String {
         .unwrap_or_default()
 }
 
-/// `#queue-user-edit-overwrite`: the user-authored `do [#id]` queue line(s)
-/// present in the IPC `candidate` (disk / ack sidecar) `agent:queue` that
-/// `content_ours` does not own — i.e. the queue edits that would be silently
-/// deleted when `content_ours` is adopted. Scoped to `agent:queue` so exchange /
-/// backlog drift is not misread. Recorded so `session-check` can fail closed on
-/// the silent-queue-deletion class instead of letting convergence drop a
-/// user-added queue head the current response never consumed.
+fn queue_prompt_texts(body: &str) -> Vec<String> {
+    let Ok(entries) = crate::queue::parse(body) else {
+        return Vec::new();
+    };
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) if !prompt.multiline => {
+                let text = prompt.text.trim().to_string();
+                (!text.is_empty()).then_some(text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn queue_prompt_counts(prompts: &[String]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for prompt in prompts {
+        *counts.entry(prompt.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn queue_prompt_count(counts: &HashMap<String, usize>, prompt: &str) -> usize {
+    counts.get(prompt).copied().unwrap_or(0)
+}
+
+/// `#queue-user-edit-overwrite`: the user-authored queue prompt line(s) present
+/// in the IPC `candidate` (disk / ack sidecar) `agent:queue` that `content_ours`
+/// does not own; these would be silently deleted when `content_ours` is adopted.
+/// Scoped to `agent:queue` so exchange / backlog drift is not misread. Recorded
+/// so `session-check` can fail closed on the silent-queue-deletion class instead
+/// of letting convergence drop a user-added queue item the current response never
+/// consumed.
 fn dropped_queue_prompt_lines_after_content_ours(
     baseline: &str,
     candidate: &str,
@@ -573,21 +601,36 @@ fn dropped_queue_prompt_lines_after_content_ours(
     let candidate_q = queue_component_text(candidate);
     let content_ours_q = queue_component_text(content_ours);
 
-    let candidate_changes = prompt_bearing_user_changes_between(&baseline_q, &candidate_q);
-    if candidate_changes.is_empty() {
+    let baseline_prompts = queue_prompt_texts(&baseline_q);
+    let candidate_prompts = queue_prompt_texts(&candidate_q);
+    let content_ours_prompts = queue_prompt_texts(&content_ours_q);
+    if candidate_prompts.is_empty() {
         return Vec::new();
     }
-    let owned_changes = prompt_bearing_user_changes_between(&baseline_q, &content_ours_q);
-    candidate_changes
-        .into_iter()
-        // Only a discrete prompt target (a `do #id` / prompt-shaped queue line)
-        // is an unambiguous user queue edit. Multi-line content edits are noisy
-        // diff context, not a discrete queued prompt to recover.
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
-        .filter(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
-        .map(|change| change.text.trim().to_string())
-        .filter(|text| !text.is_empty() && !text.contains('\n'))
-        .collect()
+
+    let baseline_counts = queue_prompt_counts(&baseline_prompts);
+    let content_ours_counts = queue_prompt_counts(&content_ours_prompts);
+    let mut candidate_seen = HashMap::new();
+    let mut dropped = Vec::new();
+
+    for prompt in candidate_prompts {
+        let seen = candidate_seen.entry(prompt.clone()).or_insert(0);
+        *seen += 1;
+
+        let baseline_count = queue_prompt_count(&baseline_counts, &prompt);
+        if *seen <= baseline_count {
+            continue;
+        }
+
+        let candidate_added_index = *seen - baseline_count;
+        let content_ours_added_count =
+            queue_prompt_count(&content_ours_counts, &prompt).saturating_sub(baseline_count);
+        if candidate_added_index > content_ours_added_count {
+            dropped.push(prompt);
+        }
+    }
+
+    dropped
 }
 
 fn snapshot_content_to_persist<'a>(
@@ -13650,6 +13693,68 @@ Old.
         // Both candidate and content_ours contain "go" → nothing is dropped.
         let dropped = dropped_prompt_lines_after_content_ours(baseline, &with_go, &with_go);
         assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- item being edited\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- previous user queue item\n",
+            "- item being edited\n",
+            "- next user queue item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, baseline);
+        assert_eq!(
+            dropped,
+            vec![
+                "previous user queue item".to_string(),
+                "next user queue item".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_empty_when_items_are_owned() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- item being edited\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- previous user queue item\n",
+            "- item being edited\n",
+            "- next user queue item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, candidate);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_counts_duplicate_user_items() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- repeat me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- repeat me\n",
+            "- repeat me\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, baseline);
+        assert_eq!(dropped, vec!["repeat me".to_string()]);
     }
 
     #[test]

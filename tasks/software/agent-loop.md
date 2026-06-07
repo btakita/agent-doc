@@ -2,7 +2,7 @@
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
@@ -32,32 +32,12 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260602-151510.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260607-073145.md`*
 
 Compacted content:
-- Archived 1 response topic(s): recursive submodule commit + push
+- Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-❯ Fix "Cargo still emits the pre-existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` during some builds." seen in lazily-rs.md session.
-❯ commit + push
-
-### Re: Fix workspace patch warnings for agent-kit, tagpath, tmux-router — opus-4-8
-
-**Root cause.** The repo-root `.cargo/config.toml` declared `[patch.crates-io]` for `tmux-router`, `agent-kit`, and `tagpath`. Cargo merges config from the cwd up to the filesystem root, so that single file applied its patches to **every** submodule build in the tree. Any build whose dependency graph lacked a patched crate (e.g. `lazily-rs`) — or used a different version (`tsift` wants `tagpath 0.11.1`; local is `0.12.1`) — emitted `warning: patch ... was not used in the crate graph`.
-
-**Fix (scoped the patches to the workspaces that actually consume them):**
-
-- Removed the global repo-root `.cargo/config.toml`. This is already in `HEAD` — a concurrent `agent-doc-bugs2` session committed the deletion (`8734f7b66`, HEAD now `4813ed0f6`), so the global pollution is gone from the committed tree. My `git rm` was a redundant no-op against the same already-deleted path.
-- `src/agent-doc/.cargo/config.toml` (gitignored local-dev wiring) now patches all three siblings — `tmux-router`, `tagpath`, `agent-kit` — so the agent-doc workspace still builds against local sources.
-- `src/instruction-files/.cargo/config.toml` (new, untracked — mirrors corky's untracked local config) patches `agent-kit` so the repo-root `make check` (`cd src/instruction-files && cargo clippy && cargo test`) keeps exercising the local crate. Local `agent-kit` currently has no source changes (Cargo.lock/README only), so this is behavior-preserving rather than a functional shift.
-
-**Verification (current tree):**
-
-- `lazily-rs`, `tsift`, `corky`, `agent-doc` — `cargo metadata` clean, **no patch warnings**.
-- `agent-doc` still resolves `tmux-router`/`tagpath`/`agent-kit` → `src/<crate>` (local).
-- `make check-shared` (instruction-files `clippy -D warnings` + tests): green, no patch warnings.
-
-**Note:** the gitignored/untracked per-workspace configs are local-dev conveniences (same pattern as corky's existing untracked `.cargo/config.toml`); they are not part of any committed surface. The committed superproject change is the root-config removal, already in `HEAD`. Pushing the 2 ahead-of-origin commits to publish it.
-<!-- agent:boundary:07482540 -->
+<!-- agent:boundary:adda181a -->
 <!-- /agent:exchange -->
 ###
 <!--

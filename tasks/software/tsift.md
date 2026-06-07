@@ -92,7 +92,45 @@ Verification: no code changed; the referenced session-check still reports `INTER
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:6369d4b2 -->
+❯ I still see the agent-doc-bugs2.md session using the old style `--line` + `--count` api. Why is it not using the new ast/semantic structure interface?
+### Re: agent-doc-bugs2 source-read API style — gpt-5
+
+There are two separate layers here.
+
+First, the installed `tsift` CLI is already on the newer source-read surface. `tsift source-read --help` shows that `--style ast` is the default, and the current bounded form is:
+
+```bash
+tsift --envelope source-read <file> --budget normal
+# optional bound on the AST projection:
+tsift --envelope source-read <file> --start <n> --lines <n> --budget normal
+# only for literal numbered source rows:
+tsift --envelope source-read <file> --style window --start <n> --lines <n> --budget normal
+```
+
+I did not find active repo guidance that tells agents to use `tsift source-read --line ... --count ...`. If that exact shape is visible in the live `agent-doc-bugs2.md` pane, it is most likely stale harness/session context, an older generated command surface, or a native Read-tool abstraction being shown by that harness rather than the current `tsift` CLI contract.
+
+Second, `agent-doc-bugs2.md` still is not in a normal source-navigation phase. Its session-check is still `INTERRUPTED` at `preflight_started` with IPC proof diagnostic `no_ack`, and `tsift session-review --next-context` reports prompt targets but `files=0` and `symbols=0`. With no concrete source file, symbol, `span-*`, or Markdown AST node handle selected, agent-doc is staying on the session-review/preflight path instead of expanding through `source-read` or `symbol-read`.
+
+So the root cause is not that tsift lacks the AST/semantic interface. It is that this particular `agent-doc-bugs2.md` run is operating from interrupted/stale session context, and the agent-doc session-document path is still handing off prompt/session digests rather than automatically selecting Markdown AST nodes for exchange/backlog slicing. The newer semantic surfaces exist (`source-read` default AST projection and `markdown-ast`), but they are not yet automatically wired into that recovery path.
+
+Changed paths: none besides this agent-doc response.
+
+Commands run:
+- `tsift status`
+- `agent-doc --version`
+- `agent_doc_preflight` / `agent_doc_plan` for this session
+- `agent_doc_session_check` for `tasks/agent-doc/agent-doc-bugs2.md`
+- `tsift --envelope session-review /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --next-context --budget normal`
+- `tsift --help`
+- `tsift --envelope source-read --help`
+- `rg` searches for stale `--line` / `--count` / `source-read` guidance
+
+Verification: no code changed; current `tsift source-read --help` confirms AST projection is the default and `--style window` is the explicit numbered-line fallback; the referenced agent-doc session remains interrupted with no file or symbol handles.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:a77b914f -->
 <!-- /agent:exchange -->
 ###
 <!--

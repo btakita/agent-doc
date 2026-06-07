@@ -53,7 +53,7 @@ Compacted content:
 - `agent-doc` executed successfully.
 - No queue prompt is currently active.
 - No document changes detected on this cycle.
-<!-- agent:boundary:85d01bc3 -->
+<!-- agent:boundary:52ff672d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,6 +67,10 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc1] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [ ] [#ipc2] Design lazily-ipc snapshot + incremental update protocol
+- [ ] [#ipc3] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- [ ] [#yxjw] Build Cloudflare Worker signaling server for internet-scale peer discovery
 <!-- /agent:backlog -->
 
 ## Review

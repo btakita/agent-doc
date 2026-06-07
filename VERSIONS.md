@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex idle queue drain no longer reinvokes the owning pane.** The
+  supervisor idle-queue watch now drains Codex `agent:queue auto` heads by
+  injecting an in-owner-pane continuation instruction instead of the recursive
+  `agent-doc <file>` trigger. Claude and OpenCode keep their configured trigger
+  command. This keeps JetBrains `Run Agent Doc` prompts queued behind a busy
+  Codex owner from stalling on the recursive-direct-invocation guard once the
+  owner goes idle.
+
 - **`agent-doc focus` is the fast pane handoff by default.** The default focus
   path now has the former editor fast-focus behavior: it selects an already
   visible pane immediately, defers stash surfacing to `sync --no-autostart`, and

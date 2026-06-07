@@ -428,20 +428,26 @@ distinct from the one-shot restart auto-trigger:
     cannot hot-loop the watch every idle tick.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- On `Dispatch` it injects the harness trigger (`agent-doc <FILE>`) through the
-  same `auto_trigger_inject_command` path (capability-proof gated, actor marked
-  `busy` before bytes), which re-runs preflight and consumes the queue head. A
-  failed inject is not recorded as dispatched, so it retries on the next idle
-  tick. Successful drains log `idle_queue_watch_drain`; failures log
+- On `Dispatch` it injects a harness-specific payload through the same
+  `auto_trigger_inject_command` path (capability-proof gated, actor marked
+  `busy` before bytes). Claude/OpenCode receive the normal harness trigger
+  (`agent-doc <FILE>` / `/agent-doc <FILE>`), while Codex receives an
+  owner-pane continuation prompt naming the active head and instructing the
+  current pane to answer it and persist with `finalize`/`write --commit`. Codex
+  idle drains must not inject `agent-doc <FILE>` into the pane that already owns
+  the document, because that self-reinvokes the owner pane and trips the
+  recursive-direct-invocation guard instead of doing the queued work. A failed
+  inject is not recorded as dispatched, so it retries on the next idle tick.
+  Successful drains log `idle_queue_watch_drain` with
+  `payload_kind=trigger|owner_continuation`; failures log
   `idle_queue_watch_drain_failed`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is
-  edge-triggered on the latest output chunk. When an injected turn's composer
-  redraw lands split so the final chunk carries no detectable prompt — e.g. an
-  `auto_trigger_inject` recursive `agent-doc <FILE>` that hit the recursion
-  guard and returned — the actor can stay wedged `busy` over an idle pane with
-  no further bytes to retrigger ready, so the session presents as "truly stuck"
-  and even a pane kill + restart re-enters the state. The watch closes this with
+  edge-triggered on the latest output chunk. When an injected turn returns but
+  its composer redraw lands split so the final chunk carries no detectable
+  prompt, the actor can stay wedged `busy` over an idle pane with no further
+  bytes to retrigger ready, so the session presents as "truly stuck" and even a
+  pane kill + restart re-enters the state. The watch closes this with
   a polling backstop driven by the pure
   `stale_busy_idle_reconcile_decision(actor_busy, pane_has_busy_cue, clear_cooldown_active, ticks)`:
   when the in-memory actor is `busy`/`starting`, a fresh `tmux capture-pane`
@@ -455,9 +461,9 @@ distinct from the one-shot restart auto-trigger:
   `idle_queue_watch_stale_busy_reconciled`. It must preserve the dispatch dedup
   for the current head: if the injected command returned without consuming the
   same active head, the next idle tick must skip it as `SkipAlreadyDispatched`
-  instead of re-injecting `agent-doc <FILE>` in a loop. The dedup clears only when
-  there is no active head or the head advances. This recovers the wedge with no
-  pane kill and no operator `session status`/`session clear`.
+  instead of re-injecting the same drain payload in a loop. The dedup clears
+  only when there is no active head or the head advances. This recovers the
+  wedge with no pane kill and no operator `session status`/`session clear`.
 
 Live end-to-end verification (a real busy Codex/Claude pane returning to idle and
 draining the route-appended head with no duplicate injection into the active

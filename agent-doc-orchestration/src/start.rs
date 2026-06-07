@@ -339,7 +339,8 @@ impl AutoTriggerMonitor {
 /// active-queue head on the busy→idle transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IdleQueueDrainDecision {
-    /// Inject the harness trigger so the next cycle drains the active queue head.
+    /// Inject the harness-specific drain payload so the next cycle drains the
+    /// active queue head.
     Dispatch,
     /// A recent explicit session clear suppresses passive queue dispatch until
     /// the cooldown expires or an explicit route invocation clears the marker.
@@ -383,6 +384,38 @@ fn idle_queue_drain_decision(
             IdleQueueDrainDecision::SkipAlreadyDispatched
         }
         Some(_) => IdleQueueDrainDecision::Dispatch,
+    }
+}
+
+fn codex_owner_queue_continuation_prompt(file: &str, active_head: &str) -> String {
+    format!(
+        "Agent-doc active queue continuation for {file}.\n\n\
+Queue head:\n{active_head}\n\n\
+Continue in this owner pane: answer the queue head, then persist with \
+`agent-doc finalize {file}` or `agent-doc write --commit {file}`. Do NOT run \
+`agent-doc {file}` from this pane; that re-invokes the owner pane and hits the \
+recursive-direct-invocation guard. Do not send a final answer until \
+`agent-doc session-check {file} --codex-final-gate` passes."
+    )
+}
+
+fn idle_queue_drain_payload(
+    file: &str,
+    harness: &crate::harness::HarnessConfig,
+    active_head: &str,
+) -> String {
+    if harness.binary == "codex" {
+        codex_owner_queue_continuation_prompt(file, active_head)
+    } else {
+        harness.trigger_command(file)
+    }
+}
+
+fn idle_queue_drain_payload_kind(harness: &crate::harness::HarnessConfig) -> &'static str {
+    if harness.binary == "codex" {
+        "owner_continuation"
+    } else {
+        "trigger"
     }
 }
 
@@ -1329,12 +1362,11 @@ fn supervisor_pane_has_busy_cue(
 ///
 /// The supervisor's one-shot pty completion transition (busy→ready on
 /// `prompt_ready`, see the pty→stdout thread) is edge-triggered on the latest
-/// output chunk. When an injected turn's composer redraw lands split so the
-/// final chunk carries no detectable prompt — e.g. an `auto_trigger_inject`
-/// recursive `agent-doc <FILE>` that hit the recursion guard and returned — the
-/// actor can stay wedged `busy` over an idle pane with no further bytes to
-/// retrigger the transition. The session then presents as "truly stuck" and a
-/// pane kill + restart re-enters the same state.
+/// output chunk. When an injected turn returns but its composer redraw lands
+/// split so the final chunk carries no detectable prompt, the actor can stay
+/// wedged `busy` over an idle pane with no further bytes to retrigger the
+/// transition. The session then presents as "truly stuck" and a pane kill +
+/// restart re-enters the same state.
 ///
 /// This polling backstop self-heals it: reconcile only when the actor is
 /// projected busy/starting, the live pane shows no busy cue, no clear cooldown
@@ -1642,10 +1674,13 @@ fn clear_cooldown_blocks_auto_dispatch(
 /// watch runs for the whole child lifetime. On every busy→idle transition it
 /// drains a live `agent:queue auto` head — including one a busy-pane
 /// `Run Agent Doc` route appended via `enqueue_route_dispatch_prompt` — by
-/// injecting the harness trigger (`agent-doc <FILE>`), which re-runs preflight
-/// and consumes the queue head. It is the supervisor-owned drain guarantee the
-/// route busy path lacked: route enqueues + returns `Ok`, this thread fires the
-/// dispatch once the pane goes idle so the queued prompt is never stranded.
+/// injecting a harness-specific drain payload. Claude/OpenCode keep their
+/// normal harness trigger, while Codex receives an in-owner-pane continuation
+/// prompt so it answers the head instead of recursively running `agent-doc
+/// <FILE>` in the pane that already owns the document. It is the
+/// supervisor-owned drain guarantee the route busy path lacked: route enqueues +
+/// returns `Ok`, this thread fires the dispatch once the pane goes idle so the
+/// queued prompt is never stranded.
 ///
 /// Invariants:
 /// - Never injects while the pane is mid-turn (no-inject-into-active-turn).
@@ -1685,12 +1720,12 @@ fn spawn_idle_queue_watch_thread(
 
                 // `#stale-busy-after-auto-inject-no-clear`: poll-based self-heal
                 // for a stale busy actor wedged over an idle pane. The
-                // edge-triggered pty completion transition can miss an injected
-                // turn's composer redraw (e.g. a recursive `agent-doc <FILE>`
-                // that hit the recursion guard and returned), leaving the actor
-                // `busy` with no further output to retrigger ready. Re-derive
-                // ready from direct pane evidence so the session never gets
-                // "truly stuck" needing a pane kill or `session clear`.
+                // edge-triggered pty completion transition can miss an
+                // injected turn's composer redraw after it returns, leaving the
+                // actor `busy` with no further output to retrigger ready.
+                // Re-derive ready from direct pane evidence so the session
+                // never gets "truly stuck" needing a pane kill or
+                // `session clear`.
                 let actor_busy = actor_state_is_busy_or_starting(&shared);
                 let pane_busy_cue = if actor_busy && !clear_cooldown_active {
                     supervisor_pane_has_busy_cue(&shared, &harness)
@@ -1820,20 +1855,20 @@ fn spawn_idle_queue_watch_thread(
                 ) {
                     IdleQueueDrainDecision::Dispatch => {
                         let head = active_head.expect("dispatch implies an active head");
-                        let trigger_cmd = harness.trigger_command(&file);
-                        match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
+                        let drain_payload = idle_queue_drain_payload(&file, &harness, &head);
+                        let payload_kind = idle_queue_drain_payload_kind(&harness);
+                        match auto_trigger_inject_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
                                 last_dispatched = Some(head);
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "idle_queue_watch_drain harness={} cmd=\"{}\"",
-                                        harness.binary, trigger_cmd
+                                        "idle_queue_watch_drain harness={} payload_kind={}",
+                                        harness.binary, payload_kind
                                     ),
                                 );
                                 eprintln!(
-                                    "[agent-doc] idle-queue watch: drained active queue head via {}",
-                                    trigger_cmd
+                                    "[agent-doc] idle-queue watch: drained active queue head via {payload_kind}",
                                 );
                             }
                             AutoTriggerOutcome::Cancelled => return,
@@ -5337,6 +5372,47 @@ Done.
         assert_eq!(
             idle_queue_drain_decision(false, true, Some("do [#b]"), Some("do [#a]")),
             IdleQueueDrainDecision::Dispatch
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_payload_uses_owner_continuation_for_codex() {
+        let payload = idle_queue_drain_payload(
+            "tasks/monsterrodholders.md",
+            &crate::harness::HarnessConfig::codex(),
+            "JB Run Agent Doc on monsterrodholders.md stalled.",
+        );
+
+        assert!(payload.contains("Agent-doc active queue continuation"));
+        assert!(payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
+        assert!(payload.contains("answer the queue head"));
+        assert!(payload.contains("agent-doc finalize tasks/monsterrodholders.md"));
+        assert!(payload.contains("Do NOT run `agent-doc tasks/monsterrodholders.md`"));
+        assert!(
+            !payload
+                .trim_start()
+                .starts_with("agent-doc tasks/monsterrodholders.md"),
+            "Codex idle queue watch must not inject the recursive trigger"
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses() {
+        assert_eq!(
+            idle_queue_drain_payload(
+                "tasks/monsterrodholders.md",
+                &crate::harness::HarnessConfig::claude(),
+                "ignored",
+            ),
+            "/agent-doc tasks/monsterrodholders.md"
+        );
+        assert_eq!(
+            idle_queue_drain_payload(
+                "tasks/monsterrodholders.md",
+                &crate::harness::HarnessConfig::opencode(),
+                "ignored",
+            ),
+            "/agent-doc tasks/monsterrodholders.md"
         );
     }
 

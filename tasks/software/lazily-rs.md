@@ -167,11 +167,6 @@ No escalated permissions were used. Confidence is high for the implemented IPC a
 
 > **Queue prompt:**
 >
-> Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
-
-
-> **Queue prompt:**
->
 > What is the benefit of a SHM ring buffer over a SHM blob arena?
 
 
@@ -186,7 +181,35 @@ For agent-doc / tsift IPC, the better architecture is usually both together: rin
 So the benefit of the ring buffer over the blob arena is event sequencing and backpressure. The benefit of the blob arena over the ring buffer is large-payload storage. They compose cleanly: ring for control, arena for bytes.
 
 No code changed for this answer.
-<!-- agent:boundary:6f799a18 -->
+
+### Re: Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy? — gpt-5
+
+> **Queue prompt:**
+>
+> Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?
+
+
+lazily-rs can use descriptor-style IPC in platform transports, but file descriptors themselves are not a good cross-platform core abstraction.
+
+On Unix, FDs work well for pieces of the design: Unix domain sockets can pass FDs atomically, `eventfd` can provide a kernel counter/wakeup on Linux, pipes/socketpairs can provide portable-ish event delivery, and shared-memory objects can be represented by FDs. That is useful for a Unix transport crate.
+
+On Windows, the equivalent world is `HANDLE`, `DuplicateHandle`, named pipes, file mappings, events, IOCP, and socket-specific duplication. It is not the same API or the same lifetime model as Unix FDs. Rust reflects this split with owned FD versus owned handle types. So the portable lazily-rs layer should model capabilities and events, not raw FDs.
+
+For atomic IPC counters, prefer shared memory atomics for portable counters, plus a platform event primitive for wakeups. Linux `eventfd` is attractive, but it is Linux-specific; it should be an implementation choice behind an `IpcEvent` / `IpcNotify` style trait, not the protocol contract.
+
+For file descriptor counts, there is no reliable cross-platform fixed budget. Unix processes can have low soft limits, commonly in the hundreds or low thousands; Windows handle limits and costs are different. The portable strategy should therefore use a small, bounded descriptor set per session, not one descriptor per blob/message. A practical design target is roughly:
+
+- one control channel,
+- one wakeup/event object per direction or peer,
+- one shared-memory object per arena,
+- optional extra descriptors only for rotation or fallback.
+
+Keep it comfortably under a few dozen descriptors for a normal agent-doc/tsift/editor session, and query/enforce runtime limits per platform. Blob references should remain offsets/generations/checksums inside an arena, not separate FDs per payload.
+
+Recommendation: keep lazily-rs core transport-neutral. Add Unix FD passing and Linux `eventfd` as optimized transport implementations later, with Windows handle/event/file-mapping implementations behind the same traits. Do not make FD IPC the cross-platform protocol surface.
+
+No code changed for this answer.
+<!-- agent:boundary:6a0d7709 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -199,7 +222,7 @@ No code changed for this answer.
 - ~~Implement a SHM blob arena for IPC transport.~~
 - ~~What is the benefit of a SHM ring buffer over a SHM blob arena?~~
 - ~~Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?~~
-- Are there existing 
+- Are there existing Rust crates that solve these problems?
 <!-- /agent:queue -->
 
 ## Backlog

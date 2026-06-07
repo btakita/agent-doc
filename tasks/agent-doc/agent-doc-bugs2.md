@@ -35,12 +35,32 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 3 response topic(s): do [#md-ast-document-model]; closeout repair - gpt-5; do [#recursion-guard-wedge-escape] -- gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0909359a -->
+❯ do [#recursion-guard-wedge-escape]. #spec-test-build-install-commit-push
+### Re: do [#recursion-guard-wedge-escape] -- gpt-5
+
+Closed as shipped. Part 2 is present in `src/agent-doc` commit `91f06782` (`Add force interrupt-clear wedge escape`), which is included in current `origin/main` at `9df1244f`.
+
+Proof checked in source:
+
+- `agent-doc session interrupt-clear <FILE> --force` is exposed in `src/main.rs`.
+- `force_interrupt_clear` closes actor state, removes matching session registry projections, signals child/supervisor PIDs, kills the selected owner pane, removes the supervisor socket, writes clear cooldown, and reclaims orphaned empty preflight cycles.
+- `specs/07-core-commands.md` pins the recursive-start guard and the one-command destructive hatch.
+
+Verification run now:
+
+```
+cargo test -p agent-doc force_interrupt_clear_summary_reports_destructive_cleanup -- --nocapture
+cargo test -p agent-doc-orchestration recursive_start_diagnostic_refuses_and_names_out_of_pane_recovery -- --nocapture
+cargo test -p agent-doc-orchestration owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries -- --nocapture
+```
+
+All three passed. Source CI for `src/agent-doc` `9df1244f` was already green in run `27088129850`, so this was a stale backlog/queue mirror and is now done.
+<!-- agent:boundary:ea08221c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
 - do [#jb-file-cache-conflict-syntax-loss]
 - do [#recursion-guard-wedge-escape]
@@ -85,7 +105,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED 9df1244f: runtime writes now persist structured .overlay.yrs sidecars beside legacy .yrs from the same markdown snapshot, and preflight queue dedup is markdown-AST node-keyed so intentional duplicate do/free-text prompts survive. REMAINING: legacy text CRDT is still the merge base; editor/IPC plugins still need the authoritative node_patches apply path and realtime watcher convergence. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 2. [ ] [#jb-file-cache-conflict-syntax-loss] #agent-doc-bug REOPENED false closeout: previous closeout verified queue-consume behavior, not JetBrains File Cache Conflict syntax-highlighting loss; define and verify the actual cache-conflict syntax preservation path before closing.
-3. [ ] [#recursion-guard-wedge-escape] [recommended] #agent-doc-bug PART 1 SHIPPED (f24889fc origin/main): the `agent-doc start` entry now hard-refuses a recursive self-owned-pane start (run::recursive_codex_start_invocation_diagnostic, Codex-only via detect_harness, fires even under --force) instead of spawning a looping replacement owner; bail logs start_recursive_self_owned_pane_refused and prints an out-of-pane recovery path. REMAINING part 2: `agent-doc session clear`/`interrupt-clear` must offer a force path that kills the wedged owner pane + supervisor PID and clears the sessions registry in one command (today recovery is the multi-step session status then interrupt-clear from another pane). Overlaps #autoloop-command-preemption, plan-jb-run-preempt-autoloop-priority.md sub-part 4; relates #clear-blocked-by-own-drafted-clear-command.
+3. [x] [#recursion-guard-wedge-escape] [recommended] #agent-doc-bug PART 1 SHIPPED (f24889fc origin/main): the `agent-doc start` entry now hard-refuses a recursive self-owned-pane start (run::recursive_codex_start_invocation_diagnostic, Codex-only via detect_harness, fires even under --force) instead of spawning a looping replacement owner; bail logs start_recursive_self_owned_pane_refused and prints an out-of-pane recovery path. REMAINING part 2: `agent-doc session clear`/`interrupt-clear` must offer a force path that kills the wedged owner pane + supervisor PID and clears the sessions registry in one command (today recovery is the multi-step session status then interrupt-clear from another pane). Overlaps #autoloop-command-preemption, plan-jb-run-preempt-autoloop-priority.md sub-part 4; relates #clear-blocked-by-own-drafted-clear-command.
 4. [ ] [#partial-staging-closeout-guard] [recommended] #agent-doc-bug closeout guard for partial change-set staging: a turn that edits source + tests can commit a partial set (e.g. queue.rs ~~ render change committed but its test-assertion fixes left unstaged) so local make check passes against the working tree while CI fails against the committed tree only. Observed live this session: 1645112d CI red, fixed dcb734eb. Add a heuristic/guard that flags when committed output-format changes leave companion test files (matching changed string literals) unstaged, or warns the staged diff is not self-consistent. Same "regressions when I work on agent-doc" class.
 5. [ ] [#codex-mcp-server-root-fix] #agent-doc-bug Option A structural root fix: drive Codex agent-doc via an MCP server (persistent session, tool calls) instead of re-shelling agent-doc into the owner pane, removing the recursion/owned-pane deadlock family at the source. Plan: tasks/agent-doc/plans/codex-mcp-server-option-a.md
 6. [ ] [#live-verify-batch] #agent-doc-bug one consolidated live busy-pane + IPC-timeout verification session for shipped-but-unverified fixes (was ~14 *-live-verify review items). Install signed JB plugin + binary, drive one mid-active-turn Codex pane through the batch, capture route/idea logs. Blocked on live IntelliJ/Codex panes.

@@ -49,31 +49,12 @@ Changed paths: `agent-doc-markdown-ast/src/crdt.rs`, `agent-doc-markdown-ast/src
 
 What changed: added `OverlayCrdtDoc`, rooted at `agent_doc_overlay`, storing `schema_version`, the markdown projection, component maps, and item maps with stable ids, spans, raw/text fields, pin/strike flags, and nested kind metadata. Added decode/encode support, strict schema errors, legacy `content` Text migration, empty-state fallback to current markdown, and tests proving legacy text wins over fallback when non-empty.
 
-Verification: `cargo test -p agent-doc-markdown-ast` passed; `make check` passed; `cargo install --path .` passed. Latest GitHub Actions CI checked before commit was successful (`27082037274`, single `check` job success; no red tmux leg to reproduce).
+Verification: `cargo check -p agent-doc-markdown-ast` passed; `cargo test -p agent-doc-markdown-ast` passed; `make check` passed; `cargo install --path .` passed. GitHub Actions CI run `27082388018` succeeded on `main` for `8e54718a`; both `make check` and `make tmux-ci` passed.
 
 Commits/push: submodule commit `8e54718a` pushed to `btakita/agent-doc` `main`; superproject pointer commit pushed to `btakita/agent-loop` `main` as `7e224eb6c` via a clean temporary worktree, because the active checkout was already dirty and divergent.
 
 Confidence: high. Escalation: none.
 
-### Re: do [#md-ast-crdt-schema] — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#md-ast-mutations-node-keyed]
-
-
-Implemented phase 3 in `src/agent-doc` as `8e54718a` (`Add markdown overlay CRDT schema`) and pushed it to `origin/main`.
-
-The markdown AST overlay now has a structured Yrs-backed sidecar in `agent-doc-markdown-ast`: a versioned root map, component arrays, and item maps with ids, spans, text/raw text, checkbox state, pin/strike flags, and typed item metadata. It also migrates legacy `.yrs` states that only had a `content` text root into the structured schema, preferring non-empty legacy text and using the visible markdown fallback for empty legacy states.
-
-Updated docs/specs in `README.md`, `specs/02-document-format.md`, and `specs/06-config.md`, and added unit coverage for structured map/array storage, round-tripping, pin/strike/checkbox fields, and legacy migration.
-
-Verification:
-- `cargo check -p agent-doc-markdown-ast`
-- `cargo test -p agent-doc-markdown-ast` (15 passed)
-- `make check`
-- `cargo install --path .`
-- GitHub Actions CI run `27082388018` succeeded on `main` for `8e54718a`; both `make check` and `make tmux-ci` passed.
 <!-- agent:boundary:f0ce30a4 -->
 <!-- /agent:exchange -->
 
@@ -84,7 +65,7 @@ Verification:
 - ~~:pushpin: do [#md-ast-crate-extract]~~
 - ~~:pushpin: do [#md-ast-component-overlay]~~
 - ~~:pushpin: do [#md-ast-crdt-schema]~~
-- ~~:pushpin: do [#md-ast-mutations-node-keyed]~~
+- :pushpin: do [#md-ast-mutations-node-keyed]
 - :pushpin: do [#md-ast-ipc-node-patches]
 - :pushpin: do [#md-ast-realtime-watcher]
 - :pushpin: do [#queue-enqueue-action]

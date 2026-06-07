@@ -189,9 +189,9 @@ When the user navigates to a document in the editor:
 
 | Invariant | Enforcement |
 |-----------|-------------|
-| One document per pane | Registry check in `claim::run()` and pre-write actor-store alias refusal |
+| One document per pane | Registry check in `claim::run()` and transaction-level actor-store handoff that closes and clears displaced cross-document owners |
 | Document drives, pane follows | Sync resolves files first, then matches to panes |
-| Never commandeer another document's pane | `auto_start` creates new panes; `claim` and actor-store writes reject panes bound to another active document |
+| Editor-selected document owns the requested pane | `auto_start` creates new panes when needed; actor-store writes recover stale aliases by making the incoming document authoritative and clearing displaced owners |
 | Stashed panes stay alive | `join-pane` moves to stash, doesn't kill |
 | Initialization is idempotent | `ensure_initialized()` checks snapshot existence first |
 

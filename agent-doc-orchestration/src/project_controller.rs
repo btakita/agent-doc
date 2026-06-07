@@ -581,7 +581,7 @@ pub fn store_actor_record(
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
     let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
-    state_store::store_actor_record_tx(
+    let evicted_document_ids = state_store::store_actor_record_tx(
         &mut conn,
         expected_prior_generation,
         record,
@@ -596,6 +596,9 @@ pub fn store_actor_record(
             &record.document_id,
             &format!("failed to emit actor projection after sqlite commit: {err}"),
         );
+    }
+    for evicted_document_id in evicted_document_ids {
+        let _ = project_sessions_projection_for_actor(project_root, &evicted_document_id);
     }
     if record.last_transition.caller == "start" && record.last_transition.reason == "session_start"
     {
@@ -720,14 +723,13 @@ pub fn evict_cross_document_pane_bindings(
     let store = load_actor_store(project_root)?;
     let mut evicted = 0;
     for record in store.values() {
-        if record.document_id == owner_document_id
-            || record.pane_id != pane_id
-            || record.state == crate::session_actor::ActorState::Closed
-        {
+        if record.document_id == owner_document_id || record.pane_id != pane_id {
             continue;
         }
         let mut next = record.clone();
         next.state = crate::session_actor::ActorState::Closed;
+        next.pane_id.clear();
+        next.window_id.clear();
         next.last_transition = crate::session_actor::ActorLastTransition {
             caller: caller.to_string(),
             reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
@@ -864,6 +866,21 @@ pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &
             return Ok(());
         }
     };
+    if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
+        if registry.remove(document_id).is_none() {
+            return Ok(());
+        }
+        if let Err(err) = crate::sessions::save_in(project_root, &registry) {
+            record_projection_diagnostic(
+                project_root,
+                "sessions.json",
+                document_id,
+                &format!("failed to remove closed actor projection: {err}"),
+            );
+            return Ok(());
+        }
+        return Ok(());
+    }
     let Some(entry) = registry.get_mut(document_id) else {
         record_projection_diagnostic(
             project_root,
@@ -2376,7 +2393,6 @@ fn handle_attach_pane(
     );
     let record = load_actor_record(&bootstrap.project_root, &document_id)?
         .with_context(|| format!("missing actor record after attach for {}", file.display()))?;
-    let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
     crate::ops_log::log_op(
         &file,
         &format!(
@@ -2634,6 +2650,63 @@ mod tests {
         assert_eq!(entry.session_id, "session-1");
         assert_eq!(entry.pid, 123);
         assert_eq!(entry.supervisor_instance_id, "supervisor-1");
+    }
+
+    #[test]
+    fn sessions_projection_removes_displaced_cross_document_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc_a = dir.path().join("tasks/a.md");
+        let doc_b = dir.path().join("tasks/b.md");
+        std::fs::create_dir_all(doc_a.parent().unwrap()).unwrap();
+        std::fs::write(&doc_a, "a").unwrap();
+        std::fs::write(&doc_b, "b").unwrap();
+        let document_a = doc_a.to_string_lossy().to_string();
+        let document_b = doc_b.to_string_lossy().to_string();
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            document_a.clone(),
+            crate::sessions::SessionEntry {
+                pane: "%70".to_string(),
+                pid: 100,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: "1".to_string(),
+                session_id: "session-a".to_string(),
+                file: document_a.clone(),
+                window: "@7".to_string(),
+                supervisor_instance_id: "supervisor-a".to_string(),
+            },
+        );
+        registry.insert(
+            document_b.clone(),
+            crate::sessions::SessionEntry {
+                pane: "%old".to_string(),
+                pid: 200,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: "2".to_string(),
+                session_id: "session-b".to_string(),
+                file: document_b.clone(),
+                window: "@old".to_string(),
+                supervisor_instance_id: "supervisor-b".to_string(),
+            },
+        );
+        crate::sessions::save_in(dir.path(), &registry).unwrap();
+
+        let mut record_a = actor_record(&document_a, "%70", "@7");
+        record_a.session_id = "session-a".to_string();
+        store_actor_record(dir.path(), Some(0), &record_a).unwrap();
+        let mut record_b = actor_record(&document_b, "%70", "@7");
+        record_b.session_id = "session-b".to_string();
+        store_actor_record(dir.path(), Some(0), &record_b).unwrap();
+
+        let projected = crate::sessions::load_in(dir.path()).unwrap();
+        assert!(
+            !projected.contains_key(&document_a),
+            "displaced document must not remain in sessions.json"
+        );
+        let entry_b = projected.get(&document_b).unwrap();
+        assert_eq!(entry_b.pane, "%70");
+        assert_eq!(entry_b.window, "@7");
+        assert_eq!(entry_b.session_id, "session-b");
     }
 
     #[test]
@@ -3824,6 +3897,14 @@ mod tests {
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-attach", "%41", "@1", 1)
             .unwrap();
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let diagnostics_before_attach: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         let attach = ControllerRequest {
             command: "attach_pane".to_string(),
@@ -3855,6 +3936,17 @@ mod tests {
         assert_eq!(record.generation, 2);
         assert_eq!(record.last_transition.caller, "session");
         assert_eq!(record.last_transition.reason, "manual_attach");
+        let diagnostics_after_attach: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            diagnostics_after_attach, diagnostics_before_attach,
+            "controller attach should not add a projection diagnostic before the caller updates sessions.json"
+        );
     }
 
     #[test]

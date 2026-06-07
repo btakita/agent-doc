@@ -177,7 +177,7 @@ agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/e
 
 | Term | Definition |
 |------|-----------|
-| **Binding** | The document→pane association stored in `sessions.json`. Created by `claim` (explicit) or `auto_start` (automatic). One document per pane. |
+| **Binding** | The document→pane association stored in `sessions.json` and the actor store. Created by `claim` (explicit) or `auto_start` (automatic). One active document owns a pane; if a stale cross-document alias exists, the incoming owner closes and clears the displaced binding. |
 | **Reconciliation** | The process of matching editor layout to tmux layout. Performed by `sync`. Stashes unwanted panes, provisions missing ones. |
 | **Provisioning** | Creating a new tmux pane and starting the configured agent harness for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
 | **Initialization** | Assigning a session UUID, creating a snapshot, and committing to git. Performed by `ensure_initialized()`. Called from claim, preflight, and sync's resolve_file. |

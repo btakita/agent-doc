@@ -231,22 +231,6 @@ fn store_record_in(
             prior_generation
         );
     }
-    if update.state != ActorState::Closed
-        && !update.pane_id.is_empty()
-        && let Some(conflict) =
-            active_cross_document_pane_binding_in(base_dir, &document_id, update.pane_id)?
-    {
-        anyhow::bail!(
-            "pane {} is already bound to active document {} session={} state={} generation={}; refusing to bind {}",
-            update.pane_id,
-            conflict.document_id,
-            conflict.session_id,
-            conflict.state.as_str(),
-            conflict.generation,
-            document_id
-        );
-    }
-
     let record = ActorRecord {
         document_id: document_id.clone(),
         session_id: update.session_id.to_string(),
@@ -269,24 +253,6 @@ fn store_record_in(
         &record,
     )?;
     Ok(stored)
-}
-
-fn active_cross_document_pane_binding_in(
-    base_dir: &Path,
-    owner_document_id: &str,
-    pane_id: &str,
-) -> Result<Option<ActorRecord>> {
-    if pane_id.is_empty() {
-        return Ok(None);
-    }
-    Ok(load_store_in(base_dir)?
-        .values()
-        .find(|record| {
-            record.document_id != owner_document_id
-                && record.pane_id == pane_id
-                && record.state != ActorState::Closed
-        })
-        .cloned())
 }
 
 pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {
@@ -764,9 +730,9 @@ mod tests {
     }
 
     #[test]
-    fn binding_a_pane_refuses_other_documents_bound_to_it() {
-        // "1 pane = 1 document": a new document must not commandeer a pane that
-        // another non-closed actor record already owns (#jb-lazily-pane-alias).
+    fn binding_a_pane_evicts_other_documents_bound_to_it() {
+        // "1 pane = 1 document": a new document taking a pane must clear the
+        // previous document's binding in the same actor-store write.
         let tmp = tempfile::TempDir::new().unwrap();
         let doc_a = seed_project_file(
             &tmp,
@@ -786,28 +752,28 @@ mod tests {
         assert_eq!(a_before.pane_id, "%1");
         assert_ne!(a_before.state, ActorState::Closed);
 
-        // Document B attempts the SAME pane %1. The bind must fail before B is
-        // stored, leaving A as the pane owner.
-        let err = record_session_start(&doc_b, "sess-b", "%1", "@1", 1)
-            .expect_err("cross-document pane aliases must fail closed");
-        assert!(
-            err.to_string().contains("already bound to active document"),
-            "{err}"
-        );
+        let b_after = record_session_start(&doc_b, "sess-b", "%1", "@1", 1)
+            .expect("the incoming document should recover by taking the pane");
+        assert_eq!(b_after.pane_id, "%1");
+        assert_eq!(b_after.state, ActorState::Starting);
 
         let a_after = load_record_in(tmp.path(), &doc_a.to_string_lossy())
             .unwrap()
             .unwrap();
         assert_eq!(
             a_after.state,
-            ActorState::Starting,
-            "document A must remain the owner when B tries to take the pane"
+            ActorState::Closed,
+            "document A must lose the pane when B takes it"
         );
+        assert_eq!(a_after.pane_id, "");
+        assert_eq!(a_after.window_id, "");
         assert!(
-            load_record_in(tmp.path(), &doc_b.to_string_lossy())
-                .unwrap()
-                .is_none(),
-            "document B must not be stored on the conflicting pane"
+            a_after
+                .last_transition
+                .reason
+                .contains("evicted_cross_document_pane owner="),
+            "unexpected transition: {:?}",
+            a_after.last_transition
         );
     }
 

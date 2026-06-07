@@ -699,19 +699,62 @@ pub fn insert_projection_diagnostic(
     Ok(())
 }
 
+fn evict_cross_document_actor_pane_bindings_tx(
+    conn: &Connection,
+    owner_document_id: &str,
+    pane_id: &str,
+    caller: &str,
+    timestamp: u64,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+) -> Result<Vec<String>> {
+    if pane_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let store = load_actor_store_from_db(conn)?;
+    let mut evicted = Vec::new();
+    for prior in store.values() {
+        if prior.document_id == owner_document_id || prior.pane_id != pane_id {
+            continue;
+        }
+        let mut next = prior.clone();
+        next.state = ActorState::Closed;
+        next.pane_id.clear();
+        next.window_id.clear();
+        next.last_transition = ActorLastTransition {
+            caller: caller.to_string(),
+            reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
+            timestamp,
+            prior_generation: prior.generation,
+            new_generation: prior.generation,
+        };
+        let transition_id = insert_actor_transition(conn, Some(prior), &next)?;
+        upsert_actor_document(
+            conn,
+            &next,
+            transition_id,
+            launch_mode.clone(),
+            controller_epoch,
+        )?;
+        evicted.push(prior.document_id.clone());
+    }
+    Ok(evicted)
+}
+
 /// Run the compare-and-swap actor write transaction.
 ///
 /// Mirrors the prior `project_controller::store_actor_record` transaction body:
 /// load the previous record, enforce the optional CAS expectation, reject
-/// generation regressions, insert the transition, then upsert the document row
-/// using the lifted `launch_mode`/`controller_epoch` bootstrap tendril.
+/// generation regressions, recover cross-document pane aliases, insert the
+/// transition, then upsert the document row using the lifted
+/// `launch_mode`/`controller_epoch` bootstrap tendril.
 pub fn store_actor_record_tx(
     conn: &mut Connection,
     expected_prior_generation: Option<u64>,
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let tx = conn.transaction()?;
     let previous = load_actor_record_from_db(&tx, &record.document_id)?;
     let prior_generation = previous
@@ -736,10 +779,23 @@ pub fn store_actor_record_tx(
             prior_generation
         );
     }
+    let evicted_document_ids = if record.state != ActorState::Closed {
+        evict_cross_document_actor_pane_bindings_tx(
+            &tx,
+            &record.document_id,
+            &record.pane_id,
+            &record.last_transition.caller,
+            record.last_transition.timestamp,
+            launch_mode.clone(),
+            controller_epoch,
+        )?
+    } else {
+        Vec::new()
+    };
     let transition_id = insert_actor_transition(&tx, previous.as_ref(), record)?;
     upsert_actor_document(&tx, record, transition_id, launch_mode, controller_epoch)?;
     tx.commit()?;
-    Ok(())
+    Ok(evicted_document_ids)
 }
 
 /// True when the `documents` table holds no rows yet.

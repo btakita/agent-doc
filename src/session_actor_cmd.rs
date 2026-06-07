@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
 use agent_doc_orchestration::session_actor::{ActorRecord, ActorState};
@@ -2050,7 +2050,11 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
         let closeout = agent_doc_orchestration::repair::repair(file)?;
-        let repair_notes = agent_doc_orchestration::sync::repair_file_state(file)?;
+        let mut repair_notes = agent_doc_orchestration::sync::repair_file_state(file)?;
+        let repair_ctx = build_context(file)?;
+        if let Some(note) = clear_closed_actor_pane_projection(&repair_ctx)? {
+            repair_notes.push(note);
+        }
         agent_doc_orchestration::resync::run_fix(Some(file), None)?;
         println!("Applied repair path for {}.", file.display());
         if closeout.repaired() {
@@ -2101,6 +2105,45 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn clear_closed_actor_pane_projection(ctx: &SessionContext) -> Result<Option<String>> {
+    let Some(record) = &ctx.actor_record else {
+        return Ok(None);
+    };
+    if record.state != ActorState::Closed || record.pane_id.is_empty() {
+        return Ok(None);
+    }
+    let old_pane = record.pane_id.clone();
+    let old_window = record.window_id.clone();
+    let mut cleared = record.clone();
+    cleared.pane_id.clear();
+    cleared.window_id.clear();
+    cleared.last_transition = agent_doc_orchestration::session_actor::ActorLastTransition {
+        caller: "session_doctor".to_string(),
+        reason: format!(
+            "cleared_closed_actor_pane old_pane={} old_window={}",
+            old_pane,
+            empty_or_placeholder(&old_window)
+        ),
+        timestamp: timestamp_secs(),
+        prior_generation: record.generation,
+        new_generation: record.generation,
+    };
+    agent_doc_orchestration::project_controller::store_actor_record(
+        &ctx.base_dir,
+        Some(record.generation),
+        &cleared,
+    )?;
+    agent_doc_orchestration::project_controller::project_sessions_projection_for_actor(
+        &ctx.base_dir,
+        &cleared.document_id,
+    )?;
+    Ok(Some(format!(
+        "Cleared stale closed actor pane `{}` for `{}`.",
+        old_pane,
+        ctx.canonical_file.display()
+    )))
 }
 
 fn build_context(file: &Path) -> Result<SessionContext> {
@@ -2367,7 +2410,10 @@ fn live_pane_evidence_for_pane(
 }
 
 fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) {
-    if let Some(record) = &ctx.actor_record {
+    if let Some(record) = &ctx.actor_record
+        && record.state != ActorState::Closed
+        && !record.pane_id.is_empty()
+    {
         return (Some(record.pane_id.clone()), "authoritative_actor");
     }
     if let Some(entry) = &ctx.registry_entry {
@@ -2804,6 +2850,15 @@ fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
             miss.pane_id
         ));
     }
+    if let Some(actor) = &ctx.actor_record
+        && actor.state == ActorState::Closed
+        && !actor.pane_id.is_empty()
+    {
+        issues.push(format!(
+            "closed actor record still references pane {}",
+            actor.pane_id
+        ));
+    }
     for diagnostic in &ctx.operator_status.projection_diagnostics {
         issues.push(format!(
             "controller projection drift in {}: {}",
@@ -2827,6 +2882,13 @@ fn empty_or_placeholder(value: &str) -> &str {
     } else {
         value
     }
+}
+
+fn timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -3499,6 +3561,32 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
+    fn live_evidence_target_ignores_closed_actor_pane() {
+        let mut record = test_actor_record(ActorState::Closed);
+        record.pane_id = "%stale".to_string();
+        let mut ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            None,
+        );
+        ctx.registry_entry = Some(SessionEntry {
+            pane: "%registry".to_string(),
+            pid: 123,
+            cwd: "/tmp".to_string(),
+            started: "1".to_string(),
+            session_id: "session-1".to_string(),
+            file: "/tmp/doc.md".to_string(),
+            window: "@1".to_string(),
+            supervisor_instance_id: "sup-1".to_string(),
+        });
+
+        assert_eq!(
+            live_evidence_target(&ctx),
+            (Some("%registry".to_string()), "registry")
+        );
+    }
+
+    #[test]
     fn operator_starting_guard_lets_matching_runtime_ready_override_stale_record() {
         let record = test_actor_record(ActorState::Starting);
         let ctx = test_session_context(
@@ -3804,6 +3892,20 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             issues
                 .iter()
                 .any(|issue| issue.contains("supervisor socket"))
+        );
+    }
+
+    #[test]
+    fn doctor_flags_closed_actor_with_stale_pane() {
+        let record = test_actor_record(ActorState::Closed);
+        let ctx = test_session_context(record, test_supervisor_runtime(None), None);
+
+        let issues = collect_doctor_issues(&ctx);
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("closed actor record still references pane %7"))
         );
     }
 

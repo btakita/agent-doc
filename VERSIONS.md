@@ -6,13 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
-- **Actor pane binding now refuses cross-document aliases.** Route/start actor
-  store writes fail closed before mutation when the target pane already has a
-  non-closed record for another document, instead of storing the new owner and
-  evicting the old one. This prevents editor navigation to files such as
-  `lazily-rs.md` from briefly opening the correct third pane and then losing it
-  to the previous document's pane. Test
-  `binding_a_pane_refuses_other_documents_bound_to_it`.
+- **Actor pane binding now recovers cross-document aliases.** Route/start actor
+store writes atomically close and clear the displaced document's pane binding
+before storing the incoming owner. This prevents editor navigation to files such
+as `lazily-rs.md` from leaving that document pointed at the previous
+`agent-doc-bugs2.md` pane after recovery. `session status` no longer treats a
+closed actor's stale pane as live evidence, and `session doctor --repair` clears
+old closed actor pane projections. Tests
+`binding_a_pane_evicts_other_documents_bound_to_it`,
+`sessions_projection_removes_displaced_cross_document_owner`, and
+`closed_actor`.
 
 - **Free-text queue consumption now requires exchange history.** Session-check
   no longer treats a sidecar response hash or binary consume marker as sufficient

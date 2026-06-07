@@ -460,7 +460,17 @@ single-owner actor controls:
   pane still does not settle, the ops event and error must name the final
   blocking live-pane state, evidence source, prompt-ready value, last observed
   command, and recent pane tail, then give an exact manual recovery action
-  instead of leaving the operator with a generic busy timeout. For Codex panes, a capture
+  instead of leaving the operator with a generic busy timeout.
+  `agent-doc session interrupt-clear <FILE> --force` is the explicit
+  destructive hatch for a wedged owner that cannot settle: it marks the
+  authoritative actor closed when possible, removes the document's sessions.json
+  projection under the registry lock, writes the clear cooldown, signals the
+  supervisor/child PIDs when known, kills the bound tmux pane when it is still
+  alive, removes the supervisor socket, and reclaims any empty orphaned
+  preflight cycle. This force path is intentionally separate from ordinary
+  `session clear` and normal `interrupt-clear`, and its ops-log summary must
+  report which cleanup steps actually ran.
+  For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
   clear/status; Codex idle placeholder prompts such as

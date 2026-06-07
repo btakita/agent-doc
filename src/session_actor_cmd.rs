@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -1109,7 +1110,11 @@ fn busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: 
     )
 }
 
-pub fn interrupt_clear(file: &Path) -> Result<()> {
+pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
+    if force {
+        return force_interrupt_clear(file);
+    }
+
     let ctx = build_context(file)?;
     agent_doc_orchestration::project_controller::authorize_operator_command(
         &ctx.base_dir,
@@ -1200,6 +1205,286 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
             )
         ),
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ForceInterruptClearReport {
+    actor_closed: bool,
+    registry_removed: bool,
+    supervisor_signaled: bool,
+    child_signaled: bool,
+    pane_killed: bool,
+    socket_removed: bool,
+    cooldown_written: bool,
+}
+
+fn force_interrupt_clear(file: &Path) -> Result<()> {
+    let ctx = build_context(file)?;
+    if let Err(err) = agent_doc_orchestration::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_interrupt_clear",
+    ) {
+        eprintln!(
+            "[interrupt-clear --force] warning: operator authorization failed for {}: {err:#}; continuing with explicit force cleanup",
+            ctx.canonical_file.display()
+        );
+        agent_doc_orchestration::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_interrupt_clear_force_authorization_failed file={} error={:?}",
+                ctx.canonical_file.display(),
+                err.to_string()
+            ),
+        );
+    }
+
+    let tmux = Tmux::default_server();
+    let evidence = live_pane_evidence(&ctx, &tmux);
+    let pane = force_interrupt_clear_pane(&ctx, &evidence);
+
+    let mut report = ForceInterruptClearReport {
+        actor_closed: force_close_actor_record(&ctx),
+        registry_removed: force_remove_registry_projection(&ctx)?,
+        ..ForceInterruptClearReport::default()
+    };
+
+    if let Err(err) =
+        agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
+            &ctx.canonical_file,
+        )
+    {
+        eprintln!(
+            "[interrupt-clear --force] warning: failed to drop deferred-clear marker for {}: {err:#}",
+            ctx.canonical_file.display()
+        );
+    }
+    match agent_doc_orchestration::queue_continuation::write_clear_cooldown(&ctx.canonical_file) {
+        Ok(()) => report.cooldown_written = true,
+        Err(err) => eprintln!(
+            "[interrupt-clear --force] warning: failed to write queue cooldown marker for {}: {err:#}",
+            ctx.canonical_file.display()
+        ),
+    }
+
+    let child_pid = ctx.supervisor_runtime.child_pid;
+    let supervisor_pid = ctx
+        .supervisor_runtime
+        .supervisor_pid
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pid))
+        .filter(|pid| *pid > 0);
+    report.child_signaled = signal_pid_for_force_clear(&ctx.canonical_file, "child", child_pid);
+    report.supervisor_signaled =
+        signal_pid_for_force_clear(&ctx.canonical_file, "supervisor", supervisor_pid);
+    report.pane_killed = kill_pane_for_force_clear(&ctx.canonical_file, &tmux, pane.as_deref());
+    report.socket_removed = remove_supervisor_socket_for_force_clear(&ctx);
+
+    reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+
+    agent_doc_orchestration::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_interrupt_clear_force_cleanup file={} pane={} actor_closed={} registry_removed={} supervisor_pid={} supervisor_signaled={} child_pid={} child_signaled={} pane_killed={} socket_removed={} cooldown_written={}",
+            ctx.canonical_file.display(),
+            pane.as_deref().unwrap_or("none"),
+            report.actor_closed,
+            report.registry_removed,
+            supervisor_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            report.supervisor_signaled,
+            child_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            report.child_signaled,
+            report.pane_killed,
+            report.socket_removed,
+            report.cooldown_written,
+        ),
+    );
+    println!(
+        "{}",
+        force_interrupt_clear_summary(&ctx.canonical_file, pane.as_deref(), report)
+    );
+    Ok(())
+}
+
+fn force_interrupt_clear_pane(ctx: &SessionContext, evidence: &LivePaneEvidence) -> Option<String> {
+    evidence
+        .pane_id
+        .clone()
+        .or_else(|| {
+            ctx.actor_record
+                .as_ref()
+                .map(|record| record.pane_id.clone())
+        })
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pane.clone()))
+}
+
+fn force_close_actor_record(ctx: &SessionContext) -> bool {
+    let Some(record) = &ctx.actor_record else {
+        return false;
+    };
+    if record.state == ActorState::Closed {
+        return true;
+    }
+    match agent_doc_orchestration::project_controller::mark_lifecycle(
+        &ctx.base_dir,
+        agent_doc_orchestration::project_controller::LifecycleRequest {
+            file: ctx.canonical_file.clone(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+            state: ActorState::Closed,
+            caller: "session_interrupt_clear".to_string(),
+            reason: "force_interrupt_clear".to_string(),
+        },
+    ) {
+        Ok(_) => true,
+        Err(err) => {
+            eprintln!(
+                "[interrupt-clear --force] warning: failed to mark actor closed for {}: {err:#}",
+                ctx.canonical_file.display()
+            );
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_interrupt_clear_force_actor_close_failed file={} error={:?}",
+                    ctx.canonical_file.display(),
+                    err.to_string()
+                ),
+            );
+            false
+        }
+    }
+}
+
+fn force_remove_registry_projection(ctx: &SessionContext) -> Result<bool> {
+    let registry_path = agent_doc_orchestration::sessions::registry_path_in(&ctx.base_dir);
+    let _lock = agent_doc_orchestration::sessions::RegistryLock::acquire(&registry_path)?;
+    let mut registry = agent_doc_orchestration::sessions::load_in(&ctx.base_dir)?;
+    let canonical = ctx.canonical_file.to_string_lossy().to_string();
+    let mut session_ids = BTreeSet::new();
+    session_ids.insert(ctx.session_id.clone());
+    if let Some(record) = &ctx.actor_record {
+        session_ids.insert(record.session_id.clone());
+    }
+    if let Some(entry) = &ctx.registry_entry {
+        session_ids.insert(entry.session_id.clone());
+    }
+    let remove_keys: Vec<String> = registry
+        .iter()
+        .filter(|(key, entry)| {
+            *key == &canonical || entry.file == canonical || session_ids.contains(&entry.session_id)
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+    let removed = !remove_keys.is_empty();
+    for key in remove_keys {
+        registry.remove(&key);
+    }
+    if removed {
+        agent_doc_orchestration::sessions::save_in(&ctx.base_dir, &registry)?;
+    }
+    Ok(removed)
+}
+
+#[cfg(unix)]
+fn signal_pid_for_force_clear(file: &Path, kind: &str, pid: Option<u32>) -> bool {
+    let Some(pid) = pid.filter(|pid| *pid > 0) else {
+        return false;
+    };
+    let signaled = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 };
+    agent_doc_orchestration::ops_log::log_op(
+        file,
+        &format!(
+            "session_interrupt_clear_force_signal file={} kind={} pid={} signaled={}",
+            file.display(),
+            kind,
+            pid,
+            signaled
+        ),
+    );
+    signaled
+}
+
+#[cfg(not(unix))]
+fn signal_pid_for_force_clear(file: &Path, kind: &str, pid: Option<u32>) -> bool {
+    if let Some(pid) = pid {
+        agent_doc_orchestration::ops_log::log_op(
+            file,
+            &format!(
+                "session_interrupt_clear_force_signal file={} kind={} pid={} signaled=false platform=non_unix",
+                file.display(),
+                kind,
+                pid
+            ),
+        );
+    }
+    false
+}
+
+fn kill_pane_for_force_clear(file: &Path, tmux: &Tmux, pane: Option<&str>) -> bool {
+    let Some(pane) = pane else {
+        return false;
+    };
+    if !tmux.pane_alive(pane) {
+        agent_doc_orchestration::ops_log::log_op(
+            file,
+            &format!(
+                "session_interrupt_clear_force_kill_pane file={} pane={} killed=false reason=already_closed",
+                file.display(),
+                pane
+            ),
+        );
+        return false;
+    }
+    let killed = tmux.raw_cmd(&["kill-pane", "-t", pane]).is_ok();
+    agent_doc_orchestration::ops_log::log_op(
+        file,
+        &format!(
+            "session_interrupt_clear_force_kill_pane file={} pane={} killed={}",
+            file.display(),
+            pane,
+            killed
+        ),
+    );
+    killed
+}
+
+fn remove_supervisor_socket_for_force_clear(ctx: &SessionContext) -> bool {
+    if !ctx.supervisor_socket.exists() {
+        return false;
+    }
+    match std::fs::remove_file(&ctx.supervisor_socket) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!(
+                "[interrupt-clear --force] warning: failed to remove supervisor socket {}: {err:#}",
+                ctx.supervisor_socket.display()
+            );
+            false
+        }
+    }
+}
+
+fn force_interrupt_clear_summary(
+    file: &Path,
+    pane: Option<&str>,
+    report: ForceInterruptClearReport,
+) -> String {
+    format!(
+        "Force-cleared session for {} (pane={}, actor_closed={}, registry_removed={}, supervisor_signaled={}, child_signaled={}, pane_killed={}, socket_removed={}, cooldown_written={}).",
+        file.display(),
+        pane.unwrap_or("none"),
+        report.actor_closed,
+        report.registry_removed,
+        report.supervisor_signaled,
+        report.child_signaled,
+        report.pane_killed,
+        report.socket_removed,
+        report.cooldown_written,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2944,6 +3229,32 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("pane %7 is alive-busy"));
         assert!(message.contains("reason=active codex turn"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn force_interrupt_clear_summary_reports_destructive_cleanup() {
+        let message = force_interrupt_clear_summary(
+            Path::new("/tmp/doc.md"),
+            Some("%7"),
+            ForceInterruptClearReport {
+                actor_closed: true,
+                registry_removed: true,
+                supervisor_signaled: true,
+                child_signaled: false,
+                pane_killed: true,
+                socket_removed: true,
+                cooldown_written: true,
+            },
+        );
+
+        assert!(message.contains("Force-cleared session for /tmp/doc.md"));
+        assert!(message.contains("pane=%7"));
+        assert!(message.contains("actor_closed=true"));
+        assert!(message.contains("registry_removed=true"));
+        assert!(message.contains("supervisor_signaled=true"));
+        assert!(message.contains("pane_killed=true"));
+        assert!(message.contains("socket_removed=true"));
+        assert!(message.contains("cooldown_written=true"));
     }
 
     #[test]

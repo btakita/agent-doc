@@ -1127,9 +1127,10 @@ pub fn recursive_codex_start_invocation_diagnostic(
 /// registry, or harness-env state.
 fn format_recursive_start_diagnostic(file: &Path, detail: &str) -> String {
     format!(
-        "recursive self-owned-pane start would deadlock: `agent-doc start {}` was run inside the Codex pane that already owns this document ({}). Spawning a replacement owner here would loop re-injecting `agent-doc {}` into this same pane. Recover from a DIFFERENT pane: first reconcile a possibly stale-busy actor without killing the pane via `agent-doc session status {}`, then if the pane really is wedged run `agent-doc session interrupt-clear {}` to interrupt the owner and clear the session. Do NOT re-run `agent-doc start {}` from this pane — it only re-trips this guard.",
+        "recursive self-owned-pane start would deadlock: `agent-doc start {}` was run inside the Codex pane that already owns this document ({}). Spawning a replacement owner here would loop re-injecting `agent-doc {}` into this same pane. Recover from a DIFFERENT pane: first reconcile a possibly stale-busy actor without killing the pane via `agent-doc session status {}`, then if the pane really is wedged run `agent-doc session interrupt-clear {}` to interrupt the owner and clear the session; if that cannot settle, run `agent-doc session interrupt-clear {} --force` to kill the owner pane/supervisor and clear the registry in one command. Do NOT re-run `agent-doc start {}` from this pane — it only re-trips this guard.",
         file.display(),
         detail,
+        file.display(),
         file.display(),
         file.display(),
         file.display(),
@@ -1635,8 +1636,9 @@ mod tests {
         // the Codex pane that already owns the doc must fail closed with a message
         // that (a) names the deadlock as a recursive self-owned-pane start, (b)
         // explains it would loop re-injecting `agent-doc <FILE>`, (c) points at an
-        // out-of-pane recovery (session status reconcile, then interrupt-clear),
-        // and (d) warns against re-running `agent-doc start` from this pane.
+        // out-of-pane recovery (session status reconcile, then interrupt-clear,
+        // escalating to interrupt-clear --force), and (d) warns against re-running
+        // `agent-doc start` from this pane.
         let msg = format_recursive_start_diagnostic(
             Path::new("tasks/x.md"),
             "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
@@ -1647,6 +1649,7 @@ mod tests {
         assert!(msg.contains("DIFFERENT pane"));
         assert!(msg.contains("agent-doc session status tasks/x.md"));
         assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md"));
+        assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md --force"));
         assert!(msg.contains("Do NOT re-run"));
     }
 

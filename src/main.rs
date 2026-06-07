@@ -1643,6 +1643,9 @@ enum SessionAction {
     InterruptClear {
         /// Path to the session document
         file: PathBuf,
+        /// Kill the bound pane/supervisor and clear registry state when normal interrupt-clear cannot settle
+        #[arg(long)]
+        force: bool,
     },
     /// Diagnose actor/registry/supervisor drift for a document
     Doctor {
@@ -2612,8 +2615,8 @@ fn main() -> anyhow::Result<()> {
             ),
             Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
             Some(SessionAction::Clear { file: None }) => session_cmd::clear(),
-            Some(SessionAction::InterruptClear { file }) => {
-                session_actor_cmd::interrupt_clear(&file)
+            Some(SessionAction::InterruptClear { file, force }) => {
+                session_actor_cmd::interrupt_clear(&file, force)
             }
             Some(SessionAction::Doctor { file, repair }) => {
                 session_actor_cmd::doctor(&file, repair)

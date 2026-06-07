@@ -239,7 +239,21 @@ Recommendation: keep lazily-rs core small and transport-neutral. The `ShmBlobAre
 So: yes, existing crates solve major pieces, especially iceoryx2. But lazily-rs should not make any of them mandatory in the core `ipc` feature yet. The current protocol types give us a stable seam where those crates can plug in.
 
 No code changed for this answer.
-<!-- agent:boundary:1f083630 -->
+
+### Re: Add #next-steps for a SHM & FD IPC strategy. — gpt-5
+
+> **Queue prompt:**
+>
+> Add #next-steps for a SHM & FD IPC strategy.
+
+Added the IPC follow-up backlog in priority order.
+
+Top backlog item: `#ipc5`.
+
+The strategy is to keep `lazily-rs` core transport-neutral: `Snapshot`, `Delta`, `IpcMessage`, `ShmBlobRef`, epochs, checksums, and permission filtering remain pure protocol/data types. SHM should become the large-payload data plane through blob arenas; FD/HANDLE/event primitives should be optional platform transport optimizations, not the portable protocol surface.
+
+The first backlog item is the transport contract plus benchmark matrix because it gives us evidence before we choose defaults. After that, the order is SHM backing adapter, Unix FD/event adapter, Windows parity design, then the agent-doc/tsift process-state schema that sits on top of the transport-neutral protocol.
+<!-- agent:boundary:bafa111c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -248,11 +262,18 @@ No code changed for this answer.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~Add #next-steps for a SHM & FD IPC strategy.~~
+- Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ipc5] [recommended] Define an IpcTransport adapter contract and benchmark matrix for agent-doc/tsift IPC: in-process, Unix socket/interprocess, mmap/shared-memory blob arena, FD/event wakeup paths; measure 4 KB, 64 KB, 1 MB, and 10 MB payloads before choosing defaults.
+- [ ] [#ipc6] [recommended] Add a real shared-memory backing adapter for ShmBlobArena using shared_memory or memmap2, with lifecycle cleanup, namespace rules, cross-process descriptor validation, stale-generation rejection, and fallback for oversized payloads.
+- [ ] [#ipc7] [recommended] Add a Unix FD/event transport adapter behind an optional feature: Unix-domain control socket, SCM_RIGHTS for shared-memory handles, eventfd on Linux or socketpair/pipe fallback elsewhere, descriptor-budget enforcement, and tests that core IPC messages stay transport-neutral.
+- [ ] [#ipc8] [recommended] Design the Windows transport parity layer for the same IPC capabilities using HANDLE duplication, named pipes, file mappings, and event objects, so FD concepts do not leak into the portable lazily-rs protocol surface.
+- [ ] [#ipc9] [recommended] Define the agent-doc/tsift process-state schema on top of lazily IPC Snapshot/Delta: authority domains, permission-filtered views, resync rules, large-blob thresholds, and passive regression telemetry for transport health.
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -416,29 +416,35 @@ This document's current queue marker is valid:
 `&lt;!-- agent:queue priority preset="#spec-test-build-install-commit-push" go --&gt;`
 
 No new backlog item is needed from this prompt.
-<!-- agent:boundary:4adbbeb1 -->
+
+### Re: AST/semantic diff for agent-doc — gpt-5
+
+> **Queue prompt:**
+>
+> Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
+
+
+Yes. A semantic diff would be more efficient for agents than only a line-oriented annotated diff, as long as it is an additional structured view rather than a replacement for the raw unified diff.
+
+The useful shape is:
+- component-level navigation: `exchange`, `queue`, `backlog`, `review`, frontmatter, status, plus changed item IDs
+- semantic operations: prompt added/answered, queue item consumed/reordered, backlog item added/done/gated/edited, boundary-only churn, response inserted, stale snapshot repaired
+- identity-preserving item diffs: compare queue/backlog items by stable IDs or AST node keys rather than line position
+- bounded expansion handles: let agents expand the exact changed component/item instead of rereading the full session document
+- dual output: keep the current annotated diff for human/debug parity, but add a machine-readable semantic summary for routing and closeout decisions
+
+This would reduce false positives from boundary churn and large exchange diffs, and it would make queue/backlog closeouts easier to reason about. It should not hide raw text, because malformed markdown and parser bugs still need a source-level escape hatch.
+
+Concrete blocker: I did not implement semantic diff in this queue turn because it is a separate source feature requiring parser/event design, preflight output changes, and a full test pass. The durable output of this turn is the tracked backlog item below, not a claim that the feature is already implemented.
+
+Captured backlog item:
+- [ ] [#adoc-semantic-diff-nav] Add AST/semantic diff mode for agent-doc preflight, including component-level navigation, queue/backlog item identity changes, prompt-bearing change summaries, and bounded source/section expansion handles for agents.
+<!-- agent:boundary:3ffb4b5a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~Should the agent-doc controller actor, session actor, and supervisor actor be consolidated into a single process instead of relying on IPC? Can we have reliable state management and a sufficient admin api to manage the actor pool in a single process? Should we have a new real-time command/dispatch actor that is fast and effectively non-blocking...dispatching to other actors and which may use background workers if needed?~~
-- ~~"The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.~~
-- ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
-- ~~Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".~~
-- ~~:round_pushpin: do #spcp-contract~~
-- ~~:round_pushpin: do #spcp-store~~
-- ~~:round_pushpin: do #spcp-cache~~
-- ~~:round_pushpin: do #spcp-dispatch~~
-- ~~:round_pushpin: do #spcp-migrate~~
-- ~~:round_pushpin: do #spcp-tests~~
-- ~~:round_pushpin: do [#adoc-pending-retry-loss]~~
-- ~~agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.~~
-- ~~"#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?~~
-- ~~`agent:boundary` elements are accumulating in the `agent:backlog`...presumably from the queue turns? There should only be 1.~~
-- ~~Ensure we have comprehensive Codex Simworld test coverage. Also add Simworld test coverage for Claude Code + Opencode. Full edge case coverage for all agent harnesses please.~~
-- ~~`=true` is being appended to `agent:queue priority preset="#spec-test-build-install-commit-push"=true` and also `go=true`. This is a regression.~~
-- Would it be more efficient for agents if agent-doc diff presents an ast or semantic structure (based on the ast) style diff with a semantic structure navigation of the document?
 <!-- /agent:queue -->
 ###
 <!--
@@ -464,6 +470,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#adoc-semantic-diff-nav] Add AST/semantic diff mode for agent-doc preflight, including component-level navigation, queue/backlog item identity changes, prompt-bearing change summaries, and bounded source/section expansion handles for agents.
 - [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
 - [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->

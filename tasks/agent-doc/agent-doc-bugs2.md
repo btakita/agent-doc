@@ -182,7 +182,18 @@ Verification:
 - Existing `agent-doc` CI run `27089249574` passed earlier this cycle, including `make check` and `make tmux-ci`.
 
 The harder fail-closed busy lease remains tracked separately by the `#subagent-blocks-session` scope decision; this item was the visible turn-in-progress status surface.
-<!-- agent:boundary:5026b6e6 -->
+### Re: #stale-busy-self-heal-live-verify -- gpt-5
+
+Closed as live-verified; no source changes were made in this cycle.
+
+Evidence checked:
+- The shipped code path in `start.rs` reconciles a stale busy/starting actor to ready when the idle-queue watch observes no live pane busy cue for `STALE_BUSY_RECONCILE_TICKS`, clears the one-shot prompt latch, preserves drain dedup state, and logs `idle_queue_watch_stale_busy_reconciled` with the pane id and tick count.
+- The focused regression suite passed: `cargo test -p agent-doc-orchestration stale_busy_reconcile -- --nocapture` reported 6 passed tests.
+- Live Codex supervisor log `.agent-doc/logs/4602f467-ef2a-4094-a750-5eb533368988.log` for `tasks/software/tagpath.md` shows the idle-queue watch on pane `%36` emitting `idle_queue_watch_stale_busy_reconciled harness=codex pane=%36 after_ticks=4`, then continuing `idle_queue_watch_drain harness=codex cmd="agent-doc tasks/software/tagpath.md"`.
+- The same live log then reaches `document_cycle phase=response_captured` and `document_cycle phase=committed ... event=commit_success` for `cycle-1780811070625`; the inspected window contains no `session_clear`, `interrupt_clear`, `kill-pane`, or pane-kill recovery event.
+
+I did not manually force controller lifecycle state or kill/restart the pane. The live proof came from an actual managed Codex supervisor self-heal and queue drain, which is the behavior this tracker needed verified.
+<!-- agent:boundary:fd8cddff -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -196,7 +207,7 @@ The harder fail-closed busy lease remains tracked separately by the `#subagent-b
 - ~~:round_pushpin: do [#monsterrod-queue-items-deleted-live]~~
 - ~~:round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]~~
 - ~~:round_pushpin: do [#tmux-status-turn-in-progress]~~
-- :round_pushpin: do [#stale-busy-self-heal-live-verify]
+- ~~:round_pushpin: do [#stale-busy-self-heal-live-verify]~~
 - :round_pushpin: do [#codex-mcp-server-mvp]
 - :round_pushpin: do [#codex-mcp-codex-integration]
 - :round_pushpin: do [#codex-mcp-live-verify]

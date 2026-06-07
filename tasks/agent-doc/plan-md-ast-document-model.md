@@ -48,6 +48,19 @@ Rationale:
 5. **`#md-ast-ipc-node-patches`** — IPC patches become `{node-id, op}`; drift-resilient apply. Subsumes the `live_prompt_drift_after_preflight` failure class and overlaps `#ipc-listener-dewedge-direct-disk`.
 6. **`#md-ast-realtime-watcher`** — document watcher emitting node-keyed CRDT events; unblocks `#queue-enqueue-action` realtime enqueue.
 
+## Quick-win stopgap (independent of the rewrite): `#queue-consume-pushpin-normalization`
+
+Observed 3× this session, blocking `finalize` every time:
+
+```
+Error: queue consume: snapshot head prompts ["do [#md-ast-document-model]. ..."]
+do not match document head prompts [":pushpin: do [#md-ast-document-model]. ..."]
+```
+
+The queue-consume head-equality check compares the **sorted snapshot head** against the **document head** without normalizing the `:pushpin:` / `:round_pushpin:` annotation prefix (and without normalizing sort order). The *same item* differs only by the `:pushpin:` prefix, so the equality check errors out and the cycle cannot commit (forcing `reset --from-current` recovery). An earlier variant instead **struck the wrong head**.
+
+Cheap fix in `queue.rs`: normalize the annotation prefix + sort order on **both** sides before the head-equality comparison in queue consume. This is the text-keyed-mutation symptom that `#md-ast-document-model` removes structurally (node-id equality), but the normalization is a low-risk stopgap that should land first so the queue is committable in the meantime.
+
 ## Bugs this subsumes / overlaps
 
 `#queue-dedup-destroys-intentional-duplicates`, `#monsterrod-queue-items-deleted-live`, `#ipc-listener-dewedge-direct-disk`, `#ipc-typing-duplication-family`, the queue-consume wrong-head/head-mismatch failures observed this session, and (via the watcher) `#queue-enqueue-action`.

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,7 +80,45 @@ Committed and pushed (`btakita/tsift` `main` `232c766`). The tsift submodule wor
 Pushed to keep `main` consistent with the already-pushed feature commit `188bd5b`. Note: the `.opencode/commands/*.md` still carry `v=0.1.62` markers while `AGENTS.md` is at `v0.1.63` — a minor drift from a partial `tsift init` run. I committed them as-is per your request; re-run `tsift init --opencode` if you want the markers realigned.
 
 (The agent-loop superproject's `src/tsift` pointer now trails `232c766`.)
-<!-- agent:boundary:b7dc30e5 -->
+
+### Re: Ontology / Fact / Passage Graph mapping onto tsift — opus-4-8
+
+> **Queue prompt:**
+>
+> How does the https://arxiv.org/pdf/2606.00610 Ontology Graph, Fact Graph, and Passage Graph map onto tsift?
+
+
+The paper bundles these as the **Hierarchical Indexing Graph (𝒢)**, three layers that retrieval traverses top-down (abstract → grounded): Semantic Ontology Graph → Fact Graph → Source Evidence Graph. Here's how each lands on tsift:
+
+| Paper layer | What it holds | tsift analog | Coverage |
+|---|---|---|---|
+| **Semantic Ontology Graph** (𝒢_ont) — schema *types* + valid relations between types; the "logical backbone" | tsift's **node-kind / edge-kind schema** (`NodeKind`, `memory_graph_node_kinds()`, edge kinds like `calls`/`references`/`records_memory_event`) | ⚠️ **partial** — kinds exist but only as *conventions on rows*, not first-class queryable type-nodes with inter-type relations. Communities are emergent clusters, not a typed ontology. **This is the real gap.** |
+| **Fact Graph** (𝒢_fac) — concrete entities + instantiated relation triples, multi-hop, bridging edges | tsift's **`GraphStore`**: code symbols = entities; call/reference/import edges = triples; `+` memory_event/memory_session nodes after `#memgraphrag2`. Multi-hop via `graph --callers/--callees`, `explain`, `ranked_neighborhood` | ✅ **strong** — this is tsift's core |
+| **Source Evidence Graph** (𝒢_pas) — passages + links from facts/entities back to originating text | tsift's **AST spans + provenance**: every node carries `source_ref` / `GraphProvenance` / file:line span; `source-read`/`symbol-read` expand to grounded text; BM25 `token-index` is the passage retrieval surface | ✅ **strong** — "every result is a citable handle" is exactly this layer |
+
+```mermaid
+flowchart TD
+  subgraph Paper["MemGraphRAG Hierarchical Indexing Graph"]
+    O[Ontology Graph<br/>schema types] --> F[Fact Graph<br/>entities + triples]
+    F --> P[Source Evidence Graph<br/>passages]
+  end
+  subgraph tsift["tsift substrate"]
+    OK[node/edge KIND schema<br/>⚠️ implicit, not materialized] --> GS[GraphStore<br/>symbols + edges + memory nodes]
+    GS --> EV[AST spans + provenance<br/>+ BM25 token-index]
+  end
+  O -. maps .-> OK
+  F -. maps .-> GS
+  P -. maps .-> EV
+```
+
+**Cross-layer linkages:**
+- **fact ↔ passage grounding** — tsift's strongest property. Every symbol/node resolves to a file:line span with provenance; `source-read` makes every reasoning step traceable to text. This is the 𝒢_pas link, already first-class.
+- **schema ↔ instance alignment** — only half-present. Each node has a `kind`, so instance→type is recoverable, but the *type itself* isn't a node and there's no "valid relations between types" graph to constrain traversal. The paper uses 𝒢_ont as a logical backbone; tsift has no backbone, just typed rows.
+
+**The one genuine gap = the Ontology Graph.** To match MemGraphRAG, tsift would materialize an ontology layer: node-kind and edge-kind *types* (and their permitted relations) as a small queryable schema graph, letting retrieval start from abstract types and prune by schema constraints. The ontology source could be the code's `NodeKind`/edge-kind enums, the authored-node types from `#trt1`, or your Existence Lang ontology. Queued as gated `#memgraphrag-ont` (needs a decision on the ontology source).
+
+Net: tsift already implements the bottom two of the three layers well — it's a **Fact + Evidence** graph today. The missing piece to be a full tri-layer MemGraphRAG is the typed ontology backbone on top.
+<!-- agent:boundary:533bfd69 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,14 +127,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- ~~Commit all uncommitted tsift changes.~~
-- How does the https://arxiv.org/pdf/2606.00610 Ontology Graph, Fact Graph, and Passage Graph map onto tsift?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#memgraphrag-ont] Materialize a Semantic Ontology Graph layer (MemGraphRAG arxiv 2606.00610 third layer). Today tsift node/edge kinds are conventions on rows, not first-class queryable type-nodes with valid inter-type relations; tsift is a Fact+Evidence graph but lacks the ontology backbone. Add a small typed schema graph (node-kind/edge-kind types + permitted relations) so retrieval can start from abstract types and prune by schema constraints. Ontology source TBD: code NodeKind/edge-kind enums, #trt1 authored-node types, or Existence Lang ontology. GATED on the ontology-source decision; relates to #trt1 and #memgraphrag2.
 <!-- /agent:backlog -->
 
 ## Review

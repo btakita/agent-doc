@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -209,7 +209,37 @@ Keep it comfortably under a few dozen descriptors for a normal agent-doc/tsift/e
 Recommendation: keep lazily-rs core transport-neutral. Add Unix FD passing and Linux `eventfd` as optimized transport implementations later, with Windows handle/event/file-mapping implementations behind the same traits. Do not make FD IPC the cross-platform protocol surface.
 
 No code changed for this answer.
-<!-- agent:boundary:6a0d7709 -->
+
+### Re: Are there existing Rust crates that solve these problems? — gpt-5
+
+> **Queue prompt:**
+>
+> Are there existing Rust crates that solve these problems?
+
+
+Yes, but not as one small cross-platform crate that exactly matches the lazily-rs protocol shape.
+
+Good candidates by layer:
+
+- [iceoryx2](https://docs.rs/iceoryx2/latest) / [project site](https://iceoryx.io/) is the closest full solution for zero-copy shared-memory IPC. It already models a data plane with shared payloads and references. Use it if agent-doc/tsift wants to adopt a larger IPC middleware rather than keep a small lazily-owned protocol surface.
+- [interprocess](https://docs.rs/interprocess/latest/interprocess/) is a good control-channel candidate. Its docs describe cross-platform local sockets, using named pipes on Windows and Unix-domain-socket-style local sockets on Unix. This fits the small control-message lane.
+- [ipc-channel](https://docs.rs/ipc-channel/latest/ipc_channel/) is useful for serde-based process channels. It is a simpler control/message option, but it is serialization-oriented rather than a zero-copy blob plane.
+- [shared_memory](https://docs.rs/shared_memory/latest/shared_memory/struct.ShmemConf.html) can create/open named shared-memory mappings. It could back `ShmBlobArena` directly.
+- [memmap2](https://docs.rs/memmap2/latest/memmap2/) gives cross-platform memory-mapped buffers and is a good lower-level file/mapping primitive, but it does not solve IPC synchronization or descriptor lifetimes by itself.
+- [nix sendmsg/SCM_RIGHTS](https://docs.rs/nix/latest/nix/sys/socket/fn.sendmsg.html) is the Unix FD-passing route. Good for Unix transport implementations, not for the cross-platform core.
+- [eventfd](https://docs.rs/eventfd/latest/eventfd/) is useful for Linux wakeup/counter semantics, but it is explicitly Linux-specific.
+
+Recommendation: keep lazily-rs core small and transport-neutral. The `ShmBlobArena` / `ShmBlobRef` layer we added is still useful because it defines the protocol contract: descriptors, generations, epochs, lengths, and checksums. Then build adapters later:
+
+- `lazily-ipc-interprocess` for cross-platform local control channels,
+- `lazily-ipc-shared-memory` or direct `shared_memory`/`memmap2` backing for blob arenas,
+- optional Unix/Linux adapters for FD passing and `eventfd`,
+- optional `iceoryx2` integration if we decide to delegate most of the zero-copy transport stack.
+
+So: yes, existing crates solve major pieces, especially iceoryx2. But lazily-rs should not make any of them mandatory in the core `ipc` feature yet. The current protocol types give us a stable seam where those crates can plug in.
+
+No code changed for this answer.
+<!-- agent:boundary:1f083630 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,11 +248,6 @@ No code changed for this answer.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~What is the benefit of a SHM ring buffer?~~
-- ~~Implement a SHM blob arena for IPC transport.~~
-- ~~What is the benefit of a SHM ring buffer over a SHM blob arena?~~
-- ~~Can lazily-rs use File Descriptor IPC for event delivery and atomic file descriptor references & atomic IPC counters? Would this be a cross-platform solution? How many file descriptors can be used as a cross-platform strategy?~~
-- Are there existing Rust crates that solve these problems?
 <!-- /agent:queue -->
 
 ## Backlog

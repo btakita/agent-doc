@@ -321,6 +321,18 @@ Semantics:
   (or another activation trigger).
 - The sync is idempotent: when the queue already matches the requested shape it
   mutates nothing, so it is safe to run on every preflight cycle.
+- **Active-loop population (`#backlog-queue-sync-pending-add-amplification` /
+  `#backlog-queue-attr-populates-in-go-mode`).** While a queue is *persisted-active*
+  (`queue_active: true`) the population rule depends on the loop mode:
+  - **plain persisted-active** (no `go`/`start`) — freshly-added backlog ids are
+    *held* out of the running loop (only ids already present as queue heads sync),
+    so an agent capturing follow-ups mid-loop cannot amplify the queue unboundedly
+    or churn `pending_done_guard`. Held ids join on the next activation.
+  - **go-mode** (`queue: go`/`start`, the continuous-backlog-loop opt-in) — fresh
+    backlog `queue`-attr ids *append immediately* (not only when the queue drains),
+    so the `queue` attribute populates the live queue as intended. Append/Prepend
+    stay idempotent and processed items drop out of `active_item_ids` once marked
+    `[/]`/`[x]`, so the queue stays bounded by the open backlog.
 - Both `agent:backlog` and `agent:icebox` (and the legacy `pending` alias) may
   carry the attribute; the first queue-tagged component's mode wins and active
   ids from every queue-tagged source are taken in document order.

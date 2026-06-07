@@ -3521,11 +3521,16 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             .and_then(|q| agent_doc_core::frontmatter::QueueControl::parse(&q))
             .map(|c| matches!(c, agent_doc_core::frontmatter::QueueControl::Start))
             .unwrap_or(false);
-        let live_prompt_count = entries
-            .iter()
-            .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
-            .count();
-        if persisted_active_incoming && !(queue_go_mode && live_prompt_count == 0) {
+        // `#backlog-queue-attr-populates-in-go-mode`: a plain persisted-active
+        // queue (no `go`/`start`) still holds freshly-added backlog ids out of the
+        // running loop to avoid mid-loop amplification. But a `go`-mode queue
+        // (`queue: go`/`start`) is an explicit continuous-backlog-loop opt-in: the
+        // `queue` backlog attribute is *supposed* to populate the queue, so fresh
+        // backlog ids append immediately (not only when the queue fully drains).
+        // Append/Prepend stay idempotent (existing + struck `Completed` ids are
+        // never re-added) and processed items drop out of `active_item_ids` once
+        // marked `[/]`/`[x]`, so the queue stays bounded by the open backlog.
+        if persisted_active_incoming && !queue_go_mode {
             let existing_queue_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter_map(queue_entry_do_id)
@@ -3540,11 +3545,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                      (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)"
                 );
             }
-        } else if persisted_active_incoming && queue_go_mode && live_prompt_count == 0 {
+        } else if persisted_active_incoming && queue_go_mode {
             eprintln!(
-                "[preflight] queue: go-mode drained active queue — repopulating {} active backlog id(s) \
-                 (continuous-backlog-loop; #backlog-queue-empty-active-repopulate)",
-                backlog_ids.len()
+                "[preflight] queue: go-mode active queue — appending fresh backlog `queue`-attr id(s) \
+                 (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)"
             );
         }
         if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
@@ -5984,6 +5988,54 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_go_mode_appends_fresh_backlog_into_nondrained_queue() {
+        // #backlog-queue-attr-populates-in-go-mode: with the `go` control and a
+        // NON-drained live queue, a freshly-added backlog `queue`-attr item still
+        // appends to the queue immediately (the operator opted into the
+        // continuous-backlog-loop, so the `queue` attribute must populate it).
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] already running\n",
+            "- [ ] [#beta] freshly added mid-loop\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let updated_state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            updated.contains("- do [#alpha]"),
+            "the running head stays:\n{updated}"
+        );
+        assert!(
+            updated.contains("- do [#beta]"),
+            "go-mode must append a fresh backlog `queue`-attr item even when the queue is not drained:\n{updated}"
+        );
+        assert!(
+            updated_state.synced_queue_ids.contains(&"beta".to_string()),
+            "beta must be a newly-synced queue id under go-mode: {:?}",
+            updated_state.synced_queue_ids
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_no_go_keeps_drain_then_stop_on_empty_active_queue() {
         // #backlog-queue-empty-active-repopulate: WITHOUT the `go` control, a
         // drained persisted-active queue stays drained (drain-then-stop). The
@@ -6379,7 +6431,7 @@ mod tests {
         assert_eq!(outcome.remaining, 1);
 
         let consumed = std::fs::read_to_string(&doc).unwrap();
-        assert!(consumed.contains("- ~do [#newhead]~"));
+        assert!(consumed.contains("- ~~do [#newhead]~~"));
         assert!(consumed.contains("- do [#nexthead]"));
     }
 
@@ -6493,7 +6545,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ~do [#alpha]~"),
+            updated.contains("- ~~do [#alpha]~~"),
             "done head struck to completed: {updated}"
         );
         assert!(updated.contains("- do [#beta]"));

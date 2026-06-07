@@ -326,9 +326,13 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     }
                     out.push_str("~~~\n");
                 } else {
-                    out.push_str("- ~");
+                    // Double-tilde markdown strikethrough so a completed queue
+                    // item renders struck-through in the editor (#queue-strike-on-complete).
+                    // The parser (`parse_completed_inline`) reads back both `~x~`
+                    // and `~~x~~`, so legacy single-tilde residue still resolves.
+                    out.push_str("- ~~");
                     out.push_str(&p.text);
-                    out.push_str("~\n");
+                    out.push_str("~~\n");
                 }
             }
             QueueEntry::Preset(preset) => {
@@ -1295,6 +1299,23 @@ mod tests {
     }
 
     #[test]
+    fn completed_item_renders_double_tilde_strikethrough() {
+        // #queue-strike-on-complete: a completed single-line item renders as
+        // markdown strikethrough (`~~x~~`), and round-trips through the parser.
+        let entries = vec![QueueEntry::Completed(QueuePrompt {
+            text: "do [#x]".to_string(),
+            multiline: false,
+        })];
+        let rendered = render(&entries);
+        assert_eq!(rendered, "- ~~do [#x]~~\n");
+        // Legacy single-tilde residue still parses back as Completed.
+        let reparsed = parse("- ~~do [#x]~~\n").unwrap();
+        assert!(matches!(&reparsed[0], QueueEntry::Completed(p) if p.text == "do [#x]"));
+        let legacy = parse("- ~do [#x]~\n").unwrap();
+        assert!(matches!(&legacy[0], QueueEntry::Completed(p) if p.text == "do [#x]"));
+    }
+
+    #[test]
     fn item_after_deps_parses_tokens() {
         assert_eq!(
             agent_doc_core::pending::item_after_deps("do the thing after=#a"),
@@ -1452,13 +1473,15 @@ mod tests {
 
     #[test]
     fn parse_completed_single_line_item() {
+        // Legacy single-tilde input parses as Completed; render canonicalizes to
+        // double-tilde markdown strikethrough (#queue-strike-on-complete).
         let body = "- ~do #fix1~\n- do #fix2\n";
         let entries = parse(body).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(matches!(&entries[0], QueueEntry::Completed(p) if p.text == "do #fix1"));
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "do #fix2"));
         assert_eq!(prompts(&entries).len(), 1);
-        assert_eq!(render(&entries), body);
+        assert_eq!(render(&entries), "- ~~do #fix1~~\n- do #fix2\n");
     }
 
     #[test]
@@ -1697,7 +1720,7 @@ mod tests {
             }),
         ];
         let result = mark_first_prompt_completed(&entries);
-        assert_eq!(render(&result), "preset spec\n- ~do #fix1~\n- do #fix2\n");
+        assert_eq!(render(&result), "preset spec\n- ~~do #fix1~~\n- do #fix2\n");
         assert_eq!(prompts(&result).len(), 1);
     }
 
@@ -1717,7 +1740,7 @@ mod tests {
         let result = mark_first_prompt_completed(&entries);
         assert_eq!(
             render(&result),
-            "dispatch #spec\n- ~do #fix1~\n- do #fix2\n"
+            "dispatch #spec\n- ~~do #fix1~~\n- do #fix2\n"
         );
         assert_eq!(prompts(&result).len(), 1);
     }

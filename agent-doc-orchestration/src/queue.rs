@@ -514,18 +514,19 @@ pub fn sync_backlog_into_queue(
 /// renders distinctly in the editor and is released by deleting it:
 ///
 /// - **Operator** pin (top tier) — markdown **strong** emphasis:
-///   `**prioritized**` or the equivalent `__prioritized__`.
+///   `**prioritized**` / `__prioritized__`, or the terse `:pin:` shortcode.
 /// - **Agent** pin (middle tier, above unpinned, never above operator pins;
 ///   `#queue-agent-vs-operator-pin-tier`) — markdown *emphasis* (italic):
-///   `*prioritized*` or the equivalent `_prioritized_`.
+///   `*prioritized*` / `_prioritized_`, or the terse `_pin_` shortcode.
 ///
 /// Both asterisk and underscore spellings are accepted (markdown treats them as
-/// the same emphasis), so toggling between them does not change the tier.
-pub const PRIORITIZED_MARKERS: [&str; 2] = ["**prioritized**", "__prioritized__"];
-pub const AGENT_PRIORITIZED_MARKERS: [&str; 2] = ["*prioritized*", "_prioritized_"];
-/// Canonical single-spelling constants (markdown asterisk form).
-pub const PRIORITIZED_MARKER: &str = "**prioritized**";
-pub const AGENT_PRIORITIZED_MARKER: &str = "*prioritized*";
+/// the same emphasis), so toggling between them does not change the tier. The
+/// terse `:pin:` (operator) / `_pin_` (agent) shortcodes are accepted aliases.
+pub const PRIORITIZED_MARKERS: [&str; 3] = ["**prioritized**", "__prioritized__", ":pin:"];
+pub const AGENT_PRIORITIZED_MARKERS: [&str; 3] = ["*prioritized*", "_prioritized_", "_pin_"];
+/// Canonical single-spelling constants (terse shortcode form).
+pub const PRIORITIZED_MARKER: &str = ":pin:";
+pub const AGENT_PRIORITIZED_MARKER: &str = "_pin_";
 
 /// True when `text` carries an **operator** (strong-emphasis) pin marker at its
 /// head (after optional leading whitespace), in either spelling.
@@ -1071,6 +1072,27 @@ mod tests {
         // Strong emphasis is operator, never agent — for both spellings.
         assert!(!is_agent_prioritized("**prioritized** do [#x]"));
         assert!(!is_agent_prioritized("__prioritized__ do [#x]"));
+    }
+
+    #[test]
+    fn pin_shortcode_aliases_resolve_to_tiers() {
+        // :pin: (operator) / _pin_ (agent) shortcodes alias the emphasis markers.
+        assert!(is_prioritized(":pin: do [#x]"));
+        assert!(is_agent_prioritized("_pin_ do [#x]"));
+        assert!(!is_agent_prioritized(":pin: do [#x]")); // shortcode operator pin is not agent
+        let entries = parse(concat!(
+            "- do [#a]\n",
+            "- _pin_ do [#b]\n",
+            "- :pin: do [#c]\n",
+        ))
+        .unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        assert_eq!(
+            render(&sorted),
+            "- :pin: do [#c]\n- _pin_ do [#b]\n- do [#a]\n"
+        );
     }
 
     #[test]

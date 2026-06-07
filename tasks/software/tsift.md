@@ -36,7 +36,34 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): is [#rtsw] done?; Separate SQLite DBs for caches to avoid writer-lock contention? Is it even an issue with WAL?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:9e6a122c -->
+
+### Re: msgpack instead of JSON for serialization — opus-4-8
+
+> **Queue prompt:**
+>
+> Is there a more efficient way to serialize the data such as msgpack, instead of JSON?
+
+
+Short answer: **mostly no, and a blanket swap would break things.** I traced where tsift actually serializes data, and only one narrow category is a real msgpack candidate.
+
+**Where JSON is used, and whether msgpack helps:**
+
+1. **SQLite graph columns** — `properties_json`, `provenance_json`, `freshness_json` (`packages/tsift-sqlite/src/lib.rs:713-715`). These look like blobs but are **queried by SQLite itself** via `json_each` / `json_extract` (`lib.rs:401,420`). msgpack would break SQL-side JSON querying. ❌ Keep JSON.
+2. **`--json` / `--envelope` stdout** — this is the API contract the harnesses (Claude/Codex/OpenCode) parse. ❌ Must stay JSON.
+3. **Session transcript parsing** — `tsift-agent-doc/src/session_*.rs` reads Claude/Codex JSONL. External input format. ❌ Can't change.
+4. **The index proper** — symbols/edges/routes are already native SQLite rows/columns (`tsift-index/src/index.rs`), not JSON. Nothing to convert. There are **no dense float embedding vectors** stored (the "hybrid" search is BM25 + structural, not a float-vector store), so the one shape where binary encoding wins big isn't present.
+
+**The only genuine candidate** is the opaque disk caches that round-trip through `serde_json::to_vec` / `from_slice` → `fs::write` and are never SQL-queried:
+- `packages/tsift-cli/src/community_detection.rs:225-253`
+- `packages/tsift-cli/src/conflict_matrix.rs:1731-1745`
+
+Even there I'd hold off on msgpack specifically:
+- **Measure first.** `serde_json` is fast; for these shapes (maps/strings, no big numeric arrays) the gain is ~30-50% size and roughly comparable parse time. If these cache blobs are small relative to the SQLite index, it's noise.
+- **If serialization profiles hot, prefer `postcard` or `bincode` over msgpack** for internal-only blobs — they're schema-driven (no field-name overhead), so smaller and faster than msgpack. msgpack's edge (self-describing, cross-language) isn't needed for a cache only tsift reads.
+- **For size alone, zstd over the existing JSON** often beats a format swap and is orthogonal — you keep JSON's debuggability.
+
+Queued this as a `[recommended]` backlog item (scoped to those two caches, gated on a profile) so it doesn't get applied as a blanket find-and-replace.
+<!-- agent:boundary:0421c4de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,13 +73,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Is there a more efficient way to serialize the data such as msgpack, instead of JSON?
+- ~~Is there a more efficient way to serialize the data such as msgpack, instead of JSON?~~
 - Please read https://arxiv.org/pdf/2606.00610. Can tsift become a mem graph rag?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#3dhp] [recommended] Cache encoding: only the opaque disk caches (packages/tsift-cli/src/community_detection.rs read/write_community_detection_cache, conflict_matrix.rs disk cache) are msgpack candidates — they use serde_json to_vec/from_slice → fs::write and are never SQL-queried. Do NOT touch the SQLite graph columns (properties_json/provenance_json/freshness_json) — they are queried via json_each/json_extract; nor the --json/--envelope stdout (harness API contract); nor session JSONL parsing (external format). Gate on a profile showing serialization is hot; if so prefer postcard/bincode (schema-driven, smaller/faster than msgpack for internal blobs) or zstd over the existing JSON. Measure cache blob sizes first.
 <!-- /agent:backlog -->
 
 ## Review

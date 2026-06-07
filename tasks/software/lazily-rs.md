@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -106,7 +106,7 @@ For agent-doc / tsift, I would use a hybrid transport:
 So yes, shared memory is promising for large content, especially repeated document/context exchange between agent-doc, the editor, and tsift. I would not make it the default first transport. The safer next step is an `IpcTransport` benchmark harness comparing socket, file-backed, and shared-memory blob-reference paths at representative sizes: 4 KB, 64 KB, 1 MB, and 10 MB.
 
 No code changed in this cycle.
-<!-- agent:boundary:29f1ed34 -->
+<!-- agent:boundary:c541e389 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,8 +114,9 @@ No code changed in this cycle.
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Would the shared memory ring buffer perform better than sockets or whatever mechanism we have currently? Especially for large content?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- What is the benefit of a SHM ring buffer?
+- Implement a SHM blob arena for IPC transport.
 <!-- /agent:queue -->
 
 ## Backlog

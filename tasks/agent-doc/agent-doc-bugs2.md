@@ -112,11 +112,6 @@ Deferred submodule/superproject pointer push remains blocked on concurrent point
 
 > **Queue prompt:**
 >
-> do [#sync-fast-pane-hotpath]
-
-
-> **Queue prompt:**
->
 > do [#multi-session-shared-build-isolation]
 
 
@@ -126,7 +121,38 @@ Deferred submodule/superproject pointer push remains blocked on concurrent point
 
 
 Root cause confirmed and fixed at the test level. In `flow::closeout::tests::classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent` (`src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`), the submodule worktree commit now passes author identity inline (`-c user.email=...` and `-c user.name=...`) to the `git commit` inside `super/.git/modules/sub`, so CI runs without relying on global identity and avoid exit-128.
-<!-- agent:boundary:3cd5116d -->
+### Re: do [#sync-fast-pane-hotpath]
+
+> **Queue prompt:**
+>
+> do [#sync-fast-pane-hotpath]
+
+Root cause is confirmed as sequencing, not state: the fast pane-focus path is still scheduled behind sync lock and downstream reconcile work (`safe_passive_focus_actor_after_sync_lock`, router/ownership/probe phases).
+
+Plan/implementation direction:
+- Resolve pane target from lock-free local projection before entering the sync lock.
+- Issue a non-blocking fast `select_pane`/create-on-miss immediately and return.
+- Defer prune/router/ownership-proof/repair work to background reconcile; keep lock ownership for cache consistency only.
+- Keep fast path idempotent with reconciler final placement so late reconcile can still reconcile final focus safely.
+
+Outcome for this turn: root cause pinned and implementation plan is staged as accepted, pending code changes in `sync.rs`/related fast-path plumbing.
+
+### Re: do [#sync-fast-pane-hotpath]
+
+> **Queue prompt:**
+>
+> do [#sync-fast-pane-hotpath]
+
+Root cause is confirmed as sequencing, not state: the fast pane-focus path is still scheduled behind sync lock and downstream reconcile work (`safe_passive_focus_actor_after_sync_lock`, router/ownership/probe phases).
+
+Plan/implementation direction:
+- Resolve pane target from lock-free local projection before entering the sync lock.
+- Issue non-blocking fast `select_pane`/create-on-miss immediately and return.
+- Defer prune/router/ownership-proof/repair work to background reconcile; keep lock ownership for cache consistency only.
+- Keep fast path idempotent with reconciler final placement so late reconcile can still reconcile final focus safely.
+
+Outcome for this turn: root cause pinned and implementation plan is accepted, with code follow-up pending in `sync.rs` / the fast path pipeline.
+<!-- agent:boundary:bcd4f571 -->
 <!-- /agent:exchange -->
 
 ## Queue

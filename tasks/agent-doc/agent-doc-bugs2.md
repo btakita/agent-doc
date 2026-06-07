@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -71,16 +71,54 @@ Commits:
 Confidence: high. The feature is covered by focused serialization/semantic tests and the full project check/install path.
 
 Escalation: none.
-<!-- agent:boundary:e953909c -->
+
+### Re: #adoc-harness-simworld — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#adoc-harness-simworld]
+
+
+Added comprehensive closeout SimWorld harness matrix coverage.
+
+Changed paths:
+- `src/agent-doc/src/sim_world.rs`
+- parent gitlink: `src/agent-doc`
+
+What changed:
+- Added `HarnessKind` coverage for Codex, Claude Code, and OpenCode.
+- Added `HarnessMatrixEdge` coverage for response capture, pending/backlog mutation, queue consumption, IPC write, PTY fallback write, hook stop, hook continuation, and failed-closeout recovery.
+- Added a deterministic matrix runner that exercises every harness/edge pair and records coverage only after the simulated closeout reaches strict invariants.
+- Added `closeout_sim_harness_matrix_covers_agent_backends_and_edge_classes`, which asserts all 24 harness/edge pairs are covered.
+
+Verification:
+- `cargo fmt` passed.
+- `cargo test -q closeout_sim_harness_matrix_covers_agent_backends_and_edge_classes` passed.
+- `cargo test -q closeout_sim` passed: 7 passed, 1 existing ignored.
+- `make check` passed: clippy/build gates, 3,950 nextest tests, doctests, and the ignored medium closeout simulator corpus.
+- `make install` passed and installed `agent-doc 0.34.0` plus the shared library.
+- `agent-doc --version` reports `agent-doc 0.34.0`.
+- Latest GitHub Actions `CI` run before commit was green: `27107795754`, `completed/success`, `2026-06-07T23:16:21Z`.
+- `git diff --check` passed.
+
+Commits:
+- `src/agent-doc`: `845f456b test: add closeout harness simworld matrix` pushed to `btakita/agent-doc main`.
+- parent repo: `49552c899 chore: update agent-doc submodule` pushed to `btakita/agent-loop main`.
+
+Confidence: high. The requested edge classes are covered by a deterministic matrix, and the full check/install path passed.
+
+Escalation: none.
+<!-- agent:boundary:22235e56 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#adoc-semantic-diff-nav]~~
-- monsterrodholders.md queue responses are still not going into the exchange.
-- [#adoc-harness-simworld]
-- [#adoc-auto-dag-priority]
+- ~~:round_pushpin: [#adoc-harness-simworld]~~
+- :pushpin: monsterrodholders.md queue responses are still not going into the exchange.
+- :round_pushpin: [#adoc-auto-dag-priority]
+- If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
 <!-- /agent:queue -->
 ###
 <!--
@@ -106,7 +144,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#adoc-harness-simworld] Add comprehensive closeout SimWorld harness matrix coverage for Codex, Claude Code, and OpenCode, including edge cases for response capture, pending/backlog mutation, queue consumption, IPC/PTY fallback, hook stop/continue semantics, and recovery after failed closeout.
 - [ ] [#adoc-auto-dag-priority] Implement auto-DAG queue priority selection so priority/:round_pushpin: tasks can be selected before or interspersed with pinned batches without relying on physical FIFO order.
 <!-- /agent:backlog -->
 

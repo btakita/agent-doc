@@ -47,75 +47,90 @@ pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
 
 /// Collect markdown emphasis spans (`#editor-bold-markdown-rendering`): `**…**`
 /// / `__…__` → [`VisualTokenKind::Bold`], `*…*` / `_…_` → [`VisualTokenKind::Italic`].
-/// Scans per line (no cross-line matches), skips code ranges, and marks consumed
-/// byte ranges so a strong run is never re-matched as italic or double-emitted.
-/// Markers are ASCII so byte-index scanning stays on char boundaries; emitted
-/// offsets are byte offsets (the FFI layer converts to UTF-16).
+/// Scans per line (no cross-line matches), skips code ranges. Bold and italic use
+/// **independent** consumed maps, so italic nests inside bold — `**_x_**` emits
+/// both a Bold span and an inner Italic span and the editor renders the inner
+/// text bold+italic (`#editor-nested-bold-italic-rendering`) — while two bolds
+/// (or two italics) never overlap. Markers are ASCII so byte-index scanning stays
+/// on char boundaries; emitted offsets are byte offsets (FFI converts to UTF-16).
 fn collect_emphasis_tokens(doc: &str, code_ranges: &[(usize, usize)], out: &mut Vec<VisualToken>) {
     let mut line_start = 0usize;
     for line in doc.split_inclusive('\n') {
         let base = line_start;
         line_start += line.len();
         let bytes = line.as_bytes();
-        let mut consumed = vec![false; bytes.len()];
+        let mut consumed_bold = vec![false; bytes.len()];
+        let mut consumed_italic = vec![false; bytes.len()];
+        // Strong (double markers) first, then italic (single). The two levels keep
+        // separate consumed maps so an inner italic inside a bold run is still found.
+        scan_emphasis_runs(bytes, base, b'*', 2, VisualTokenKind::Bold, &mut consumed_bold, code_ranges, out);
+        scan_emphasis_runs(bytes, base, b'_', 2, VisualTokenKind::Bold, &mut consumed_bold, code_ranges, out);
+        scan_emphasis_runs(bytes, base, b'*', 1, VisualTokenKind::Italic, &mut consumed_italic, code_ranges, out);
+        scan_emphasis_runs(bytes, base, b'_', 1, VisualTokenKind::Italic, &mut consumed_italic, code_ranges, out);
+    }
+}
 
-        // Strong emphasis first (double markers), then italic (single), so a
-        // `**bold**` run is not re-matched by the `*` italic pass.
-        for (marker, kind, mlen) in [
-            (b'*', VisualTokenKind::Bold, 2usize),
-            (b'_', VisualTokenKind::Bold, 2usize),
-            (b'*', VisualTokenKind::Italic, 1usize),
-            (b'_', VisualTokenKind::Italic, 1usize),
-        ] {
-            // Marker-char test (does not read `consumed`, so it never conflicts
-            // with the mutable borrow when marking a span consumed below).
-            let is_marker_chars = |i: usize| -> bool {
-                if i + mlen > bytes.len() {
-                    return false;
+/// Scan one line for emphasis runs of a single `marker`/`mlen` level, emitting a
+/// token per matched span and marking its byte range in `consumed` so the same
+/// level does not re-match it. See [`collect_emphasis_tokens`].
+#[allow(clippy::too_many_arguments)]
+fn scan_emphasis_runs(
+    bytes: &[u8],
+    base: usize,
+    marker: u8,
+    mlen: usize,
+    kind: VisualTokenKind,
+    consumed: &mut [bool],
+    code_ranges: &[(usize, usize)],
+    out: &mut Vec<VisualToken>,
+) {
+    // Marker-char test (does not read `consumed`, so it never conflicts with the
+    // mutable borrow when marking a span consumed below).
+    let is_marker_chars = |i: usize| -> bool {
+        if i + mlen > bytes.len() {
+            return false;
+        }
+        (0..mlen).all(|k| bytes[i + k] == marker)
+            // A single-marker italic must not be part of a double marker.
+            && (mlen == 2
+                || ((i == 0 || bytes[i - 1] != marker)
+                    && (i + 1 >= bytes.len() || bytes[i + 1] != marker)))
+    };
+    let is_marker = |i: usize, consumed: &[bool]| -> bool {
+        is_marker_chars(i) && (0..mlen).all(|k| !consumed[i + k])
+    };
+    let mut i = 0usize;
+    while i + mlen <= bytes.len() {
+        if is_marker(i, consumed) {
+            let mut j = i + mlen;
+            let mut close = None;
+            while j + mlen <= bytes.len() {
+                if is_marker(j, consumed) {
+                    close = Some(j);
+                    break;
                 }
-                (0..mlen).all(|k| bytes[i + k] == marker)
-                    // A single-marker italic must not be part of a double marker.
-                    && (mlen == 2
-                        || ((i == 0 || bytes[i - 1] != marker)
-                            && (i + 1 >= bytes.len() || bytes[i + 1] != marker)))
-            };
-            let is_marker = |i: usize, consumed: &[bool]| -> bool {
-                is_marker_chars(i) && (0..mlen).all(|k| !consumed[i + k])
-            };
-            let mut i = 0usize;
-            while i + mlen <= bytes.len() {
-                if is_marker(i, &consumed) {
-                    let mut j = i + mlen;
-                    let mut close = None;
-                    while j + mlen <= bytes.len() {
-                        if is_marker(j, &consumed) {
-                            close = Some(j);
-                            break;
-                        }
-                        j += 1;
-                    }
-                    if let Some(close) = close
-                        && close > i + mlen
-                    {
-                        let tok_start = base + i;
-                        let tok_end = base + close + mlen;
-                        if !overlaps_code(tok_start, tok_end, code_ranges) {
-                            out.push(VisualToken {
-                                kind,
-                                start: tok_start,
-                                end: tok_end,
-                            });
-                            for slot in consumed.iter_mut().take(close + mlen).skip(i) {
-                                *slot = true;
-                            }
-                        }
-                        i = close + mlen;
-                        continue;
+                j += 1;
+            }
+            if let Some(close) = close
+                && close > i + mlen
+            {
+                let tok_start = base + i;
+                let tok_end = base + close + mlen;
+                if !overlaps_code(tok_start, tok_end, code_ranges) {
+                    out.push(VisualToken {
+                        kind,
+                        start: tok_start,
+                        end: tok_end,
+                    });
+                    for slot in consumed.iter_mut().take(close + mlen).skip(i) {
+                        *slot = true;
                     }
                 }
-                i += 1;
+                i = close + mlen;
+                continue;
             }
         }
+        i += 1;
     }
 }
 
@@ -409,6 +424,18 @@ mod tests {
             tokens_of(doc, VisualTokenKind::Bold),
             vec!["**prioritized**".to_string(), "**pin**".to_string()]
         );
+    }
+
+    #[test]
+    fn nested_bold_italic_emits_both_spans() {
+        // #editor-nested-bold-italic-rendering: `**_x_**` emits a Bold span over
+        // the whole run AND an Italic span over the inner text, so the editor
+        // renders the inner text bold+italic.
+        let doc = "a **_bold italic_** b\n";
+        let bold = tokens_of(doc, VisualTokenKind::Bold);
+        let italic = tokens_of(doc, VisualTokenKind::Italic);
+        assert_eq!(bold, vec!["**_bold italic_**".to_string()]);
+        assert_eq!(italic, vec!["_bold italic_".to_string()]);
     }
 
     #[test]

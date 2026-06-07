@@ -108,7 +108,17 @@ Superproject CI note:
 Closeout note: the implementation item had already been reaped by the prior closeout; this write restores the visible exchange response after sidecar repair.
 
 Confidence: high.
-<!-- agent:boundary:17f0f524 -->
+
+### Re: monsterrodholders completed queue items not writing into exchange
+
+This did not require a new code fix. The queue-prompt echo behavior is already present in the current `agent-doc` binary, and this session already reinstalled that binary with `cargo install --path .`.
+
+The live `tasks/research/monsterrodholders.md` document had stale completed tracked items after closeout. I ran `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/research/monsterrodholders.md`; it repaired transcript prompt prefixes, backfilled missing ids/checkboxes, reaped six completed items (`b2b4`, `1aeb`, `ef81`, `5feq`, `f9vy`, `bx9a`), and committed `996b30799 agent-doc(monsterrodholders): 2026-06-07 01:38:10`.
+
+Verification: `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/research/monsterrodholders.md` now passes with `queue_continuation_required=false`.
+
+Restart guidance: no restart is needed for the repaired document state. If a long-running `agent-doc watch` daemon, editor plugin, or managed pane was started before the current binary install and still shows stale behavior, restart that process so it loads the updated binary and refreshed file state.
+<!-- agent:boundary:43c504dd -->
 <!-- /agent:exchange -->
 
 ## Queue

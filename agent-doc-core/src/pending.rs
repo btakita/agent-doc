@@ -1340,6 +1340,53 @@ pub fn active_item_priorities(body: &str) -> Vec<(String, u8)> {
         .collect()
 }
 
+/// Parse `after=#id` dependency tokens from an item's text
+/// (`#queue-auto-dag-priority`). Declares that this item must be ordered *after*
+/// each named id. Accepts repeated tokens and comma lists: `after=#a`,
+/// `after=#a,#b`, `after=#a after=#b`. Ids are normalized lowercase with
+/// `#`/`[`/`]` stripped; only valid pending ids are kept. The `after=` token must
+/// start at a word boundary so prose like `hereafter=` does not match.
+pub fn item_after_deps(text: &str) -> Vec<String> {
+    let mut deps = Vec::new();
+    let bytes = text.as_bytes();
+    let mut search = 0;
+    while let Some(rel) = text[search..].find("after=") {
+        let idx = search + rel;
+        search = idx + "after=".len();
+        if idx > 0 && bytes[idx - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        let value = &text[search..];
+        let chunk: String = value
+            .chars()
+            .take_while(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '#' | '-' | '_' | ',' | '[' | ']')
+            })
+            .collect();
+        for part in chunk.split(',') {
+            let id = part
+                .trim()
+                .trim_matches(|c| matches!(c, '#' | '[' | ']'))
+                .to_ascii_lowercase();
+            if !id.is_empty() && is_valid_pending_id(&id) {
+                deps.push(id);
+            }
+        }
+    }
+    deps
+}
+
+/// Active (open) backlog item ids paired with their `after=#id` dependency ids,
+/// in document order. Feeds the auto-dag queue ordering (`#queue-auto-dag-priority`).
+pub fn active_item_after_deps(body: &str) -> Vec<(String, Vec<String>)> {
+    PendingLayout::parse(body)
+        .items()
+        .into_iter()
+        .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .map(|item| (item.id.clone(), item_after_deps(&item.text)))
+        .collect()
+}
+
 /// Stable-sort the item lines of a pending body by per-item priority
 /// (`#backlog-priority-attribute`), preserving every non-item segment (blank
 /// lines, prose, ordered-list separators) at its original position. Returns

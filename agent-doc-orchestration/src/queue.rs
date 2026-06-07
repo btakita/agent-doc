@@ -624,6 +624,122 @@ pub fn sort_prompts_by_priority(
     Some(out)
 }
 
+/// Priority-weighted topological sort of queue prompts (`#queue-auto-dag-priority`).
+///
+/// `deps` maps an item id to the ids it must be ordered *after* (`after=#id`,
+/// from a backlog item's tokens); inline `after=` tokens on a queue prompt's own
+/// text are merged in. Ordering is Kahn's algorithm with a priority-ordered ready
+/// set: among prompts whose dependencies are already emitted, the next is chosen
+/// by the same tie-break as [`sort_prompts_by_priority`] — operator pin, then
+/// agent pin, then backlog-priority rank, then document order. Dependencies
+/// therefore always precede their dependents, so a blocker outranks a pin (the
+/// operator's stated exception), while an edge-free queue comes out identical to
+/// the plain pin+priority sort. A dependency cycle is broken by emitting the
+/// remaining prompts in priority order (never dropped). Returns `None` when there
+/// are no resolvable edges (caller falls back to [`sort_prompts_by_priority`]) or
+/// when the prompts are already in the computed order (idempotent).
+pub fn sort_prompts_by_dag(
+    entries: &[QueueEntry],
+    rank: &std::collections::HashMap<String, u8>,
+    deps: &std::collections::HashMap<String, Vec<String>>,
+) -> Option<Vec<QueueEntry>> {
+    let positions: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| matches!(e, QueueEntry::Prompt(_)).then_some(i))
+        .collect();
+    if positions.len() < 2 {
+        return None;
+    }
+    let prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
+    let n = prompts.len();
+
+    // id -> prompt slot (first occurrence wins).
+    let mut id_to_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (i, e) in prompts.iter().enumerate() {
+        if let Some(id) = entry_do_id(e) {
+            id_to_idx.entry(id).or_insert(i);
+        }
+    }
+
+    // prereq[i] = prompt slots that must precede slot i (resolvable present nodes).
+    let mut prereq: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut any_edge = false;
+    for (i, e) in prompts.iter().enumerate() {
+        let mut dep_ids: Vec<String> = Vec::new();
+        if let Some(id) = entry_do_id(e)
+            && let Some(d) = deps.get(&id)
+        {
+            dep_ids.extend(d.iter().cloned());
+        }
+        if let QueueEntry::Prompt(p) | QueueEntry::Completed(p) = e {
+            dep_ids.extend(agent_doc_core::pending::item_after_deps(&p.text));
+        }
+        for dep in dep_ids {
+            if let Some(&j) = id_to_idx.get(&dep)
+                && j != i
+                && !prereq[i].contains(&j)
+            {
+                prereq[i].push(j);
+                any_edge = true;
+            }
+        }
+    }
+    if !any_edge {
+        return None;
+    }
+
+    let key = |idx: usize| -> (u8, u8, usize) {
+        let e = &prompts[idx];
+        let tier = entry_priority_tier(e);
+        let r = if tier < 2 {
+            0
+        } else {
+            entry_do_id(e)
+                .and_then(|id| rank.get(&id).copied())
+                .unwrap_or(u8::MAX)
+        };
+        (tier, r, idx)
+    };
+
+    let mut done = vec![false; n];
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let mut best: Option<usize> = None;
+        for idx in 0..n {
+            if done[idx] || prereq[idx].iter().any(|&j| !done[j]) {
+                continue;
+            }
+            if best.is_none_or(|b| key(idx) < key(b)) {
+                best = Some(idx);
+            }
+        }
+        match best {
+            Some(pick) => {
+                done[pick] = true;
+                order.push(pick);
+            }
+            None => {
+                // Dependency cycle: emit the remaining prompts in priority order,
+                // stable, so nothing is dropped.
+                let mut leftover: Vec<usize> = (0..n).filter(|&i| !done[i]).collect();
+                leftover.sort_by_key(|&i| key(i));
+                order.extend(leftover);
+                break;
+            }
+        }
+    }
+
+    if order.iter().enumerate().all(|(slot, &i)| slot == i) {
+        return None;
+    }
+    let mut out = entries.to_vec();
+    for (slot, &pos) in positions.iter().enumerate() {
+        out[pos] = prompts[order[slot]].clone();
+    }
+    Some(out)
+}
+
 fn parse_completed_inline(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     trimmed
@@ -1118,6 +1234,78 @@ mod tests {
             render(&sorted),
             "- :pushpin: do [#c]\n- :round_pushpin: do [#b]\n- do [#a]\n"
         );
+    }
+
+    #[test]
+    fn dag_orders_dependency_before_dependent() {
+        // #queue-auto-dag-priority: `after=#a` forces #a before #b even though #b
+        // has the better priority rank.
+        let entries = parse("- do [#b]\n- do [#a]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("b".to_string(), 1u8); // best rank
+        rank.insert("a".to_string(), 9u8);
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("b".to_string(), vec!["a".to_string()]); // b after a
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("dep reorders");
+        assert_eq!(render(&sorted), "- do [#a]\n- do [#b]\n");
+    }
+
+    #[test]
+    fn dag_blocker_outranks_pin() {
+        // A pinned item that depends on an unpinned item cannot float above it.
+        let entries = parse("- :pushpin: do [#b]\n- do [#a]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("b".to_string(), vec!["a".to_string()]); // pinned b after a
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("blocker wins");
+        assert_eq!(render(&sorted), "- do [#a]\n- :pushpin: do [#b]\n");
+    }
+
+    #[test]
+    fn dag_returns_none_without_edges() {
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        assert!(sort_prompts_by_dag(&entries, &rank, &deps).is_none());
+    }
+
+    #[test]
+    fn dag_inline_after_token_on_queue_prompt() {
+        // `after=#a` declared inline on the queue prompt text (not via backlog).
+        let entries = parse("- do [#b] after=#a\n- do [#a]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("inline dep reorders");
+        assert_eq!(render(&sorted), "- do [#a]\n- do [#b] after=#a\n");
+    }
+
+    #[test]
+    fn dag_cycle_does_not_drop_prompts() {
+        // a after b, b after a → cycle; both still emitted (priority order).
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("a".to_string(), vec!["b".to_string()]);
+        deps.insert("b".to_string(), vec!["a".to_string()]);
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps);
+        // Either reordered or None (already-ordered), but never fewer prompts.
+        if let Some(s) = sorted {
+            assert_eq!(prompts(&s).len(), 2);
+        }
+    }
+
+    #[test]
+    fn item_after_deps_parses_tokens() {
+        assert_eq!(
+            agent_doc_core::pending::item_after_deps("do the thing after=#a"),
+            vec!["a".to_string()]
+        );
+        assert_eq!(
+            agent_doc_core::pending::item_after_deps("x after=#a,#b more"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        // word-boundary guard: `hereafter=` must not match.
+        assert!(agent_doc_core::pending::item_after_deps("hereafter=#a").is_empty());
     }
 
     #[test]

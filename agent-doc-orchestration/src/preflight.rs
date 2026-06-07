@@ -3406,6 +3406,29 @@ fn collect_backlog_priority_ranks(
     rank
 }
 
+/// Build an id→`after=#id` dependency map from active `agent:backlog` /
+/// `agent:icebox` items for auto-dag queue ordering (`#queue-auto-dag-priority`).
+/// First-seen deps win on duplicate ids across components; items with no
+/// dependency tokens are omitted.
+fn collect_after_deps(
+    components: &[crate::component::Component],
+    content: &str,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut deps = std::collections::HashMap::new();
+    for comp in components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, d) in crate::pending::active_item_after_deps(body) {
+            if !d.is_empty() {
+                deps.entry(id).or_insert(d);
+            }
+        }
+    }
+    deps
+}
+
 fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -3580,16 +3603,24 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") {
         let rank = collect_backlog_priority_ranks(&components, &content);
-        if let Some(sorted) = crate::queue::sort_prompts_by_priority(&entries, &rank) {
+        // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
+        // graph first (a blocker outranks a pin); fall back to the plain
+        // pin+priority sort when there are no dependency edges.
+        let deps = collect_after_deps(&components, &content);
+        let sorted = crate::queue::sort_prompts_by_dag(&entries, &rank, &deps)
+            .map(|s| ("auto-dag dependency order (blockers + pins)", s))
+            .or_else(|| {
+                crate::queue::sort_prompts_by_priority(&entries, &rank)
+                    .map(|s| ("backlog priority (pins floated to top)", s))
+            });
+        if let Some((how, sorted)) = sorted {
             let new_body = crate::queue::render(&sorted);
             current_content = {
                 let comps = crate::component::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
-            eprintln!(
-                "[preflight] queue: sorted do-prompts by backlog priority (pins floated to top)"
-            );
+            eprintln!("[preflight] queue: sorted do-prompts by {how}");
             entries = sorted;
             mutated = true;
         }

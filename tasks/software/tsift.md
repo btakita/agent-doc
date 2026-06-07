@@ -81,7 +81,7 @@ Go-mode pulled my own `[recommended]` item `#3dhp` into the queue, so I did the 
 **Conclusion: don't do a blanket swap.** The data that's actually large is binary SQLite/SurrealDB, where serialization format is irrelevant. The JSON caches total a few MB and are each read at most once per command. The single worthwhile target is `token-index.json` (4.6MB), and only if a cold-start profile shows its read/parse is hot — in which case **gzip is already used elsewhere in the tree** (`.json.gz` projection caches) and is the lower-risk lever; `postcard`/`bincode` beat msgpack if you want a true binary format.
 
 I've rewritten `#3dhp` to record these numbers and dropped it to a measurement-gated low priority rather than implementing anything — no code change is warranted on the evidence.
-<!-- agent:boundary:bec0d18e -->
+<!-- agent:boundary:738d76cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,7 +99,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3dhp] [recommended] Cache encoding (MEASURED, low priority). On-disk audit: bulk of .tsift is binary SQLite/SurrealDB (graph.db 141MB, index.db 20MB, surrealkv clogs 162MB+) — msgpack irrelevant there. Largest plain-JSON cache is search-cache/token-index.json (4.6MB BM25 token index) — the ONLY worthwhile target. conflict-matrix/graph cache ~1.2MB, community-cache ~130KB (community_detection.rs/conflict_matrix.rs to_vec/from_slice → fs::write, never SQL-queried). Note: backend-eval projection caches already ship .json.gz, so gzip is the existing lever. Do NOT touch SQLite json_each columns / --json|--envelope stdout / session JSONL. Action only if a cold-start profile shows token-index.json read/parse is hot; then prefer gzip (already in tree) or postcard/bincode over msgpack. Otherwise leave as JSON.
 <!-- /agent:backlog -->
 
 ## Review

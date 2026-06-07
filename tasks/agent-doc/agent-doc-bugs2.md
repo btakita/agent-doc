@@ -106,6 +106,11 @@ Note: I attempted to push the superproject, but `agent-loop/main` is 145 local c
 
 > **Queue prompt:**
 >
+> commit all uncommitted changes in agent-doc
+
+
+> **Queue prompt:**
+>
 > :pushpin: Please investigate the lazily-rs session. It is not behaving correctly.
 
 
@@ -129,14 +134,26 @@ Verification:
 - Agent-doc CI run `27085793181` passed (`make check` and `make tmux-ci`).
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now passes with `queue_continuation_required=false`.
 - Parent `btakita/agent-loop` has no workflow named `CI`; its `Agent Doc` run `27085892248` failed immediately with `check` and `tmux-ci` jobs containing `steps: []`, matching the existing runner/infra-shaped failure pattern.
-<!-- agent:boundary:5005996f -->
+Implemented and pushed the agent-doc root fix:
+
+- `btakita/agent-doc` `main`: `d4b2746f` `Fix missing-response recovery without capture metadata`
+- Installed the rebased binary locally.
+- Lazily session now passes:
+  `agent-doc session-check .../tasks/software/lazily-rs.md --codex-final-gate`
+- CI was listed once, not waited on:
+  `27086037667` was `in_progress`.
+
+The lazily state is repaired: no queue-drain loop, queue empty, replacement backlog items present.
+
+I also wrote the closeout into `tasks/agent-doc/agent-doc-bugs2.md`, but that document’s own final gate is still blocked by an older stale cycle guard over many existing queued backlog items. I did not gate or remove those unrelated queue items. The superproject push was rejected because local `main` is 145 commits ahead and 15 behind with many unrelated dirty files, so I left that rebase/push alone.
+<!-- agent:boundary:112706c4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Please investigate the lazily-rs session. It is not behaving correctly.~~
-- commit all uncommitted changes in agent-doc
+- ~~commit all uncommitted changes in agent-doc~~
 - :pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.
 - :pushpin: Please fix the root cause of the lazily-rs session issues.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
@@ -224,3 +241,4 @@ What are #next-steps to fix bugs?
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
+/

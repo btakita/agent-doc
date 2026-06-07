@@ -700,16 +700,13 @@ pub fn close_stale_starting_actors(
     close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
-/// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": a tmux pane
-/// owns at most one document. When `owner_document_id` (re)binds `pane_id`, close
-/// any OTHER document whose actor record still points at the same pane with a
-/// non-closed state. A second live binding is stale cross-document contamination
-/// — a prior document's actor that was never closed when this pane was reused
-/// (the case `admin detect` flags as `cross_document_pane`). Closing the stale
-/// binding makes the pane resolve to a single owner so navigation finds the
-/// correct pane. Best-effort per record: a CAS failure (a concurrent writer
-/// raced this eviction) logs and skips that record rather than failing the
-/// owner's bind. Returns the number of evicted bindings.
+/// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": repair-only
+/// cleanup for stale actor aliases. Normal actor binding paths must refuse a
+/// non-closed cross-document pane alias before storing the new owner; they must
+/// not call this helper to commandeer an existing document pane. Best-effort per
+/// record: a CAS failure (a concurrent writer raced this eviction) logs and skips
+/// that record rather than failing the caller. Returns the number of evicted
+/// bindings.
 pub fn evict_cross_document_pane_bindings(
     project_root: &Path,
     owner_document_id: &str,

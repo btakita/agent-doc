@@ -12259,16 +12259,9 @@ mod tests {
             "primary_owner",
         )
         .unwrap();
-        crate::session_actor::project_binding_in(
-            root,
-            &secondary.to_string_lossy(),
-            "secondary-session",
-            "%70",
-            "@1",
-            "test",
-            "secondary_owner",
-        )
-        .unwrap();
+        // Leave the sibling owner in sessions.json so this exercises the sweep
+        // fallback projection without seeding an invalid two-document actor
+        // alias for pane %70.
 
         run(&primary).unwrap();
 

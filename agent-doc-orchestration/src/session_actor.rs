@@ -231,6 +231,21 @@ fn store_record_in(
             prior_generation
         );
     }
+    if update.state != ActorState::Closed
+        && !update.pane_id.is_empty()
+        && let Some(conflict) =
+            active_cross_document_pane_binding_in(base_dir, &document_id, update.pane_id)?
+    {
+        anyhow::bail!(
+            "pane {} is already bound to active document {} session={} state={} generation={}; refusing to bind {}",
+            update.pane_id,
+            conflict.document_id,
+            conflict.session_id,
+            conflict.state.as_str(),
+            conflict.generation,
+            document_id
+        );
+    }
 
     let record = ActorRecord {
         document_id: document_id.clone(),
@@ -253,28 +268,25 @@ fn store_record_in(
         update.expected_prior_generation,
         &record,
     )?;
-    // "1 pane = 1 document": once this document owns the pane (any non-closed
-    // state), evict any OTHER document still bound to the same pane. This
-    // self-heals stale cross-document pane contamination on the next bind/state
-    // transition so a pane resolves to a single owner and navigation finds the
-    // correct pane (#monsterrod-pane-cross-doc-contamination).
-    if stored.state != ActorState::Closed
-        && let Err(err) = crate::project_controller::evict_cross_document_pane_bindings(
-            base_dir,
-            &stored.document_id,
-            &stored.pane_id,
-            update.caller,
-        )
-    {
-        crate::ops_log::log_op(
-            &document_path_from_base_dir(base_dir, file),
-            &format!(
-                "evict_cross_document_pane_bindings_failed document={} pane={} error={}",
-                stored.document_id, stored.pane_id, err
-            ),
-        );
-    }
     Ok(stored)
+}
+
+fn active_cross_document_pane_binding_in(
+    base_dir: &Path,
+    owner_document_id: &str,
+    pane_id: &str,
+) -> Result<Option<ActorRecord>> {
+    if pane_id.is_empty() {
+        return Ok(None);
+    }
+    Ok(load_store_in(base_dir)?
+        .values()
+        .find(|record| {
+            record.document_id != owner_document_id
+                && record.pane_id == pane_id
+                && record.state != ActorState::Closed
+        })
+        .cloned())
 }
 
 pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {
@@ -752,10 +764,9 @@ mod tests {
     }
 
     #[test]
-    fn binding_a_pane_evicts_other_documents_bound_to_it() {
-        // "1 pane = 1 document": when document B binds a pane already owned by
-        // document A, A's stale binding is evicted (closed) so the pane resolves
-        // to a single owner (#monsterrod-pane-cross-doc-contamination).
+    fn binding_a_pane_refuses_other_documents_bound_to_it() {
+        // "1 pane = 1 document": a new document must not commandeer a pane that
+        // another non-closed actor record already owns (#jb-lazily-pane-alias).
         let tmp = tempfile::TempDir::new().unwrap();
         let doc_a = seed_project_file(
             &tmp,
@@ -775,25 +786,28 @@ mod tests {
         assert_eq!(a_before.pane_id, "%1");
         assert_ne!(a_before.state, ActorState::Closed);
 
-        // Document B binds the SAME pane %1 — must evict A's stale binding.
-        record_session_start(&doc_b, "sess-b", "%1", "@1", 1).unwrap();
+        // Document B attempts the SAME pane %1. The bind must fail before B is
+        // stored, leaving A as the pane owner.
+        let err = record_session_start(&doc_b, "sess-b", "%1", "@1", 1)
+            .expect_err("cross-document pane aliases must fail closed");
+        assert!(
+            err.to_string().contains("already bound to active document"),
+            "{err}"
+        );
 
         let a_after = load_record_in(tmp.path(), &doc_a.to_string_lossy())
             .unwrap()
             .unwrap();
         assert_eq!(
             a_after.state,
-            ActorState::Closed,
-            "document A's stale binding to pane %1 must be evicted when B takes the pane"
+            ActorState::Starting,
+            "document A must remain the owner when B tries to take the pane"
         );
-        let b_after = load_record_in(tmp.path(), &doc_b.to_string_lossy())
-            .unwrap()
-            .unwrap();
-        assert_eq!(b_after.pane_id, "%1");
-        assert_ne!(
-            b_after.state,
-            ActorState::Closed,
-            "document B must own the pane after binding it"
+        assert!(
+            load_record_in(tmp.path(), &doc_b.to_string_lossy())
+                .unwrap()
+                .is_none(),
+            "document B must not be stored on the conflicting pane"
         );
     }
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -441,35 +441,27 @@ Escalation: none.
 Residual state:
 - The source repo still has unrelated unstaged edits in agent-doc-orchestration/src/queue.rs, queue_cmd.rs, and start.rs; I left them untouched.
 - The root repo still has unrelated dirty submodule state in src/boost-client, src/corky, and src/instruction-files; I left that untouched.
-<!-- agent:boundary:30aac46e -->
+Closed #jb-run-preempt-followups as an evidence/proof closeout; no new source change was needed in this cycle.
+
+> **Queue prompt:**
+>
+> do [#jb-run-preempt-followups]
+
+
+The follow-up parts are already covered by shipped commits and current tests:
+
+- Empty-queue / operator autoloop preemption: #autoloop-command-preemption shipped in 51d7e174, 203d51a4, and 841bbc4f, adding queue stop/resume planning, deferred clear delivery, and resume from the supervisor idle-queue watch.
+- 60s busy ready-wait audit when a queue fallback exists: b93b3c3c updates the route path so a proven active busy turn skips the busy ready-wait, and current route coverage includes busy_dispatch_only_should_wait_for_ready cases where queue fallback avoids the wait.
+- Recursion-guard escape hatch for a wedged loop: 8627ad1b adds the wedged recursive self-invocation halt, and f24889fc hard-refuses recursive self-owned-pane start with out-of-pane recovery guidance.
+- Manual Run Agent Doc preemption remains covered by 79e0406d, which head-inserts priority reruns ahead of pending auto-queue items while preserving the pending auto item.
+
+Verification already run in this overall drain: source make check, source make tmux-ci, source GitHub CI 27092596507, and root make check.
+<!-- agent:boundary:2ec3743c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority -->
-- ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
-- ~~:round_pushpin: do [#partial-staging-closeout-guard]~~
-- ~~:round_pushpin: do [#codex-mcp-server-root-fix]~~
-- ~~:round_pushpin: do [#live-verify-batch]~~
-- ~~:round_pushpin: do [#automated-completion-detection]~~
-- ~~:round_pushpin: do [#monsterrod-queue-items-deleted-live]~~
-- ~~:round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]~~
-- ~~:round_pushpin: do [#tmux-status-turn-in-progress]~~
-- ~~:round_pushpin: do [#stale-busy-self-heal-live-verify]~~
-- ~~:round_pushpin: do [#codex-mcp-server-mvp]~~
-- ~~:round_pushpin: do [#codex-mcp-codex-integration]~~
-- ~~:round_pushpin: do [#codex-mcp-live-verify]~~
-- ~~:round_pushpin: do [#auto-complete-done-archive-mirrors]~~
-- ~~:round_pushpin: do [#auto-complete-ops-proof]~~
-- ~~do [#recursion-guard-wedge-escape]~~
-- ~~do [#queue-dedup-destroys-intentional-duplicates]~~
-- ~~:round_pushpin: do [#auto-complete-semantic-retrieval]~~
-- ~~do [#jb-file-cache-conflict-syntax-loss]~~
-- ~~do [#jb-busy-active-turn-stall-live-verify]~~
-- ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
-- ~~do [#multi-session-shared-build-isolation]~~
-- ~~do [#sync-fast-pane-hotpath]~~
-- do [#jb-run-preempt-followups]
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -497,7 +489,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED 9df1244f: runtime writes now persist structured .overlay.yrs sidecars beside legacy .yrs from the same markdown snapshot, and preflight queue dedup is markdown-AST node-keyed so intentional duplicate do/free-text prompts survive. REMAINING: legacy text CRDT is still the merge base; editor/IPC plugins still need the authoritative node_patches apply path and realtime watcher convergence. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
-3. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
 <!-- /agent:backlog -->
 
 ## Review

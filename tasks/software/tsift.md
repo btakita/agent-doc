@@ -94,7 +94,31 @@ Updated backlog **`#tsift-shared-md-ast-and-memgraphrag-lib`** with a plan at `s
 3. agent-doc depends on `tsift-md-ast` (no agent-doc→tsift hard dep — both depend on the leaf, same dependency-direction discipline as the `#7qky` ledger); **MemGraphRag stays optional**, in tsift's graph stack, not the leaf.
 
 I captured + planned it rather than executing the crate extraction unprompted — it's a multi-phase architectural move spanning agent-doc. Say `do #tsift-shared-md-ast-and-memgraphrag-lib` and I'll run phase 1 (the tsift-side extraction). The agent-doc integration (phase 3) belongs in the `agent-doc-bugs2.md` `#md-ast-document-model` session.
-<!-- agent:boundary:dadefecb -->
+
+### Re: do #tsift-shared-md-ast-and-memgraphrag-lib — opus-4-8
+
+> **Queue prompt:**
+>
+> [#tsift-shared-md-ast-and-memgraphrag-lib]
+
+
+Phase 1 (the tsift-side extraction) done, tested, built/installed, committed + pushed (`btakita/tsift` `main` `1da08f7`). New leaf crate **`tsift-md-ast`**.
+
+**What moved.** The `tree-sitter-md` grammar + heading/section/code-block/list extraction left `tsift-graph/src/lang.rs` (−228 lines there) for `packages/tsift-md-ast/`. The leaf exposes:
+- `markdown_language()`, `parse(source)`,
+- `markdown_symbols(source)` and `markdown_symbols_from_tree(&tree, source)` → `Vec<MdSymbol>`,
+- `MdSymbol` — **serializable** (serde), carries **no tsift types**.
+
+**Dependency direction.** `tsift-graph` now depends on `tsift-md-ast` behind `lang-markdown` (dropped its direct `tree-sitter-md` dep) and adapts `MdSymbol → Symbol`. agent-doc can depend on `tsift-md-ast` for its live-document model with **no agent-doc→tsift hard dep** — both depend on the leaf. MemGraphRag stays in tsift's graph stack, out of the leaf. Both share `tree-sitter 0.26`, so `Tree` types interoperate.
+
+**Verification.** 4 new leaf tests (heading→section spans, fenced code + list items, empty source, from-tree==convenience); `tsift-graph`'s markdown tests pass unchanged through the adapter (behavior preserved); `make check` clippy-clean + all Rust tests pass (only the pre-existing `opencode-tsift` npm publish:check red); `cargo install` done.
+
+Marked `#tsift-shared-md-ast-and-memgraphrag-lib` done — the shareable leaf is the deliverable and is consumable now.
+
+**Remaining (not blocking):**
+- *Phase 2 (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item.
+- *Phase 3 (agent-doc, out of tsift scope):* wire agent-doc's document model onto `tsift-md-ast` — belongs in `agent-doc-bugs2.md` `#md-ast-document-model`.
+<!-- agent:boundary:233b0f45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,13 +128,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- [#tsift-shared-md-ast-and-memgraphrag-lib]
+- ~~[#tsift-shared-md-ast-and-memgraphrag-lib]~~
+- [#trt1phase2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsift-shared-md-ast-and-memgraphrag-lib] Extract a leaf tsift-md-ast crate (tree-sitter-md parse + heading/section model) out of tsift-graph/src/lang.rs so both tsift-graph and agent-doc can depend on it with NO agent-doc->tsift hard dep; MemGraphRag stays optional in the tsift graph stack. Plan: src/tsift/plans/shared-md-ast-memgraphrag-lib.md. Context: agent-doc-bugs2.md #md-ast-document-model. tree-sitter-md is already a used tsift dep (tsift-graph Cargo.toml + lang.rs:91); this is the extraction-for-sharing follow-on.
 - [ ] [#surrealbulk] SurrealDB projection performance (consolidates surrealbulk + surrealbulk-close + surreal-batch-bfs + surreal-fixture): replace per-row upsert loops with bulk/transactional row load + one-pass secondary-index rebuild; add batch frontier expansion; record SurrealDB samples in graph-db-performance-history.json fixture; re-run backend-eval benchmarks, update SPEC.md/BENCHMARKS.md table, measure refresh vs load separately.
 - [/] [#e2e-install] E2E verify opencode-tsift install in a fresh opencode project: opencode plugin opencode-tsift && opencode then /tsift-status returns healthy (consolidates e2e-install + full-e2e-verify). Live-verify only; npm publish + OIDC auth already done (opencode-tsift@0.1.63 on npm).
 - [ ] [#trt1phase2] #trt1 follow-on phases (core authored findings nodes shipped in b300196): context-pack/search injection of authored finding/decision/note nodes; community_graph_watermark staleness gating on finding freshness; opt-in/passive capture of findings from agent-doc session archives; md/html on-demand projection of the findings graph. Builds on shipped authored_node_projection + finding-add + ontology layer.

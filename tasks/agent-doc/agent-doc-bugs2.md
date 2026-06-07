@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-Closed the duplicate `#md-ast-realtime-node-events` queue head as already shipped by `src/agent-doc` commit `1cc8e2ad`; focused AST and watcher tests passed. Remaining markdown-AST work: `#md-ast-crdt-merge-base`.
+Completed `#md-ast-crdt-merge-base` and the parent `#md-ast-document-model`: overlay CRDT projections now drive merge-base selection with guarded fallback to explicit baseline text. Submodule `5fd64b26` and parent pointer `960fab435` are pushed; CI `27097931595` passed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -79,7 +79,31 @@ Verification passed this cycle:
 - `cargo test -p agent-doc-orchestration update_node_snapshot_emits_node_keyed_events_after_seed`
 
 No new source change was needed for this queue head. The remaining `#md-ast-document-model` work is the CRDT merge-base phase, tracked by `#md-ast-crdt-merge-base`.
-<!-- agent:boundary:948ae8d7 -->
+
+### Re: [#md-ast-crdt-merge-base] — gpt-5
+
+> **Queue prompt:**
+>
+> [#md-ast-crdt-merge-base]
+
+
+Shipped the structured-overlay CRDT merge-base phase for `#md-ast-document-model`.
+
+Implemented `snapshot::crdt_merge_base_state`, which derives the text CRDT merge base from the structured `.agent-doc/crdt/<hash>.overlay.yrs` sidecar when its markdown projection matches the active cycle baseline. If the overlay sidecar is absent, corrupt, or stale relative to that explicit baseline, the merge falls back to the baseline text and logs the reason. The shared write paths now use that helper instead of constructing merge bases directly from text at each call site, while still persisting the legacy `.yrs` state for older binaries and editor plugins.
+
+Updated docs/spec/release notes to make the new authority boundary explicit: overlay projection is preferred for merge-base selection, baseline text is the guarded fallback.
+
+Verification passed:
+
+- `cargo test -p agent-doc-orchestration crdt_merge_base_state`
+- `cargo test -p agent-doc-orchestration crdt_merge`
+- `cargo test -p agent-doc-markdown-ast crdt`
+- `make check`
+- `make install`
+- GitHub CI `27097931595` green, including `make check` and `make tmux-ci`
+
+Commits: `src/agent-doc` `5fd64b26` (`Use overlay CRDT as merge base`), parent submodule pointer `960fab435`. With the earlier IPC node-patch and watcher work, `#md-ast-document-model` is now complete.
+<!-- agent:boundary:e00b2cd5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -87,9 +111,10 @@ No new source change was needed for this queue head. The remaining `#md-ast-docu
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
 - ~~There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?~~
 - ~~[#md-ast-realtime-node-events]~~
-- [#md-ast-crdt-merge-base]
+- ~~[#md-ast-crdt-merge-base]~~
 - ~~[#stale-busy-after-auto-inject-no-clear]~~
 - do [#md-ast-document-model]
+- When I navigate to lazily-rs.md, the tmux pane switch was not responsive. We need this to be responsive. The main loop should defer any long-running operations to avoid blocking the UI.
 <!-- /agent:queue -->
 ###
 <!--
@@ -115,8 +140,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED a45121b0 + 1cc8e2ad: editor/IPC plugins apply authoritative node_patches via shared Rust markdown-AST mutations, and the watch daemon already emits node-keyed `document_node_events` batches for realtime consumers. REMAINING: legacy text CRDT is still the merge base. NEXT: #md-ast-crdt-merge-base. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-2. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 <!-- /agent:backlog -->
 
 ## Review

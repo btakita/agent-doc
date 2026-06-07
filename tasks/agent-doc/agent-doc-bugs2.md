@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -206,14 +206,41 @@ Commits pushed:
 - parent `agent-loop`: `15c93d911` (`Update agent-doc submodule`)
 
 CI check: latest `agent-doc` CI run `27099347166` for `de7751ef` was `in_progress`; I did not wait for it to finish. The parent repo still has no workflow named `CI`.
-<!-- agent:boundary:95a9b9a5 -->
+Fixed the cross-document pane alias path that could make navigation to `tasks/software/lazily-rs.md` briefly create the right pane and then lose it to the existing `agent-doc-bugs2.md` pane.
+
+> **Queue prompt:**
+>
+> Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
+
+
+What changed:
+- `session_actor::store_record_in` now fails closed before writing if the target pane already has a non-closed actor record for another document.
+- Removed the normal bind-time behavior that stored the new owner and then evicted the previous document from the same pane. The old eviction helper is documented as repair-only now.
+- Updated the regression from “second document evicts first” to “second document is refused and the first owner remains authoritative.”
+- Adjusted the preflight same-owner sweep fixture so it uses `sessions.json` fallback projection instead of seeding an invalid two-document actor-store alias.
+- Updated routing specs and release notes for the new invariant.
+
+Commits pushed:
+- `src/agent-doc`: `bba1da2b fix: refuse cross-document pane aliases`
+- parent repo: `eefa99fbb Update agent-doc submodule`
+
+Verification:
+- `cargo test -p agent-doc-orchestration binding_a_pane_refuses_other_documents_bound_to_it` passed.
+- `cargo test -p agent-doc-orchestration preflight_sweep_commits_same_owner_doc` passed.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
+- `make check` passed: clippy, 3927 nextest tests, doctests, and the closeout simulation.
+
+CI check, non-blocking per harness instruction:
+- `src/agent-doc` latest `CI` run for `bba1da2b` is `in_progress` (`27099579913`). I did not wait for it to finish.
+- parent repo has no workflow named `CI`.
+
+I also verified the non-blocking CI instruction is already present in the development harness guidance (`AGENTS.md`, `runbooks/code-navigation.md`, and `.codex/AGENTS.md`), so no extra harness-file edit was needed this cycle.
+<!-- agent:boundary:f9b629c9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
-- ~~monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.~~
-- Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go=true -->
 <!-- /agent:queue -->
 ###
 <!--

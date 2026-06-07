@@ -127,22 +127,6 @@ Verification passed:
 
 > **Queue prompt:**
 >
-> JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc tasks/monsterrodholders.md` not follow a deadlock path and do the work. Even if this means the invocation messages the current owner to continue to the next task and that's all. If we can detect `Codex pane already owns that agent-doc session`, we can message the owning supervisor or agent-doc session.
-> ```
-> • agent-doc tasks/monsterrodholders.md refused to run because this Codex pane already owns that agent-doc session, so a
->   direct recursive invocation would deadlock.
->
->   agent-doc session status tasks/monsterrodholders.md reports the session is healthy and the actor is ready, with the
->   last event recorded as recursive_direct_invocation_blocked. No agent-doc cancel is needed.
->
->   To run it as a new managed cycle, start it from outside this owned pane, or use:
->
->   agent-doc start tasks/monsterrodholders.md
-> ```
-
-
-> **Queue prompt:**
->
 > `focus-fast` should be the `focus` behavior. So make `focus` have the same behavior as `focus-fast` and retire the blocking slow `focus` behavior. The idea of `focus` is to quickly switch to the next pane and let the rest of the UI operations to catch up in a concurrent or parallel task. The main thing is the tmux pane must switch fast. Is there is a good reason to keep the blocking `focus` behavior? If there is, add a `--blocking`, `--synchronous`, or another more appropriate attribute name to trigger this behavior
 
 
@@ -175,7 +159,21 @@ Commits: `src/agent-doc` `2f2e9327` (`Make focus default to fast handoff`), pare
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go=true -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
+---
+JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc tasks/monsterrodholders.md` not follow a deadlock path and do the work. Even if this means the invocation messages the current owner to continue to the next task and that's all. If we can detect `Codex pane already owns that agent-doc session`, we can message the owning supervisor or agent-doc session.
+```
+• agent-doc tasks/monsterrodholders.md refused to run because this Codex pane already owns that agent-doc session, so a
+  direct recursive invocation would deadlock.
+
+  agent-doc session status tasks/monsterrodholders.md reports the session is healthy and the actor is ready, with the
+  last event recorded as recursive_direct_invocation_blocked. No agent-doc cancel is needed.
+
+  To run it as a new managed cycle, start it from outside this owned pane, or use:
+
+  agent-doc start tasks/monsterrodholders.md
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

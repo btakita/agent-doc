@@ -792,6 +792,24 @@ fn closeout_recovery_hint(file: &Path) -> String {
 /// and any normal response cycle sets `capture_id`, so neither false-fires.
 /// Recovery is non-destructive — land the visible response through
 /// `agent-doc write --commit`, which sets `capture_id` and clears the guard.
+/// True when the committed `agent:exchange` contains at least one assistant
+/// `### Re:` response heading (`#codex-queue-drain-no-response-body`). Used to
+/// verify a queue-drain turn actually landed a response body in the document
+/// rather than only mutating status/queue/backlog. A doc with no exchange
+/// component, or an exchange holding only a compacted `### Session Summary`,
+/// returns false.
+fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
+    let content = std::fs::read_to_string(file)?;
+    let components = crate::component::parse(&content)?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(false);
+    };
+    let body = &content[exchange.open_end..exchange.close_start];
+    Ok(body
+        .lines()
+        .any(|line| line.trim_start().starts_with("### Re:")))
+}
+
 fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
@@ -799,10 +817,22 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
     if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
         return Ok(GuardResult::None);
     }
-    // A captured response (capture_id/response_sha256) means the close-out body
-    // landed through the binary write path — not the missing-response shape.
+    // A captured response (capture_id/response_sha256) normally means the
+    // close-out body landed through the binary write path — not the
+    // missing-response shape. EXCEPTION (#codex-queue-drain-no-response-body):
+    // the systematic Codex queue-drain bug sets the capture record yet commits
+    // only status/queue/backlog, leaving `agent:exchange` with zero `### Re:`
+    // blocks. So for a queue-drain turn, capture metadata alone is not proof —
+    // require the committed exchange to actually contain a response body before
+    // trusting it. Non-queue turns keep trusting the capture record (no behavior
+    // change); only a queue turn whose committed exchange has no `### Re:` body
+    // falls through to fire.
     if state.capture_id.is_some() || state.response_sha256.is_some() {
-        return Ok(GuardResult::None);
+        let is_queue_turn =
+            state.queue_task_id.is_some() || !state.active_queue_heads.is_empty();
+        if !is_queue_turn || committed_exchange_has_response_body(file)? {
+            return Ok(GuardResult::None);
+        }
     }
     // Only fire when this cycle ran a response-write turn. `had_pending_mutations`
     // is set exclusively by the `write`/`finalize` response path
@@ -839,7 +869,7 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
     }
     let side_effects = tracked_side_effect_note(file)?;
     let msg = format!(
-        "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant response body was captured (cycle `{}`, last_event `{}`). The close-out response was never written into `agent:exchange`{}. {}",
+        "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant `### Re:` response body is present in `agent:exchange` (cycle `{}`, last_event `{}`). The close-out response was never written into `agent:exchange`{} (#codex-queue-drain-no-response-body). {}",
         state.cycle_id,
         state.last_event,
         side_effects,
@@ -5204,7 +5234,7 @@ Body\n\
         match check_committed_without_response_body_guard(&doc).unwrap() {
             GuardResult::Error(msg) => {
                 assert!(
-                    msg.contains("no assistant response body was captured"),
+                    msg.contains("no assistant `### Re:` response body is present in `agent:exchange`"),
                     "{msg}"
                 );
                 assert!(msg.contains("agent-doc write --commit"), "{msg}");
@@ -5235,7 +5265,7 @@ Body\n\
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(msg) => {
                 assert!(
-                    msg.contains("no assistant response body was captured"),
+                    msg.contains("no assistant `### Re:` response body is present in `agent:exchange`"),
                     "{msg}"
                 );
             }
@@ -5247,6 +5277,58 @@ Body\n\
     fn committed_without_response_body_guard_passes_with_captured_response() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_committed_turn_doc(dir.path(), true, true, &["nsga4verify"]);
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    fn write_queue_drain_doc(root: &std::path::Path, exchange_body: &str) -> std::path::PathBuf {
+        let _lock = crate::test_support::env_lock();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{exchange_body}\n<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        // A response WAS captured/parsed this turn (capture_id set)...
+        crate::capture::capture_response(&doc, "### Re: do #x — gpt-5\n\nDone.").unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        // ...and this is a queue-drain turn (a head was recorded).
+        crate::cycle_state::record_active_queue_heads(&doc, &["x".to_string()]).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
+            .unwrap();
+        doc
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_fires_on_queue_drain_captured_but_no_exchange_body() {
+        // #codex-queue-drain-no-response-body: a queue-drain turn that captured a
+        // response but committed only status/queue/backlog — exchange holds only a
+        // compacted `### Session Summary`, zero `### Re:` — must fire even though
+        // capture_id is set (the systematic Codex queue-drain symptom).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_queue_drain_doc(dir.path(), "### Session Summary\n\nCompacted.");
+        match check_committed_without_response_body_guard(&doc).unwrap() {
+            GuardResult::Error(msg) => {
+                assert!(msg.contains("agent:exchange"), "{msg}");
+                assert!(msg.contains("codex-queue-drain-no-response-body"), "{msg}");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_passes_queue_drain_with_exchange_body() {
+        // Same queue-drain shape but the `### Re:` response body DID land → pass.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_queue_drain_doc(
+            dir.path(),
+            "### Session Summary\n\nCompacted.\n\n### Re: do #x — gpt-5\n\nDone.",
+        );
         assert!(matches!(
             check_committed_without_response_body_guard(&doc).unwrap(),
             GuardResult::None

@@ -313,7 +313,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `_with_context` resolvers is a 1:1 token-for-token swap (no net change).
         // +1 (#nochange-after-stall-breadth): the no-response active-queue-head
         // closeout check reuses pending_done_guard mode for strict/warn/off policy.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 81,
+        // +2 (#codex-queue-drain-no-response-body): two new test fn names
+        // `committed_without_response_body_guard_{fires,passes}_…` contain the
+        // `guard_` substring (test identifiers, not new flow guards).
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 83,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

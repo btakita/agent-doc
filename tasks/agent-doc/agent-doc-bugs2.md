@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -456,12 +456,12 @@ The follow-up parts are already covered by shipped commits and current tests:
 - Manual Run Agent Doc preemption remains covered by 79e0406d, which head-inserts priority reruns ahead of pending auto-queue items while preserving the pending auto item.
 
 Verification already run in this overall drain: source make check, source make tmux-ci, source GitHub CI 27092596507, and root make check.
-<!-- agent:boundary:2ec3743c -->
+<!-- agent:boundary:072e01bb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
+<!-- agent:queue auto priority -->
 <!-- /agent:queue -->
 ###
 <!--

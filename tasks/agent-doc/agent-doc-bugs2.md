@@ -38,6 +38,11 @@ Compacted content:
 ❯ do [#md-ast-document-model]. #spec-test-build-install-commit-push
 ### Re: do [#md-ast-document-model] — gpt-5
 
+> **Queue prompt:**
+>
+> do [#jb-file-cache-conflict-syntax-loss]
+
+
 Shipped a partial implementation slice for `#md-ast-document-model`.
 
 What changed:
@@ -64,15 +69,14 @@ Verification:
 - `src/agent-doc` GitHub Actions CI run `27088129850` passed for `9df1244f`.
 
 This is intentionally partial, not a full closeout of the umbrella item. Remaining work is captured in the reopened backlog text: legacy text CRDT is still the merge base, and editor/IPC plugins still need authoritative `node_patches` application plus realtime watcher convergence.
-
-<!-- agent:boundary:7e120966 -->
+<!-- agent:boundary:25bdf628 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: do [#md-ast-document-model]. #spec-test-build-install-commit-push~~
-- do [#jb-file-cache-conflict-syntax-loss]
+- ~~do [#jb-file-cache-conflict-syntax-loss]~~
 - do [#recursion-guard-wedge-escape]
 - do [#jb-busy-active-turn-stall-live-verify]
 - do [#adoc-route-busy-fix-superproject-pointer-push]

@@ -180,13 +180,39 @@ Added regression coverage for Codex owner-continuation payloads and non-Codex tr
 Commits: `src/agent-doc` `9b6f4635` (`Avoid Codex idle queue self-invocation`), parent `9520d9a31` (`Update agent-doc submodule`).
 
 Verification: `cargo test -p agent-doc-orchestration idle_queue_drain` passed; `make check` passed after the final edit. CI was checked without waiting: latest `agent-doc` CI run `27099096431` was `in_progress`; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:362122f0 -->
+
+### Re: monsterrodholders.md completed queue items missing exchange response — gpt-5
+
+> **Queue prompt:**
+>
+> monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.
+
+
+Implemented the free-text queue provenance fix in `src/agent-doc`.
+
+Changes:
+- Tightened `check_free_text_queue_head_provenance` so a sidecar response hash or binary consume marker no longer proves a consumed free-text queue head by itself.
+- A free-text head seen at preflight must either remain queued or have committed `agent:exchange` history, normally the queue-prompt echo.
+- Added regressions for the missing-exchange case and the passing committed-echo case.
+- Updated `queue consume` docs, orchestration spec text, `VERSIONS.md`, and the audited FlowCore token budget.
+
+Verification:
+- `cargo test -p agent-doc-orchestration free_text_queue_head_guard` passed.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
+- `make check` passed: clippy, 3,927 nextest tests, doctests, and closeout sim.
+
+Commits pushed:
+- `src/agent-doc`: `de7751ef` (`Require exchange proof for free-text queue consume`)
+- parent `agent-loop`: `15c93d911` (`Update agent-doc submodule`)
+
+CI check: latest `agent-doc` CI run `27099347166` for `de7751ef` was `in_progress`; I did not wait for it to finish. The parent repo still has no workflow named `CI`.
+<!-- agent:boundary:95a9b9a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
-- monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.
+- ~~monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.~~
 - Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
 <!-- /agent:queue -->
 ###

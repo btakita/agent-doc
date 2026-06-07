@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Session clear ignores its own drafted control command.** Codex protected
+  prompt detection now treats `agent-doc session clear`, `interrupt-clear`,
+  `stop`, and restart control lines as operator commands instead of unsaved
+  drafted prompt text, so the clear command no longer blocks itself. Ordinary
+  drafted prompt text remains protected. Tests
+  `protected_prompt_input_reason_ignores_agent_doc_session_control_commands`
+  and `protected_prompt_input_reason_keeps_agent_doc_non_control_text_protected`.
+
 - **Runtime snapshots persist the structured markdown-overlay CRDT
   (`#md-ast-document-model`).** Template/CRDT write, stream, IPC fallback,
   socket-ack repair, compact, commit-refresh, reset/rebuild, and closeout

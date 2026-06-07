@@ -568,8 +568,31 @@ impl HarnessConfig {
         if codex_prompt_candidate_is_dim_placeholder(output, trimmed) {
             return None;
         }
+        if Self::agent_doc_session_control_prompt(trimmed) {
+            return None;
+        }
 
         Some("drafted prompt input".to_string())
+    }
+
+    fn agent_doc_session_control_prompt(line: &str) -> bool {
+        let mut chars = line.chars();
+        if !matches!(chars.next(), Some('>' | '›' | '❯')) {
+            return false;
+        }
+        let payload = chars.as_str().trim_start();
+        let mut parts = payload.split_whitespace();
+        let Some(command) = parts.next() else {
+            return false;
+        };
+        let command_name = command.rsplit(['/', '\\']).next().unwrap_or(command);
+        if command_name != "agent-doc" || parts.next() != Some("session") {
+            return false;
+        }
+        matches!(
+            parts.next(),
+            Some("clear" | "interrupt-clear" | "stop" | "restart" | "restart-supervisor")
+        )
     }
 
     /// Return the most recent non-empty, non-footer line from a captured transcript.
@@ -2081,6 +2104,37 @@ Starting codex...
         let h = HarnessConfig::codex();
         let output = "\
 › investigate this issue
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_agent_doc_session_control_commands() {
+        let h = HarnessConfig::codex();
+        for prompt in [
+            "❯ agent-doc session clear tasks/monsterrodholders.md",
+            "› agent-doc session interrupt-clear tasks/monsterrodholders.md",
+            "> /usr/local/bin/agent-doc session stop tasks/monsterrodholders.md",
+        ] {
+            let output =
+                format!("{prompt}\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n");
+            assert_eq!(
+                h.protected_prompt_input_reason(&output),
+                None,
+                "{prompt} should be treated as operator control input"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_keeps_agent_doc_non_control_text_protected() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› agent-doc should inspect this session clear bug
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 ";
         assert_eq!(

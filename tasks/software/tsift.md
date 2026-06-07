@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): lazily-rs IPC for tsift/agent-doc; durable fallback in OS shm
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:cadee9d1 -->
+<!-- agent:boundary:f07ea3a8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +45,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- The source-read command `• Ran tsift --envelope source-read tests/test_cli.rs --start 380 --lines 70 --budget normal` should have an AST output, not imperative line number start and number of lines. An AST navigation seems like it would be more effective. Correct? If yes, implement.
 <!-- /agent:queue -->
 
 ## Backlog

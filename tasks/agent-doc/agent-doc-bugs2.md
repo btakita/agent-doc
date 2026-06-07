@@ -35,16 +35,12 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 8 response topic(s): monsterrodholders.md cycling between sessions - gpt-5; :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any...; Please investigate the lazily-rs session. It is not behaving correctly.; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7c14049c -->
+<!-- agent:boundary:98040f70 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly.~~
-- ~~:pushpin: Please fix the root cause of the lazily-rs session issues.~~
-- ~~:pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.~~
-- ~~:pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?~~
 - :pushpin: do [#ipc-typing-duplication-family]
 - :pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.
 - do [#ipc-listener-dewedge-direct-disk]

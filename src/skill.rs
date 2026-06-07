@@ -765,7 +765,9 @@ pub fn install_turn_status_hooks(base: Option<&Path>, user: bool, tmux: bool) ->
         if applied {
             println!("  tmux: applied `pane-border-status top` to the running server");
         } else {
-            println!("  tmux: could not apply `pane-border-status` (no running server / not in tmux)");
+            println!(
+                "  tmux: could not apply `pane-border-status` (no running server / not in tmux)"
+            );
         }
         println!("  tmux: to persist, add to your tmux config: set -g pane-border-status top");
     } else {
@@ -795,8 +797,7 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     Ok(())
 }
@@ -826,7 +827,12 @@ fn merge_codex_turn_status_hooks(path: &Path) -> Result<()> {
     let hooks_map = hooks
         .as_object_mut()
         .context("hooks.json `hooks` must be an object")?;
-    ensure_codex_hook_command(hooks_map, "UserPromptSubmit", TURN_STATUS_ACTIVE_COMMAND, None);
+    ensure_codex_hook_command(
+        hooks_map,
+        "UserPromptSubmit",
+        TURN_STATUS_ACTIVE_COMMAND,
+        None,
+    );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
     let rendered = serde_json::to_string_pretty(&root)?;
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
@@ -860,7 +866,12 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
 
     // Shared shape with Codex hooks.json — `ensure_codex_hook_command` is
     // harness-agnostic (a command-hook merger), reused here for Claude.
-    ensure_codex_hook_command(hooks_map, "UserPromptSubmit", TURN_STATUS_ACTIVE_COMMAND, None);
+    ensure_codex_hook_command(
+        hooks_map,
+        "UserPromptSubmit",
+        TURN_STATUS_ACTIVE_COMMAND,
+        None,
+    );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
     ensure_codex_hook_command(hooks_map, "SessionStart", TURN_STATUS_IDLE_COMMAND, None);
 
@@ -1677,7 +1688,9 @@ mod tests {
         // Claude: start + (Stop, SessionStart) end hooks; autoclaim preserved; idempotent.
         let claude: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&claude_settings).unwrap()).unwrap();
-        assert!(cmds(&claude, "UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string()));
+        assert!(
+            cmds(&claude, "UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string())
+        );
         assert!(cmds(&claude, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
         let ss = cmds(&claude, "SessionStart");
         assert!(
@@ -1686,7 +1699,9 @@ mod tests {
         );
         assert!(ss.contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
         assert_eq!(
-            ss.iter().filter(|c| c.as_str() == TURN_STATUS_IDLE_COMMAND).count(),
+            ss.iter()
+                .filter(|c| c.as_str() == TURN_STATUS_IDLE_COMMAND)
+                .count(),
             1,
             "idempotent: {ss:?}"
         );
@@ -1700,10 +1715,9 @@ mod tests {
         assert!(cmds(&codex, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
 
         // OpenCode: plugin file wired to both turn-status commands via chat.message + session.idle.
-        let oc = std::fs::read_to_string(
-            dir.path().join(".opencode/plugin/agent-doc-turn-status.js"),
-        )
-        .unwrap();
+        let oc =
+            std::fs::read_to_string(dir.path().join(".opencode/plugin/agent-doc-turn-status.js"))
+                .unwrap();
         assert!(oc.contains("turn-status active"), "{oc}");
         assert!(oc.contains("session.idle"), "{oc}");
         assert!(oc.contains("turn-status idle"), "{oc}");

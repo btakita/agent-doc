@@ -2948,7 +2948,10 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
     assert_eq!(outcome.consumed_count, 1);
     assert_eq!(outcome.remaining, 1);
     let after = std::fs::read_to_string(&doc).unwrap();
-    assert!(after.contains("- ~~do [#alpha]~~"), "alpha struck:\n{after}");
+    assert!(
+        after.contains("- ~~do [#alpha]~~"),
+        "alpha struck:\n{after}"
+    );
     assert!(
         after.contains("- do [#beta]"),
         "beta remains the head:\n{after}"

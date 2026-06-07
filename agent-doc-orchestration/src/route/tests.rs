@@ -962,9 +962,13 @@ fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
     std::fs::write(&doc, content).unwrap();
     crate::snapshot::save(&doc, content).unwrap();
 
-    let outcome =
-        enqueue_route_dispatch_prompt(&doc, "do [#adoc-orch-shim-cleanup]", "test_busy_actor", true)
-            .expect("route should treat the live head as already queued");
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "do [#adoc-orch-shim-cleanup]",
+        "test_busy_actor",
+        true,
+    )
+    .expect("route should treat the live head as already queued");
 
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert_eq!(
@@ -1051,8 +1055,9 @@ fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
     std::fs::write(&doc, content).unwrap();
     crate::snapshot::save(&doc, content).unwrap();
 
-    let outcome = enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
-        .expect("route should append to user-style multi-prompt auto queues");
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
+            .expect("route should append to user-style multi-prompt auto queues");
 
     assert!(outcome.appended);
     assert!(!outcome.already_present);
@@ -1172,7 +1177,9 @@ fn route_enqueue_priority_dispatch_preserves_leading_queue_directives() {
         .expect("priority route dispatch should insert after leading directives");
 
     let updated = std::fs::read_to_string(&doc).unwrap();
-    let preset_pos = updated.find("preset #spec").expect("preset directive preserved");
+    let preset_pos = updated
+        .find("preset #spec")
+        .expect("preset directive preserved");
     let preempt_pos = updated
         .find("- :pushpin: manual preempt prompt")
         .expect("preempt prompt inserted");

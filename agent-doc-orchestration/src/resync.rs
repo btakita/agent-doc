@@ -2615,16 +2615,9 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
         for pane_id in panes {
             let is_active = false;
             let is_agent_doc = registered_panes.contains(pane_id.as_str())
-                || live_supervisors
-                    .iter()
-                    .any(|(_session_id, _pid)| {
-                        pane_hosts_live_supervisor_session(
-                            tmux,
-                            &pane_id,
-                            &live_supervisors,
-                        )
-                            .is_some()
-                    });
+                || live_supervisors.iter().any(|(_session_id, _pid)| {
+                    pane_hosts_live_supervisor_session(tmux, &pane_id, &live_supervisors).is_some()
+                });
 
             candidates.push(StashTtlCandidate {
                 pane_id: pane_id.clone(),

@@ -3822,9 +3822,9 @@ fn dispatch_only_busy_refusal_message(
             file.display(),
             dispatch_pane,
             reason,
-            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(
-                harness
-            ))),
+            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
+                Some(harness)
+            )),
             authoritative_actor_dispatch_recovery_hint(actor_state, file)
         ),
     }
@@ -4163,9 +4163,9 @@ fn route_via_authoritative_actor(
             file.display(),
             harness.binary,
             cue,
-            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(
-                harness
-            )))
+            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
+                Some(harness)
+            ))
         );
     }
     let mut waited_and_timed_out = false;
@@ -4377,7 +4377,15 @@ fn route_via_authoritative_actor(
                     harness.binary,
                     actor.record.generation,
                     actor_state.as_str(),
-                    content.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+                    content
+                        .lines()
+                        .rev()
+                        .take(5)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(" | ")
                 ),
             );
             actor_state = crate::session_actor::ActorState::Ready;
@@ -4426,7 +4434,15 @@ fn route_via_authoritative_actor(
                 harness.binary,
                 actor.record.generation,
                 actor_state.as_str(),
-                content.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+                content
+                    .lines()
+                    .rev()
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
             ),
         );
         actor_state = crate::session_actor::ActorState::Ready;
@@ -4569,7 +4585,9 @@ fn route_via_authoritative_actor(
                 actor_state.as_str(),
                 dispatch_pane
             );
-            if let Some(queued) = activate_existing_route_queue_head(file, "focus_only_inactive_queue")? {
+            if let Some(queued) =
+                activate_existing_route_queue_head(file, "focus_only_inactive_queue")?
+            {
                 eprintln!(
                     "[route] activated existing inactive agent:queue head {:?} for {} (already_present={}, activated={}) during focus-only reopen",
                     queued.prompt_text,
@@ -8914,8 +8932,7 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     // actual `›` dispatch-ready prompt when ready, so a status/footer line alone
     // is not a dispatch-ready prompt and must not be accepted as one.
     if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
-        return latest_dispatch_ready_prompt
-            .or_else(|| Some("bottom idle chrome".to_string()));
+        return latest_dispatch_ready_prompt.or_else(|| Some("bottom idle chrome".to_string()));
     }
     if harness.binary == "codex"
         && latest_dispatch_ready_prompt.is_some()

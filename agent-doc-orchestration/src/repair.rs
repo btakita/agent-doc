@@ -1578,9 +1578,7 @@ fn strike_recovered_free_text_queue_head(file: &Path) {
             outcome.remaining
         ),
         Ok(None) => {}
-        Err(e) => eprintln!(
-            "[repair] queue-head strike after replay failed: {e} (non-fatal)"
-        ),
+        Err(e) => eprintln!("[repair] queue-head strike after replay failed: {e} (non-fatal)"),
     }
 }
 

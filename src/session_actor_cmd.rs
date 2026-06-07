@@ -757,11 +757,10 @@ fn reconcile_idle_projection_before_clear(
             // defer the clear to the next inter-iteration idle gap instead of
             // killing the in-flight turn. A busy pane with no active loop keeps
             // the existing fail-closed block — there is nothing to preempt.
-            let queue_active = agent_doc_orchestration::queue_continuation::detect(
-                &ctx.canonical_file,
-            )
-            .unwrap_or(None)
-            .is_some();
+            let queue_active =
+                agent_doc_orchestration::queue_continuation::detect(&ctx.canonical_file)
+                    .unwrap_or(None)
+                    .is_some();
             match agent_doc_orchestration::queue_preemption::plan_busy_clear(queue_active) {
                 agent_doc_orchestration::queue_preemption::BusyClearOutcome::PauseAndDefer => {
                     // Pause the loop (the idle-queue watch honors this cooldown)
@@ -1121,9 +1120,11 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
     // supersedes any clear the non-interrupting path deferred to the idle gap —
     // drop the deferred-clear marker so the supervisor watch does not ALSO
     // deliver a second clear (`#autoloop-command-preemption` Phase 2b).
-    if let Err(err) = agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
-        &ctx.canonical_file,
-    ) {
+    if let Err(err) =
+        agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
+            &ctx.canonical_file,
+        )
+    {
         eprintln!(
             "[interrupt-clear] warning: failed to drop deferred-clear marker for {}: {err:#}",
             ctx.canonical_file.display()
@@ -1283,16 +1284,14 @@ fn harness_clear_command(harness: &str) -> &'static str {
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
     let command = harness_clear_command(harness);
-    agent_doc_orchestration::sessions::send_submitted_text_for_harness(
-        tmux, pane, command, harness,
-    )
-    .with_context(|| {
-        format!(
-            "failed to send `{command}` to authoritative pane {} for {}",
-            pane,
-            file.display()
-        )
-    })
+    agent_doc_orchestration::sessions::send_submitted_text_for_harness(tmux, pane, command, harness)
+        .with_context(|| {
+            format!(
+                "failed to send `{command}` to authoritative pane {} for {}",
+                pane,
+                file.display()
+            )
+        })
 }
 
 /// Ordered interrupt keys for an operator interrupt-clear / force-restart on a

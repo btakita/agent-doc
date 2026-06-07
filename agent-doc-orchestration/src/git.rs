@@ -8671,7 +8671,8 @@ More content.
     #[test]
     fn safe_exchange_user_prompt_insert_rejects_deletions() {
         let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-        let file = "### Re: prev — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file =
+            "### Re: prev — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
         assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
     }
 

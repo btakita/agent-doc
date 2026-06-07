@@ -2427,9 +2427,7 @@ real stderr
 
     #[test]
     fn looks_like_codex_transport_403_429_detects_https_429() {
-        assert!(looks_like_codex_transport_403_429(
-            "429 Too Many Requests"
-        ));
+        assert!(looks_like_codex_transport_403_429("429 Too Many Requests"));
         assert!(looks_like_codex_transport_403_429(
             "rate limit exceeded 429"
         ));
@@ -2461,7 +2459,10 @@ real stderr
             ]),
         );
         let result = codex.send("ignored", None, false, None);
-        assert!(result.is_err(), "expected error for 403 transport rejection");
+        assert!(
+            result.is_err(),
+            "expected error for 403 transport rejection"
+        );
         let msg = result.err().unwrap().to_string();
         assert!(msg.contains("transport rejection"), "got: {msg}");
         assert!(msg.contains("403 Forbidden"), "got: {msg}");

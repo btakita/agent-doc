@@ -1563,11 +1563,7 @@ fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Op
     };
     let base_dir = file.parent().unwrap_or(Path::new("."));
     let descriptions = match crate::describe_image::describe_images_in_text(
-        doc,
-        &provider,
-        &api_key,
-        &model,
-        base_dir,
+        doc, &provider, &api_key, &model, base_dir,
     ) {
         Ok(descs) => descs,
         Err(err) => {
@@ -1578,7 +1574,9 @@ fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Op
     if descriptions.is_empty() {
         return None;
     }
-    let mut block = String::from("<image-descriptions>\nThe following image references were found in the document and described using a vision model:\n\n");
+    let mut block = String::from(
+        "<image-descriptions>\nThe following image references were found in the document and described using a vision model:\n\n",
+    );
     for desc in &descriptions {
         block.push_str(&format!(
             "### Image: {}\n\n{}\n\n",

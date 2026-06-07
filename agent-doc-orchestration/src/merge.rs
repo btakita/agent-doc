@@ -393,8 +393,7 @@ User line 2.
         // (the NEW id) must KEEP the user's renamed id — never revert it to the
         // snapshot's id. (Confirms the merge layer does not cause the historical
         // revert; the rename is authoritative.)
-        let base =
-            "<!-- agent:backlog -->\n- [ ] [#abcd] do the thing\n<!-- /agent:backlog -->\n";
+        let base = "<!-- agent:backlog -->\n- [ ] [#abcd] do the thing\n<!-- /agent:backlog -->\n";
         let ours = base; // agent/snapshot side unchanged — still the old id
         let theirs =
             "<!-- agent:backlog -->\n- [ ] [#abcd-2] do the thing\n<!-- /agent:backlog -->\n";

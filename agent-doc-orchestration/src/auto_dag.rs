@@ -32,7 +32,9 @@ impl Lane {
     pub fn title(self) -> &'static str {
         match self {
             Lane::Implementable => "Path C — implementable now (no live pane, agent-executable)",
-            Lane::LiveVerify => "Path A — operator live-verify session (busy-pane / route / harness)",
+            Lane::LiveVerify => {
+                "Path A — operator live-verify session (busy-pane / route / harness)"
+            }
             Lane::IpcCapture => "Path B — operator IPC / typing-corruption capture session",
             Lane::Blocked => "Blocked on a design decision",
             Lane::LikelyDone => "Likely done — verify + reap",
@@ -217,15 +219,27 @@ mod tests {
 
     #[test]
     fn classify_routes_each_lane() {
-        assert_eq!(classify("gated on the #subagent-blocks-session decision"), Lane::Blocked);
-        assert_eq!(classify("IMPLEMENTED + shipped this session"), Lane::LikelyDone);
+        assert_eq!(
+            classify("gated on the #subagent-blocks-session decision"),
+            Lane::Blocked
+        );
+        assert_eq!(
+            classify("IMPLEMENTED + shipped this session"),
+            Lane::LikelyDone
+        );
         assert_eq!(
             classify("LOG REVIEW 2026-06-03 denies completion: IMPLEMENTED but unverified"),
             Lane::LiveVerify,
             "a denies-completion log-review is not done even if it says implemented"
         );
-        assert_eq!(classify("PatchWatcher typing-corruption capture needed"), Lane::IpcCapture);
-        assert_eq!(classify("live-verify the busy-pane reopen"), Lane::LiveVerify);
+        assert_eq!(
+            classify("PatchWatcher typing-corruption capture needed"),
+            Lane::IpcCapture
+        );
+        assert_eq!(
+            classify("live-verify the busy-pane reopen"),
+            Lane::LiveVerify
+        );
         assert_eq!(
             classify("accept a leading bare #id token in --pending-add"),
             Lane::Implementable

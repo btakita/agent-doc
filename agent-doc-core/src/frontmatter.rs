@@ -970,7 +970,9 @@ pub fn strip_deprecated_queue_active_line(content: &str) -> String {
         return content.to_string();
     };
     let fm_lines = &lines[1..close_idx];
-    let has_canonical_queue = fm_lines.iter().any(|l| l.trim_start().starts_with("queue:"));
+    let has_canonical_queue = fm_lines
+        .iter()
+        .any(|l| l.trim_start().starts_with("queue:"));
     let has_deprecated = fm_lines
         .iter()
         .any(|l| l.trim_start().starts_with("queue_active:"));
@@ -1489,7 +1491,10 @@ mod tests {
         assert_eq!(fm.pipeline.turn_id.as_deref(), Some("#fm-run-id-step"));
         assert_eq!(fm.pipeline.run_id.as_deref(), Some("cycle-1780600334196"));
         assert_eq!(fm.pipeline.step.as_deref(), Some("response_captured"));
-        assert_eq!(fm.pipeline.queue_task_id.as_deref(), Some("#fm-run-id-step"));
+        assert_eq!(
+            fm.pipeline.queue_task_id.as_deref(),
+            Some("#fm-run-id-step")
+        );
         assert!(!fm.pipeline.is_empty());
     }
 
@@ -1510,7 +1515,8 @@ mod tests {
             "---\nagent_doc_session: abc-123\nagent: claude\nqueue: start\n---\n\n## Body\n";
         // Set run_id + step, leave turn_id/queue_task_id untouched.
         let updated =
-            set_pipeline_state(content, Some("cycle-99"), Some("write_applied"), None, None).unwrap();
+            set_pipeline_state(content, Some("cycle-99"), Some("write_applied"), None, None)
+                .unwrap();
         let (fm, body) = parse(&updated).unwrap();
         assert_eq!(fm.pipeline.run_id.as_deref(), Some("cycle-99"));
         assert_eq!(fm.pipeline.step.as_deref(), Some("write_applied"));
@@ -1522,9 +1528,14 @@ mod tests {
         assert!(body.contains("## Body"));
 
         // A second merge updates step + turn_id while preserving the prior run_id.
-        let updated2 =
-            set_pipeline_state(&updated, None, Some("committed"), Some("#fm-run-id-step"), None)
-                .unwrap();
+        let updated2 = set_pipeline_state(
+            &updated,
+            None,
+            Some("committed"),
+            Some("#fm-run-id-step"),
+            None,
+        )
+        .unwrap();
         let (fm2, _) = parse(&updated2).unwrap();
         assert_eq!(fm2.pipeline.run_id.as_deref(), Some("cycle-99"));
         assert_eq!(fm2.pipeline.step.as_deref(), Some("committed"));
@@ -1603,7 +1614,8 @@ mod tests {
 
         // A doc parsed from canonical `queue:` (queue_active mirrored on) must
         // not double-emit the deprecated line on re-serialize.
-        let (fm, body) = parse("---\nagent_doc_format: template\nqueue: start\n---\n\nx\n").unwrap();
+        let (fm, body) =
+            parse("---\nagent_doc_format: template\nqueue: start\n---\n\nx\n").unwrap();
         let out = write(&fm, &body).unwrap();
         assert!(out.contains("queue: start"), "{out}");
         assert!(!out.contains("queue_active:"), "{out}");
@@ -1611,7 +1623,10 @@ mod tests {
         // No queue state → neither key is emitted.
         let fm = Frontmatter::default();
         let out = write(&fm, "body\n").unwrap();
-        assert!(!out.contains("queue_active:") && !out.contains("queue:"), "{out}");
+        assert!(
+            !out.contains("queue_active:") && !out.contains("queue:"),
+            "{out}"
+        );
     }
 
     #[test]

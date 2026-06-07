@@ -105,7 +105,10 @@ pub enum DeferredClearStep {
 /// wait (pending-but-busy) or no-op (nothing pending). Keeping this pure makes
 /// the live-thread wiring trivially testable and guarantees the
 /// nothing-pending path is a no-op.
-pub fn plan_deferred_clear_step(deferred_clear_pending: bool, prompt_ready: bool) -> DeferredClearStep {
+pub fn plan_deferred_clear_step(
+    deferred_clear_pending: bool,
+    prompt_ready: bool,
+) -> DeferredClearStep {
     match (deferred_clear_pending, prompt_ready) {
         (false, _) => DeferredClearStep::None,
         (true, false) => DeferredClearStep::WaitForIdle,
@@ -255,7 +258,10 @@ mod tests {
     fn pause_then_resume_round_trips_to_active() {
         let content = "---\nqueue: start\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let (paused, prior) = pause_queue_for_operator_command(content).unwrap();
-        assert_eq!(frontmatter::parse(&paused).unwrap().0.queue_active, Some(false));
+        assert_eq!(
+            frontmatter::parse(&paused).unwrap().0.queue_active,
+            Some(false)
+        );
         let resumed = resume_queue_after_operator_command(&paused, prior).unwrap();
         assert_eq!(
             frontmatter::parse(&resumed).unwrap().0.queue_active,

@@ -119,7 +119,9 @@ fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
 /// Parse a `<!-- /agent:name -->` close marker, returning the name.
 fn parse_close_marker(trimmed: &str) -> Option<String> {
     let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-    let rest = inner.strip_prefix("agent:/").or_else(|| inner.strip_prefix("agent:")?.strip_prefix('/'))?;
+    let rest = inner
+        .strip_prefix("agent:/")
+        .or_else(|| inner.strip_prefix("agent:")?.strip_prefix('/'))?;
     let name = rest.trim();
     (!name.is_empty()).then(|| name.to_string())
 }
@@ -282,7 +284,8 @@ pub fn components(source: &str) -> Vec<Component> {
         if let Some(comp) = open.as_mut()
             && let Some(item_content) = strip_bullet(content)
         {
-            comp.items.push(parse_item(item_content, line_start, offset));
+            comp.items
+                .push(parse_item(item_content, line_start, offset));
         }
     }
     if let Some(comp) = open.take() {
@@ -310,7 +313,10 @@ mod tests {
 ";
 
     fn queue() -> Component {
-        components(DOC).into_iter().find(|c| c.name == "queue").unwrap()
+        components(DOC)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .unwrap()
     }
 
     #[test]
@@ -341,7 +347,11 @@ mod tests {
         let free = &q.items[2];
         assert_eq!(free.kind, ItemKind::FreeText);
         assert!(free.pinned);
-        assert!(free.id.starts_with("ft-"), "free text gets a content id: {}", free.id);
+        assert!(
+            free.id.starts_with("ft-"),
+            "free text gets a content id: {}",
+            free.id
+        );
         assert_eq!(free.text, "Free-text bug report about pins");
 
         let gamma = &q.items[3];
@@ -362,7 +372,10 @@ mod tests {
 
     #[test]
     fn backlog_checkbox_state() {
-        let b = components(DOC).into_iter().find(|c| c.name == "backlog").unwrap();
+        let b = components(DOC)
+            .into_iter()
+            .find(|c| c.name == "backlog")
+            .unwrap();
         assert_eq!(b.items.len(), 2);
         assert_eq!(b.items[0].kind, ItemKind::BacklogTask { checkbox: ' ' });
         assert_eq!(b.items[0].id, "alpha");

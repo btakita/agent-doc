@@ -1559,10 +1559,7 @@ mod tests {
             Some("#reentrant-phase2"),
         )
         .unwrap();
-        assert_eq!(
-            state.queue_task_id.as_deref(),
-            Some("#reentrant-phase2")
-        );
+        assert_eq!(state.queue_task_id.as_deref(), Some("#reentrant-phase2"));
         assert_eq!(state.turn_id.as_deref(), Some("#reentrant-phase2"));
 
         let loaded = load(&doc).unwrap().expect("state should persist");

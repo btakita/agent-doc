@@ -108,7 +108,10 @@ pub fn build_actor_list(
 ///   documents execute in the same pane (`#xdoc-route-sweep-commits-sibling-docs`).
 /// - `stale_dead_pane`: a non-`Closed` actor whose pane is not alive — an
 ///   orphaned binding that route/sync should reap.
-pub fn detect_findings(actors: &ActorStore, pane_alive: impl Fn(&str) -> bool) -> Vec<AdminFinding> {
+pub fn detect_findings(
+    actors: &ActorStore,
+    pane_alive: impl Fn(&str) -> bool,
+) -> Vec<AdminFinding> {
     let mut findings = Vec::new();
 
     // A *live* pane claimed by more than one non-closed document is the
@@ -318,12 +321,7 @@ mod tests {
 
     #[test]
     fn detect_flags_non_closed_actor_with_dead_pane() {
-        let actors = store(vec![record(
-            "tasks/a.md",
-            "sid-a",
-            "%9",
-            ActorState::Busy,
-        )]);
+        let actors = store(vec![record("tasks/a.md", "sid-a", "%9", ActorState::Busy)]);
         let findings = detect_findings(&actors, |_| false); // pane dead
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].kind, "stale_dead_pane");
@@ -358,7 +356,10 @@ mod tests {
             "dead shared pane must not produce cross_document_pane, got {findings:?}"
         );
         assert_eq!(
-            findings.iter().filter(|f| f.kind == "stale_dead_pane").count(),
+            findings
+                .iter()
+                .filter(|f| f.kind == "stale_dead_pane")
+                .count(),
             2,
             "each non-closed actor on the dead pane is an orphaned binding"
         );

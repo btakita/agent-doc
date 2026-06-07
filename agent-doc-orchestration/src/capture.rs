@@ -450,7 +450,9 @@ pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
 /// drift and fail the replay baseline. Stripping it keeps replay validation
 /// invariant to the mirror, matching the diff layer.
 fn replay_file_hash(content: &str) -> String {
-    crate::ops_log::content_hash(&agent_doc_core::frontmatter::strip_pipeline_block_lines(content))
+    crate::ops_log::content_hash(&agent_doc_core::frontmatter::strip_pipeline_block_lines(
+        content,
+    ))
 }
 
 pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {

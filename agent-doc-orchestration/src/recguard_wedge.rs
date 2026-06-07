@@ -121,7 +121,10 @@ mod tests {
         assert!(!is_wedged(2));
         let third = record(&doc, "do [#alpha]").unwrap();
         assert_eq!(third, 3);
-        assert!(is_wedged(third), "third consecutive same-head fire is a wedge");
+        assert!(
+            is_wedged(third),
+            "third consecutive same-head fire is a wedge"
+        );
     }
 
     #[test]

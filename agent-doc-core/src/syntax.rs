@@ -63,10 +63,46 @@ fn collect_emphasis_tokens(doc: &str, code_ranges: &[(usize, usize)], out: &mut 
         let mut consumed_italic = vec![false; bytes.len()];
         // Strong (double markers) first, then italic (single). The two levels keep
         // separate consumed maps so an inner italic inside a bold run is still found.
-        scan_emphasis_runs(bytes, base, b'*', 2, VisualTokenKind::Bold, &mut consumed_bold, code_ranges, out);
-        scan_emphasis_runs(bytes, base, b'_', 2, VisualTokenKind::Bold, &mut consumed_bold, code_ranges, out);
-        scan_emphasis_runs(bytes, base, b'*', 1, VisualTokenKind::Italic, &mut consumed_italic, code_ranges, out);
-        scan_emphasis_runs(bytes, base, b'_', 1, VisualTokenKind::Italic, &mut consumed_italic, code_ranges, out);
+        scan_emphasis_runs(
+            bytes,
+            base,
+            b'*',
+            2,
+            VisualTokenKind::Bold,
+            &mut consumed_bold,
+            code_ranges,
+            out,
+        );
+        scan_emphasis_runs(
+            bytes,
+            base,
+            b'_',
+            2,
+            VisualTokenKind::Bold,
+            &mut consumed_bold,
+            code_ranges,
+            out,
+        );
+        scan_emphasis_runs(
+            bytes,
+            base,
+            b'*',
+            1,
+            VisualTokenKind::Italic,
+            &mut consumed_italic,
+            code_ranges,
+            out,
+        );
+        scan_emphasis_runs(
+            bytes,
+            base,
+            b'_',
+            1,
+            VisualTokenKind::Italic,
+            &mut consumed_italic,
+            code_ranges,
+            out,
+        );
     }
 }
 

@@ -1334,14 +1334,35 @@ mod tests {
     #[test]
     fn pin_shortcode_aliases_resolve_to_tiers() {
         // Operator aliases: :pin:, :pushpin:, 📌, **pin**, __pin__.
-        for m in ["**prioritized**", "__prioritized__", "**pin**", "__pin__", ":pin:", ":pushpin:", "📌"] {
+        for m in [
+            "**prioritized**",
+            "__prioritized__",
+            "**pin**",
+            "__pin__",
+            ":pin:",
+            ":pushpin:",
+            "📌",
+        ] {
             assert!(is_prioritized(&format!("{m} do [#x]")), "operator: {m}");
-            assert!(!is_agent_prioritized(&format!("{m} do [#x]")), "not agent: {m}");
+            assert!(
+                !is_agent_prioritized(&format!("{m} do [#x]")),
+                "not agent: {m}"
+            );
         }
         // Agent aliases: _pin_, :round_pushpin:, 📍, *pin*, *prioritized*.
-        for m in ["*prioritized*", "_prioritized_", "*pin*", "_pin_", ":round_pushpin:", "📍"] {
+        for m in [
+            "*prioritized*",
+            "_prioritized_",
+            "*pin*",
+            "_pin_",
+            ":round_pushpin:",
+            "📍",
+        ] {
             assert!(is_agent_prioritized(&format!("{m} do [#x]")), "agent: {m}");
-            assert!(!is_prioritized(&format!("{m} do [#x]")), "not operator: {m}");
+            assert!(
+                !is_prioritized(&format!("{m} do [#x]")),
+                "not operator: {m}"
+            );
         }
         // Tier ordering with emoji shortcodes.
         let entries = parse(concat!(
@@ -1586,7 +1607,10 @@ mod tests {
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "run tests"));
         // Re-render strips the stray backtick (self-heal to canonical `- `).
         let rendered = render(&entries);
-        assert!(rendered.contains("- There is significant blocking"), "{rendered}");
+        assert!(
+            rendered.contains("- There is significant blocking"),
+            "{rendered}"
+        );
         assert!(!rendered.contains("`-"), "{rendered}");
     }
 

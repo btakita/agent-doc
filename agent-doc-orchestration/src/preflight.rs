@@ -3824,8 +3824,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 }
             }
             if persisted_active {
-                current_content =
-                    frontmatter::merge_queue_state(&current_content, false)?;
+                current_content = frontmatter::merge_queue_state(&current_content, false)?;
             }
             // Persist to file + snapshot
             std::fs::write(file, &current_content)
@@ -3944,67 +3943,73 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     // Fall through to normal active-queue handling below; the
                     // queue stays active with the edited head as the new prompt.
                 } else {
-                eprintln!("[preflight] queue: pause — head prompt modified mid-edit (buffer not settled); not grabbing a half-typed head");
-                // Strip auto and clear queue_active
-                if has_auto {
-                    let comps = crate::component::parse(&current_content)?;
-                    if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                        let raw = &current_content[q.open_start..q.open_end];
-                        let new_tag = crate::queue::strip_auto_from_tag(raw);
-                        if new_tag != raw {
-                            let mut rebuilt = String::with_capacity(current_content.len());
-                            rebuilt.push_str(&current_content[..q.open_start]);
-                            rebuilt.push_str(&new_tag);
-                            rebuilt.push_str(&current_content[q.open_end..]);
-                            current_content = rebuilt;
+                    eprintln!(
+                        "[preflight] queue: pause — head prompt modified mid-edit (buffer not settled); not grabbing a half-typed head"
+                    );
+                    // Strip auto and clear queue_active
+                    if has_auto {
+                        let comps = crate::component::parse(&current_content)?;
+                        if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                            let raw = &current_content[q.open_start..q.open_end];
+                            let new_tag = crate::queue::strip_auto_from_tag(raw);
+                            if new_tag != raw {
+                                let mut rebuilt = String::with_capacity(current_content.len());
+                                rebuilt.push_str(&current_content[..q.open_start]);
+                                rebuilt.push_str(&new_tag);
+                                rebuilt.push_str(&current_content[q.open_end..]);
+                                current_content = rebuilt;
+                            }
                         }
                     }
-                }
-                if persisted_active {
-                    current_content =
-                        frontmatter::merge_queue_state(&current_content, false)?;
-                }
-                std::fs::write(file, &current_content)
-                    .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
-                converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
-                // Update snapshot
-                if let Ok(Some(snap2)) = snapshot::load(file) {
-                    let mut ns = snap2.clone();
-                    if has_auto
-                        && let Ok(sc) = crate::component::parse(&ns)
-                        && let Some(sq) = sc.iter().find(|c| c.name == "queue")
-                    {
-                        let raw = &ns[sq.open_start..sq.open_end];
-                        let new_tag = crate::queue::strip_auto_from_tag(raw);
-                        if new_tag != raw {
-                            let mut rebuilt = String::with_capacity(ns.len());
-                            rebuilt.push_str(&ns[..sq.open_start]);
-                            rebuilt.push_str(&new_tag);
-                            rebuilt.push_str(&ns[sq.open_end..]);
-                            ns = rebuilt;
+                    if persisted_active {
+                        current_content = frontmatter::merge_queue_state(&current_content, false)?;
+                    }
+                    std::fs::write(file, &current_content).with_context(|| {
+                        format!("queue halt: failed to write {}", file.display())
+                    })?;
+                    converge_live_buffer_queue_shape(
+                        file,
+                        &current_content,
+                        project_root.as_deref(),
+                    );
+                    // Update snapshot
+                    if let Ok(Some(snap2)) = snapshot::load(file) {
+                        let mut ns = snap2.clone();
+                        if has_auto
+                            && let Ok(sc) = crate::component::parse(&ns)
+                            && let Some(sq) = sc.iter().find(|c| c.name == "queue")
+                        {
+                            let raw = &ns[sq.open_start..sq.open_end];
+                            let new_tag = crate::queue::strip_auto_from_tag(raw);
+                            if new_tag != raw {
+                                let mut rebuilt = String::with_capacity(ns.len());
+                                rebuilt.push_str(&ns[..sq.open_start]);
+                                rebuilt.push_str(&new_tag);
+                                rebuilt.push_str(&ns[sq.open_end..]);
+                                ns = rebuilt;
+                            }
+                        }
+                        if persisted_active
+                            && let Ok(m) = frontmatter::merge_queue_state(&ns, false)
+                        {
+                            ns = m;
+                        }
+                        if ns != snap2
+                            && let Err(e) = snapshot::save(file, &ns)
+                        {
+                            eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
                         }
                     }
-                    if persisted_active
-                        && let Ok(m) = frontmatter::merge_queue_state(&ns, false)
-                    {
-                        ns = m;
-                    }
-                    if ns != snap2
-                        && let Err(e) = snapshot::save(file, &ns)
-                    {
-                        eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
-                    }
-                }
-                return Ok(QueueState {
-                    queue_prompts: vec![],
-                    queue_active: Some(false),
-                    queue_deferred: false,
-                    queue_start_at: None,
-                    queue_trigger: activation.trigger,
-                    queue_halted: Some("item_modified".into()),
-                    synced_queue_ids,
-                    warnings: Vec::new(),
-                });
+                    return Ok(QueueState {
+                        queue_prompts: vec![],
+                        queue_active: Some(false),
+                        queue_deferred: false,
+                        queue_start_at: None,
+                        queue_trigger: activation.trigger,
+                        queue_halted: Some("item_modified".into()),
+                        synced_queue_ids,
+                        warnings: Vec::new(),
+                    });
                 }
             }
         }
@@ -4018,10 +4023,8 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let need_set_active = activation.active && !persisted_active;
     let need_clear_active = !activation.active && persisted_active && !activation.deferred;
     let need_strip_auto = has_auto && !queue_has_prompts;
-    let need_clear_non_auto_residue = !has_auto
-        && !activation.active
-        && !activation.deferred
-        && drained_residue;
+    let need_clear_non_auto_residue =
+        !has_auto && !activation.active && !activation.deferred && drained_residue;
     let need_clear_drained_body =
         (need_strip_auto || need_clear_non_auto_residue) && !activation.deferred;
 
@@ -4071,9 +4074,8 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         let comps = crate::component::parse(&current_content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         let raw_tag = &current_content[q.open_start..q.open_end];
-        let new_tag = crate::queue::strip_control_from_tag(&crate::queue::strip_auto_from_tag(
-            raw_tag,
-        ));
+        let new_tag =
+            crate::queue::strip_control_from_tag(&crate::queue::strip_auto_from_tag(raw_tag));
         if new_tag != raw_tag {
             let mut rebuilt = String::with_capacity(current_content.len());
             rebuilt.push_str(&current_content[..q.open_start]);
@@ -4163,9 +4165,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
 
         // Apply frontmatter change to snapshot
-        if need_set_active
-            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, true)
-        {
+        if need_set_active && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, true) {
             new_snap = merged;
         } else if need_sync_newly_activated_queue_snapshot
             && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, true)
@@ -6876,8 +6876,14 @@ mod tests {
 
         // File keeps the armed auto-queue with the edited head.
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("agent:queue auto"), "auto preserved: {updated}");
-        assert!(updated.contains("queue_active: true"), "active preserved: {updated}");
+        assert!(
+            updated.contains("agent:queue auto"),
+            "auto preserved: {updated}"
+        );
+        assert!(
+            updated.contains("queue_active: true"),
+            "active preserved: {updated}"
+        );
         assert!(updated.contains("- do [#newhead]"));
 
         // Snapshot absorbed the edited head so a follow-up pass is idempotent
@@ -9678,10 +9684,8 @@ mod tests {
             "- [ ] [#x1] keep this\n",
             "<!-- /agent:backlog -->\n",
         );
-        let warning =
-            misplaced_component_attr_warning(Path::new("session.md"), content).expect(
-                "`preset` on backlog should warn as a queue-only attribute on wrong component",
-            );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`preset` on backlog should warn as a queue-only attribute on wrong component");
         assert_eq!(warning.code, "misplaced_component_attr");
         assert!(
             warning.message.contains("queue-only"),
@@ -11799,7 +11803,9 @@ mod tests {
             "---\nagent_doc_pipeline:\n  run_id: cycle-77\n  step: write_applied\n---\n\nbody\n",
         )
         .unwrap();
-        let p = resolve_pipeline_state(&doc).unwrap().expect("frontmatter fallback");
+        let p = resolve_pipeline_state(&doc)
+            .unwrap()
+            .expect("frontmatter fallback");
         assert_eq!(p.run_id.as_deref(), Some("cycle-77"));
         assert_eq!(p.step.as_deref(), Some("write_applied"));
     }
@@ -11823,7 +11829,9 @@ mod tests {
         )
         .unwrap();
 
-        let p = resolve_pipeline_state(&doc).unwrap().expect("cycle-state present");
+        let p = resolve_pipeline_state(&doc)
+            .unwrap()
+            .expect("cycle-state present");
         assert_eq!(p.run_id.as_deref(), Some(state.cycle_id.as_str()));
         assert_eq!(p.step.as_deref(), Some("preflight_started"));
         assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));

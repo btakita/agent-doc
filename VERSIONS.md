@@ -57,6 +57,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   and `route_enqueue_priority_dispatch_*`; specs `specs/pending-system.md`,
   `specs/07-orchestration-commands.md`.
 
+- **Session memory retrieval (`#agent-doc-memgraphrag-retrieval`).**
+  `agent-doc memory index/search` now indexes current session tracked work
+  (`agent:backlog`, `agent:review`, `agent:icebox`, `agent:done` including
+  repo-relative `.done.md` archives) plus live exchange response summaries into
+  `.tsift/memory.db` through the shared `tsift-memory` library crate. Search
+  combines persisted memory with the current document and ranks locally for
+  already-tracked / already-fixed dedupe checks without embedding tsift's heavy
+  codebase index in the per-cycle hot path. Tests `memory_cmd::*`; specs
+  `SPEC.md`, `specs/07-core-commands.md`.
+
 - **Per-item enqueue markers populate `agent:queue` (`#queue-enqueue-action`).**
   Open backlog/icebox/pending items containing `:inbox_tray:`, `/enqueue`, or a
   Markdown-decorated `enqueue` token such as `**enqueue**` now append `do [#id]`
@@ -69,16 +79,6 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `collect_backlog_queue_sync_reads_enqueue_markers_without_attr`, and
   `sync_accepts_enqueue_marker_without_queue_attr`. Spec
   `specs/07-orchestration-commands.md`.
-
-- **Session memory retrieval (`#agent-doc-memgraphrag-retrieval`).**
-  `agent-doc memory index/search` now indexes current session tracked work
-  (`agent:backlog`, `agent:review`, `agent:icebox`, `agent:done` including
-  repo-relative `.done.md` archives) plus live exchange response summaries into
-  `.tsift/memory.db` through the shared `tsift-memory` library crate. Search
-  combines persisted memory with the current document and ranks locally for
-  already-tracked / already-fixed dedupe checks without embedding tsift's heavy
-  codebase index in the per-cycle hot path. Tests `memory_cmd::*`; specs
-  `SPEC.md`, `specs/07-core-commands.md`.
 
 - **Watch daemon emits node-keyed document events (`#md-ast-realtime-watcher`).**
   The markdown AST crate now exposes `events::diff_node_events`, producing

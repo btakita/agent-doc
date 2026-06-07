@@ -133,7 +133,11 @@ pub fn render_dashboard(model: &DashboardModel, color: bool) -> String {
             .supervisor_pid
             .map(|p| p.to_string())
             .unwrap_or_else(|| "?".to_string());
-        let alive = if row.actor.pane_alive { "alive" } else { "dead" };
+        let alive = if row.actor.pane_alive {
+            "alive"
+        } else {
+            "dead"
+        };
         let flags = row.highlight_kinds.join(",");
         let line = format!(
             "  {:<2} {:<32} {:<9} {:<6} {:<6} {:<13} {:<8} {}",
@@ -142,7 +146,10 @@ pub fn render_dashboard(model: &DashboardModel, color: bool) -> String {
             truncate(&row.actor.harness, 9),
             truncate(&row.actor.pane, 6),
             alive,
-            truncate(&format!("{} g{}", row.actor.state, row.actor.generation), 13),
+            truncate(
+                &format!("{} g{}", row.actor.state, row.actor.generation),
+                13
+            ),
             truncate(&pid, 8),
             flags,
         );
@@ -216,7 +223,10 @@ pub fn dashboard(
 
     if once {
         let model = snapshot_model(&root)?;
-        print!("{}", render_dashboard(&model, std::io::IsTerminal::is_terminal(&std::io::stdout())));
+        print!(
+            "{}",
+            render_dashboard(&model, std::io::IsTerminal::is_terminal(&std::io::stdout()))
+        );
         return Ok(());
     }
 
@@ -359,7 +369,11 @@ mod tests {
         assert!(frame.contains("cross_document_pane"));
         assert!(frame.contains("findings:"));
         // The flagged row carries the `!` marker.
-        assert!(frame.lines().any(|l| l.contains("tasks/a.md") && l.contains('!')));
+        assert!(
+            frame
+                .lines()
+                .any(|l| l.contains("tasks/a.md") && l.contains('!'))
+        );
     }
 
     #[test]

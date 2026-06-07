@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
@@ -82,9 +82,7 @@ pub fn extract_image_references(text: &str) -> Vec<ImageRef> {
         if word.starts_with("http://") || word.starts_with("https://") || word.starts_with("![") {
             continue;
         }
-        if has_image_extension(word)
-            && seen.insert(word.to_string())
-        {
+        if has_image_extension(word) && seen.insert(word.to_string()) {
             refs.push(ImageRef {
                 kind: ImageRefKind::NakedPath,
                 path: word.to_string(),
@@ -174,7 +172,11 @@ fn shell_expand(value: &str) -> Result<String> {
     Ok(expanded.to_string())
 }
 
-fn resolve_api_key(provider: &Provider, cli_key: Option<&str>, config_key: Option<&str>) -> Result<String> {
+fn resolve_api_key(
+    provider: &Provider,
+    cli_key: Option<&str>,
+    config_key: Option<&str>,
+) -> Result<String> {
     if let Some(k) = cli_key {
         return shell_expand(k);
     }
@@ -196,7 +198,11 @@ fn resolve_api_key(provider: &Provider, cli_key: Option<&str>, config_key: Optio
     })
 }
 
-fn resolve_model(provider: &Provider, cli_model: Option<&str>, config_model: Option<&str>) -> String {
+fn resolve_model(
+    provider: &Provider,
+    cli_model: Option<&str>,
+    config_model: Option<&str>,
+) -> String {
     if let Some(m) = cli_model {
         return m.to_string();
     }
@@ -318,8 +324,24 @@ pub fn describe_image_data(
     let http_agent = build_agent();
     let endpoint = resolve_endpoint(provider);
     match provider {
-        Provider::OpenAI => call_openai(&http_agent, &endpoint, api_key, model, mime, &b64_data, prompt),
-        Provider::Anthropic => call_anthropic(&http_agent, &endpoint, api_key, model, mime, &b64_data, prompt),
+        Provider::OpenAI => call_openai(
+            &http_agent,
+            &endpoint,
+            api_key,
+            model,
+            mime,
+            &b64_data,
+            prompt,
+        ),
+        Provider::Anthropic => call_anthropic(
+            &http_agent,
+            &endpoint,
+            api_key,
+            model,
+            mime,
+            &b64_data,
+            prompt,
+        ),
     }
 }
 
@@ -478,7 +500,10 @@ mod tests {
 
     #[test]
     fn resolve_model_default_openai() {
-        assert_eq!(resolve_model(&Provider::OpenAI, None, None), DEFAULT_OPENAI_MODEL);
+        assert_eq!(
+            resolve_model(&Provider::OpenAI, None, None),
+            DEFAULT_OPENAI_MODEL
+        );
     }
 
     #[test]
@@ -499,7 +524,10 @@ mod tests {
 
     #[test]
     fn resolve_provider_default() {
-        assert!(matches!(resolve_provider(None, None).unwrap(), Provider::OpenAI));
+        assert!(matches!(
+            resolve_provider(None, None).unwrap(),
+            Provider::OpenAI
+        ));
     }
 
     #[test]
@@ -592,14 +620,9 @@ mod tests {
     #[test]
     fn describe_images_empty_text() {
         let provider = Provider::OpenAI;
-        let result = describe_images_in_text(
-            "no images here",
-            &provider,
-            "key",
-            "model",
-            Path::new("."),
-        )
-        .unwrap();
+        let result =
+            describe_images_in_text("no images here", &provider, "key", "model", Path::new("."))
+                .unwrap();
         assert!(result.is_empty());
     }
 

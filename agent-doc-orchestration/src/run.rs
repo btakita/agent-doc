@@ -1721,7 +1721,9 @@ mod tests {
                 assert!(recovery.contains("non-owner pane"));
                 assert!(recovery.contains("agent-doc start"));
             }
-            NoChangeVerdict::Clean => panic!("expected Abnormal for committed no-response bookkeeping cycle"),
+            NoChangeVerdict::Clean => {
+                panic!("expected Abnormal for committed no-response bookkeeping cycle")
+            }
         }
     }
 

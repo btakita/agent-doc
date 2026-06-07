@@ -306,17 +306,14 @@ pub fn write_clear_cooldown(file: &Path) -> Result<()> {
         return Ok(());
     };
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let payload = serde_json::json!({
         "file": file.to_string_lossy(),
         "written_at": now_secs(),
     });
-    let json = serde_json::to_string_pretty(&payload)
-        .context("serialize cooldown marker")?;
-    std::fs::write(&path, json)
-        .with_context(|| format!("write {}", path.display()))?;
+    let json = serde_json::to_string_pretty(&payload).context("serialize cooldown marker")?;
+    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -821,7 +818,10 @@ mod tests {
         )
         .unwrap()
         .expect("scan must continue past foreign marker to the valid one");
-        assert_eq!(found.0, valid, "must return the same-pane valid doc, not foreign");
+        assert_eq!(
+            found.0, valid,
+            "must return the same-pane valid doc, not foreign"
+        );
         assert_eq!(found.1.head_prompt, "do [#valid]");
 
         // The skipped foreign marker must survive for its own owner.

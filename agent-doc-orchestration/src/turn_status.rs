@@ -107,11 +107,7 @@ pub fn turn_active(base: &Path) -> bool {
 /// Title to set for a turn state. `active` → the busy title; `idle` → empty, so
 /// the pane returns to its default border title.
 pub fn pane_title_for_state(active: bool) -> &'static str {
-    if active {
-        TURN_ACTIVE_PANE_TITLE
-    } else {
-        ""
-    }
+    if active { TURN_ACTIVE_PANE_TITLE } else { "" }
 }
 
 /// Set the current tmux pane's border title to reflect the turn state. No-op

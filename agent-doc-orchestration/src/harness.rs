@@ -329,9 +329,7 @@ impl HarnessConfig {
         }
 
         let min_chrome = if self.binary == "opencode" {
-            if !recent.is_empty()
-                && is_opencode_footer_version_line(&recent[0])
-            {
+            if !recent.is_empty() && is_opencode_footer_version_line(&recent[0]) {
                 1
             } else {
                 4
@@ -728,9 +726,15 @@ fn is_opencode_footer_version_line(trimmed: &str) -> bool {
     lower.contains("opencode")
         && lower.split_whitespace().next_back().is_some_and(|last| {
             let mut parts = last.split('.');
-            parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
-                && parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
-                && parts.next().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+            parts
+                .next()
+                .is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+                && parts
+                    .next()
+                    .is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+                && parts
+                    .next()
+                    .is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
                 && parts.next().is_none()
         })
 }
@@ -2632,7 +2636,9 @@ opencode debug               debugging and troubleshooting tools
         ));
         assert!(is_opencode_idle_keybinding_hint_line("esc interrupt"));
         assert!(!is_opencode_idle_keybinding_hint_line("esc to interrupt"));
-        assert!(!is_opencode_idle_keybinding_hint_line("Working (14s - esc to interrupt)"));
+        assert!(!is_opencode_idle_keybinding_hint_line(
+            "Working (14s - esc to interrupt)"
+        ));
     }
 
     #[test]

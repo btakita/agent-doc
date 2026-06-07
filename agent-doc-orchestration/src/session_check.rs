@@ -179,9 +179,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 && cycle.capture_id.is_none()
                 && cycle.response_sha256.is_none()
             {
-                let has_visible_response =
-                    unresolved_exchange_prompt(file)?.is_none()
-                        && exchange_tail_has_response_heading(file);
+                let has_visible_response = unresolved_exchange_prompt(file)?.is_none()
+                    && exchange_tail_has_response_heading(file);
                 if has_visible_response {
                     eprintln!(
                         "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
@@ -2922,13 +2921,20 @@ fn check_free_text_queue_head_provenance(
         if normalized.is_empty() {
             continue;
         }
-        if committed_queue_text.to_ascii_lowercase().contains(&normalized) {
+        if committed_queue_text
+            .to_ascii_lowercase()
+            .contains(&normalized)
+        {
             continue;
         }
         if response_head_plausibly_answers(&content, head) {
             continue;
         }
-        if state.dropped_queue_prompts.iter().any(|d| d.trim().eq_ignore_ascii_case(head.trim())) {
+        if state
+            .dropped_queue_prompts
+            .iter()
+            .any(|d| d.trim().eq_ignore_ascii_case(head.trim()))
+        {
             continue;
         }
         unresolved.push(head.clone());
@@ -2972,7 +2978,22 @@ fn check_free_text_queue_head_provenance(
 fn response_head_plausibly_answers(content: &str, head: &str) -> bool {
     let head_words: Vec<&str> = head
         .split_whitespace()
-        .filter(|w| w.len() > 3 && !matches!(w.to_ascii_lowercase().as_str(), "the" | "this" | "that" | "with" | "from" | "also" | "does" | "what" | "when" | "how"))
+        .filter(|w| {
+            w.len() > 3
+                && !matches!(
+                    w.to_ascii_lowercase().as_str(),
+                    "the"
+                        | "this"
+                        | "that"
+                        | "with"
+                        | "from"
+                        | "also"
+                        | "does"
+                        | "what"
+                        | "when"
+                        | "how"
+                )
+        })
         .collect();
     if head_words.is_empty() {
         return false;
@@ -4881,8 +4902,13 @@ Body\n\
             .output()
             .unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
 
         // Late stale-patch replay re-inserts an earlier committed response (A) at
         // the tail (non-adjacent over-application), leaving the real responses in
@@ -5237,7 +5263,9 @@ Body\n\
         match check_committed_without_response_body_guard(&doc).unwrap() {
             GuardResult::Error(msg) => {
                 assert!(
-                    msg.contains("no assistant `### Re:` response body is present in `agent:exchange`"),
+                    msg.contains(
+                        "no assistant `### Re:` response body is present in `agent:exchange`"
+                    ),
                     "{msg}"
                 );
                 assert!(msg.contains("agent-doc write --commit"), "{msg}");
@@ -5268,7 +5296,9 @@ Body\n\
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(msg) => {
                 assert!(
-                    msg.contains("no assistant `### Re:` response body is present in `agent:exchange`"),
+                    msg.contains(
+                        "no assistant `### Re:` response body is present in `agent:exchange`"
+                    ),
                     "{msg}"
                 );
             }
@@ -8097,14 +8127,14 @@ Body\n\
         // Optional-`do` Stage 2: the `do` verb is optional for a bare leading id
         // token, and a `re` reference never targets an id.
         let prompts = vec![
-            "[#solo]".to_string(),            // bare bracketed → id-backed
+            "[#solo]".to_string(),                      // bare bracketed → id-backed
             "- [#listed] do the small fix".to_string(), // bare after list marker
-            "#hashbare proceed".to_string(),  // bare hash token
-            "re [#ref]".to_string(),          // reference → inert
-            "re #ref2".to_string(),           // reference → inert
-            "[#note]: just prose".to_string(), // trailing `:` → inert
-            "see [#mention] for context".to_string(), // not leading → inert
-            "do [#explicit]".to_string(),     // explicit still works
+            "#hashbare proceed".to_string(),            // bare hash token
+            "re [#ref]".to_string(),                    // reference → inert
+            "re #ref2".to_string(),                     // reference → inert
+            "[#note]: just prose".to_string(),          // trailing `:` → inert
+            "see [#mention] for context".to_string(),   // not leading → inert
+            "do [#explicit]".to_string(),               // explicit still works
         ];
         let ids = do_directive_target_ids(&prompts);
         assert_eq!(ids, vec!["solo", "listed", "hashbare", "explicit"]);
@@ -8847,9 +8877,7 @@ Body\n\
         // codex_final_gate should adopt it instead of blocking.
         match run_with_options(&doc, true) {
             Ok(()) => {}
-            other => panic!(
-                "expected codex_final_gate to adopt manual patchback, got {other:?}"
-            ),
+            other => panic!("expected codex_final_gate to adopt manual patchback, got {other:?}"),
         }
     }
 

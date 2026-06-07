@@ -78,12 +78,12 @@ pub mod editor_route_errors;
 pub mod flow;
 pub mod focus;
 pub mod gc;
-pub mod turn_status;
 pub mod git;
 pub mod git_sibling;
 pub mod graph;
 pub mod harness;
 pub mod harness_prompt;
+pub mod turn_status;
 // Relocated to `agent-doc-core` (#bz6s follow-up #adoc-pure-to-core — pure,
 // zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
 pub use agent_doc_core::heuristics;

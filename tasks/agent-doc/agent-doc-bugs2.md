@@ -186,22 +186,8 @@ Verification: `cargo test -p agent-doc-orchestration idle_queue_drain` passed; `
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go=true -->
----
-JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc tasks/monsterrodholders.md` not follow a deadlock path and do the work. Even if this means the invocation messages the current owner to continue to the next task and that's all. If we can detect `Codex pane already owns that agent-doc session`, we can message the owning supervisor or agent-doc session.
-```
-• agent-doc tasks/monsterrodholders.md refused to run because this Codex pane already owns that agent-doc session, so a
-  direct recursive invocation would deadlock.
-
-  agent-doc session status tasks/monsterrodholders.md reports the session is healthy and the actor is ready, with the
-  last event recorded as recursive_direct_invocation_blocked. No agent-doc cancel is needed.
-
-  To run it as a new managed cycle, start it from outside this owned pane, or use:
-
-  agent-doc start tasks/monsterrodholders.md
-```
----
-- ~~monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.~~
-- ~~Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.~~
+- monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.
+- Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
 <!-- /agent:queue -->
 ###
 <!--

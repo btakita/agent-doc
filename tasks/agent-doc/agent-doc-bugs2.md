@@ -61,7 +61,20 @@ Verification:
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` passes and now reports next queue prompt `do [#learn-ohio-duplicate-gate]`.
 - `btakita/boost-client` has no GitHub Actions workflows named/listed, so there was no remote Boost Client CI to inspect.
 - Parent `btakita/agent-loop` `Agent Doc` run `27085543043` still fails immediately with jobs `check` and `tmux-ci` containing `steps: []`, matching the existing runner/infrastructure-shaped failure on prior gitlink pushes.
-<!-- agent:boundary:b92d5bfa -->
+
+### Re: :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn. - gpt-5
+
+Checked the specific example and repaired the tracking state.
+
+Findings:
+- The JB/VSCode markdown emphasis work is already completed and archived as `#editor-nested-bold-italic-rendering` in `tasks/agent-doc-bugs2.done.md`.
+- The implementation exists in `src/agent-doc` commits `3153dbbc` (`#editor-bold-markdown-rendering`) and `3d894bf3` (`#editor-nested-bold-italic-rendering`).
+- The stale queue item is this free-text audit prompt, not an id-backed `do [#editor-nested-bold-italic-rendering]` directive. That is why the existing done-id queue strike path did not automatically prove it safe to mark completed.
+
+Fix:
+- Expanded `#automated-completion-detection` so the durable root fix explicitly covers opportunistic completions that leave stale queue/review mirrors, including semantic matches from queue free text to `agent:done` / session history.
+- This current prompt is answered; no additional backlog item is needed beyond the tightened `#automated-completion-detection` scope.
+<!-- agent:boundary:bd75961c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -69,6 +82,7 @@ Verification:
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: The previous and next items in the queue I was editing were uncommitted deleted by agent-doc.~~
 - ~~:pushpin: The monsterrodholders.md run seems to be cycling between two sessions. Please check the current state. Fix the root cause and the current state.~~
+- :pushpin: Please investigate the lazily-rs session. It is not behaving correctly.
 - :pushpin: Completed items were not marked as completed in the queue...such as "The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**."...which was opportunistically (good behavior that I want to encourage...with the help of auto-dag perhaps?) picked up in a previous turn.
 - :pushpin: Can lazily-rs IPC help with agent-doc IPC and IPC with tsift? Would it help if our processes have models of each other's state? Perhaps lazily-rs can facilitate this state sharing?
 - :pushpin: do [#ipc-typing-duplication-family]
@@ -123,7 +137,7 @@ What are #next-steps to fix bugs?
 5. [ ] [#ipc-typing-duplication-family] #agent-doc-bug consolidate IPC/typing full-document duplication prevention (was review #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing). PatchWatcher.setText must not duplicate/delete the full document/tail while a prompt is typed; needs JB debug-log setText capture + SimWorld regression + pluginVersion bump. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md
 6. [ ] [#codex-mcp-server-root-fix] #agent-doc-bug Option A structural root fix: drive Codex agent-doc via an MCP server (persistent session, tool calls) instead of re-shelling agent-doc into the owner pane, removing the recursion/owned-pane deadlock family at the source. Plan: tasks/agent-doc/plans/codex-mcp-server-option-a.md
 7. [ ] [#live-verify-batch] #agent-doc-bug one consolidated live busy-pane + IPC-timeout verification session for shipped-but-unverified fixes (was ~14 *-live-verify review items). Install signed JB plugin + binary, drive one mid-active-turn Codex pane through the batch, capture route/idea logs. Blocked on live IntelliJ/Codex panes.
-8. [ ] [#automated-completion-detection] #agent-doc-bug enhancement: detect item completion from logs/state (ops.log proofs, capture/commit records) so the binary auto-reaps satisfied gated items instead of parking work in agent:review for a human. Operator wants automated review to stop review-item accumulation.
+8. [ ] [#automated-completion-detection] #agent-doc-bug enhancement: detect item completion from logs/state and retrieval (ops.log proofs, capture/commit records, agent:done archives, semantic match to queued free-text) so the binary auto-reaps satisfied gated/review/queue mirrors and strikes completed opportunistic queue items instead of parking work in agent:review or leaving stale queue heads. Operator wants automated review/queue completion to stop accumulation; example stale queue mirror: completed #editor-nested-bold-italic-rendering / JB+VSCode bold italic rendering work.
 9. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 10. [ ] [#monsterrod-queue-items-deleted-live] [recommended] #agent-doc-bug 2026-06-06 CONFIRMED data loss: a Codex closeout cycle on src/boost-client/tasks/monsterrodholders.md net-removed user-added queue items. Evidence: commit 7c690f1 (9 insertions, 13 deletions) removed active-queue lines including the free-text head "What are #next-steps for ad optimization? Today is 2026-06-06." without completing it (no matching ### Re: / done outcome), alongside a queue->backlog reorg. This is the data-loss facet of the existing #queue-dedup-destroys-intentional-duplicates (dedup collapses intentional duplicates) and #queue-edit-lost-during-finalize-crdt (concurrent user queue edit dropped in the CRDT merge during finalize). Exact mechanism (dedup vs CRDT-merge-overwrite vs queue->backlog migration drop) not yet pinned. Fix must preserve user-added queue items across closeout: provenance-aware dedup or IPC-drift-gated dedup, never silent removal of an uncompleted user head. Plans: tasks/agent-doc/plan-queue-dedup-destroys-intentional-duplicates.md; relates review #queue-edit-lost-during-finalize-crdt, #queue-user-edit-overwrite.
 11. [ ] [#clear-blocked-by-own-drafted-clear-command] #agent-doc-bug 2026-06-06: `agent-doc session clear <FILE>` is refused because the pane composer holds protected "drafted prompt input" whose tail IS the clear command itself (reason=drafted prompt input, current_command=agent-doc, tail="❯ agent-doc session clear ..."). The guard is self-defeating: the only drafted line blocking the clear is the clear command the operator just typed. Fix: exclude agent-doc control commands (session clear/interrupt-clear/stop) from the protected-prompt set so clear proceeds; keep protecting genuine drafted prompt content. Immediate recovery exists: `agent-doc session interrupt-clear <FILE>`. Plan: tasks/agent-doc/plan-session-clear-blocked-by-own-drafted-command.md

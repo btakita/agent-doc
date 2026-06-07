@@ -143,7 +143,7 @@ pub fn run(
             && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
         {
             let compacted_crdt = crate::crdt::compact(&crdt_state)?;
-            snapshot::save_crdt(file, &compacted_crdt)?;
+            snapshot::save_document_crdt(file, &compacted_crdt, &content)?;
             eprintln!(
                 "[compact] CRDT state compacted: {} → {} bytes",
                 crdt_state.len(),
@@ -335,7 +335,7 @@ fn apply_compacted_document(
 
     if refresh_crdt {
         let new_crdt = crate::crdt::CrdtDoc::from_text(compacted).encode_state();
-        snapshot::save_crdt(file, &new_crdt)?;
+        snapshot::save_document_crdt(file, &new_crdt, compacted)?;
         eprintln!("[compact] CRDT state refreshed from post-compact content");
     }
 
@@ -1965,7 +1965,7 @@ mod tests {
 
         // Create and save initial CRDT state
         let initial_crdt = crate::crdt::CrdtDoc::from_text(doc).encode_state();
-        snapshot::save_crdt(&file, &initial_crdt).unwrap();
+        snapshot::save_document_crdt(&file, &initial_crdt, doc).unwrap();
 
         // Capture pending before compact
         let components_before = component::parse(doc).unwrap();

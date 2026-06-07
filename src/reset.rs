@@ -84,7 +84,7 @@ pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()
 fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool) -> Result<()> {
     snapshot::save(file, content)?;
     let crdt = crate::crdt::CrdtDoc::from_text(content).encode_state();
-    snapshot::save_crdt(file, &crdt)?;
+    snapshot::save_document_crdt(file, &crdt, content)?;
     if save_baseline {
         save_baseline_from_current(file, content)?;
     }
@@ -129,6 +129,7 @@ mod tests {
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, updated);
+        assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
     }
 
     #[test]
@@ -173,6 +174,7 @@ mod tests {
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, current);
+        assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
         assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);
         assert_eq!(
             std::fs::read_to_string(&capture_path).unwrap(),

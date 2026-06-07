@@ -1464,7 +1464,7 @@ fn apply_template_response(
     write::guard_visible_write_idle(file, "direct_run_template")?;
     snapshot::save(file, &final_content)?;
     if let Some(state) = crdt_state {
-        snapshot::save_crdt(file, &state)?;
+        snapshot::save_document_crdt(file, &state, &final_content)?;
     }
     atomic_write(file, &final_content)?;
     drop(doc_lock);

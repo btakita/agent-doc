@@ -469,7 +469,7 @@ fn stream_loop(
         };
         snapshot::save(file, &content_ours)?;
         let doc = crdt::CrdtDoc::from_text(&content_ours);
-        snapshot::save_crdt(file, &doc.encode_state())?;
+        snapshot::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
 
         repair::clear_pending(file)?;
     }

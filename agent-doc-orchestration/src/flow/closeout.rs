@@ -766,7 +766,7 @@ fn apply_metadata_drift_recovery(
 fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
     crate::snapshot::save(file, content)?;
     let crdt = crate::crdt::CrdtDoc::from_text(content).encode_state();
-    crate::snapshot::save_crdt(file, &crdt)?;
+    crate::snapshot::save_document_crdt(file, &crdt, content)?;
     Ok(())
 }
 

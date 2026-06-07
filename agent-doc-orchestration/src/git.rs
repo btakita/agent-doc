@@ -2637,7 +2637,7 @@ fn refresh_live_closeout_sidecars(
 ) -> Result<Option<bool>> {
     if document_uses_crdt(committed_doc) {
         let crdt = crate::crdt::CrdtDoc::from_text(committed_doc).encode_state();
-        crate::snapshot::save_crdt(file, &crdt)?;
+        crate::snapshot::save_document_crdt(file, &crdt, committed_doc)?;
     }
 
     if !signal_editor_refresh {

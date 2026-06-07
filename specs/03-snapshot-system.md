@@ -24,7 +24,7 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
 ## Auto-Migration on Rename
 
 When a document is renamed/moved, its path hash changes, orphaning all `.agent-doc/` state
-files. `ensure_initialized` (called from `start`, `preflight`, `claim`, and `sync`) detects
+files, including both CRDT sidecars (`<hash>.yrs` and `<hash>.overlay.yrs`). `ensure_initialized` (called from `start`, `preflight`, `claim`, and `sync`) detects
 this automatically:
 
 1. Document has a `agent_doc_session` UUID in frontmatter
@@ -32,8 +32,7 @@ this automatically:
 3. Scan `.agent-doc/snapshots/*.md` for a snapshot whose frontmatter has the same session UUID
 
 If an orphaned snapshot is found, all state files are migrated from the old hash to the new
-hash: snapshots, baselines, locks, pending, CRDT, and pre-response. The sessions registry is
-also updated.
+hash: snapshots, baselines, locks, pending, legacy CRDT, overlay CRDT, and pre-response. The sessions registry is also updated.
 
 Explicit preflight baseline paths are part of the active closeout contract. If a document
 is moved after preflight and rename migration moves `.agent-doc/baselines/<old-hash>.md`

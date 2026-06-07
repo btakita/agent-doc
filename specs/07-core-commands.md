@@ -99,9 +99,9 @@ Two modes:
 
 ## reset
 
-`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot/CRDT state for the document. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds both sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
+`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot plus CRDT state for the document, including both `.yrs` and `.overlay.yrs` sidecars. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds snapshot, legacy CRDT, and overlay CRDT sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
 
-`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and capture history untouched.
+`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, legacy CRDT state, overlay CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and capture history untouched.
 
 ## clean
 
@@ -203,7 +203,7 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 `agent-doc rename <OLD_PATH> <NEW_PATH>`
 
-- Migrates hash-keyed state files such as snapshots, baselines, locks, pending state, CRDT state, and pre-response artifacts to the new path hash.
+- Migrates hash-keyed state files such as snapshots, baselines, locks, pending state, legacy CRDT state, overlay CRDT state, and pre-response artifacts to the new path hash.
 - Auto-migration through `ensure_initialized` still handles the common rename path; `rename` remains the explicit fallback.
 
 ## watch

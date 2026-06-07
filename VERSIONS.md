@@ -6,6 +6,24 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Runtime snapshots persist the structured markdown-overlay CRDT
+  (`#md-ast-document-model`).** Template/CRDT write, stream, IPC fallback,
+  socket-ack repair, compact, commit-refresh, reset/rebuild, and closeout
+  recovery paths now save a structured `.agent-doc/crdt/<hash>.overlay.yrs`
+  sidecar from the same markdown snapshot as the legacy text `.yrs` merge
+  state. The legacy state remains the current merge engine base, while the
+  overlay state gives node-keyed component operations an authoritative runtime
+  document model. Tests
+  `document_crdt_save_persists_legacy_and_overlay_state` and
+  `ensure_initialized_migrates_after_move_with_existing_session`.
+
+- **Preflight queue dedup is node-keyed, not text-keyed
+  (`#md-ast-document-model`).** The active queue cleanup pass now delegates
+  duplicate cleanup to the markdown-AST mutation layer and only removes duplicate
+  durable queue node keys. Repeated `do [#id]` or free-text prompts remain
+  executable queue intent instead of being collapsed by raw prompt text. Test
+  `preflight_preserves_intentional_duplicate_tracked_queue_prompt`.
+
 - **Icebox queue sync no longer auto-promotes parked work.** `agent:icebox`
   may still be sorted by priority and individual icebox items can still opt into
   queueing with per-item enqueue markers, but a component-level `queue`

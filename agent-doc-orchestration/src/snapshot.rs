@@ -9,7 +9,10 @@
 //!   Falls back to a relative path when no project root is found.
 //! - `lock_path_for(doc)`: compute advisory lock path `<project_root>/.agent-doc/locks/<hash>.lock`.
 //! - `pending_path_for(doc)`: compute pending response path `<project_root>/.agent-doc/pending/<hash>.md`.
-//! - `crdt_path_for(doc)`: compute CRDT state path `<project_root>/.agent-doc/crdt/<hash>.yrs`.
+//! - `crdt_path_for(doc)`: compute legacy text CRDT state path
+//!   `<project_root>/.agent-doc/crdt/<hash>.yrs`.
+//! - `overlay_crdt_path_for(doc)`: compute structured markdown-overlay CRDT
+//!   state path `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
 //! - `pre_response_path_for(doc)`: compute pre-response snapshot path
 //!   `<project_root>/.agent-doc/pre-response/<hash>.md`.
 //! - `SnapshotLock::acquire(doc)`: acquire an exclusive advisory flock on the snapshot lock
@@ -25,20 +28,25 @@
 //! - `load_pre_response(doc)`: return pre-response snapshot content or `None`.
 //! - `delete_pre_response(doc)`: remove pre-response snapshot if present.
 //! - `load_crdt(doc)`: acquire CRDT advisory lock, return CRDT state bytes or `None`.
-//! - `save_crdt(doc, state)`: acquire CRDT advisory lock, atomically write state bytes.
+//! - `save_crdt(doc, state)`: acquire CRDT advisory lock, atomically write legacy text state bytes.
+//! - `save_document_crdt(doc, state, markdown)`: persist both the legacy text
+//!   state and the structured markdown-overlay state derived from the same
+//!   runtime markdown snapshot.
 //! - `delete_crdt(doc)`: acquire CRDT advisory lock, remove CRDT state file if present.
 //!
 //! ## Agentic Contracts
 //! - All writes (snapshot, pre-response, CRDT) are atomic: written to a temp file in the
 //!   same directory then renamed, ensuring no partial reads under concurrent access.
-//! - `load`, `save`, `delete`, `load_crdt`, `save_crdt`, `delete_crdt` are all
-//!   flock-protected — safe to call from concurrent processes on the same document.
+//! - `load`, `save`, `delete`, `load_crdt`, `save_crdt`, `save_document_crdt`,
+//!   and `delete_crdt` are all flock-protected — safe to call from concurrent
+//!   processes on the same document.
 //! - `resolve` prefers the snapshot file unconditionally when it exists. Git is only used
 //!   as a recovery fallback. This prevents false baselines after a step-0b commit.
 //! - `doc_hash` is deterministic and stable: same canonical path → same hash across runs.
-//! - `path_for`, `lock_path_for`, `pending_path_for`, `crdt_path_for`, and
-//!   `pre_response_path_for` all use the same `doc_hash`, so files for the same document
-//!   always colocate under the same project root `.agent-doc/` tree.
+//! - `path_for`, `lock_path_for`, `pending_path_for`, `crdt_path_for`,
+//!   `overlay_crdt_path_for`, and `pre_response_path_for` all use the same
+//!   `doc_hash`, so files for the same document always colocate under the same
+//!   project root `.agent-doc/` tree.
 //! - `delete` and `delete_crdt` are idempotent: calling them on an absent file is not an error.
 //! - Pre-response snapshots are not flock-protected (single-writer assumption: only the
 //!   active write path saves them).
@@ -376,6 +384,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         ("locks", "lock"),
         ("pending", "md"),
         ("crdt", "yrs"),
+        ("crdt", "overlay.yrs"),
         ("pre-response", "md"),
     ];
 
@@ -658,12 +667,24 @@ pub fn delete_pre_response(doc: &Path) -> Result<()> {
 // CRDT state persistence (for stream mode)
 // ---------------------------------------------------------------------------
 
-/// Compute the CRDT state file path for a given document.
+/// Compute the legacy text CRDT state file path for a given document.
 /// Returns `<project_root>/.agent-doc/crdt/<hash>.yrs`.
 /// Falls back to doc's parent directory if no project root found.
 pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
     let hash = doc_hash(doc)?;
     let filename = format!("{}.yrs", hash);
+    crdt_path_for_filename(doc, filename)
+}
+
+/// Compute the structured markdown-overlay CRDT state file path for a document.
+/// Returns `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
+pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let filename = format!("{}.overlay.yrs", hash);
+    crdt_path_for_filename(doc, filename)
+}
+
+fn crdt_path_for_filename(doc: &Path, filename: String) -> Result<PathBuf> {
     let canonical = doc.canonicalize()?;
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -678,19 +699,51 @@ pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
         .with_context(|| format!("failed to read CRDT state {}", path.display()))
 }
 
+/// Load structured markdown-overlay CRDT state bytes for a document (if any).
+pub fn load_overlay_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
+    let path = overlay_crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    crate::fs_util::read_optional_bytes(&path)
+        .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))
+}
+
 /// Save CRDT state bytes for a document.
 pub fn save_crdt(doc: &Path, state: &[u8]) -> Result<()> {
     let path = crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    write_crdt_state(&path, state)
+}
+
+/// Save structured markdown-overlay CRDT state bytes for a document.
+pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
+    let path = overlay_crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    write_crdt_state(&path, state)
+}
+
+/// Persist both CRDT runtime states for the same markdown snapshot.
+///
+/// The legacy text CRDT remains the merge engine's base state. The overlay CRDT
+/// is the structured document model sidecar used by node-keyed queue, backlog,
+/// exchange, and editor-integration operations.
+pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
+    save_crdt(doc, legacy_state)?;
+    let overlay_state =
+        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(markdown).encode_state();
+    save_overlay_crdt(doc, &overlay_state)?;
+    Ok(())
+}
+
+fn write_crdt_state(path: &Path, state: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let _lock = acquire_crdt_lock(doc)?;
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
     std::io::Write::write_all(&mut tmp, state)
         .with_context(|| "failed to write CRDT state temp file")?;
-    tmp.persist(&path)
+    tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
     Ok(())
 }
@@ -698,10 +751,14 @@ pub fn save_crdt(doc: &Path, state: &[u8]) -> Result<()> {
 /// Delete CRDT state for a document.
 pub fn delete_crdt(doc: &Path) -> Result<()> {
     let path = crdt_path_for(doc)?;
-    if path.exists() {
+    let overlay_path = overlay_crdt_path_for(doc)?;
+    if path.exists() || overlay_path.exists() {
         let _lock = acquire_crdt_lock(doc)?;
         if path.exists() {
             std::fs::remove_file(&path)?;
+        }
+        if overlay_path.exists() {
+            std::fs::remove_file(&overlay_path)?;
         }
     }
     Ok(())
@@ -968,12 +1025,57 @@ mod tests {
     }
 
     #[test]
+    fn overlay_crdt_path_has_correct_extension() {
+        let (_dir, doc) = setup();
+        let p = overlay_crdt_path_for(&doc).unwrap();
+        assert!(p.to_string_lossy().contains(".agent-doc/crdt/"));
+        assert!(p.to_string_lossy().ends_with(".overlay.yrs"));
+    }
+
+    #[test]
     fn crdt_save_and_load_roundtrip() {
         let (_dir, doc) = setup();
         let state = vec![1u8, 2, 3, 4, 5];
         save_crdt(&doc, &state).unwrap();
         let loaded = load_crdt(&doc).unwrap();
         assert_eq!(loaded, Some(state));
+    }
+
+    #[test]
+    fn overlay_crdt_save_and_load_roundtrip() {
+        let (_dir, doc) = setup();
+        let state = vec![5u8, 4, 3, 2, 1];
+        save_overlay_crdt(&doc, &state).unwrap();
+        let loaded = load_overlay_crdt(&doc).unwrap();
+        assert_eq!(loaded, Some(state));
+    }
+
+    #[test]
+    fn document_crdt_save_persists_legacy_and_overlay_state() {
+        let (_dir, doc) = setup();
+        let markdown = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#first]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let legacy = crate::crdt::CrdtDoc::from_text(markdown).encode_state();
+
+        save_document_crdt(&doc, &legacy, markdown).unwrap();
+
+        let loaded_legacy = load_crdt(&doc).unwrap().unwrap();
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&loaded_legacy)
+                .unwrap()
+                .to_text(),
+            markdown
+        );
+        let loaded_overlay = load_overlay_crdt(&doc).unwrap().unwrap();
+        let overlay =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&loaded_overlay).unwrap();
+        assert_eq!(overlay.to_markdown().unwrap(), markdown);
+        let components = overlay.to_components().unwrap();
+        assert!(components.iter().any(|component| component.name == "queue"));
     }
 
     #[test]
@@ -987,9 +1089,12 @@ mod tests {
     fn crdt_delete_removes_file() {
         let (_dir, doc) = setup();
         save_crdt(&doc, &[1, 2, 3]).unwrap();
+        save_overlay_crdt(&doc, &[4, 5, 6]).unwrap();
         assert!(load_crdt(&doc).unwrap().is_some());
+        assert!(load_overlay_crdt(&doc).unwrap().is_some());
         delete_crdt(&doc).unwrap();
         assert!(load_crdt(&doc).unwrap().is_none());
+        assert!(load_overlay_crdt(&doc).unwrap().is_none());
     }
 
     #[test]
@@ -1304,6 +1409,11 @@ mod tests {
         );
         fs::write(snap_dir.join(format!("{}.md", old_hash)), &old_snap).unwrap();
         fs::write(crdt_dir.join(format!("{}.yrs", old_hash)), b"crdt-state").unwrap();
+        fs::write(
+            crdt_dir.join(format!("{}.overlay.yrs", old_hash)),
+            b"overlay-crdt-state",
+        )
+        .unwrap();
 
         // Move the file (simulates JB plugin respawn after rename)
         let new_doc = dir.path().join("moved-doc.md");
@@ -1322,6 +1432,8 @@ mod tests {
         // CRDT state migrated to new hash
         assert!(crdt_dir.join(format!("{}.yrs", new_hash)).exists());
         assert!(!crdt_dir.join(format!("{}.yrs", old_hash)).exists());
+        assert!(crdt_dir.join(format!("{}.overlay.yrs", new_hash)).exists());
+        assert!(!crdt_dir.join(format!("{}.overlay.yrs", old_hash)).exists());
     }
 
     /// When `start` calls `ensure_initialized` on a file with no prior state

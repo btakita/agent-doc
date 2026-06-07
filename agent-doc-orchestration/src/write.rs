@@ -8000,7 +8000,9 @@ pub fn run_stream(
                     e
                 );
             }
-            if let Err(e) = snapshot::save_crdt(file, &snapshot_crdt_state) {
+            if let Err(e) =
+                snapshot::save_document_crdt(file, &snapshot_crdt_state, snapshot_content)
+            {
                 eprintln!(
                     "[write] WARNING: CRDT state save before exit(75) failed: {}",
                     e
@@ -8320,7 +8322,7 @@ pub fn run_stream(
     );
     guard_visible_write_idle_and_current(file, "run_stream", &content_current)?;
     snapshot::save(file, snapshot_content)?;
-    snapshot::save_crdt(file, &snapshot_crdt_state)?;
+    snapshot::save_document_crdt(file, &snapshot_crdt_state, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
     crate::ops_log::log_cycle(
@@ -8584,7 +8586,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &unmatched,
             );
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
-            snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+            snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
             drop(doc_lock);
             repair::clear_pending(file)?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
@@ -8722,7 +8724,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     guard_visible_write_idle_and_current(file, "run_ipc_timeout_fallback", &content_current)?;
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
-    snapshot::save_crdt(file, &crdt_state)?;
+    snapshot::save_document_crdt(file, &crdt_state, &final_content)?;
     drop(doc_lock);
     repair::clear_pending(file)?;
     eprintln!(
@@ -9797,7 +9799,11 @@ fn persist_already_applied_socket_content_ours_snapshot(
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     snapshot::save(file, &repair_decision.snapshot_content)?;
     let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-    snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+    snapshot::save_document_crdt(
+        file,
+        &crdt_doc.encode_state(),
+        &repair_decision.snapshot_content,
+    )?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -11081,7 +11087,11 @@ pub fn try_ipc(
                         );
                         let crdt_doc =
                             crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-                        if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
+                        if let Err(e) = snapshot::save_document_crdt(
+                            file,
+                            &crdt_doc.encode_state(),
+                            &repair_decision.snapshot_content,
+                        ) {
                             eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                         }
                     }
@@ -12191,7 +12201,11 @@ fn write_ipc_and_poll(
                     ),
                 );
                 let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-                if let Err(e) = snapshot::save_crdt(doc_file, &crdt_doc.encode_state()) {
+                if let Err(e) = snapshot::save_document_crdt(
+                    doc_file,
+                    &crdt_doc.encode_state(),
+                    &repair_decision.snapshot_content,
+                ) {
                     eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                 }
                 eprintln!("[write] IPC patch consumed by plugin — snapshot updated");

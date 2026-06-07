@@ -3456,6 +3456,26 @@ fn collect_after_deps(
     deps
 }
 
+fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
+    let before_nodes =
+        agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+            anyhow::anyhow!("queue maintenance: failed to parse queue node keys: {err}")
+        })?;
+    let updated =
+        agent_doc_markdown_ast::mutations::dedup_node_keys(content, "queue").map_err(|err| {
+            anyhow::anyhow!("queue maintenance: failed to dedup queue node keys: {err}")
+        })?;
+    if updated == content {
+        return Ok(None);
+    }
+    let after_nodes =
+        agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue").map_err(|err| {
+            anyhow::anyhow!("queue maintenance: failed to parse deduped queue node keys: {err}")
+        })?;
+    let dropped = before_nodes.len().saturating_sub(after_nodes.len());
+    Ok(Some((updated, dropped)))
+}
+
 fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -3709,21 +3729,20 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     }
     let snapshot_was_active = snapshot_proves_queue_was_active(file);
 
-    // Collapse duplicate `do [#id]` prompts before any other maintenance.
-    // Those duplicates are the known `#adoc-queue-ipc-drift` pattern from
-    // IPC-buffer/snapshot replay; free-text duplicate prompts are preserved as
-    // intentional queue intent.
-    if let Some(deduped) = crate::queue::dedup_live_prompts(&activation.entries_after) {
-        let dropped = activation.entries_after.len() - deduped.len();
-        let new_body = crate::queue::render(&deduped);
-        current_content = {
-            let comps = crate::component::parse(&current_content)?;
-            let q = comps.iter().find(|c| c.name == "queue").unwrap();
-            q.replace_content(&current_content, &new_body)
-        };
-        activation.entries_after = deduped;
+    // Collapse duplicated queue nodes by durable AST node key, never by prompt
+    // text. This keeps intentional repeated `do [#id]` prompts executable while
+    // preserving a structural cleanup point for true duplicate node-key replay
+    // residue from IPC/snapshot drift.
+    if let Some((deduped_content, dropped)) = dedup_queue_nodes_by_key(&current_content)? {
+        current_content = deduped_content;
+        let comps = crate::component::parse(&current_content)?;
+        if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+            let body = &current_content[q.open_end..q.close_start];
+            activation.entries_after = crate::queue::parse(body)
+                .context("queue maintenance: failed to parse AST-deduped queue")?;
+        }
         mutated = true;
-        eprintln!("[preflight] queue: collapsed {dropped} duplicate live prompt(s)");
+        eprintln!("[preflight] queue: collapsed {dropped} duplicate queue node-key(s)");
     }
 
     // Consume start fence if needed
@@ -6957,10 +6976,11 @@ mod tests {
     }
 
     #[test]
-    fn preflight_collapses_duplicate_live_queue_prompt() {
-        // #adoc-queue-ipc-drift: a merge-duplicated live head must converge to a
-        // single prompt and persist deduped, so the drift does not grow on each
-        // preflight.
+    fn preflight_preserves_intentional_duplicate_tracked_queue_prompt() {
+        // #queue-dedup-destroys-intentional-duplicates / #md-ast-document-model:
+        // duplicate `do [#id]` text can be intentional user queue intent. Preflight
+        // must not collapse it by raw prompt/id matching; only duplicate AST node
+        // keys are eligible for cleanup.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -6989,14 +7009,16 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
-            1,
-            "duplicate live queue prompt must collapse to one:\n{updated}"
+            2,
+            "duplicate tracked prompts must remain executable queue intent:\n{updated}"
         );
-        // The remaining single live prompt is still an executable queue head.
         assert_eq!(
             state.queue_prompts,
-            vec!["do [#adoc-orch-shim-cleanup]".to_string()],
-            "deduped queue exposes exactly one live prompt: {state:?}"
+            vec![
+                "do [#adoc-orch-shim-cleanup]".to_string(),
+                "do [#adoc-orch-shim-cleanup]".to_string()
+            ],
+            "duplicate tracked prompts should remain queued: {state:?}"
         );
         // Re-running maintenance on the converged doc is a no-op (stable).
         let before = std::fs::read_to_string(&doc).unwrap();

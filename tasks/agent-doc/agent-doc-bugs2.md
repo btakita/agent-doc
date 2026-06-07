@@ -245,12 +245,27 @@ I also added a dedicated follow-up backlog item for that pending-mutation-loss b
 
 Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`.
 Verification: backlog state was checked before closeout and was empty; this response uses binary-owned pending mutations so the items are materialized by the closeout path, not by manual component editing.
-<!-- agent:boundary:7181d93d -->
-<!-- agent:boundary:1222e0a1 -->
-<!-- agent:boundary:841c7002 -->
-<!-- agent:boundary:0754f40a -->
-<!-- agent:boundary:0b05d66d -->
-<!-- agent:boundary:794b24d2 -->
+
+### Re: missing #spcp backlog capture closeout reconciliation — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do #spcp-contract
+
+
+> **Queue prompt:**
+>
+> "#next-steps captured in backlog as `#spcp-contract`, `#spcp-store`, `#spcp-cache`, `#spcp-dispatch`, `#spcp-migrate`, and `#spcp-tests`": not in the backlog yet. Please add them. Is the non-add an #agent-doc-bug?
+
+This is a closeout reconciliation for the response immediately above. The six `#spcp-*` backlog items are present now, and `#adoc-pending-retry-loss` records the `#agent-doc-bug` follow-up for the failed pending mutation replay.
+
+The earlier response write landed, but queue consumption stopped on snapshot drift, so the queue item stayed live even though the exchange and backlog already contained the answer. This cycle closes that stale head without creating any additional architecture work.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`.
+Verification: checked the queue/backlog region and confirmed the six `#spcp-*` items plus `#adoc-pending-retry-loss` are present before this reconciliation closeout.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:c6ff0598 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -260,7 +275,7 @@ Verification: backlog state was checked before closeout and was empty; this resp
 - ~~"The stale lazily diagnostic comes from handle_attach_pane projecting before sessions.json is updated": How can we make updating sessions.json faster considering there is a lock? Should we have the controller cache the sessions data using lazily-rs with a background WAL style durable record writing into sessions.json? The point is, session tracking should be very fast. It should not be blocked on a file lock. Is json the best format for the durable record? Would an alternative such as a sqlitedb to consolidate all durable state be a better choice? Can we make all durable writes a background operation and keep the coordination state in memory? A fast in-memory state (using lazily-rs) seems like it would make consolidating into a single sqlitedb for durable records practical. Sqlite can handle the WAL logic while we focus on the write-through caching using lazily-rs.~~
 - ~~agent-doc monsterrodholders.md is still not writing the queue task response into the `agent:exchange`. Why is this still happening? Make the correct behavior of writing each completed task's response into `agent:exchange` provably reliable. Do we need to simulate Codex harness behavior in the Simworld tests? Use the monsterrodholders.md sessions as a real-world reproduction.~~
 - ~~Please create a plan and #next-steps for all your architecture recommendations in "single-process actor control plane" and "fast session state and durable projections".~~
-- :round_pushpin: do #spcp-contract
+- ~~:round_pushpin: do #spcp-contract~~
 - agent-doc should be able to prioritize tasks before or interspersed within a group of `:round_pushpin:` annotatated tasks. Use auto-dag to figure out priority.
 - :round_pushpin: do #spcp-store
 - :round_pushpin: do #spcp-cache

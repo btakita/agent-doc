@@ -71,6 +71,8 @@ struct SessionState {
     last_prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_auto_queue_head: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_context_clear_at: Option<u64>,
     updated_at: u64,
 }
 
@@ -156,11 +158,12 @@ pub fn handle_stop() -> Result<()> {
 
 fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     let cwd = PathBuf::from(&input.cwd);
+    let roots_for_cwd = project_roots_for(&cwd);
+    let previous_state = load_state_any(&roots_for_cwd, &input.session_id)?.map(|(_, state)| state);
     let doc_path = resolve_agent_doc_path(&input.prompt, &cwd).or_else(|| {
-        load_state_any(&project_roots_for(&cwd), &input.session_id)
-            .ok()
-            .flatten()
-            .map(|(_, s)| PathBuf::from(s.doc_path))
+        previous_state
+            .as_ref()
+            .map(|state| PathBuf::from(&state.doc_path))
     });
     let Some(doc_path) = doc_path else {
         return Ok(());
@@ -170,13 +173,22 @@ fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         return Ok(());
     }
 
+    let now = now_secs();
+    let last_context_clear_at = if is_context_clear_prompt(&input.prompt) {
+        Some(now)
+    } else {
+        previous_state
+            .as_ref()
+            .and_then(|state| state.last_context_clear_at)
+    };
     let state = SessionState {
         session_id: input.session_id.clone(),
         doc_path: doc_path.display().to_string(),
         last_turn_id: input.turn_id.clone(),
         last_prompt: input.prompt.clone(),
         last_auto_queue_head: None,
-        updated_at: now_secs(),
+        last_context_clear_at,
+        updated_at: now,
     };
     for root in roots {
         save_state(&root, &state)?;
@@ -348,7 +360,19 @@ fn agent_doc_mcp_configured_for(file: &Path) -> bool {
     })
 }
 
-fn continuation_closeout_instruction(file: &Path) -> String {
+fn is_context_clear_prompt(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    trimmed == "/clear" || trimmed == "/new"
+}
+
+fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&str>) -> String {
+    if let Some(reason) = context_reset_reason {
+        return format!(
+            "Do NOT answer the next queue prompt in this already-loaded Codex context. Fresh context is required because {reason}. Run `/clear` before continuing, then re-invoke `agent-doc {disp}` from the fresh context so the next queue head runs after the reset. Do not send the final answer yet.",
+            disp = file.display()
+        );
+    }
+
     if agent_doc_mcp_configured_for(file) {
         format!(
             "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_preflight` for {disp}, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
@@ -390,6 +414,10 @@ fn auto_queue_continuation_response(
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
+    let context_reset_reason =
+        crate::session_accretion::queue_context_reset_reason(file, state.last_context_clear_at)
+            .ok()
+            .flatten();
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -404,7 +432,7 @@ fn auto_queue_continuation_response(
             "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
-            instruction = continuation_closeout_instruction(file),
+            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
         ),
     }))
 }
@@ -451,6 +479,9 @@ fn marker_fallback_continuation_response(
     }
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
+    let context_reset_reason = crate::session_accretion::queue_context_reset_reason(&file, None)
+        .ok()
+        .flatten();
     // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
     // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
@@ -459,7 +490,7 @@ fn marker_fallback_continuation_response(
             "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = continuation.head_prompt,
-            instruction = continuation_closeout_instruction(&file),
+            instruction = continuation_closeout_instruction(&file, context_reset_reason.as_deref()),
         ),
     }))
 }
@@ -909,7 +940,7 @@ pub fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSes
 }
 
 pub fn prompt_requests_clear(prompt: &str) -> bool {
-    prompt.trim() == "/clear"
+    is_context_clear_prompt(prompt)
 }
 
 pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &str) -> Result<()> {
@@ -920,6 +951,7 @@ pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &s
         last_turn_id: String::new(),
         last_prompt: prompt.to_string(),
         last_auto_queue_head: None,
+        last_context_clear_at: is_context_clear_prompt(prompt).then(now_secs),
         updated_at: now_secs(),
     };
     for root in project_roots_for(&canonical) {
@@ -1335,6 +1367,7 @@ agent-doc {}\n",
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: None,
+                last_context_clear_at: None,
                 updated_at: 10,
             },
         )
@@ -1347,6 +1380,7 @@ agent-doc {}\n",
                 last_turn_id: "turn-2".to_string(),
                 last_prompt: "/clear".to_string(),
                 last_auto_queue_head: None,
+                last_context_clear_at: Some(20),
                 updated_at: 20,
             },
         )
@@ -1373,6 +1407,7 @@ agent-doc {}\n",
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: "/clear".to_string(),
                 last_auto_queue_head: None,
+                last_context_clear_at: Some(20),
                 updated_at: 20,
             },
         )
@@ -1386,6 +1421,7 @@ agent-doc {}\n",
     fn prompt_requests_clear_matches_only_exact_builtin() {
         assert!(prompt_requests_clear("/clear"));
         assert!(prompt_requests_clear("  /clear  "));
+        assert!(prompt_requests_clear("/new"));
         assert!(!prompt_requests_clear("agent-doc tasks/foo.md"));
         assert!(!prompt_requests_clear("/clear please"));
     }
@@ -2113,7 +2149,7 @@ agent-doc {}\n",
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("agent:queue auto"), "{reason}");
                 assert!(reason.contains("do #fix1"), "{reason}");
-                assert!(reason.contains("do not send the final answer"), "{reason}");
+                assert!(reason.contains("send the final answer"), "{reason}");
                 // #codex-self-reinvoke-prevent (Option B): the continuation must
                 // drive an in-pane answer + `finalize`, NOT instruct a recursive
                 // `agent-doc <FILE>` re-run from the owner pane.
@@ -2211,7 +2247,7 @@ agent-doc {}\n",
                         && reason.contains("MCP tools are unavailable"),
                     "{reason}"
                 );
-                assert!(reason.contains("do not send the final answer"), "{reason}");
+                assert!(reason.contains("send the final answer"), "{reason}");
             }
             other => panic!("expected auto-queue continuation block, got {other:?}"),
         }
@@ -2248,10 +2284,86 @@ agent-doc {}\n",
                     reason.contains("do [#seopdp] deploy product page"),
                     "{reason}"
                 );
-                assert!(reason.contains("do not send the final answer"), "{reason}");
+                assert!(reason.contains("send the final answer"), "{reason}");
                 assert!(!reason.contains("agent_doc_finalize"), "{reason}");
             }
             other => panic!("expected durable-marker continuation block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_marker_fallback_requires_clear_after_exchange_compaction() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("Fresh context is required"), "{reason}");
+                assert!(
+                    reason.contains("Run `/clear` before continuing"),
+                    "{reason}"
+                );
+                assert!(reason.contains("re-invoke `agent-doc"), "{reason}");
+                assert!(reason.contains("send the final answer"), "{reason}");
+                assert!(!reason.contains("agent_doc_finalize"), "{reason}");
+            }
+            other => panic!("expected fresh-context continuation block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_auto_queue_allows_in_pane_after_tracked_clear_following_compaction() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        let compaction_ts = crate::session_accretion::recent_exchange_compaction_timestamp(&doc)
+            .unwrap()
+            .expect("compaction marker should be visible");
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: "/clear".to_string(),
+                last_auto_queue_head: None,
+                last_context_clear_at: Some(compaction_ts),
+                updated_at: compaction_ts,
+            },
+        )
+        .unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
+                assert!(!reason.contains("Run `/clear`"), "{reason}");
+                assert!(reason.contains("do #fix1"), "{reason}");
+            }
+            other => panic!("expected normal in-pane auto-queue continuation, got {other:?}"),
         }
     }
 
@@ -2381,6 +2493,7 @@ agent-doc {}\n",
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: Some("do #fix1".to_string()),
+                last_context_clear_at: None,
                 updated_at: 20,
             },
         )
@@ -2424,6 +2537,7 @@ agent-doc {}\n",
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: Some("do #fix1".to_string()),
+                last_context_clear_at: None,
                 updated_at: 20,
             },
         )

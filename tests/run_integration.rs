@@ -99,6 +99,40 @@ printf '{{"result":"<!-- patch:exchange -->\\n### Re: queue item %s — gpt-5\\n
     (script, counter)
 }
 
+fn write_arg_logging_queue_agent(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let script = root.join("mock-arg-logging-queue-agent.sh");
+    let counter = root.join("mock-arg-logging-queue-agent.count");
+    let args_log = root.join("mock-arg-logging-queue-agent.args");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> '{args_log}'
+cat >/dev/null
+count_file='{counter}'
+n=0
+if [ -f "$count_file" ]; then
+  n="$(cat "$count_file")"
+fi
+n=$((n + 1))
+printf '%s' "$n" > "$count_file"
+printf '{{"result":"<!-- patch:exchange -->\\n### Re: queue item %s — gpt-5\\n\\nImplemented and verified.\\n<!-- /patch:exchange -->\\n","session_id":"sess-%s"}}\n' "$n" "$n"
+"#,
+            args_log = args_log.display(),
+            counter = counter.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    (script, counter, args_log)
+}
+
 fn write_mock_streaming_agent(root: &Path) -> PathBuf {
     let script = root.join("mock-streaming-agent.sh");
     fs::write(
@@ -253,6 +287,16 @@ fn active_auto_queue_doc() -> String {
     "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
+fn active_large_auto_queue_doc_with_resume() -> String {
+    let exchange_lines = (0..170)
+        .map(|idx| format!("prior exchange line {idx}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nresume: old-session\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+    )
+}
+
 #[test]
 fn run_template_mode_writes_inside_exchange_and_commits() {
     let tmp = TempDir::new().unwrap();
@@ -391,6 +435,51 @@ fn run_auto_queue_continues_until_drained() {
     assert!(content.contains("> do #fix2"), "response echo:\n{content}");
     assert!(content.contains("> do #fix3"), "response echo:\n{content}");
     assert_eq!(fs::read_to_string(counter).unwrap(), "3");
+}
+
+#[test]
+fn run_auto_queue_starts_fresh_backend_session_after_accretion_threshold() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, active_large_auto_queue_doc_with_resume()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let (script, counter, args_log) = write_arg_logging_queue_agent(tmp.path());
+    let config_root = write_config(tmp.path(), &script);
+
+    let assert = agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(
+        stderr.contains("queue continuation will start a fresh agent session"),
+        "stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("[run] queue context reset: starting a fresh agent session"),
+        "stderr:\n{stderr}"
+    );
+
+    let args = fs::read_to_string(&args_log).unwrap();
+    let arg_lines: Vec<&str> = args.lines().collect();
+    assert_eq!(arg_lines.len(), 2, "args log:\n{args}");
+    assert!(
+        arg_lines[0].contains("--resume old-session"),
+        "first queue dispatch should resume the existing backend session: {args}"
+    );
+    assert!(
+        !arg_lines[1].contains("--resume"),
+        "second queue dispatch should not resume after context reset: {args}"
+    );
+    assert!(
+        arg_lines[1].contains("--fork-session"),
+        "fresh queue dispatch should fork a new backend session: {args}"
+    );
+    assert_eq!(fs::read_to_string(counter).unwrap(), "2");
 }
 
 fn queue_section_of(content: &str) -> String {

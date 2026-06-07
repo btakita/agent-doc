@@ -143,6 +143,19 @@ struct RunCycleOutcome {
     queue_consumption: Option<write::QueueConsumptionOutcome>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoQueueContinuation {
+    Stop,
+    Continue { force_fresh_agent_session: bool },
+}
+
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 pub fn run(
     file: &Path,
     branch: bool,
@@ -176,8 +189,11 @@ pub fn run_with_context(
 
     let mut create_branch = branch;
     let mut completed_queue_items = 0usize;
+    let mut force_fresh_agent_session = false;
+    let mut last_context_clear_at = None;
 
     loop {
+        let used_fresh_agent_session = force_fresh_agent_session;
         let outcome = run_once(
             file,
             create_branch,
@@ -187,8 +203,12 @@ pub fn run_with_context(
             no_git,
             config,
             run_context,
+            force_fresh_agent_session,
         )?;
         create_branch = false;
+        if used_fresh_agent_session {
+            last_context_clear_at = Some(current_epoch_secs());
+        }
 
         if !outcome.dispatched {
             return Ok(());
@@ -196,8 +216,17 @@ pub fn run_with_context(
         if let Some(queue_consumption) = outcome.queue_consumption.as_ref() {
             completed_queue_items += queue_consumption.consumed_count.max(1);
         }
-        if !should_continue_auto_queue(file, &outcome, completed_queue_items, no_git)? {
-            return Ok(());
+        match should_continue_auto_queue(
+            file,
+            &outcome,
+            completed_queue_items,
+            no_git,
+            last_context_clear_at,
+        )? {
+            AutoQueueContinuation::Stop => return Ok(()),
+            AutoQueueContinuation::Continue {
+                force_fresh_agent_session: fresh,
+            } => force_fresh_agent_session = fresh,
         }
     }
 }
@@ -292,6 +321,7 @@ fn run_once(
     no_git: bool,
     config: &Config,
     run_context: Option<&crate::graph::RunContext>,
+    force_fresh_agent_session: bool,
 ) -> Result<RunCycleOutcome> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -344,7 +374,15 @@ fn run_once(
         &owned_rc
     };
     let (fm, _body) = frontmatter::parse_for_file_with_context(&content_original, file, rc)?;
-    let run_mode = RunMode::from_frontmatter(&fm);
+    let mut prompt_fm = fm.clone();
+    if force_fresh_agent_session && prompt_fm.resume.is_some() {
+        eprintln!(
+            "[run] queue context reset: starting a fresh agent session for {}",
+            file.display()
+        );
+        prompt_fm.resume = None;
+    }
+    let run_mode = RunMode::from_frontmatter(&prompt_fm);
 
     // Resolve agent
     let agent_name = agent_name
@@ -372,7 +410,7 @@ fn run_once(
     let prompt = build_prompt(
         file,
         run_mode,
-        &fm,
+        &prompt_fm,
         &the_diff,
         &content_original,
         session_accretion.as_ref(),
@@ -511,7 +549,7 @@ fn run_once(
     }
 
     // Send to agent — use `resume` for agent conversation tracking
-    let fork = fm.resume.is_none();
+    let fork = prompt_fm.resume.is_none();
     let harness = agent_doc_core::model_tier::harness_key_for_agent_name(agent_name);
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
@@ -525,7 +563,7 @@ fn run_once(
         );
         backend.send(
             &prompt,
-            fm.resume.as_deref(),
+            prompt_fm.resume.as_deref(),
             fork,
             resolved_model.as_deref(),
         )
@@ -714,12 +752,13 @@ fn should_continue_auto_queue(
     outcome: &RunCycleOutcome,
     completed_queue_items: usize,
     no_git: bool,
-) -> Result<bool> {
+    last_context_clear_at: Option<u64>,
+) -> Result<AutoQueueContinuation> {
     if no_git || !outcome.queue_synthetic_diff {
-        return Ok(false);
+        return Ok(AutoQueueContinuation::Stop);
     }
     let Some(queue) = outcome.queue_consumption.as_ref() else {
-        return Ok(false);
+        return Ok(AutoQueueContinuation::Stop);
     };
     // `auto` is a start trigger only. Continuation is driven by the active queue
     // state: consumption only runs when `queue_active: true`, so an active
@@ -728,23 +767,47 @@ fn should_continue_auto_queue(
     // re-check below still halts on stop fence / time gate / head-modified /
     // inactive / empty.
     if queue.drained || queue.remaining == 0 {
-        return Ok(false);
+        return Ok(AutoQueueContinuation::Stop);
     }
 
     match active_queue_prompt_state(file)? {
         ActiveQueuePromptState::Ready { prompt } => {
+            let force_fresh_agent_session =
+                match crate::session_accretion::queue_context_reset_reason(
+                    file,
+                    last_context_clear_at,
+                ) {
+                    Ok(Some(reason)) => {
+                        eprintln!(
+                            "[queue] queue continuation will start a fresh agent session before next prompt: {}",
+                            reason
+                        );
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(err) => {
+                        eprintln!(
+                            "[queue] warning: failed to inspect queue context reset policy for {}: {}",
+                            file.display(),
+                            err
+                        );
+                        false
+                    }
+                };
             eprintln!(
                 "[queue] queue continuation: completed {} item(s); launching next prompt: {:?}",
                 completed_queue_items, prompt
             );
-            Ok(true)
+            Ok(AutoQueueContinuation::Continue {
+                force_fresh_agent_session,
+            })
         }
         ActiveQueuePromptState::StopFence { next_prompt } => {
             eprintln!(
                 "[queue] queue continuation stopped after {} completed item(s): stop_fence before next prompt {:?}",
                 completed_queue_items, next_prompt
             );
-            Ok(false)
+            Ok(AutoQueueContinuation::Stop)
         }
         ActiveQueuePromptState::TimeGate {
             start_at,
@@ -754,7 +817,7 @@ fn should_continue_auto_queue(
                 "[queue] queue continuation stopped after {} completed item(s): time_gate {} before next prompt {:?}",
                 completed_queue_items, start_at, next_prompt
             );
-            Ok(false)
+            Ok(AutoQueueContinuation::Stop)
         }
         ActiveQueuePromptState::ItemModified {
             snapshot_head,
@@ -764,21 +827,21 @@ fn should_continue_auto_queue(
                 "[queue] queue continuation stopped after {} completed item(s): item_modified snapshot_head={:?} document_head={:?}",
                 completed_queue_items, snapshot_head, document_head
             );
-            Ok(false)
+            Ok(AutoQueueContinuation::Stop)
         }
         ActiveQueuePromptState::Inactive => {
             eprintln!(
                 "[queue] queue continuation stopped after {} completed item(s): queue_inactive",
                 completed_queue_items
             );
-            Ok(false)
+            Ok(AutoQueueContinuation::Stop)
         }
         ActiveQueuePromptState::Empty => {
             eprintln!(
                 "[queue] queue continuation stopped after {} completed item(s): no_remaining_prompt",
                 completed_queue_items
             );
-            Ok(false)
+            Ok(AutoQueueContinuation::Stop)
         }
     }
 }

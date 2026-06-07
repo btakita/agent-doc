@@ -113,6 +113,44 @@ pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn recent_exchange_compaction_timestamp(file: &Path) -> Result<Option<u64>> {
+    recent_exchange_compaction_timestamp_at(file, current_epoch_secs())
+}
+
+fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Option<u64>> {
+    Ok(load_recent_exchange_compaction(file)?
+        .map(|marker| marker.timestamp)
+        .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS))
+}
+
+pub fn queue_context_reset_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    if let Some(compaction_ts) = recent_exchange_compaction_timestamp(file)?
+        && last_context_clear_at.unwrap_or(0) < compaction_ts
+    {
+        return Ok(Some(
+            "exchange was compacted after the last tracked context clear; compaction shrinks the document but not the already-loaded conversation"
+                .to_string(),
+        ));
+    }
+
+    let report = inspect(file)?;
+    if report.is_healthy() {
+        return Ok(None);
+    }
+
+    Ok(Some(format!(
+        "session accretion is {} (exchange_lines={}, response_sections={}, recent_committed_cycles={}, recent_noop_closeouts={})",
+        level_label(report.level),
+        report.exchange_lines,
+        report.response_sections,
+        report.recent_committed_cycles,
+        report.recent_noop_closeouts
+    )))
+}
+
 /// Compaction guidance line for an over-accreted exchange.
 ///
 /// Queue-aware (`#no-compact-prompt-during-queue-drain`): while an `agent:queue`
@@ -136,6 +174,14 @@ fn compaction_guidance(file: &Path, auto_compact_opt_in: bool, queue_active: boo
             "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
             file.display()
         )
+    }
+}
+
+fn level_label(level: SessionAccretionLevel) -> &'static str {
+    match level {
+        SessionAccretionLevel::Healthy => "healthy",
+        SessionAccretionLevel::Warn => "warn",
+        SessionAccretionLevel::Block => "block",
     }
 }
 
@@ -431,9 +477,7 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
         return Ok((0, 0));
     };
     let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
-    let recent_compaction_timestamp = load_recent_exchange_compaction(file)?
-        .map(|marker| marker.timestamp)
-        .filter(|timestamp| *timestamp >= window_start);
+    let recent_compaction_timestamp = recent_exchange_compaction_timestamp_at(file, now)?;
     let post_compaction_noop_grace_until = recent_compaction_timestamp
         .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS)
         .map(|timestamp| timestamp.saturating_add(POST_COMPACTION_NOOP_GRACE_SECS));
@@ -658,6 +702,48 @@ mod tests {
                 .any(|line| line.starts_with("Run `agent-doc compact")),
             "auto-compact must be off by default; should not emit imperative compact guidance without opt-in, got {:?}",
             report.guidance
+        );
+    }
+
+    #[test]
+    fn queue_context_reset_reason_warns_on_large_exchange() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir, doc) = setup_doc(&content);
+
+        let reason = queue_context_reset_reason(&doc, None)
+            .unwrap()
+            .expect("large exchange should require fresh queue context");
+
+        assert!(reason.contains("session accretion is warn"), "{reason}");
+        assert!(reason.contains("exchange_lines="), "{reason}");
+    }
+
+    #[test]
+    fn queue_context_reset_reason_requires_clear_after_exchange_compaction() {
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n";
+        let (_dir, doc) = setup_doc(content);
+        assert!(queue_context_reset_reason(&doc, None).unwrap().is_none());
+
+        record_recent_exchange_compaction(&doc).unwrap();
+        let reason = queue_context_reset_reason(&doc, None)
+            .unwrap()
+            .expect("recent compaction should require one fresh context");
+        assert!(reason.contains("exchange was compacted"), "{reason}");
+        assert!(reason.contains("already-loaded conversation"), "{reason}");
+
+        let compaction_ts = recent_exchange_compaction_timestamp(&doc)
+            .unwrap()
+            .expect("compaction timestamp should be recorded");
+        assert!(
+            queue_context_reset_reason(&doc, Some(compaction_ts))
+                .unwrap()
+                .is_none()
         );
     }
 

@@ -513,20 +513,38 @@ pub fn sync_backlog_into_queue(
 /// The marker is a markdown-emphasis wrap of the word `prioritized`, so it
 /// renders distinctly in the editor and is released by deleting it:
 ///
-/// - **Operator** pin (top tier) — markdown **strong** emphasis:
-///   `**prioritized**` / `__prioritized__`, or the terse `:pin:` shortcode.
+/// - **Operator** pin (top tier) — any of: markdown **strong** emphasis on
+///   `pin`/`prioritized` (`**pin**`, `__pin__`, `**prioritized**`,
+///   `__prioritized__`); the emoji shortcodes `:pin:` / `:pushpin:`; or the
+///   literal 📌 emoji.
 /// - **Agent** pin (middle tier, above unpinned, never above operator pins;
-///   `#queue-agent-vs-operator-pin-tier`) — markdown *emphasis* (italic):
-///   `*prioritized*` / `_prioritized_`, or the terse `_pin_` shortcode.
+///   `#queue-agent-vs-operator-pin-tier`) — any of: markdown *emphasis* (italic)
+///   on `pin`/`prioritized` (`*pin*`, `_pin_`, `*prioritized*`, `_prioritized_`);
+///   the `:round_pushpin:` shortcode; or the literal 📍 emoji.
 ///
-/// Both asterisk and underscore spellings are accepted (markdown treats them as
-/// the same emphasis), so toggling between them does not change the tier. The
-/// terse `:pin:` (operator) / `_pin_` (agent) shortcodes are accepted aliases.
-pub const PRIORITIZED_MARKERS: [&str; 3] = ["**prioritized**", "__prioritized__", ":pin:"];
-pub const AGENT_PRIORITIZED_MARKERS: [&str; 3] = ["*prioritized*", "_prioritized_", "_pin_"];
-/// Canonical single-spelling constants (terse shortcode form).
-pub const PRIORITIZED_MARKER: &str = ":pin:";
-pub const AGENT_PRIORITIZED_MARKER: &str = "_pin_";
+/// Strong emphasis / pushpin == operator; italic emphasis / round-pushpin ==
+/// agent. Both asterisk and underscore spellings are accepted (markdown treats
+/// them identically), so toggling spelling never changes the tier.
+pub const PRIORITIZED_MARKERS: [&str; 7] = [
+    "**prioritized**",
+    "__prioritized__",
+    "**pin**",
+    "__pin__",
+    ":pushpin:",
+    ":pin:",
+    "📌",
+];
+pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
+    "*prioritized*",
+    "_prioritized_",
+    "*pin*",
+    "_pin_",
+    ":round_pushpin:",
+    "📍",
+];
+/// Canonical single-spelling constants (emoji-shortcode form).
+pub const PRIORITIZED_MARKER: &str = ":pushpin:";
+pub const AGENT_PRIORITIZED_MARKER: &str = ":round_pushpin:";
 
 /// True when `text` carries an **operator** (strong-emphasis) pin marker at its
 /// head (after optional leading whitespace), in either spelling.
@@ -1076,14 +1094,21 @@ mod tests {
 
     #[test]
     fn pin_shortcode_aliases_resolve_to_tiers() {
-        // :pin: (operator) / _pin_ (agent) shortcodes alias the emphasis markers.
-        assert!(is_prioritized(":pin: do [#x]"));
-        assert!(is_agent_prioritized("_pin_ do [#x]"));
-        assert!(!is_agent_prioritized(":pin: do [#x]")); // shortcode operator pin is not agent
+        // Operator aliases: :pin:, :pushpin:, 📌, **pin**, __pin__.
+        for m in ["**prioritized**", "__prioritized__", "**pin**", "__pin__", ":pin:", ":pushpin:", "📌"] {
+            assert!(is_prioritized(&format!("{m} do [#x]")), "operator: {m}");
+            assert!(!is_agent_prioritized(&format!("{m} do [#x]")), "not agent: {m}");
+        }
+        // Agent aliases: _pin_, :round_pushpin:, 📍, *pin*, *prioritized*.
+        for m in ["*prioritized*", "_prioritized_", "*pin*", "_pin_", ":round_pushpin:", "📍"] {
+            assert!(is_agent_prioritized(&format!("{m} do [#x]")), "agent: {m}");
+            assert!(!is_prioritized(&format!("{m} do [#x]")), "not operator: {m}");
+        }
+        // Tier ordering with emoji shortcodes.
         let entries = parse(concat!(
             "- do [#a]\n",
-            "- _pin_ do [#b]\n",
-            "- :pin: do [#c]\n",
+            "- :round_pushpin: do [#b]\n",
+            "- :pushpin: do [#c]\n",
         ))
         .unwrap();
         let mut rank = std::collections::HashMap::new();
@@ -1091,7 +1116,7 @@ mod tests {
         let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
         assert_eq!(
             render(&sorted),
-            "- :pin: do [#c]\n- _pin_ do [#b]\n- do [#a]\n"
+            "- :pushpin: do [#c]\n- :round_pushpin: do [#b]\n- do [#a]\n"
         );
     }
 

@@ -14,9 +14,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: stop
-agent_doc_pipeline:
-  run_id: cycle-1780815606517
-  step: committed
 ---
 
 
@@ -61,7 +58,12 @@ Commits/pushes:
 - superproject: `fdcbcf208 chore: bump lazily-rs benchmarks`, pushed to `origin/main`.
 
 CI: latest lazily-rs `CI` run for `601071f` is in progress, so I did not wait on it. The superproject does not have a workflow named `CI`. I left unrelated dirty work alone, including the pre-existing `src/lazily-rs/AGENTS.md` change and other dirty superproject paths.
-<!-- agent:boundary:708bac3b -->
+❯ - superproject: `fdcbcf208 chore: bump lazily-rs benchmarks`, pushed to `origin/main`.
+❯ - `src/lazily-rs`: `601071f chore: refresh benchmark results`, pushed to `origin/main`.
+❯ - `tests/ipc.rs` covers serde round trips, sequential delta application/gap handling, permission-filtered snapshot/delta construction, and shared-blob references.
+❯ - `src/ipc.rs` exports the transport-neutral `Snapshot`, `Delta`, `DeltaOp`, `DeltaApplyStatus`, `IpcMessage`, `IpcSink`, and `IpcSource` surface behind `ipc = ["serde"]`.
+❯ - `SPEC.md` documents `lazily-ipc` snapshot/delta messages, monotonic epochs, gap-triggered resync, value-mirror vs mirror-lazy behavior, and permission filtering.
+<!-- agent:boundary:7418a5d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,7 +81,6 @@ CI: latest lazily-rs `CI` run for `601071f` is in progress, so I did not wait on
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [ ] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)

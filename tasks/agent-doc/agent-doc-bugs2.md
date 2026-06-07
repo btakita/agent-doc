@@ -159,7 +159,19 @@ Details:
 - Agent-doc CI run `27086116344` passed (`make check` and `make tmux-ci`).
 - Updated the parent `btakita/agent-loop` `src/agent-doc` gitlink to `6734be4a` in parent commit `709f80dc9` and pushed it.
 - Parent `btakita/agent-loop` still has no workflow named `CI`; its `Agent Doc` run `27086218882` failed immediately with `check` and `tmux-ci` jobs containing `steps: []`, matching the existing parent workflow failure pattern.
-<!-- agent:boundary:077413a4 -->
+
+### Re: :pushpin: Please investigate the monsterrodholders.md session. It is not behaving correctly. - gpt-5
+
+Re-checked the current monsterrodholders state.
+
+Findings:
+- `tasks/research/monsterrodholders.md` passes `agent-doc session-check` with `queue_continuation_required=false`.
+- `src/boost-client/tasks/monsterrodholders.md` now passes `agent-doc session-check` too. The latest recorded cycle is an abandoned `recursive_direct_invocation_blocked` preflight, and `session-check` explicitly treats that as terminal/accepted.
+- The Boost Client actor is not cycling now: session status shows one owner, Codex pane `%35`, generation 301, state `ready`; the live pane is idle and prompt-ready.
+- The latest session log event is `idle_queue_watch_stale_busy_reconciled`, which is the expected self-heal path after the earlier stale-busy queue-loop repair.
+
+No additional monsterrodholders document repair was needed in this pass.
+<!-- agent:boundary:93718551 -->
 <!-- /agent:exchange -->
 
 ## Queue

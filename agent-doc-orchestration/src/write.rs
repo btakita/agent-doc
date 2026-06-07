@@ -13750,11 +13750,15 @@ Old.
             "<!-- agent:queue auto -->\n",
             "- repeat me\n",
             "- repeat me\n",
+            "- repeat me\n",
             "<!-- /agent:queue -->\n",
         );
 
         let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, baseline);
-        assert_eq!(dropped, vec!["repeat me".to_string()]);
+        assert_eq!(
+            dropped,
+            vec!["repeat me".to_string(), "repeat me".to_string()]
+        );
     }
 
     #[test]

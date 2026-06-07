@@ -1,0 +1,11 @@
+[package]
+name = "agent-doc-markdown-ast"
+version = "0.34.0"
+edition = "2024"
+license = "MIT"
+description = "Structured markdown block AST for agent-doc session documents (tree-sitter-md based)"
+repository = "https://github.com/btakita/agent-doc"
+
+[dependencies]
+tree-sitter = "0.26"
+tree-sitter-md = "0.5"

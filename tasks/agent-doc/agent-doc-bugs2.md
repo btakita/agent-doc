@@ -98,12 +98,25 @@ Live-verify this follow-up in the next execution cycle: with a managed Codex pan
 
 
 Deferred submodule/superproject pointer push remains blocked on concurrent pointer divergence. Treat this as not yet runnable on this cycle and keep this follow-up item active for the next owning session once submodule checkout is reconciled.
-<!-- agent:boundary:2dd3f220 -->
+❯ Fix the error in Codex
+```
+• Stop hook (blocked)
+  feedback: agent-doc Stop hook found a durable `agent:queue auto` continuation for tasks/agent-doc/agent-doc-bugs2.md
+  with no tracked session state. The next queue prompt is "do [#test-submodule-worktree-git-identity]". Continue THIS
+  turn in-pane: answer that prompt in tasks/agent-doc/agent-doc-bugs2.md and persist with `agent-doc finalize tasks/
+  agent-doc/agent-doc-bugs2.md` (or `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`). Do NOT run `agent-
+  doc tasks/agent-doc/agent-doc-bugs2.md` from this pane — that re-invokes the owner pane and hits the recursive-
+  direct-invocation deadlock guard, and do not send the final answer yet.
+```
+### Re: do [#test-submodule-worktree-git-identity]
+
+Root cause confirmed and fixed at the test level. In `flow::closeout::tests::classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent` (`src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`), the submodule worktree commit now passes author identity inline (`-c user.email=...` and `-c user.name=...`) to the `git commit` inside `super/.git/modules/sub`, so CI runs without relying on global identity and avoid exit-128.
+<!-- agent:boundary:4e142142 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: do [#ipc-typing-duplication-family]~~
 - ~~:pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.~~
 - ~~do [#ipc-listener-dewedge-direct-disk]~~

@@ -60,7 +60,7 @@ A single catch-all MCP tool is tempting, but it would make the important lifecyc
 The useful consolidation is internal: one server, one JSON-RPC handler, shared argument parsing, and shared `CommandOptions` plumbing. That is already mostly what `src/agent-doc/src/mcp.rs` does. I would avoid adding a separate MCP tool for every CLI subcommand; if the MCP surface grows, group by lifecycle stage or add a deliberately named low-level escape hatch rather than replacing the safe lifecycle tools with one generic dispatcher.
 
 So: no broad single-tool collapse for the primary API. Keep a small, stable set of purpose-specific MCP tools, and consolidate code paths underneath them.
-<!-- agent:boundary:328ceb65 -->
+<!-- agent:boundary:08dd6466 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -96,9 +96,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED a45121b0: editor/IPC plugins now apply authoritative node_patches via shared Rust markdown-AST mutations, preserving unrelated live-buffer edits while skipping stale legacy component replacement for node-patched components. REMAINING: legacy text CRDT is still the merge base; realtime watcher convergence still needs the structured node-patch apply path. NEXT: #md-ast-realtime-watcher and #md-ast-crdt-merge-base. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-2. [ ] [#md-ast-realtime-watcher] #next-steps Finish #md-ast-document-model realtime watcher convergence for editor/IPC plugins against the structured node-patch document model. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-3. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-4. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
+2. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 <!-- /agent:backlog -->
 
 ## Review

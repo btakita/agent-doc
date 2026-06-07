@@ -515,7 +515,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // site, one guard function, one ops-log diagnostic, and one regression
         // test name for dirty companion source/test changes with overlapping
         // changed string literals after a partial manual commit.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 88,
+        // +2 (#lr-queue-patchback-miss): two regression test names for free-text
+        // queue-head provenance after binary consume without exchange history.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 90,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

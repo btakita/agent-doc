@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Free-text queue consumption now requires exchange history.** Session-check
+  no longer treats a sidecar response hash or binary consume marker as sufficient
+  proof that a preflight free-text queue head was answered. If the head is gone
+  from `agent:queue`, the committed `agent:exchange` must contain the response or
+  queue-prompt echo, otherwise `#lr-queue-patchback-miss` fails closed. Tests:
+  `free_text_queue_head_guard_fires_when_binary_consume_lacks_response` and
+  `free_text_queue_head_guard_passes_with_committed_response_echo`.
+
 - **Codex idle queue drain no longer reinvokes the owning pane.** The
   supervisor idle-queue watch now drains Codex `agent:queue auto` heads by
   injecting an in-owner-pane continuation instruction instead of the recursive

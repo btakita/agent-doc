@@ -2894,12 +2894,13 @@ fn check_queue_head_removal_guard(
     })
 }
 
-/// `#lr-queue-patchback-miss`: require committed-response / consume / deferral
+/// `#lr-queue-patchback-miss`: require committed-response / deferral
 /// proof for each free-text (non-`do [#id]`) queue head recorded at preflight.
 /// Free-text heads have no backlog id, so the guard checks that: (a) the head
 /// text is still present in the committed queue (deferral / not yet consumed),
-/// (b) a committed `### Re:` response exists that plausibly answers it, or
-/// (c) the cycle recorded binary consume proof. If none hold, fail closed.
+/// or (b) a committed `### Re:` response exists that plausibly answers it. A
+/// binary consume marker by itself is not proof: the answer must be visible in
+/// committed `agent:exchange` history, normally via the queue-prompt echo.
 fn check_free_text_queue_head_provenance(
     file: &Path,
     rc: &crate::graph::RunContext,
@@ -2915,9 +2916,6 @@ fn check_free_text_queue_head_provenance(
         return Ok(GuardResult::None);
     }
     if state.is_open() {
-        return Ok(GuardResult::None);
-    }
-    if state.capture_id.is_some() || state.response_sha256.is_some() {
         return Ok(GuardResult::None);
     }
     let content = rc.doc_content();
@@ -2947,13 +2945,6 @@ fn check_free_text_queue_head_provenance(
         if response_head_plausibly_answers(&content, head) {
             continue;
         }
-        if state
-            .dropped_queue_prompts
-            .iter()
-            .any(|d| d.trim().eq_ignore_ascii_case(head.trim()))
-        {
-            continue;
-        }
         unresolved.push(head.clone());
     }
     if unresolved.is_empty() {
@@ -2973,7 +2964,7 @@ fn check_free_text_queue_head_provenance(
         ),
     );
     let warn_line = format!(
-        "[session-check] warn: free-text agent:queue head(s) {heads_text} were seen at preflight but have no committed response, binary consume, or explicit deferral proof in the closeout — the prompt may have been silently lost"
+        "[session-check] warn: free-text agent:queue head(s) {heads_text} were seen at preflight but have no committed response/echo or explicit deferral proof in the closeout — the prompt may have been silently lost"
     );
     let repair = format!(
         "either respond to the unresolved head(s) and run `agent-doc finalize {}`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was intentional",
@@ -10065,6 +10056,91 @@ Body\n\
                 assert!(warnings.contains("free-text"), "got: {warnings}");
             }
         }
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_fires_when_binary_consume_lacks_response() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "monsterrodholders.md queue items that are completed lack exchange history";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nUnrelated closeout.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let without_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nUnrelated closeout.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, without_head).unwrap();
+        crate::snapshot::save(&doc, without_head).unwrap();
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &[head.to_string()]).unwrap();
+
+        let rc = crate::graph::RunContext::new(doc.clone());
+        rc.set_doc_content(without_head.to_string());
+        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("free-text"), "got: {message}");
+                assert!(message.contains("response/echo"), "got: {message}");
+            }
+            GuardResult::Warn(lines) => {
+                let message = lines.join("\n");
+                assert!(message.contains("free-text"), "got: {message}");
+                assert!(message.contains("response/echo"), "got: {message}");
+            }
+            GuardResult::None => {
+                panic!("binary consume marker alone must not prove a free-text head")
+            }
+        }
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_passes_with_committed_response_echo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "monsterrodholders.md queue items that are completed lack exchange history";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nUnrelated closeout.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let with_echo = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: queue closeout — gpt-5\n\n",
+                "> **Queue prompt:**\n>\n> {head}\n\n",
+                "The completed queue item now has durable exchange history.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        fs::write(&doc, &with_echo).unwrap();
+        crate::snapshot::save(&doc, &with_echo).unwrap();
+
+        let rc = crate::graph::RunContext::new(doc.clone());
+        rc.set_doc_content(with_echo);
+        assert!(
+            matches!(
+                check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "committed queue-prompt echo proves the consumed free-text head"
+        );
     }
 
     #[test]

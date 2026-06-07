@@ -57,6 +57,8 @@ fn classify_active_head(content: &str) -> Result<HeadKind> {
 /// the next auto-loop, producing duplicate-response churn. This gives a
 /// deterministic, non-heuristic way to drain those answered stragglers without a
 /// fuzzy head↔response matcher that could delete a genuinely unanswered prompt.
+/// Session-check still requires committed exchange proof for the struck
+/// free-text head, normally through the queue-prompt echo.
 ///
 /// Scoped to free-text heads: if a head in range is id-backed it bails with
 /// guidance to use `--done`, so it can never silently desync a head from its

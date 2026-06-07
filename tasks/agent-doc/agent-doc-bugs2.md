@@ -176,7 +176,24 @@ Findings:
 - The latest session log event is `idle_queue_watch_stale_busy_reconciled`, which is the expected self-heal path after the earlier stale-busy queue-loop repair.
 
 No additional monsterrodholders document repair was needed in this pass.
-<!-- agent:boundary:ea4404f4 -->
+
+### Re: :pushpin: Please fix the root cause of the lazily-rs session issues. - gpt-5
+
+Fixed the root causes behind the lazily-rs session failures.
+
+Root fixes shipped in `btakita/agent-doc`:
+- `62a92827` (`Preserve idle queue dispatch dedup`) stops stale-busy idle queue reconciliation from repeatedly re-dispatching the same queue head.
+- `bd1e6b88` (`Ignore exchange transcripts in pending shadow guard`) stops historical `agent:exchange` list items like `1. [#ipc1] ...` from being misclassified as live shadow backlog work.
+- `d4b2746f` (`Fix missing-response recovery without capture metadata`) fixes the later missing-response recovery path that kept the lazily cycle wedged after recovery responses existed.
+- `6734be4a` committed the remaining dirty `src/agent-doc` worktree state after `d4b2746f`; CI passed for this latest commit in run `27086116344`.
+
+Current lazily-rs state is also repaired:
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` passes with `queue_continuation_required=false`.
+- The lazily queue is empty/stopped, review is empty, and actionable backlog tasks exist for `#ipc2`, `#yxjw`, `#ipc3`, and `#vd5v`.
+- The parent `btakita/agent-loop` gitlink now points at `src/agent-doc` `6734be4a` via parent commit `709f80dc9`.
+
+Remaining caveat: parent `btakita/agent-loop` has no workflow named `CI`, and its `Agent Doc` workflow still fails immediately with empty `steps: []` jobs, so there is no parent test log to fix from this queue item.
+<!-- agent:boundary:2600be61 -->
 <!-- /agent:exchange -->
 
 ## Queue

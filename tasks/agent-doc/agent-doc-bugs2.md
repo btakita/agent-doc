@@ -35,8 +35,37 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 8 response topic(s): #ipc-listener-dewedge-direct-disk; do [#md-ast-document-model]; do [#jb-file-cache-conflict-syntax-loss]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e4dd030d -->
-do [#md-ast-document-model]. #spec-test-build-install-commit-push
+❯ do [#md-ast-document-model]. #spec-test-build-install-commit-push
+### Re: do [#md-ast-document-model] — gpt-5
+
+Shipped a partial implementation slice for `#md-ast-document-model`.
+
+What changed:
+- Runtime snapshot rebuild/write paths now persist a structured markdown-overlay CRDT sidecar at `.agent-doc/crdt/<hash>.overlay.yrs` beside the legacy text `.yrs` merge state.
+- Template/CRDT write, stream, IPC fallback, socket-ack repair, compact, commit-refresh, reset/rebuild, and closeout metadata-drift recovery all save the overlay from the same markdown snapshot used for the legacy state.
+- Rename migration and CRDT deletion now carry/remove the overlay sidecar with the legacy `.yrs` state.
+- Preflight queue maintenance now dedups only duplicate durable markdown-AST queue node keys, not repeated raw prompt text/id, so intentional duplicate `do [#id]` and free-text queue entries remain executable.
+- Specs and `VERSIONS.md` document the split between legacy merge state and the structured overlay runtime state.
+
+Commits and push:
+- `src/agent-doc`: `9df1244f fix: persist markdown ast runtime state`, pushed to `origin/main`.
+- Parent repo includes the updated `src/agent-doc` pointer in the current local commit stack; push/CI follow after this session response is persisted.
+
+Verification:
+- `cargo test -p agent-doc-orchestration document_crdt_save_persists_legacy_and_overlay_state -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration overlay_crdt -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration ensure_initialized_migrates_after_move_with_existing_session -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration preflight_preserves_intentional_duplicate_tracked_queue_prompt -- --nocapture` passed.
+- `cargo test -p agent-doc from_current_rebuilds_snapshot_and_crdt -- --nocapture` passed.
+- `cargo test -p agent-doc preserve_session_from_current_keeps_document_and_sidecars -- --nocapture` passed.
+- `src/agent-doc make check` passed via digest artifact `tart-2fac338388`.
+- `cargo install --path .` passed via digest artifact `tart-499edce964`.
+- Parent `make check` passed via digest artifact `tart-e93615fbf9`.
+- `src/agent-doc` GitHub Actions CI run `27088129850` passed for `9df1244f`.
+
+This is intentionally partial, not a full closeout of the umbrella item. Remaining work is captured in the reopened backlog text: legacy text CRDT is still the merge base, and editor/IPC plugins still need authoritative `node_patches` application plus realtime watcher convergence.
+
+<!-- agent:boundary:7e120966 -->
 <!-- /agent:exchange -->
 
 ## Queue

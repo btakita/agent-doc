@@ -30,69 +30,12 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-085009.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260607-091343.md`*
 
 Compacted content:
-- Archived 8 response topic(s): #ipc-listener-dewedge-direct-disk; do [#md-ast-document-model]; do [#jb-file-cache-conflict-syntax-loss]; 5 more
+- Archived 3 response topic(s): do [#md-ast-document-model]; closeout repair - gpt-5; do [#recursion-guard-wedge-escape] -- gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#md-ast-document-model]. #spec-test-build-install-commit-push
-### Re: do [#md-ast-document-model] — gpt-5
-
-> **Queue prompt:**
->
-> do [#jb-file-cache-conflict-syntax-loss]
-
-
-Shipped a partial implementation slice for `#md-ast-document-model`.
-
-What changed:
-- Runtime snapshot rebuild/write paths now persist a structured markdown-overlay CRDT sidecar at `.agent-doc/crdt/<hash>.overlay.yrs` beside the legacy text `.yrs` merge state.
-- Template/CRDT write, stream, IPC fallback, socket-ack repair, compact, commit-refresh, reset/rebuild, and closeout metadata-drift recovery all save the overlay from the same markdown snapshot used for the legacy state.
-- Rename migration and CRDT deletion now carry/remove the overlay sidecar with the legacy `.yrs` state.
-- Preflight queue maintenance now dedups only duplicate durable markdown-AST queue node keys, not repeated raw prompt text/id, so intentional duplicate `do [#id]` and free-text queue entries remain executable.
-- Specs and `VERSIONS.md` document the split between legacy merge state and the structured overlay runtime state.
-
-Commits and push:
-- `src/agent-doc`: `9df1244f fix: persist markdown ast runtime state`, pushed to `origin/main`.
-- Parent repo includes the updated `src/agent-doc` pointer in the current local commit stack; push/CI follow after this session response is persisted.
-
-Verification:
-- `cargo test -p agent-doc-orchestration document_crdt_save_persists_legacy_and_overlay_state -- --nocapture` passed.
-- `cargo test -p agent-doc-orchestration overlay_crdt -- --nocapture` passed.
-- `cargo test -p agent-doc-orchestration ensure_initialized_migrates_after_move_with_existing_session -- --nocapture` passed.
-- `cargo test -p agent-doc-orchestration preflight_preserves_intentional_duplicate_tracked_queue_prompt -- --nocapture` passed.
-- `cargo test -p agent-doc from_current_rebuilds_snapshot_and_crdt -- --nocapture` passed.
-- `cargo test -p agent-doc preserve_session_from_current_keeps_document_and_sidecars -- --nocapture` passed.
-- `src/agent-doc make check` passed via digest artifact `tart-2fac338388`.
-- `cargo install --path .` passed via digest artifact `tart-499edce964`.
-- Parent `make check` passed via digest artifact `tart-e93615fbf9`.
-- `src/agent-doc` GitHub Actions CI run `27088129850` passed for `9df1244f`.
-
-This is intentionally partial, not a full closeout of the umbrella item. Remaining work is captured in the reopened backlog text: legacy text CRDT is still the merge base, and editor/IPC plugins still need authoritative `node_patches` application plus realtime watcher convergence.
-### Re: closeout repair - gpt-5
-
-Repair note: the missing-response recovery accidentally struck `#jb-file-cache-conflict-syntax-loss` while recording a keep-open proof. I restored that queue item as the live head; no implementation work for it was completed in this md-AST cycle.
-
-### Re: do [#recursion-guard-wedge-escape] -- gpt-5
-
-Closed as already shipped in `src/agent-doc` commit `91f06782` (`Add force interrupt-clear wedge escape`), included in current `origin/main` at `9df1244f`.
-
-Proof checked this cycle:
-
-- `agent-doc session interrupt-clear <FILE> --force` is exposed in [src/main.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/main.rs:1641).
-- The force path in [src/session_actor_cmd.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/session_actor_cmd.rs:1221) closes actor state, removes matching session registry projections, signals child/supervisor PIDs, kills the selected owner pane, removes the supervisor socket, writes clear cooldown, and reclaims orphaned empty preflight cycles.
-- The recursive start diagnostic now points operators to `session status`, normal `interrupt-clear`, then `interrupt-clear --force`; the spec pins the same one-command destructive hatch in [specs/07-core-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-core-commands.md:18).
-
-Verification run now:
-
-```
-cargo test -p agent-doc force_interrupt_clear_summary_reports_destructive_cleanup -- --nocapture
-cargo test -p agent-doc-orchestration recursive_start_diagnostic_refuses_and_names_out_of_pane_recovery -- --nocapture
-cargo test -p agent-doc-orchestration owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries -- --nocapture
-```
-
-All three passed. The source CI for current `src/agent-doc` `origin/main` (`9df1244f`) was already green in run `27088129850`, so this queue item is a stale mirror and can be marked done.
-<!-- agent:boundary:45543358 -->
+<!-- agent:boundary:0909359a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,15 +48,15 @@ All three passed. The source CI for current `src/agent-doc` `origin/main` (`9df1
 - do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
-- do [#queue-dedup-destroys-intentional-duplicates]
-- do [#partial-staging-closeout-guard]5
-- do [#codex-mcp-server-root-fix]
-- do [#live-verify-batch]
-- do [#automated-completion-detection]
-- do [#monsterrod-queue-items-deleted-live]
-- do [#clear-blocked-by-own-drafted-clear-command]
-- do [#tmux-status-turn-in-progress]
-- do [#stale-busy-self-heal-live-verify]
+- :round_pushpin: do [#partial-staging-closeout-guard]5
+- :round_pushpin: do [#codex-mcp-server-root-fix]
+- :round_pushpin: do [#live-verify-batch]
+- :round_pushpin: do [#automated-completion-detection]
+- :round_pushpin: do [#monsterrod-queue-items-deleted-live]
+- :round_pushpin: do [#clear-blocked-by-own-drafted-clear-command]
+- :round_pushpin: do [#tmux-status-turn-in-progress]
+- :round_pushpin: do [#stale-busy-self-heal-live-verify]
+- ~~do [#queue-dedup-destroys-intentional-duplicates]~~
 - do [#jb-run-preempt-followups]
 <!-- /agent:queue -->
 ###

@@ -60,7 +60,45 @@ No source-code changes were needed for this investigation. The concrete current 
 
 
 Answered above. The missing Monster Rod Holders response was captured in agent-doc artifacts, the parent/submodule boundary interruption has been repaired, and the remaining Monster work is a separate unresolved prompt owned by pane `%39`; I did not run or claim that queue from this pane.
-<!-- agent:boundary:cb2ec40f -->
+Implemented queue-move pin preservation.
+
+> **Queue prompt:**
+>
+> If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
+
+
+Behavior change:
+- Added `queue::annotate_operator_priority_reorders`, which compares the snapshot queue order with the current queue order and annotates any existing prompt moved earlier by the operator with the canonical operator pin `:pushpin:`.
+- Wired the helper into `run_queue_maintenance` before priority/auto-DAG recompute, so a manually moved priority-queue item becomes sticky and will not be sorted back down by backlog priority rank.
+- Updated `specs/pending-system.md` to document that manual reorder in a priority queue becomes an authored operator priority override.
+
+Tests added:
+- Queue helper tests for marking a moved prompt, upgrading an existing agent pin with operator priority, and ignoring new/later-only prompts.
+- Preflight integration test proving a manually moved low-rank priority item is rewritten as `:pushpin:` and remains ahead of higher-rank items.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/queue.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/specs/pending-system.md`
+- parent gitlink `src/agent-doc`
+
+Commits pushed:
+- `btakita/agent-doc` `d5d3fe41` (`fix: pin manually reordered priority queue prompts`)
+- `btakita/agent-loop` `5b3e90df7` (`chore: update agent-doc submodule`)
+
+Verification:
+- `cargo fmt`
+- `cargo test -q -p agent-doc-orchestration annotate_operator_priority_reorders`
+- `cargo test -q -p agent-doc-orchestration run_queue_maintenance_pins_operator_moved_priority_queue_item`
+- `cargo check -q -p agent-doc-orchestration`
+- `make check` (3,955 tests passed, doctests passed, closeout sim medium target passed)
+- `git diff --check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- `gh run list --workflow CI --limit 1` showed latest CI success: run `27108302074`, `2026-06-07T23:39:34Z`
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:dd1376f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -71,7 +109,48 @@ Answered above. The missing Monster Rod Holders response was captured in agent-d
 - ~~:pushpin: monsterrodholders.md queue responses are still not going into the exchange.~~
 - ~~:round_pushpin: [#adoc-auto-dag-priority]~~
 - ~~A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.~~
-- If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.
+- ~~If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.~~
+---
+agent-doc on monsterrodholders.md missed the response when I added a queue item mid-turn with auto-queue off. I requested in another prompt to add the response but the response was missed in the turn. I got a JB `File Cache Conflict` but nothing showed up. The response is in the session:
+```
+↳ Interacted with background terminal · agent-doc write --commit /home/brian/work/btakita/agent-loop/src/boost-client/
+tasks/monsterrodholders.md
+  └ ### Re: Learn GSC, Shopping, and Product Cards - codex-5-5
+
+    Short answer: do not update Search Console manually today, and do not replace every Learn product link with product
+    cards.
+
+    The 2026-06-07 read-only discovery monitor already did the useful Search Console work: 22/22 public targets
+    returned final HTTP 200, had no public noindex, and were present in the expected public sitemaps; Search Console
+    access returned siteOwner; the 9 sitemap records were pending=false with 0 errors and 0 warnings; URL Inspection
+    showed normal processing lag on newer Learn/June 4/regional URLs, while all four Popular Products URLs were
+    submitted/indexed. That means this is not a sitemap-resubmit or request-indexing moment. The next organic read
+    should wait for the 7-14 day window, 2026-06-11T23:58Z through 2026-06-18T23:58Z, unless a specific page is
+    materially changed and passes the manual indexing checklist.
+
+    There is still Learn work, but it is content/product-fit governance and later measurement, not a GSC push. The
+    immediate Learn cleanup path has mostly been handled: the Ohio duplicate was resolved, the first-10 guides were
+    completed/cross-linked, regional triage was clean, and the broader boat/install evidence gate now blocks public fit
+    claims until real photos, dimensions, stock/visibility checks, image rights, and Brian/Ron/Steve review exist. Keep
+    that discipline.
+
+    I do not see evidence that Learn is cannibalizing Shopping right now. The product URLs still carry the strongest
+    measured organic product demand in the May 9 through June 5 GSC window, and the Popular Products issue is still
+    Merchant/ProductView/feed-processing plus review-threshold timing, not Learn pages stealing product-page
+    visibility. The risk is future dilution: Learn pages should not target buy/shop/exact-product terms, and they
+    should not carry exact PDP modules unless the article has a real setup problem that the product solves.
+
+    For product cards: use them selectively, not globally. The existing pipeline rule is the right one: product links
+    are practical next steps after setup is clear, not generic shopping blocks. Category-first product paths are safest
+    for informational Learn pages. Exact PDP cards should be limited to high-intent Learn pages where stock,
+    visibility, sync state, fit proof, and wording are current and approved. For boat-brand/install/kayak/cleat
+    content, exact product cards stay blocked until the evidence gate clears.
+
+    Decision: keep Search Console on wait/read-only, keep Learn as top/mid-funnel support for shopping rather than a
+    replacement for PDPs/category pages, and pilot product-card treatment on one or two high-intent Learn pages after
+    the 7-14 day monitor, rather than doing a site-wide card swap.
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

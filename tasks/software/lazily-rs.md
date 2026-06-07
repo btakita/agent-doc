@@ -68,7 +68,18 @@ Closeout recovery for the cycle that consumed `do [#ipc1]` and `do [#39c5]`.
 
 The live queue is stopped and empty. The bad repeated-dispatch behavior observed for this session matched the stale-busy idle queue reinjection bug fixed in `src/agent-doc` commit `62a92827`.
 
-<!-- agent:boundary:15530142 -->
+### Re: do [#ipc1]
+
+Recovered the missing queue-head closeout body for `do [#ipc1]`.
+
+`#ipc1` is already archived in `tasks/software/lazily-rs.done.md`, the live queue is stopped and empty, and the live backlog now starts at `#ipc2`. This response exists to make the committed cycle `cycle-1780815606517` auditable with an exact `### Re:` heading for the queue head it consumed.
+
+### Re: do [#39c5]
+
+Recovered the missing queue-head closeout body for `do [#39c5]`.
+
+`#39c5` is already archived in `tasks/software/lazily-rs.done.md`, and its stale live review copy has been removed. This closes the second completed head recorded by cycle `cycle-1780815606517` without reintroducing either completed item into the live backlog or review lists.
+<!-- agent:boundary:c7aa5eb7 -->
 <!-- /agent:exchange -->
 ###
 <!--

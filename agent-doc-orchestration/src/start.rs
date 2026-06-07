@@ -3001,6 +3001,29 @@ pub fn run_with_reap_policy(
 
     let pane_id = sessions::current_pane()?;
     let tmux = sessions::Tmux::default_server();
+
+    // `#recursion-guard-wedge-escape` (part 1): hard-refuse a recursive
+    // self-owned-pane start. When `agent-doc start <FILE>` runs inside the Codex
+    // pane that already owns this document, spawning a replacement owner here
+    // would loop re-injecting `agent-doc <FILE>` into the owner pane. Mirror the
+    // `run` path's unconditional recursive guard (it fires regardless of
+    // `--force`, since the deadlock is inherent to the same-pane nesting) and
+    // point the operator at an out-of-pane recovery command instead.
+    if let Some(diagnostic) =
+        crate::run::recursive_codex_start_invocation_diagnostic(file, &session_id, &harness.binary)
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "start_recursive_self_owned_pane_refused file={} pane={} session_id={}",
+                file.display(),
+                pane_id,
+                session_id
+            ),
+        );
+        anyhow::bail!("{}", diagnostic);
+    }
+
     if let Some((miss, supersession)) = crate::startup_miss::take_superseded_startup_miss(file)? {
         let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
         eprintln!(

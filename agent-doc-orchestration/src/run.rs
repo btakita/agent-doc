@@ -954,7 +954,7 @@ fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Re
 /// owns the document, else `None`. Both the early `#codex-owned-pane-prompt-miss`
 /// fail-closed guard and the late `#recguard-abandon` deadlock guard key off
 /// this single detector so they cannot disagree about ownership.
-fn owned_pane_self_invocation_detail(
+pub(crate) fn owned_pane_self_invocation_detail(
     file: &Path,
     session_id: &str,
     agent_name: &str,
@@ -1104,6 +1104,37 @@ fn recursive_codex_direct_invocation_diagnostic(
         file.display(),
         file.display()
     ))
+}
+
+/// `#recursion-guard-wedge-escape` (part 1): fail-closed diagnostic for
+/// `agent-doc start <FILE>` (or the bare `agent-doc <FILE>` start entry) invoked
+/// inside the Codex pane that already owns the document. Unlike the `run` guard
+/// above, the `start` path would otherwise *spawn a replacement owner in this
+/// same pane*, which loops re-injecting `agent-doc <FILE>` into the owner pane —
+/// the exact self-owned-pane recursion wedge with no clean operator escape.
+/// Returns `None` when this is not a Codex owner-pane self-invocation.
+pub fn recursive_codex_start_invocation_diagnostic(
+    file: &Path,
+    session_id: &str,
+    agent_name: &str,
+) -> Option<String> {
+    let detail = owned_pane_self_invocation_detail(file, session_id, agent_name)?;
+    Some(format_recursive_start_diagnostic(file, &detail))
+}
+
+/// Pure message builder for [`recursive_codex_start_invocation_diagnostic`], kept
+/// separate so the operator-facing wording is unit-testable without live tmux,
+/// registry, or harness-env state.
+fn format_recursive_start_diagnostic(file: &Path, detail: &str) -> String {
+    format!(
+        "recursive self-owned-pane start would deadlock: `agent-doc start {}` was run inside the Codex pane that already owns this document ({}). Spawning a replacement owner here would loop re-injecting `agent-doc {}` into this same pane. Recover from a DIFFERENT pane: first reconcile a possibly stale-busy actor without killing the pane via `agent-doc session status {}`, then if the pane really is wedged run `agent-doc session interrupt-clear {}` to interrupt the owner and clear the session. Do NOT re-run `agent-doc start {}` from this pane — it only re-trips this guard.",
+        file.display(),
+        detail,
+        file.display(),
+        file.display(),
+        file.display(),
+        file.display()
+    )
 }
 
 /// `#codex-owned-pane-prompt-miss`: structured fail-closed diagnostic for the
@@ -1595,6 +1626,27 @@ mod tests {
         assert!(msg.contains("queue: go"));
         assert!(msg.contains("agent-doc start tasks/x.md"));
         assert!(msg.contains("OUTSIDE this pane"));
+        assert!(msg.contains("Do NOT re-run"));
+    }
+
+    #[test]
+    fn recursive_start_diagnostic_refuses_and_names_out_of_pane_recovery() {
+        // #recursion-guard-wedge-escape (part 1): `agent-doc start <FILE>` inside
+        // the Codex pane that already owns the doc must fail closed with a message
+        // that (a) names the deadlock as a recursive self-owned-pane start, (b)
+        // explains it would loop re-injecting `agent-doc <FILE>`, (c) points at an
+        // out-of-pane recovery (session status reconcile, then interrupt-clear),
+        // and (d) warns against re-running `agent-doc start` from this pane.
+        let msg = format_recursive_start_diagnostic(
+            Path::new("tasks/x.md"),
+            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
+        );
+        assert!(msg.contains("recursive self-owned-pane start would deadlock"));
+        assert!(msg.contains("agent-doc start tasks/x.md"));
+        assert!(msg.contains("loop re-injecting `agent-doc tasks/x.md`"));
+        assert!(msg.contains("DIFFERENT pane"));
+        assert!(msg.contains("agent-doc session status tasks/x.md"));
+        assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md"));
         assert!(msg.contains("Do NOT re-run"));
     }
 

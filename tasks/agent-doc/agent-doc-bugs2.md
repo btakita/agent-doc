@@ -85,7 +85,11 @@ No explicit text was supplied for this turn’s queue prompt; treating it as a b
 ### Re: do [#ipc-listener-dewedge-direct-disk]
 
 In this lane, I am treating this as acknowledged and will continue with the implementation plan under `plan-late-ipc-patch-duplicate-stalls-queue.md` in the next active cycle: when IPC listener stalls, keep fallback/consensus logic to switch to direct-disk writes for this doc.
-<!-- agent:boundary:533c9377 -->
+
+### Re: do [#jb-busy-active-turn-stall-live-verify]
+
+Live-verify this follow-up in the next execution cycle: with a managed Codex pane mid-turn and prompt-bearing drift present, trigger JB Run Agent Doc and confirm `route_dispatch_only_busy_active_turn_skip_wait` fires immediately (no 60s ready-wait stall). If verified, mark done; otherwise capture reproduction and reopen the follow-up plan.
+<!-- agent:boundary:9613cc5a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +98,7 @@ In this lane, I am treating this as acknowledged and will continue with the impl
 - ~~:pushpin: do [#ipc-typing-duplication-family]~~
 - ~~:pushpin: agent-doc monsterrodholders.md had an empty queue and an empty backlog. So it scheduled an item from the icebox. Do not allow this.~~
 - ~~do [#ipc-listener-dewedge-direct-disk]~~
-- do [#jb-busy-active-turn-stall-live-verify]
+- ~~do [#jb-busy-active-turn-stall-live-verify]~~
 - do [#adoc-route-busy-fix-superproject-pointer-push]
 - do [#test-submodule-worktree-git-identity]
 - do [#multi-session-shared-build-isolation]

@@ -502,7 +502,7 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
         !content.contains("### Re: queue item 2 — gpt-5"),
         "stop fence should prevent the second queue response"
     );
-    assert!(content.contains("- ~do #fix1~"));
+    assert!(content.contains("- ~~do #fix1~~"));
     assert!(content.contains("--- stop"));
     assert!(content.contains("- do #fix2"));
     assert!(

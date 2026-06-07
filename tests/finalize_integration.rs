@@ -686,7 +686,7 @@ fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
         "repair closeout must preserve active auto queue state:\n{content}"
     );
     assert!(
-        content.contains("- do #fix1") && !content.contains("- ~do #fix1~"),
+        content.contains("- do #fix1") && !content.contains("- ~~do #fix1~~"),
         "repair closeout must not consume the queue head without explicit done proof:\n{content}"
     );
 
@@ -2012,7 +2012,7 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("- ~do #fix1~"),
+        content.contains("- ~~do #fix1~~"),
         "first prompt should be marked complete"
     );
     assert!(
@@ -2066,7 +2066,7 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
         "queue head should remain open when the prompt was unrelated and already in the baseline"
     );
     assert!(
-        !content.contains("- ~do #fix1~"),
+        !content.contains("- ~~do #fix1~~"),
         "queue head must not be marked complete without exact prompt or done proof"
     );
     assert!(content.contains("queue_active: true"));
@@ -2226,7 +2226,7 @@ fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
         "queue head should remain open when the active prompt targets other work"
     );
     assert!(
-        !content.contains("- ~do #fix1~"),
+        !content.contains("- ~~do #fix1~~"),
         "queue head must not be marked complete"
     );
     assert!(content.contains("queue_active: true"));
@@ -2322,7 +2322,7 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
         "batch dispatch directive should remain while later prompts are still queued"
     );
     assert!(
-        content.contains("- ~do [#has9]~"),
+        content.contains("- ~~do [#has9]~~"),
         "completed queue item should be struck through"
     );
     assert!(
@@ -2372,7 +2372,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
         "queue body should be cleared when the last prompt is consumed"
     );
     assert!(
-        !content.contains("- ~describe the project~"),
+        !content.contains("- ~~describe the project~~"),
         "drained queue should not retain completed items"
     );
     assert!(
@@ -2426,7 +2426,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
         "drained queue should remove the completed item"
     );
     assert!(
-        !content.contains("- ~do [#has9]~"),
+        !content.contains("- ~~do [#has9]~~"),
         "drained queue should not retain a struck-through last item"
     );
     assert!(
@@ -2485,7 +2485,7 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
         "drained done-backed queue should be empty:\n{content}"
     );
     assert!(
-        !content.contains("- do [#cspe]") && !content.contains("- ~do [#cspe]~"),
+        !content.contains("- do [#cspe]") && !content.contains("- ~~do [#cspe]~~"),
         "drained queue must not retain consumed prompts:\n{content}"
     );
 }
@@ -2560,7 +2560,7 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
 
     let file_content = fs::read_to_string(&doc).unwrap();
     assert!(
-        file_content.contains("- ~do #fix1~"),
+        file_content.contains("- ~~do #fix1~~"),
         "first prompt marked complete in file"
     );
 
@@ -2572,7 +2572,7 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
             let snap = fs::read_to_string(entry.path()).unwrap();
             if snap.contains("queue") {
                 assert!(
-                    snap.contains("- ~do #fix1~"),
+                    snap.contains("- ~~do #fix1~~"),
                     "first prompt must also be marked complete in snapshot: {}",
                     snap
                 );

@@ -2068,7 +2068,7 @@ agent-doc {}\n",
         }
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #fix1 — gpt-5"));
-        assert!(content.contains("- ~do #fix1~"));
+        assert!(content.contains("- ~~do #fix1~~"));
         assert!(content.contains("- do #fix2"));
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
@@ -2181,7 +2181,7 @@ agent-doc {}\n",
         assert!(content.contains("<!-- agent:queue auto -->"));
         assert!(content.contains("queue_active: true"));
         assert!(content.contains("- do #fix1"));
-        assert!(!content.contains("- ~do #fix1~"));
+        assert!(!content.contains("- ~~do #fix1~~"));
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));

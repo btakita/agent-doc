@@ -13006,7 +13006,7 @@ mod tests {
         assert!(outcome.is_some(), "the answered head should be consumed");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~do the thing~"),
+            result.contains("- ~~do the thing~~"),
             "head must be struck after reconcile:\n{result}"
         );
         assert!(

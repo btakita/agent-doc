@@ -24,13 +24,17 @@ project verification suite explicitly after edits and before `finalize` /
 ## Tmux CI review for test-bearing turns
 
 When the cycle runs tests or changes test, build, or instruction surfaces,
-inspect the latest CI tmux-test result for this repo. If the tmux leg is red
-after runner startup, run `make tmux-ci` locally, fix the failure, and add or
-update deterministic SimWorld coverage for the regression class when the behavior
-can be modeled without live tmux. If GitHub reports an empty-step job with no logs
-because the job was not started (for example billing/spending-limit exhaustion or
-other runner-allocation failure), classify it as an external CI-start blocker
-instead of a code/tmux regression; record the annotation and continue with local
+inspect the latest CI tmux-test result for this repo with
+`gh run list --workflow CI --limit 1`. If the tmux leg is already red after
+runner startup, run `make tmux-ci` locally, fix the failure, and add or update
+deterministic SimWorld coverage for the regression class when the behavior can
+be modeled without live tmux. If the latest run is queued or in progress, record
+that status and continue from local verification evidence instead of waiting for
+CI to finish; do not use `gh run watch` as a closeout gate unless the user
+explicitly asks. If GitHub reports an empty-step job with no logs because the job
+was not started (for example billing/spending-limit exhaustion or other
+runner-allocation failure), classify it as an external CI-start blocker instead
+of a code/tmux regression; record the annotation and continue with local
 verification evidence. Record CI and local tmux evidence in closeout.
 
 ## Session document staging rule

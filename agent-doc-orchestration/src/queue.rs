@@ -1517,7 +1517,7 @@ mod tests {
             deduped
                 .iter()
                 .filter(|e| matches!(e, QueueEntry::Completed(_)))
-            .count(),
+                .count(),
             1
         );
         assert!(deduped.iter().any(|e| matches!(e, QueueEntry::Preset(_))));

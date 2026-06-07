@@ -2969,7 +2969,10 @@ pub fn run_with_reap_policy(
         let (source, _resolved_name) = if fm.agent.is_some() {
             ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
         } else if global_config.default_agent.is_some() {
-            ("config", global_config.default_agent.as_deref().unwrap_or("?"))
+            (
+                "config",
+                global_config.default_agent.as_deref().unwrap_or("?"),
+            )
         } else {
             ("fallback", "claude")
         };

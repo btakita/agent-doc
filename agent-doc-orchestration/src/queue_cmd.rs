@@ -7,7 +7,7 @@
 //! - `agent-doc queue consume <FILE> [--count N]` — explicitly strike the
 //!   leading N free-text queue head(s) the agent has already answered.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 
 use crate::component;
@@ -112,7 +112,11 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
             file.display(),
             struck.len(),
             last_remaining,
-            if drained { ", drained — cleared queue_active" } else { "" }
+            if drained {
+                ", drained — cleared queue_active"
+            } else {
+                ""
+            }
         );
     }
     Ok(())
@@ -307,8 +311,14 @@ mod tests {
 
         consume(&doc, 5).expect("consume should stop at the id-backed head");
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("~only free head~"), "free head struck:\n{result}");
-        assert!(result.contains("- do [#keepme]"), "id-backed head preserved:\n{result}");
+        assert!(
+            result.contains("~only free head~"),
+            "free head struck:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#keepme]"),
+            "id-backed head preserved:\n{result}"
+        );
     }
 
     #[test]

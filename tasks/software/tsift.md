@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -56,7 +56,33 @@ So the practical split I would use:
 For tsift specifically, the best early use would be artifact-heavy commands: `digest-runner`, `session-review`, `context-pack`, maybe large search/explain previews. For agent-doc, the best early use would be patch/sidecar payload indirection while preserving the existing commit-boundary invariants. That would improve payload handling without weakening the proof model.
 
 Bottom line: the blob arena likely benefits tsift IPC with agent-doc if it is designed as an immutable, content-addressed payload layer. SHM ring buffer should wait until correctness and recovery are locked down and measurement shows transport throughput is actually the limiting factor.
-<!-- agent:boundary:c74eadfd -->
+
+### Re: durable fallback in OS shm — gpt-5
+
+> **Queue prompt:**
+>
+> Can the "durable file fallback" live in the os shm directory? Would this be a valid cross platform solution?
+
+
+No. The durable file fallback should not live primarily in the OS shared-memory directory.
+
+It can be a useful fast scratch/cache tier, but it is not a valid cross-platform durability layer:
+
+- Linux `/dev/shm` is usually tmpfs. It is fast, but memory-backed and not durable across reboot. It can also be size-limited and pressure-sensitive.
+- macOS does not provide the same `/dev/shm` filesystem convention. POSIX shared memory exists, but not as a portable ordinary directory with the same file semantics.
+- Windows shared memory is normally named mappings / section objects, not a normal portable directory path.
+- Container and CI environments often remap, cap, or omit shm-like storage.
+- Agent-doc recovery needs post-crash, post-editor-restart, and late-IPC replay safety. A shm directory does not give that by default.
+
+The better design is a tiered payload store:
+
+1. Durable fallback: normal filesystem under a per-project/per-session state dir, using atomic write + fsync where needed, content hashes, leases, and cleanup.
+2. Optional fast tier: shm/tmpfs/memfd/named mapping for large hot payloads when available.
+3. Protocol metadata: every control message carries `blob_id`, size, hash, generation, producer, lease/ttl, and durable fallback pointer.
+4. Recovery rule: if shm is missing, stale, evicted, or hash-mismatched, fall back to the durable file path.
+
+So for tsift/agent-doc: yes, use OS shm as an optimization for blob arena payloads. Do not make it the durable fallback. The durable fallback should be boring disk-backed storage, with shm treated as an opportunistic acceleration layer.
+<!-- agent:boundary:699caf64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,8 +91,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Can the "durable file fallback" live in the os shm directory? Would this be a valid cross platform solution?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

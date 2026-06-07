@@ -4263,6 +4263,28 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") || source_queue_priority {
         let rank = collect_backlog_priority_ranks(&components, &content);
+        if let Ok(Some(snap_content)) = snapshot::load(file)
+            && let Ok(snap_components) = crate::component::parse(&snap_content)
+            && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
+        {
+            let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
+            if let Ok(snap_entries) = crate::queue::parse(snap_body)
+                && let Some(pinned) =
+                    crate::queue::annotate_operator_priority_reorders(&snap_entries, &entries)
+            {
+                let new_body = crate::queue::render(&pinned);
+                current_content = {
+                    let comps = crate::component::parse(&current_content)?;
+                    let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                    q.replace_content(&current_content, &new_body)
+                };
+                eprintln!(
+                    "[preflight] queue: pinned manually reordered prompt(s) with operator priority"
+                );
+                entries = pinned;
+                mutated = true;
+            }
+        }
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
         // graph first (a blocker outranks a pin); fall back to the plain
         // pin+priority sort when there are no dependency edges.
@@ -7248,6 +7270,44 @@ mod tests {
         assert!(
             updated.contains("- :round_pushpin: do [#fast]\n- do [#slow]"),
             "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_pins_operator_moved_priority_queue_item() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue priority auto -->\n",
+            "- do [#fast]\n",
+            "- do [#medium]\n",
+            "- do [#slow]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority -->\n",
+            "- [ ] [#fast] priority=1 first by rank\n",
+            "- [ ] [#medium] priority=5 middle by rank\n",
+            "- [ ] [#slow] priority=9 operator moved this up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current_content = snapshot_content.replace(
+            "- do [#fast]\n- do [#medium]\n- do [#slow]",
+            "- do [#slow]\n- do [#fast]\n- do [#medium]",
+        );
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- :pushpin: do [#slow]\n- do [#fast]\n- do [#medium]"),
+            "operator-moved queue prompt should become sticky with :pushpin::\n{updated}"
         );
     }
 

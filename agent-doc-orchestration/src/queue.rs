@@ -649,6 +649,58 @@ pub fn annotate_agent_priority_promotions(
     changed.then_some(out)
 }
 
+/// Prefix operator-moved queue prompts with the canonical operator-priority marker.
+///
+/// A manually reordered priority queue should not be undone by the next
+/// binary-owned priority recompute. When an existing prompt appears earlier in
+/// the live queue than it did in the snapshot, annotate it with `:pushpin:` so
+/// the authored priority is sticky. New prompts and prompts that only moved
+/// later are ignored; existing operator pins are preserved.
+pub fn annotate_operator_priority_reorders(
+    snapshot: &[QueueEntry],
+    current: &[QueueEntry],
+) -> Option<Vec<QueueEntry>> {
+    let snapshot_prompts: Vec<String> = snapshot
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => Some(strip_priority_markers(&prompt.text)),
+            _ => None,
+        })
+        .collect();
+    if snapshot_prompts.is_empty() {
+        return None;
+    }
+
+    let mut used = vec![false; snapshot_prompts.len()];
+    let mut prompt_slot = 0usize;
+    let mut changed = false;
+    let mut out = current.to_vec();
+
+    for entry in &mut out {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        let identity = strip_priority_markers(&prompt.text);
+        let original_slot =
+            snapshot_prompts
+                .iter()
+                .enumerate()
+                .find_map(|(slot, snapshot_identity)| {
+                    (!used[slot] && snapshot_identity == &identity).then_some(slot)
+                });
+        if let Some(slot) = original_slot {
+            used[slot] = true;
+            if slot > prompt_slot && !is_prioritized(&prompt.text) {
+                prompt.text = format!("{} {}", PRIORITIZED_MARKER, prompt.text.trim_start());
+                changed = true;
+            }
+        }
+        prompt_slot += 1;
+    }
+
+    changed.then_some(out)
+}
+
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
 /// unpinned. Lower tiers sort first; agent pins never outrank operator pins.
 fn priority_tier(text: &str) -> u8 {
@@ -1215,6 +1267,42 @@ mod tests {
             render(&marked),
             "- :round_pushpin: do [#high]\n- do [#low]\n"
         );
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_marks_manually_moved_prompt() {
+        let snapshot = parse("- do [#a]\n- do [#b]\n- do [#c]\n").unwrap();
+        let current = parse("- do [#c]\n- do [#a]\n- do [#b]\n").unwrap();
+
+        let marked = annotate_operator_priority_reorders(&snapshot, &current)
+            .expect("manual promotion should annotate");
+
+        assert_eq!(
+            render(&marked),
+            "- :pushpin: do [#c]\n- do [#a]\n- do [#b]\n"
+        );
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_upgrades_agent_pin() {
+        let snapshot = parse("- do [#a]\n- :round_pushpin: do [#b]\n").unwrap();
+        let current = parse("- :round_pushpin: do [#b]\n- do [#a]\n").unwrap();
+
+        let marked = annotate_operator_priority_reorders(&snapshot, &current)
+            .expect("operator move should add operator pin");
+
+        assert_eq!(
+            render(&marked),
+            "- :pushpin: :round_pushpin: do [#b]\n- do [#a]\n"
+        );
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_ignores_new_and_later_prompts() {
+        let snapshot = parse("- do [#a]\n- do [#b]\n").unwrap();
+        let current = parse("- do [#new]\n- do [#b]\n- do [#a]\n").unwrap();
+
+        assert!(annotate_operator_priority_reorders(&snapshot, &current).is_none());
     }
 
     #[test]

@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shipped in src/agent-doc 316681b0; current agent-doc main is 6a017bea and superproject pointer pushed as 1b933127b. Superproject Agent Doc workflow could not start because GitHub reported a billing/spending-limit runner allocation blocker.
+Completed the editor/IPC node-patch phase of #md-ast-document-model: src/agent-doc a45121b0 applies node_patches through shared Rust markdown-AST mutations in VS Code and JetBrains, parent pointer 3b59c9320 is pushed, local verification/install passed, and GitHub CI 27097245198 is green. Remaining: realtime watcher convergence and replacing the legacy text CRDT merge base with structured overlay/AST state.
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,12 +35,24 @@ Completed #md-ast-mutations-node-keyed: node-keyed markdown AST mutations shippe
 Compacted content:
 - Archived 14 response topic(s): do [#recursion-guard-wedge-escape] -- gpt-5; do [#partial-staging-closeout-guard]; #codex-mcp-server-root-fix split; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:14aa1ad3 -->
+
+### Re: do [#md-ast-document-model] — gpt-5
+
+Shipped the editor/IPC `node_patches` apply path for `#md-ast-document-model`.
+
+Implemented shared Rust markdown-AST node patch application for insert/remove/replace/move/strike/unstrike by stable node key, preserving unrelated live-buffer items. Exported it as `agent_doc_apply_node_patches`, then wired VS Code and JetBrains to apply node patches before legacy component patches and skip legacy replacement for components already handled by node patches. Older native libraries now fall back to the legacy component path instead of throwing.
+
+Verification passed: `make check`, focused AST/FFI/static-guard tests, VS Code `npm test`, JetBrains `./gradlew test buildPlugin`, `make install`, and GitHub CI `27097245198`. Commits: `src/agent-doc` `a45121b0`; parent submodule pointer `3b59c9320`.
+
+Scheduled next steps under `#md-ast-document-model`: `#md-ast-realtime-watcher` and `#md-ast-crdt-merge-base`.
+<!-- agent:boundary:9e6485af -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- :round_pushpin: do [#md-ast-document-model]
+- There are many mcp apis for agent-doc. Can we consolidate into a single mcp or is there a good reason to have many apis?
 - Schedule #next-steps to finish [#md-ast-document-model].
 <!-- /agent:queue -->
 ###
@@ -67,8 +79,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED 9df1244f: runtime writes now persist structured .overlay.yrs sidecars beside legacy .yrs from the same markdown snapshot, and preflight queue dedup is markdown-AST node-keyed so intentional duplicate do/free-text prompts survive. REMAINING: legacy text CRDT is still the merge base; editor/IPC plugins still need the authoritative node_patches apply path and realtime watcher convergence. Plan: tasks/agent-doc/plan-md-ast-document-model.md
-2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
+1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED a45121b0: editor/IPC plugins now apply authoritative node_patches via shared Rust markdown-AST mutations, preserving unrelated live-buffer edits while skipping stale legacy component replacement for node-patched components. REMAINING: legacy text CRDT is still the merge base; realtime watcher convergence still needs the structured node-patch apply path. NEXT: #md-ast-realtime-watcher and #md-ast-crdt-merge-base. Plan: tasks/agent-doc/plan-md-ast-document-model.md
+2. [ ] [#md-ast-realtime-watcher] #next-steps Finish #md-ast-document-model realtime watcher convergence for editor/IPC plugins against the structured node-patch document model. Plan: tasks/agent-doc/plan-md-ast-document-model.md
+3. [ ] [#md-ast-crdt-merge-base] #next-steps Finish #md-ast-document-model by making structured overlay/AST state the authoritative merge base instead of legacy text CRDT. Plan: tasks/agent-doc/plan-md-ast-document-model.md
+4. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 <!-- /agent:backlog -->
 
 ## Review

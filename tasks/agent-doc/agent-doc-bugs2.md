@@ -373,7 +373,30 @@ Verification:
 - GitHub Actions CI 27091755420 passed: make check and make tmux-ci. The only annotation was the existing actions/checkout@v4 Node.js 20 deprecation notice.
 - make check (root repo; tsift artifact tart-bd7d628e3d)
 - gh run list --workflow CI --limit 1 (root repo) could not run because no root workflow named CI exists.
-<!-- agent:boundary:8a63c0e1 -->
+Completed #adoc-route-busy-fix-superproject-pointer-push.
+
+> **Queue prompt:**
+>
+> do [#adoc-route-busy-fix-superproject-pointer-push]
+
+
+What changed:
+- Pushed the root superproject `main` branch after the earlier pointer-push blocker cleared.
+- `origin/main` now points at `d13416095`, which includes the `src/agent-doc` pointer at `440cf6cb` on the source repo main branch. That source commit includes the busy active-turn route mapping work and is newer than the originally deferred `b93b3c3c` route-core fix.
+- No source code changes were required for this queue item.
+
+Proof:
+- `git fetch origin main && git rev-list --left-right --count origin/main...HEAD` returned `0 0`.
+- `git log --oneline --decorate -1 origin/main` returned `d13416095 (HEAD -> main, origin/main, origin/HEAD) agent-doc(agent-doc-bugs2): 2026-06-07 07:58:08`.
+- `git push origin main` advanced root main from `b77844416` to `d13416095`.
+
+Verification:
+- make check (root repo; tsift artifact tart-f00417fe02)
+- gh run list --workflow CI --limit 1 (root repo) could not run because no root workflow named CI exists.
+
+Residual state:
+- The root worktree still has unrelated dirty submodule work in `src/agent-doc`, `src/boost-client`, `src/corky`, and `src/instruction-files`; I left that untouched.
+<!-- agent:boundary:83711a2b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -398,7 +421,7 @@ Verification:
 - ~~:round_pushpin: do [#auto-complete-semantic-retrieval]~~
 - ~~do [#jb-file-cache-conflict-syntax-loss]~~
 - ~~do [#jb-busy-active-turn-stall-live-verify]~~
-- do [#adoc-route-busy-fix-superproject-pointer-push]
+- ~~do [#adoc-route-busy-fix-superproject-pointer-push]~~
 - do [#multi-session-shared-build-isolation]
 - do [#sync-fast-pane-hotpath]
 - do [#jb-run-preempt-followups]
@@ -430,9 +453,8 @@ What are #next-steps to fix bugs?
 1. [ ] [#md-ast-document-model] #agent-doc-bug PARTIAL SHIPPED 9df1244f: runtime writes now persist structured .overlay.yrs sidecars beside legacy .yrs from the same markdown snapshot, and preflight queue dedup is markdown-AST node-keyed so intentional duplicate do/free-text prompts survive. REMAINING: legacy text CRDT is still the merge base; editor/IPC plugins still need the authoritative node_patches apply path and realtime watcher convergence. Plan: tasks/agent-doc/plan-md-ast-document-model.md
 2. [ ] [#stale-busy-after-auto-inject-no-clear] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals a stale-busy actor over an idle pane (poll reconcile from has_busy_cue, ~2s debounce, persisted via mark_lifecycle). Re-listed to match the still-pending queue mirror; strike via the queue drain. Live-verify tracked as #stale-busy-self-heal-live-verify.
 3. [/] [#jb-run-preempt-followups] #agent-doc-bug follow-ups from plan-jb-run-preempt-autoloop-priority.md (sub-parts 2-4, head-insert shipped 79e0406d): (2) empty-queue autoloop suppression — overlaps #post-clear-auto-queue-suppress; (3) 60s busy ready-wait stall audit when a queue fallback exists; (4) recursion-guard escape hatch for a wedged loop ('recursive direct invocation would deadlock' blocking the one Run Agent Doc that could break the stall) — overlaps #autoloop-command-preemption. Plan: tasks/agent-doc/plan-jb-run-preempt-autoloop-priority.md
-4. [ ] [#adoc-route-busy-fix-superproject-pointer-push] superproject main pointer push for the #jb-run-agent-doc-busy-active-turn-stall fix is DEFERRED (local commit 13600139e): pull --rebase conflicts on src/boost-client submodule pointer (concurrent-session shared-checkout divergence). Submodule fix b93b3c3c is pushed to origin/20260422/codex-agent-backend; land the superproject pointer on a clean cycle once boost-client divergence resolves.
-5. [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
-6. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
+4. [ ] [#multi-session-shared-build-isolation] #agent-doc-bug: the multi-session model lets a concurrent session's untracked/uncommitted work break the shared src/agent-doc crate build, forcing an isolated git-worktree-inside-src verification dance to ship a fix (committed+CI-green but not live until the other session compiles). Consider session-isolated build/worktree isolation so concurrent agent-doc sessions don't block each other's build/install. Replaces the deleted feedback_verify_via_worktree_inside_src memory workaround.
+5. [ ] [#sync-fast-pane-hotpath] #agent-doc-bug: editor file-switch sync blocks because the fast pane-focus (safe_passive_focus_actor_after_sync_lock, sync.rs:467) runs AFTER the sync lock (SYNC_LOCK_WAIT_BUDGET 3s) + stacked reconcile budgets (router 1s, ownership proof 750ms, prune 1s). The claiming pane is usually already known (cheap cached read) but showing it is serialized behind lock contention + heavy reconcile. Fix: pre-lock fast pane resolution from the lock-free local projection + select_pane immediately (≤300ms target), create-on-miss without blocking, defer prune/router/ownership-proof/repair to a background reconcile, and make the fast select idempotent with the reconciler's final placement (race-safe; the lock guards concurrent stash/swap). Plan: tasks/agent-doc/plan-sync-pipeline-fast-pane-hotpath.md
 <!-- /agent:backlog -->
 
 ## Review

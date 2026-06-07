@@ -104,5 +104,23 @@ for the recursive-fallback path. Captured as `#codex-queue-drain-no-response-bod
 - If a follow-up prompt appears after the recovered response, it remains visible
   and queued for a later turn.
 
-Per `#agent-doc-bug`, this is a plan only. Do not implement the fix in this
-cycle.
+## Implementation status
+
+- **Proposed-Fix #4 — DONE (`#codex-queue-drain-no-response-body`).**
+  `session_check::check_committed_without_response_body_guard` no longer trusts
+  capture metadata (`capture_id`/`response_sha256`) as sole proof for a
+  **queue-drain** turn: a committed turn that did binary-owned work
+  (`had_pending_mutations`) and recorded a queue head
+  (`queue_task_id`/`active_queue_heads`) must now actually contain a `### Re:`
+  response body in the committed `agent:exchange` (new
+  `committed_exchange_has_response_body` helper). The systematic Codex symptom —
+  capture record set, but the commit mutated only status/queue/backlog leaving
+  exchange at zero `### Re:` (only a compacted `### Session Summary`) — now fails
+  closed with the `agent-doc write --commit` recovery hint. Non-queue turns keep
+  trusting the capture record (no behavior change). Tests:
+  `committed_without_response_body_guard_fires_on_queue_drain_captured_but_no_exchange_body`,
+  `committed_without_response_body_guard_passes_queue_drain_with_exchange_body`.
+- **Remaining:** Proposed-Fix #1/#2 (Codex stop-hook owned-pane recursion gate +
+  mandatory finalize before chat completion) and #3/#5 (write-recovery adopt of an
+  already-visible body + follow-up-prompt preservation) — Codex-harness-specific,
+  separate cycle.

@@ -46,6 +46,8 @@ What changed:
 - Codex Stop-hook continuation now blocks with explicit `/clear` guidance when the already-loaded Codex pane should not answer the next queue head. After a tracked `/clear` or `/new`, normal in-pane continuation is allowed again.
 - Added the `#queue-context-reset` spec and regression coverage for the decision function, Codex hook behavior, and CLI argv behavior (`--resume old-session` on the first item, no `--resume` and `--fork-session` after the threshold trips).
 
+❯ I want the queue in go-mode to continue, interleaving a `/clear` if the threshold is tripped. I don't want to queue to stop if the threshold is tripped.
+
 Verification:
 - `cargo test -q -p agent-doc-orchestration queue_context_reset`
 - `cargo test -q -p agent-doc-orchestration compaction`
@@ -77,7 +79,7 @@ For partial exchange compaction: I agree, but I did not fold that into this comm
 - Tests should cover unresolved-tail preservation, queue-head/id matching, file/symbol matching, archive index continuity, and the no-prompt-bury rule.
 
 So the queue-context reset work is done and verified; partial semantic exchange compaction is the next implementation task, not completed in this cycle.
-<!-- agent:boundary:0be0c181 -->
+<!-- agent:boundary:9146ca84 -->
 <!-- /agent:exchange -->
 
 ## Queue

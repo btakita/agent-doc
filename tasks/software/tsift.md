@@ -15,7 +15,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: stop
-queue_active: false
 ---
 
 ## Status
@@ -35,9 +34,9 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260606-175807.md`*
 
 Compacted content:
-- Archived 13 response topic(s): Does a runbook re-read duplicate context across turns?; Would "retain-don't-reread" be implemented in the skill-harness?; Is the soft-discipline effective at reducing redundant runbook reads?; 10 more
+- ****Archived 13 response topic(s): Does a runbook re-read duplicate context across turns?; Would "retain-don't-reread" be implemented in the skill-harness?; Is the soft-discipline effective at reducing redundant runbook reads?; 10 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:279fdcdc -->
+<!-- agent:boundary:68fb2712 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,8 +46,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Why does tsift use json files for the community cache or other caches? Why not use sqlite?
-- What about passage btak/NPM_TOKEN? I also setup the NPM_TOKEN on gh for tsift. I don't understand why this is still failing.
+- Should we have separate sqlite databases for the community cache and other caches to avoid writer lock contention? Is the writer lock contention even an issue with WAL?
+- is [#rtsw] done?
 <!-- /agent:queue -->
 
 ## Backlog

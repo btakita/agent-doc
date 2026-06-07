@@ -55,7 +55,15 @@ Commits/push: submodule commit `8e54718a` pushed to `btakita/agent-doc` `main`; 
 
 Confidence: high. Escalation: none.
 
-<!-- agent:boundary:f0ce30a4 -->
+### Re: closeout repair — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#md-ast-mutations-node-keyed]
+
+
+Recovered the previous closeout state after duplicate response drift: kept the original `#md-ast-crdt-schema` response, updated its verification with the green CI run, removed the duplicate response block, and restored the next queue head so phase 4 remains pending.
+<!-- agent:boundary:ddc338f0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -65,7 +73,7 @@ Confidence: high. Escalation: none.
 - ~~:pushpin: do [#md-ast-crate-extract]~~
 - ~~:pushpin: do [#md-ast-component-overlay]~~
 - ~~:pushpin: do [#md-ast-crdt-schema]~~
-- :pushpin: do [#md-ast-mutations-node-keyed]
+- ~~:pushpin: do [#md-ast-mutations-node-keyed]~~
 - :pushpin: do [#md-ast-ipc-node-patches]
 - :pushpin: do [#md-ast-realtime-watcher]
 - :pushpin: do [#queue-enqueue-action]

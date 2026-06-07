@@ -127,12 +127,27 @@ Strong-emphasis / pushpin = operator; italic-emphasis / round-pushpin = agent; o
 **Re: ":pushpin: I did the update. Please verify [#late-ipc-patch…]"** — I can't drive your live IntelliJ to stage a timed-out-reposition race, so the live confirmation is yours: with `#com.github.btakita.agentdoc` debug logging on, after a finalize whose IPC reposition times out, grep `idea.log` for `generation fence: dropping superseded patch` — and confirm no duplicate `### Re:` block appears. The binary side is proven by `PatchGenerationFenceTest` + CI-green `9eee5255`.
 
 Still in your pinned queue, in order: **auto-dag priority** (graph + linear ordering projections — the big one), **`~~`-on-complete marking**, the **backlog-`queue`-attr-not-populating** bug, and **bold-markdown rendering** in the JB/VSCode plugins. Say go and I'll take them top-down.
-<!-- agent:boundary:797e2e46 -->
+
+### Re: "go" — pinned queue batch shipped (3 of 4) — opus-4-8
+
+> **Queue prompt:**
+>
+> Add :pushpin:/:round_pushpin: + **pin**/_pin_ as an alias to **prioritized**/_prioritized_.
+
+
+Draining your pinned queue top-down. Shipped this turn, each `make check`-green + installed + release-built + pushed:
+
+1. **`:pushpin:`/`:round_pushpin:` + `**pin**`/`_pin_` aliases** (`5a68b2b2`) — done earlier; all pin spellings resolve to the two tiers.
+2. **auto-dag priority** (`7f42f870`) — an item declares deps with `after=#id` (repeatable, comma lists). When edges exist, the queue is ordered by a priority-weighted topological sort: dependencies always precede dependents, so **a blocker outranks a pin** (your stated exception). Edge-free queues are unchanged; cycles are broken without dropping prompts. Backlog-declared deps propagate to synced `do [#id]` prompts. Plan: `tasks/agent-doc/plan-queue-auto-dag-priority.md`.
+3. **`~~`-on-complete marking** (`1645112d`) — a completed queue item now renders as markdown strikethrough `- ~~text~~` (was single-tilde). The parser reads both, so legacy residue still resolves.
+4. **backlog `queue` attr populates the queue in go-mode** (`1645112d`) — your `queue: start` (go-mode) is a continuous-backlog-loop opt-in, so freshly-added backlog `queue`-attr ids now append to the live queue immediately, not only when it drains. (Plain non-go active queues still hold fresh ids to prevent mid-loop amplification.) Verified live: the log now reads `go-mode active queue — appending fresh backlog queue-attr id(s)`.
+
+**Still open from your list:** the **bold-markdown rendering** in the JB + VSCode plugins (`**bold**` shown bold inline in the editor) — that's pure editor UI styling in two editors, the one item I can't self-verify (visual appearance), so I'm taking it next as its own focused build. Your `:pushpin: I did the update. Please verify [#late-ipc-patch…]` item still wants your `idea.log` check for `generation fence: dropping superseded patch`.
+<!-- agent:boundary:e90c3124 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~:pushpin: I want to be able to override priority with reordering. If I mark something to prioritize next, please make it stick. Annotate the item in the document that I manually prioritized. So if I want to release my prioritization, I can delete the annotation. For example, a more terse alternative to `:pushpin:`. Terse is better. But don't get too vague. If `:pushpin:` is the most terse and clear way to express the intent, so be it. But see if you can do better. You can also use `:pushpin:` to mark anything that you prioritized, so if I delete `:pushpin:`, you should reprioritize it if there is a `priority` attribute. If there is a better markdown annotation format, use it. Use :round_pushpin: for items that you prioritize and :pushpin: for items that I prioritized. You can prioritize items before items that you prioritize. The question is can we prioritize items before what I prioritized? Let's say no for now...but I will evaluate this behavior. The only exception if there is a blocker determined by auto-dag.~
-- Add :pushpin:/:round_pushpin: + **pin**/_pin_ as an alias to **prioritized**/_prioritized_.
+- ~~Add :pushpin:/:round_pushpin: + **pin**/_pin_ as an alias to **prioritized**/_prioritized_.~~
 - :pushpin: The `priority` attribute in queue, backlog, and icebox should use auto-dag. Make auto-dag determine the order that things should be executed in. Include graph ordering and linear ordering projections. `priority` should update the queue per turn. Make this operation efficient. Perhaps we can flag an item as prioritized. If a new item is added, it's priority can be determined...without having to reprocess the already prioritized items. Treat this in an analogous way to a graph or linked list data structure...where the insertions should be a localized operation.
 - :pushpin: The backlog with `queue` attribute is not populating the queue element in this document.
 - :pushpin: Please mark queue items `~~` when they are completed. I saw open items in the queue that have been completed but they are not completed in a previous queue run...Perhaps due to finalize not being called?
@@ -145,6 +160,15 @@ Still in your pinned queue, in order: **auto-dag priority** (graph + linear orde
 - do [#sync-fast-pane-hotpath]
 - do [#queue-dedup-destroys-intentional-duplicates]
 - The JB + VSCode plugin should bold any markdown that is **bold**, italicize any markdown that is *italicized*, and bold + italicize any markdown that is **_bold italicized_**.
+- do [#ipc-typing-duplication-family]
+- do [#codex-mcp-server-root-fix]
+- do [#live-verify-batch]
+- do [#automated-completion-detection]
+- do [#monsterrod-queue-items-deleted-live]
+- do [#codex-queue-drain-no-response-body]
+- do [#clear-blocked-by-own-drafted-clear-command]
+- do [#tmux-status-turn-in-progress]
+- do [#stale-busy-self-heal-live-verify]
 <!-- /agent:queue -->
 ###
 <!--

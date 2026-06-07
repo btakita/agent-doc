@@ -3418,7 +3418,19 @@ fn plan_queue_prompt_consumption(
             consumed_texts.len()
         );
     }
-    if snapshot_consumed_texts != consumed_texts {
+    // Compare head identity ignoring cosmetic pin annotations
+    // (`#queue-consume-pushpin-normalization`): the snapshot can carry the
+    // unpinned spelling of a head while the live document carries the `:pushpin:`
+    // spelling of the same logical item. The pin is priority metadata, not
+    // identity, so a raw text comparison spuriously fails the cycle. Normalize
+    // both sides through `strip_priority_markers` before the equality check.
+    let norm = |texts: &[String]| {
+        texts
+            .iter()
+            .map(|t| crate::queue::strip_priority_markers(t))
+            .collect::<Vec<_>>()
+    };
+    if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
         anyhow::bail!(
             "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
             snapshot_consumed_texts,

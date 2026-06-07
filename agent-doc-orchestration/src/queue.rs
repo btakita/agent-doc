@@ -567,6 +567,34 @@ pub fn is_agent_prioritized(text: &str) -> bool {
     !is_prioritized(text) && AGENT_PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
+/// Strip leading operator/agent pin markers (any spelling) plus surrounding
+/// whitespace from a prompt's text, returning the pin-independent content.
+///
+/// Used to compare two queue prompts for **identity** without being fooled by a
+/// `:pushpin:` / `:round_pushpin:` annotation present on one side only
+/// (`#queue-consume-pushpin-normalization`): the snapshot can hold the unpinned
+/// spelling of a head while the live document holds the pinned spelling of the
+/// same logical item. The pin is cosmetic priority metadata, not item identity,
+/// so a head-equality check must normalize it away or it errors out the cycle
+/// (`queue consume: snapshot head prompts ... do not match document head prompts`).
+/// Repeated leading markers are stripped so a doubly-annotated head still
+/// normalizes to its bare content.
+pub fn strip_priority_markers(text: &str) -> String {
+    let mut t = text.trim();
+    loop {
+        let trimmed = t.trim_start();
+        let stripped = PRIORITIZED_MARKERS
+            .iter()
+            .chain(AGENT_PRIORITIZED_MARKERS.iter())
+            .find_map(|m| trimmed.strip_prefix(m));
+        match stripped {
+            Some(rest) => t = rest.trim_start(),
+            None => break,
+        }
+    }
+    t.trim().to_string()
+}
+
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
 /// unpinned. Lower tiers sort first; agent pins never outrank operator pins.
 fn priority_tier(text: &str) -> u8 {
@@ -992,6 +1020,31 @@ mod tests {
         let rendered = render(&entries);
         assert!(rendered.contains("- re [#opt]"));
         assert!(rendered.contains("- re #opt2"));
+    }
+
+    #[test]
+    fn strip_priority_markers_normalizes_pin_for_identity() {
+        // #queue-consume-pushpin-normalization: a head differing only by a
+        // cosmetic pin annotation must normalize to the same identity, so the
+        // queue-consume head-equality check does not spuriously fail when the
+        // snapshot holds the unpinned spelling and the document the pinned one.
+        let bare = "do [#md-ast-document-model]. I like the tsift AST.";
+        assert_eq!(strip_priority_markers(bare), bare);
+        assert_eq!(strip_priority_markers(":pushpin: do [#x]"), "do [#x]");
+        assert_eq!(strip_priority_markers("  :pushpin:   do [#x]"), "do [#x]");
+        assert_eq!(strip_priority_markers(":round_pushpin: do [#x]"), "do [#x]");
+        assert_eq!(strip_priority_markers("**prioritized** do [#x]"), "do [#x]");
+        assert_eq!(strip_priority_markers("📌 do [#x]"), "do [#x]");
+        // The exact session repro: pinned vs unpinned spellings are equal.
+        assert_eq!(
+            strip_priority_markers(":pushpin: do [#md-ast-document-model]"),
+            strip_priority_markers("do [#md-ast-document-model]")
+        );
+        // A non-pin free-text head is untouched (no false stripping).
+        assert_eq!(
+            strip_priority_markers("Should tsift be a hard dependency?"),
+            "Should tsift be a hard dependency?"
+        );
     }
 
     #[test]

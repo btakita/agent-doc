@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -253,7 +253,7 @@ Top backlog item: `#ipc5`.
 The strategy is to keep `lazily-rs` core transport-neutral: `Snapshot`, `Delta`, `IpcMessage`, `ShmBlobRef`, epochs, checksums, and permission filtering remain pure protocol/data types. SHM should become the large-payload data plane through blob arenas; FD/HANDLE/event primitives should be optional platform transport optimizations, not the portable protocol surface.
 
 The first backlog item is the transport contract plus benchmark matrix because it gives us evidence before we choose defaults. After that, the order is SHM backing adapter, Unix FD/event adapter, Windows parity design, then the agent-doc/tsift process-state schema that sits on top of the transport-neutral protocol.
-<!-- agent:boundary:bafa111c -->
+<!-- agent:boundary:dc0b51cc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,6 +264,11 @@ The first backlog item is the transport contract plus benchmark matrix because i
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Add #next-steps for a SHM & FD IPC strategy.~~
 - Why does CI take so long? Can we speed it up? I don't want to wait for CI on every turn. I would rather speed up CI and passively check for regressions.
+- do [#ipc5]
+- do [#ipc6]
+- do [#ipc7]
+- do [#ipc8]
+- do [#ipc9]
 <!-- /agent:queue -->
 
 ## Backlog

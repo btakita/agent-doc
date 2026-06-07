@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -119,7 +119,7 @@ Persistence:
 
 - Pushed tsift submodule commit `d3f7f05` (`Add incremental markdown reparse helper`) to `btakita/tsift` `main`.
 - Committed the superproject submodule pointer locally as `b97c8e3` (`tsift: update submodule for incremental reparse`). I did not push the superproject because the root branch was already diverged and has many unrelated dirty files outside this task.
-<!-- agent:boundary:8e0f2fb6 -->
+<!-- agent:boundary:c706805f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +128,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

@@ -79,7 +79,37 @@ For partial exchange compaction: I agree, but I did not fold that into this comm
 - Tests should cover unresolved-tail preservation, queue-head/id matching, file/symbol matching, archive index continuity, and the no-prompt-bury rule.
 
 So the queue-context reset work is done and verified; partial semantic exchange compaction is the next implementation task, not completed in this cycle.
-<!-- agent:boundary:9146ca84 -->
+❯ I want the queue in go-mode to continue, interleaving a `/clear`/`/new` if the threshold is tripped. I don't want to queue to stop if the threshold is tripped.
+
+### Re: go-mode queue context reset — gpt-5
+
+Implemented the managed-pane side of this. In go-mode, an accretion threshold is now treated as a context-reset step instead of a queue stop condition: when the idle queue watch sees an idle prompt and an active head, it checks `queue_context_reset_reason`, injects the harness-specific reset command (`/clear` for Claude/Codex, `/new` for OpenCode), records that synthetic reset for Codex/OpenCode hook state, latches the current head so it cannot clear-loop, and then continues draining that same head on the next idle tick. Manual clear cooldown still wins, so an operator-triggered clear is not bypassed.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/harness.rs`
+- `src/agent-doc/src/session_actor_cmd.rs`
+- `src/agent-doc/specs/supervisor.md`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -q -p agent-doc-orchestration idle_queue_context_reset`
+- `cargo test -q -p agent-doc-orchestration idle_queue_drain`
+- `cargo test -q -p agent-doc-orchestration queue_context_reset`
+- `cargo test -q -p agent-doc --test run_integration run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`
+- `cargo test -q -p agent-doc harness_clear_command_maps_opencode_to_new`
+- `cargo check -q -p agent-doc-orchestration`
+- `make check` (`3938` passed, `233` skipped)
+- `make install`
+
+Repo/CI:
+- Source commit: `95057fe2 fix: keep go-mode queue moving after context reset`, pushed to `btakita/agent-doc` `main`.
+- Parent submodule pointer commit: `8aa9fb766 chore: update agent-doc submodule`.
+- Latest `CI` after the source push is `in_progress` for `95057fe2`; the previous latest `CI` run on `main` was green. I did not wait on the pending run, per the local runbook.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:25e56f30 -->
 <!-- /agent:exchange -->
 
 ## Queue

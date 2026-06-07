@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -129,7 +129,28 @@ flowchart LR
 **What to *not* copy:** the multi-agent orchestration layer. tsift's role is the retrieval/memory substrate that *multiple* harnesses share — the cross-agent coordination belongs in agent-doc / the harnesses, not in tsift. tsift already gets the "multi-agent memory" benefit for free via `session_id`/`imported_from`.
 
 Both new items are **gated** — they're a direction proposal, not auto-executable work (I left them off the active go-queue deliberately; otherwise go-mode would try to build them this loop, as just happened with #3dhp). Say the word and I'll un-gate #memgraphrag1 (decay retrieval) as the lowest-risk first step.
-<!-- agent:boundary:120db0b6 -->
+
+### Re: Document the MemGraphRAG direction — opus-4-8
+
+> **Queue prompt:**
+>
+> document the MemGraphRAG direction in a md document.
+
+
+Created **`src/tsift/specs/memgraphrag-direction.md`** (committed `2ff648e`, pushed to `btakita/tsift` `main`). It captures the assessment from this session as a standalone direction doc:
+
+- **Summary** — what MemGraphRAG adds (memory graph + temporal decay + multi-agent), with the arxiv link, and the headline that tsift is ~70% there.
+- **Pillar mapping table** — paper pillar → tsift today → gap (graph / memory / RAG / decay / multi-agent).
+- **Architecture mermaid** — `tsift-memory` event stream → `GraphProjection` → `GraphStore` → retrieval, with the two gap edges annotated `#memgraphrag1` (decay) and `#memgraphrag2` (unify).
+- **Roadmap** — `#trt1` (authored memory nodes, already specced), `#memgraphrag1` (decay retrieval, gated), `#memgraphrag2` (one graph not two, gated), plus suggested phasing.
+- **Out of scope** — multi-agent orchestration stays in agent-doc / the harnesses, not tsift.
+
+I staged only the new file (the submodule had pre-existing unrelated dirty files — `AGENTS.md`, `.opencode/`, `BENCHMARKS.md` — which I left untouched).
+
+**On the queue:** go-mode pulled the gated `#memgraphrag1`/`#memgraphrag2` into the active queue again (the same pattern as `#3dhp`). You asked to *document* the direction, not implement those, so I removed the two spurious queue refs — the gated backlog items stay put, awaiting your decision. Confirms the go-mode-pulls-gated-items behavior is worth a `#agent-doc-bug` plan if unintended.
+
+(Exchange is large — 3 response sections, 6 cycles in 30 min — but I'm not compacting without an explicit `agent_doc_auto_compact` opt-in.)
+<!-- agent:boundary:db8992ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,10 +159,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- document the MemGraphRAG direction in a md document.
-- [#memgraphrag1]
-- [#memgraphrag2]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

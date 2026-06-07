@@ -154,7 +154,33 @@ Verification:
 - `make check`
 
 Commits: `src/agent-doc` `2f2e9327` (`Make focus default to fast handoff`), parent submodule pointer `c8f7fd750` (`Update agent-doc submodule`). CI check: `agent-doc` CI run `27098734151` was `in_progress` when checked; per instruction, I did not wait for completion. The parent repo has no workflow named `CI`.
-<!-- agent:boundary:6c86f31d -->
+
+### Re: JB `Run Agent Doc` on monsterrodholders.md stalled
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc tasks/monsterrodholders.md` not follow a deadlock path and do the work. Even if this means the invocation messages the current owner to continue to the next task and that's all. If we can detect `Codex pane already owns that agent-doc session`, we can message the owning supervisor or agent-doc session.
+> ```
+> • agent-doc tasks/monsterrodholders.md refused to run because this Codex pane already owns that agent-doc session, so a
+>   direct recursive invocation would deadlock.
+>
+>   agent-doc session status tasks/monsterrodholders.md reports the session is healthy and the actor is ready, with the
+>   last event recorded as recursive_direct_invocation_blocked. No agent-doc cancel is needed.
+>
+>   To run it as a new managed cycle, start it from outside this owned pane, or use:
+>
+>   agent-doc start tasks/monsterrodholders.md
+> ```
+
+
+Implemented and pushed the `agent-doc` fix so the supervisor idle-queue watch no longer injects recursive `agent-doc <FILE>` into a Codex owner pane. Codex drains now inject an in-pane queue continuation prompt containing the active head and closeout instructions; Claude and OpenCode keep their normal harness triggers.
+
+Added regression coverage for Codex owner-continuation payloads and non-Codex trigger payloads, updated the supervisor and route specs, and added the Unreleased note.
+
+Commits: `src/agent-doc` `9b6f4635` (`Avoid Codex idle queue self-invocation`), parent `9520d9a31` (`Update agent-doc submodule`).
+
+Verification: `cargo test -p agent-doc-orchestration idle_queue_drain` passed; `make check` passed after the final edit. CI was checked without waiting: latest `agent-doc` CI run `27099096431` was `in_progress`; the parent repo has no workflow named `CI`.
+<!-- agent:boundary:5b434855 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -174,6 +200,8 @@ JB `Run Agent Doc` on monsterrodholders.md stalled. We need to make `agent-doc t
   agent-doc start tasks/monsterrodholders.md
 ```
 ---
+- ~~monsterrodholders.md queue items that are completed don't have the response written into the agent:exchange element.~~
+- Now, when I navigate to lazily-rs.md, 3 panes appear, with the 3rd pane being the lazily-rs.md pane. But then the lazily-rs.md pane disappears and we are still left with the wrong agent-doc-bugs2.md pane instead of the correct lazily-rs.md pane.
 <!-- /agent:queue -->
 ###
 <!--

@@ -68,7 +68,47 @@ Verification:
 Commits pushed to `src/agent-doc`:
 - `1cc8e2ad Add node-keyed watch events`
 - `8ccf4f2c Document watcher node-event spec`
-<!-- agent:boundary:e2d577ec -->
+
+### Re: #md-ast-realtime-watcher - gpt-5
+
+Implemented `#md-ast-realtime-watcher`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-markdown-ast/src/events.rs`
+- `src/agent-doc/agent-doc-markdown-ast/src/lib.rs`
+- `src/agent-doc/agent-doc-markdown-ast/src/mutations.rs`
+- `src/agent-doc/agent-doc-orchestration/src/watch.rs`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/docs/reference/reactive-stream.md`
+- superproject gitlink `src/agent-doc`
+
+What changed:
+- Added `agent_doc_markdown_ast::events::diff_node_events`, which emits node-keyed item events for `insert`, `remove`, `replace`, `move`, `strike`, and `unstrike` from before/after markdown projections.
+- Added `mutations::all_item_nodes` so watcher/event code can address all component item nodes, including duplicate component instances, with the same node-key format used by mutations and IPC patches.
+- Adjusted node-key occurrence assignment to be id-based, so same-id text edits remain the same node while same-id duplicates still get distinct occurrence keys.
+- Wired the watch daemon to seed a per-file node snapshot for watched documents and log `document_node_events` JSON payloads on subsequent file changes. The payload includes `component`, `node_key`, `op`, `item_id`, indexes, before/after content, and neighboring node anchors.
+- Documented the watcher event stream for realtime follow-up work such as backlog enqueue.
+
+Commits:
+- `src/agent-doc`: `1cc8e2ad Add node-keyed watch events`, pushed to `btakita/agent-doc/main`.
+- superproject: `e5710b4d7 Update agent-doc submodule`, pushed to `btakita/agent-loop/main`.
+
+Verification:
+- Focused markdown AST and orchestration watcher tests passed.
+- `cargo test -p agent-doc-markdown-ast -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration watch::tests -- --nocapture` passed.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed.
+- `btakita/agent-doc` GitHub CI run `27083761884` passed, including `make check` and `make tmux-ci`.
+
+Superproject CI note:
+- `gh run list --workflow CI --limit 1` reports no workflow named `CI` in `btakita/agent-loop`.
+- Latest `Agent Doc` workflow run `27083768560` failed before jobs started because GitHub reported an account billing/spending-limit runner allocation blocker. Both `check` and `tmux-ci` had no steps/logs, so this is external to the code change.
+
+Closeout note: the implementation item had already been reaped by the prior closeout; this write restores the visible exchange response after sidecar repair.
+
+Confidence: high.
+<!-- agent:boundary:17f0f524 -->
 <!-- /agent:exchange -->
 
 ## Queue

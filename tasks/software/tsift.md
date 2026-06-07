@@ -59,6 +59,9 @@ Verification:
 - `cargo test -p tsift-md-ast` passed.
 - `make check` passed on the final narrowed diff.
 - Latest GitHub Actions CI check was `completed success` for workflow `CI` on `main` at run `27082060444`.
+
+### Re: [#trt1inject]
+
 `#trt1inject` is already implemented in the current tsift tree, so I closed it as done rather than adding duplicate code.
 
 Evidence checked:
@@ -67,9 +70,11 @@ Evidence checked:
 - `packages/tsift-cli/src/commands/finding.rs` has `collect_injectable_findings()`, which selects only matching `finding` / `decision` / `note` nodes, excludes `draft`, excludes stale/no-watermark findings by re-resolving the anchor watermark, and fails open to an empty list when `.tsift/findings.db` is absent.
 - `VERSIONS.md` records the shipped `#trt1p2` context-pack injection behavior; `#trt1p2b` later extends the same trusted+fresh contract to `search` and `explain`.
 
+Verification:
+
 
 - `cargo test -p tsift-cli --test finding context_pack_` passed: 4 tests cover trusted fresh injection plus draft, stale, and out-of-result exclusions.
-<!-- agent:boundary:bef03691 -->
+<!-- agent:boundary:3f92e6db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +86,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 - ~~do "*Phase 2c (tsift, optional refinement):* an explicit incremental-reparse helper on top of `parse()` for CRDT keystroke edits (tree-sitter-md is already incremental; today consumers re-`parse()`). Say the word if you want it; I didn't queue a churny item."~~
 - ~~[#trt1inject]~~
-- ~~[#trt1watermark]~~
+- [#trt1watermark]
 - [#trt1capture]
 - [#trt1project]
 <!-- /agent:queue -->
@@ -116,4 +121,3 @@ Could FalkorDB help with performance?
 
 <!-- completed work archived in tasks/software/tsift.done.md -->
 <!-- /agent:done -->
-

@@ -72,7 +72,27 @@ This is intentionally partial, not a full closeout of the umbrella item. Remaini
 ### Re: closeout repair - gpt-5
 
 Repair note: the missing-response recovery accidentally struck `#jb-file-cache-conflict-syntax-loss` while recording a keep-open proof. I restored that queue item as the live head; no implementation work for it was completed in this md-AST cycle.
-<!-- agent:boundary:6d170f32 -->
+
+### Re: do [#recursion-guard-wedge-escape] -- gpt-5
+
+Closed as already shipped in `src/agent-doc` commit `91f06782` (`Add force interrupt-clear wedge escape`), included in current `origin/main` at `9df1244f`.
+
+Proof checked this cycle:
+
+- `agent-doc session interrupt-clear <FILE> --force` is exposed in [src/main.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/main.rs:1641).
+- The force path in [src/session_actor_cmd.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/session_actor_cmd.rs:1221) closes actor state, removes matching session registry projections, signals child/supervisor PIDs, kills the selected owner pane, removes the supervisor socket, writes clear cooldown, and reclaims orphaned empty preflight cycles.
+- The recursive start diagnostic now points operators to `session status`, normal `interrupt-clear`, then `interrupt-clear --force`; the spec pins the same one-command destructive hatch in [specs/07-core-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-core-commands.md:18).
+
+Verification run now:
+
+```
+cargo test -p agent-doc force_interrupt_clear_summary_reports_destructive_cleanup -- --nocapture
+cargo test -p agent-doc-orchestration recursive_start_diagnostic_refuses_and_names_out_of_pane_recovery -- --nocapture
+cargo test -p agent-doc-orchestration owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries -- --nocapture
+```
+
+All three passed. The source CI for current `src/agent-doc` `origin/main` (`9df1244f`) was already green in run `27088129850`, so this queue item is a stale mirror and can be marked done.
+<!-- agent:boundary:45543358 -->
 <!-- /agent:exchange -->
 
 ## Queue

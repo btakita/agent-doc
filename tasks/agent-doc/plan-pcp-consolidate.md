@@ -152,3 +152,50 @@ Live tmux/editor coverage remains a smoke layer for the external pane/editor bou
   session response through it; verify each Rust phase with `make check` + a fresh `cargo install`
   + `cargo build --release`, and each plugin phase against a live editor before claiming the fix is
   live.
+
+## Implementation finding (2026-06-08): consolidation is a prerequisite for #pcp3/#pcp4/#pcp7
+
+Mapping the *current* (not target) implementation while starting `#pcp3` surfaced a sequencing
+dependency the original phase order missed:
+
+- **The supervisor and the agent finalize run in SEPARATE processes today.** The supervisor is a
+  child process spawned by `agent-doc start`; the agent finalize runs in the `agent-doc` CLI
+  process. The only thing serializing their `.md` disk writes is the per-operation advisory
+  `flock` (`write.rs`) plus SQLite compare-and-swap on actor rows. There is **no in-process write
+  queue**, and `session_actor.rs` is a data struct with CAS guards persisted to SQLite — **not** a
+  message-passing actor that owns a write queue.
+- Therefore an **"in-process ordered write queue in the session actor" (the `#pcp3` premise) cannot
+  serialize the two racing writers until the supervisor is an in-process adapter** inside the
+  controller process — i.e. it depends on the single-process control-plane consolidation
+  (`specs/08b` §"In-process actors"/"Document write and watch authority"), which is **not yet
+  landed**. `project_controller.rs` (242KB) + `session_actor.rs` + `turn_scope_store.rs` exist and
+  persist actor/cycle state to SQLite, but the supervisor is still out-of-process.
+- The same prerequisite almost certainly applies to **`#pcp4`** (a single *controller-owned*
+  filesystem watcher presupposes the controller hosting the watch) and **`#pcp7`** (plugin
+  demotion to read-only presupposes the controller being the sole writer/watcher).
+- **R6 mechanism (corrected).** "could not drain the active closeout / exit 75" originates in
+  `route.rs::drain_open_closeout_before_routed_dispatch` (~L1798–1877), called from
+  `route_via_authoritative_actor` before a routed dispatch. The drain reads `cycle_state` +
+  capture baseline, runs `repair` + `session_check`; a concurrent finalize in the *other* process
+  writes the document between the drain's reads, so the captured baseline "no longer matches
+  current document" and the drain returns `Blocked` → exit 75. It self-resolves once the finalize
+  completes (the ~20s the user observed).
+
+### Re-sequencing
+
+- **`#pcp3a` (achievable now, no consolidation): R6 drain race-hardening.** Make
+  `drain_open_closeout_before_routed_dispatch` fail *soft* on a concurrent-finalize baseline drift:
+  detect that the mismatch is a transient in-flight write (cycle phase advanced between reads / a
+  write-in-progress signal) and classify it as retryable (bounded backoff/retry, or a clean
+  "transiently busy, queued" outcome) instead of a hard `Blocked`/exit-75. Cross-process safe using
+  existing `flock`/cycle-state primitives; SimWorld-testable (model a drain that observes
+  `cycle_state` advance mid-check → retry → succeed). This is the near-term win for the symptom the
+  user actually hit.
+- **`#pcp3b` (blocked on consolidation): in-process ordered write queue.** Build the session actor
+  into a real per-document write serializer once the supervisor is an in-process adapter, and route
+  all `write`/`stream`/`finalize`/repair + supervisor idle/file-watch writes through it. Gated on
+  the supervisor-in-process consolidation step.
+- **Net:** `#pcp5` (early-ack IPC / FFI protocol) and `#pcp6` (buffer content in the live-buffer
+  digest) remain largely independent of the consolidation and can proceed; `#pcp3b`, `#pcp4`, and
+  `#pcp7` should be sequenced *after* a supervisor-in-process consolidation phase. The operator
+  decision is whether to invest in that consolidation now or ship `#pcp3a` + `#pcp5`/`#pcp6` first.

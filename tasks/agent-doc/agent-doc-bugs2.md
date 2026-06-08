@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,13 +56,13 @@ Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpre
 Closed the active Codex continuation after the `#ctrlplane-adminbp` queue response. No additional task work was needed beyond committing the recovered plan/backlog closeout and repairing the queue metadata drift.
 
 Verification after the repair path: the ordinary `agent-doc session-check` reported the queue drained with no next head. I am rerunning the strict Codex final gate after this binary-owned closeout.
-
-<!-- agent:boundary:f3a91a48 -->
+<!-- agent:boundary:d7224ca3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ctrlplane-adminbp-data]
 <!-- /agent:queue -->
 ###
 <!--

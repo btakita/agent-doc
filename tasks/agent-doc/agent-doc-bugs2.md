@@ -30,203 +30,30 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-210740.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-231427.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do [#op-scoped-drift-1]; do [#op-scoped-drift-2]; do [#op-scoped-drift-3]; 2 more
+- Archived 6 response topic(s): do [#nm1x-codex-clear-parity]; investigate agent-doc churn / IPC drift / File Cache Conflict; investigate agent-doc churn / IPC drift / File Cache Conflict; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#nm1x-codex-clear-parity] — gate Codex Stop-hook + run-path context reset on the queue opt-in — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.
-
-
-> **Queue prompt:**
->
-> :pushpin: do [#nm1x-codex-clear-parity]. Respect the new `agent_doc_queue_context_reset` opt-in
-
-
-Done and shipped. `#nm1x-no-preempt-clear` had scoped the off-by-default `agent_doc_queue_context_reset` opt-in to the supervisor idle-queue watch only; the Codex Stop-hook continuation instructions and the `run.rs` queue-continuation fresh-agent-session decision kept firing the accretion-driven pre-emptive `/clear`. This makes the no-pre-emptive-clear policy product-wide.
-
-**Change (`src/agent-doc`, committed `26e390a3`, pushed):**
-- New `session_accretion::queue_context_reset_reason_if_opted_in(file, last_context_clear_at)` — combines the opt-in check with the accretion reason. Returns `None` without an explicit `agent_doc_queue_context_reset` opt-in (frontmatter precedence, then `.agent-doc/config.toml`), mirroring the `start.rs` idle-queue watch gate.
-- All five accretion-driven call sites now route through the gated helper: the four Codex Stop-hook continuation paths in `codex_hook.rs` (tracked/marker repeated recovery, auto-queue continuation, marker fallback) and the `run.rs` fresh-agent-session decision. Without the opt-in none of them interleaves a pre-emptive `/clear`. Deferred *operator* clears (`session clear`/`interrupt-clear`) stay a separate live path.
-- Spec §6 (`specs/06-config.md`) now documents the product-wide scope. Unit test `queue_context_reset_reason_if_opted_in_gates_codex_and_run_paths` covers default-off + opt-in; the affected `codex_hook` compaction test and `run_integration` fresh-session fixture now opt in explicitly.
-- `#ipc-degrade-self-heal` — `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch the moment the plugin socket accepts connections again: a self-healing circuit breaker instead of a one-way ratchet.
-- `#ipc-ack-timeout-align` — sender ack timeout 2 s → 6 s (`IPC_ACK_TIMEOUT_SECS`), above the plugin's idle cap; `send_message` connects first so a dead listener still fails fast. Matcher made duration-agnostic.
-- `#ipc-degrade-false-vote` — a confirmed-but-slow sidecar no longer votes toward the degrade threshold; it recovers via the file-IPC patch queue (still the Plugin path), never a raw disk write.
-2. The sender's ack budget was **2 s**, below the plugin's **5 s** `agent_doc_await_idle` typing-debounce cap, so a busy/typing plugin tripped a false timeout.
-1. A **confirmed** socket delivery (`Ok(Some(ack))`) whose *content sidecar* was merely slow — the plugin writes that sidecar only after `saveDocument`, which lags past the 200 ms poll budget while the EDT is busy or you're typing — was counted as an ack timeout.
-- `#ipc-degrade-self-heal` — `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch the moment the plugin socket recovers: a self-healing circuit breaker instead of a one-way ratchet to session-restart.
-- `#ipc-ack-timeout-align` — sender ack timeout 2 s → 6 s (above the plugin's idle cap); `send_message` connects first so a dead listener still fails fast.
-- `#ipc-degrade-false-vote` — a confirmed-but-slow sidecar no longer votes toward degradation; recovers via the file-IPC patch queue (still the Plugin path), never a raw disk write.
-
-**Verification:** `make check` green (clippy + full suite, 4055 tests). `cargo build --release` + `cargo install --path .` done — both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` refreshed. Latest CI run (`27167663064`) is pending from this push; closed out on local evidence per the test-bearing-turn rule.
-
-One note on the new queue item you added mid-run (`/agent-doc` + `/clear` accumulating): this fix directly removes the *pre-emptive `/clear`* source of that churn product-wide. The remaining "multiple `/agent-doc` invocations scheduled" concern is a separate idle-queue/loop dispatch dedupe issue — it stays queued and will get its own turn.
-
-### Re: investigate agent-doc churn / IPC drift / File Cache Conflict — root-cause map + keystone fix — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#nm1x-livebuf-content]
-
-
-Investigated this session and the IPC/CRDT write path. The IPC drift, "too much IPC / not enough reliable Plugin insertion", and "too many File Cache Conflict" are **one defect with three surfaces**, centered on the IPC **degrade state machine** (`write.rs`) + the sender ack timeout (`ipc_socket.rs`).
-
-**Root cause.** A session latched to "degraded" after 2 ack timeouts and then wrote every change to disk with **no in-session recovery**. Two of those "timeouts" were false positives: (1) a *confirmed* socket delivery whose content sidecar was merely slow (plugin writes it after `saveDocument`, lagging past the 200 ms poll budget while the EDT is busy/typing); (2) the sender's 2 s ack budget was below the plugin's 5 s `agent_doc_await_idle` typing cap. Once degraded → raw disk writes → IntelliJ raises "File Cache Conflict" on the open buffer. So File Cache Conflict is *downstream* of the degrade latch.
-
-**Phase 1 shipped** (`src/agent-doc@9ecb5775`, pushed):
-- `#ipc-degrade-false-vote` — a confirmed-but-slow sidecar no longer votes toward degradation; recovers via the file-IPC patch queue (still the Plugin path), never a raw disk write.
-- `#ipc-ack-timeout-align` — sender ack timeout 2 s → 6 s (above the plugin's idle cap); `send_message` connects first so a dead listener still fails fast.
-- `#ipc-degrade-self-heal` — `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch the moment the plugin socket recovers: a self-healing circuit breaker instead of a one-way ratchet to session-restart.
-- closes the cycle committed and returns `RepairOutcome::StaleCaptureRetired`.
-- rebuilds the snapshot **and** CRDT sidecars from the current document so the merge layer can't re-diverge,
-- marks the capture `Discarded` (the body is **preserved on disk** for forensics, never deleted),
-- `capture::validate_replay` fails closed — the captured file/snapshot hashes no longer match.
-- `response_already_applied*` is false — the body is no longer contiguously present, so it can't be recognized as already-landed, and
-
-Net: Plugin (Document API) insertion stays primary; the disk fallback only fires on a genuinely wedged listener and recovers automatically — the "fallback should be extremely rare" behavior, removing the dominant File-Cache-Conflict source. Full suite 4057 passed; both binaries rebuilt/installed; agent-doc CI `27168907477` was in progress at push (closed out on local evidence). Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
-
-**Live meta-note:** this very turn hit the drift bug — your concurrent edits drove `live_prompt_drift_after_preflight`, the response capture went stale, and recovery needed `reset --from-current --preserve-session` + moving a stale capture aside. That's the `#nm1x-livebuf-content` / `#ipc-drift-writeprovenance` surface (a *different* guard than the degrade latch I fixed): the visible-write reconcile still fails closed on genuine concurrent editing. The provenance follow-up is the real fix; until then, editing the doc mid-finalize will still churn.
-
-### Re: investigate agent-doc churn / IPC drift / File Cache Conflict — root-cause map + keystone fix — opus-4-8
-
-Investigated this session and the IPC/CRDT write path. The IPC drift, "too much IPC / not enough reliable Plugin insertion", and "too many File Cache Conflict" are **one defect with three surfaces**, centered on the IPC **degrade state machine** (`write.rs`) + the sender ack timeout (`ipc_socket.rs`).
-
-**Root cause.** A session latched to "degraded" after 2 ack timeouts, then wrote every change to disk with **no in-session recovery**. Two of those "timeouts" were false positives: (1) a *confirmed* socket delivery whose content sidecar was merely slow (plugin writes it after `saveDocument`, lagging past the 200 ms poll budget while the EDT is busy/typing); (2) the sender's 2 s ack budget was below the plugin's 5 s `agent_doc_await_idle` typing cap. Once degraded → raw disk writes → IntelliJ raises "File Cache Conflict" on the open buffer, so it is *downstream* of the degrade latch.
-
-**Phase 1 shipped** (`src/agent-doc@9ecb5775`, pushed): `#ipc-degrade-false-vote` (confirmed-but-slow sidecar no longer votes; recovers via file-IPC, still the Plugin path), `#ipc-ack-timeout-align` (2 s → 6 s, above the plugin idle cap; connect-first keeps dead-listener fast-fail), `#ipc-degrade-self-heal` (`ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch on recovery — a self-healing circuit breaker). Full suite 4057 passed; both binaries rebuilt/installed; CI `27168907477` in progress at push. Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
-
-**Live meta-note:** landing this very response repeatedly hit `live_prompt_drift_after_preflight` / exit 75 plus a supervisor self-race on pane %30 (route "could not drain the active closeout"). Recovery needed `reset --from-current --preserve-session` + retiring stale captures. That is a *different* guard than the degrade latch I fixed — the visible-write reconcile failing closed on concurrent editing — and is exactly the `#ipc-drift-writeprovenance` / `#nm1x-livebuf-content` follow-up surface.
-
-### Re: Fix the root cause of the compounding stale-capture deadlock — opus-4-8
-
-Fixed and shipped (`src/agent-doc@ec2bf878`, pushed) — and the fix just auto-recovered *this very session's* wedge live (`[repair] retired wedged write-applied capture ... rebuilt snapshot/CRDT from current`), no manual `reset --from-current --preserve-session` needed.
-
-**Root cause.** A `finalize` advanced the cycle to `write_applied` (response written to disk), but a concurrent editor edit / CRDT intermix then removed or fragmented that response body **and** drifted the captured baseline. By the time `repair` re-runs (next route closeout drain, `commit`, or `write --commit`):
-- `response_already_applied*` is false — the body is no longer contiguously present, so it isn't recognized as already-landed, and
-- `capture::validate_replay` fails closed — the captured file/snapshot hashes no longer match.
-
-That combination wedged the document: every later `commit` / `write --commit` / route drain hit "captured response baseline no longer matches current document" and bailed. The route-side "owns pane %30 but route could not drain the active closeout" was the same wedge surfacing through `drain_open_closeout_before_routed_dispatch` → `repair` → `validate_replay`.
-
-**The fix** (`repair::retire_wedged_write_applied_capture_if_drifted`): when repair sees that exact signature — capture `WriteApplied` + `replay_baseline_drifted` + body absent — it mirrors the non-destructive `reset --from-current --preserve-session` automatically instead of failing closed:
-- marks the capture `Discarded` (body **preserved on disk** for forensics, never deleted),
-- rebuilds the snapshot **and** CRDT sidecars from the current document so the merge layer can't re-diverge,
-- closes the cycle committed and returns `RepairOutcome::StaleCaptureRetired`.
-
-The superseded turn re-runs cleanly on the rebuilt baseline (queue prompts survive in `agent:queue`). Replaying a drifted baseline is exactly the duplicate/reorder corruption `validate_replay` exists to prevent, so re-running fresh is the correct recovery, not a regression.
-
-**Scoping (why it's safe).** Gated to `WriteApplied` captures only — the write was already attempted, so it isn't a never-written pending body. A `Captured`-only orphan still takes the conservative fail-closed path (queued as `#stale-capture-captured-only-drift` to evaluate later). All three callers (route drain, `commit`, `write --commit`) benefit because they funnel through `repair`.
-
-**Verification.** `make check` green — clippy clean, **4060 passed / 237 skipped** — incl. `retires_wedged_write_applied_capture_on_baseline_drift`, `captured_only_orphan_on_drift_still_fails_closed`, `replay_baseline_drifted_tracks_file_divergence`. `cargo build --release` + `cargo install --path .` done (both binaries, 0.34.0). Spec §07-closeout-commands documents `#stale-capture-deadlock-autoretire`. CI `27170755210` in progress for this commit; closed out on local evidence per the test-bearing-turn rule. The deeper *upstream* cause (why the response fragments during concurrent editing) stays the queued `#ipc-drift-writeprovenance` / review `#ipc-crdt-response-drift` surface — this change is the recovery half.
-
-### Re: process model — what runs where, remaining races, consolidation plan — opus-4-8
-
-> **Queue prompt:**
->
-> What part of the stack runs in the Project Control Pane process? What are separate processes? Does the Plugin IPC live in the editor process or can it be moved into the Project Control Pane process? Explain where race conditions can still occur. Recommend moving any logic into the Project Control Pane process. Draw a #mermaid.
-
-
-Verified against source (`agent-doc-orchestration/src/ipc_socket.rs`, `src/ffi.rs`, `editors/jetbrains/.../PatchWatcher.kt`). The consolidation follow-up is already queued as `#pcp-consolidate` (added the prior cycle).
-
-#### Two OS processes
-
-**Process 1 — Project Control Pane (the tmux pane, e.g. `%30`).** Runs the harness (Claude Code / Codex / OpenCode) *and* the `agent-doc` binary + its supervisor. Everything that decides document state lives here: `preflight`/`plan`/`write`/`finalize`/`commit`/`repair`, the **CRDT merge** (`crdt.rs`), snapshot/capture/baseline sidecars, the **idle-queue watch + supervisor file-watcher**, the IPC **sender** (`send_message`, `is_listener_active`, `try_connect` in `ipc_socket.rs`), and the **disk-fallback writer**.
-
-**Process 2 — Editor (IntelliJ / VS Code).** Runs the plugin. It loads the agent-doc **cdylib via FFI** (`NativeLib.kt` → `ffi.rs`), and that FFI code starts the IPC **listener** thread *inside the editor JVM* (`agent_doc_start_ipc_listener_v2`). The plugin also runs *its own* WatchService file-watcher, an applied-patch dedup ledger, and dispatches the actual Document-API mutation + `saveDocument` onto the **EDT** (`invokeAndWait`/`invokeLater`). It writes the content + live-buffer sidecars.
-
-So agent-doc core code *already* runs in both processes (the listener is FFI-hosted in the editor). The socket is the only cross-process channel: sender in Process 1, listener in Process 2.
-
-#### Can the Plugin IPC move into the control pane?
-
-**The listener cannot fully move** — its entire job is to mutate the editor's *in-memory* Document on the EDT, which is only reachable from inside the editor JVM. What *can* move (and mostly already has) is all the **policy/decision** logic: degrade state machine, ack-timeout policy, drift classification, CRDT merge. The terminal `Document.apply + saveDocument` is the only thing that is intrinsically editor-side. Everything else belongs in the control pane.
-
-#### Process & race-condition map
-
-```mermaid
-flowchart TB
-    subgraph P1["Process 1: Project Control Pane (tmux pane)"]
-        H["Harness: Claude Code / Codex / OpenCode"]
-        BIN["agent-doc binary: preflight / plan / finalize / commit / repair"]
-        CRDT["crdt merge: document-state authority"]
-        SUP["supervisor: idle-queue watch + file-watcher"]
-        SND["IPC sender: send_message / is_listener_active"]
-        DISK["disk-fallback writer"]
-        H --> BIN --> CRDT
-        BIN --> SND
-        BIN --> DISK
-    end
-    subgraph P2["Process 2: Editor JVM (IntelliJ / VS Code)"]
-        FFI["FFI cdylib: agent_doc_start_ipc_listener_v2"]
-        LIS["IPC listener thread"]
-        WATCH["plugin WatchService file-watcher"]
-        EDT["EDT: Document apply + saveDocument"]
-        SIDE["writes content + live-buffer sidecars"]
-        FFI --> LIS --> EDT --> SIDE
-        WATCH --> EDT
-    end
-    DOC[("session .md on disk")]
-    SND -. "unix socket patch" .-> LIS
-    DISK -- "R3 two writers" --> DOC
-    EDT -- "saveDocument" --> DOC
-    DOC -- "R1 two watchers" --> SUP
-    DOC -- "R1 two watchers" --> WATCH
-    SIDE -. "R4 mtime-heuristic drift" .-> SUP
-    LIS -. "R2 EDT/save lag vs ack budget" .-> SND
-    WATCH -. "R5 TOCTOU vs listener" .-> LIS
-    SUP -. "R6 supervisor self-race vs finalize" .-> BIN
-
-    classDef race fill:#fff3cd,stroke:#d39e00,color:#663c00;
-    class DISK,WATCH,SIDE race;
-```
-
-**Where races still occur**
-
-- **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift.
-- **R2 — EDT/save lag vs ack budget.** The listener dispatches to the EDT, then `saveDocument` + the content sidecar land *after* the EDT runs — lagging the sender's poll budget → false ack-timeout / false degrade vote (partially fixed by `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
-- **R3 — disk fallback** manufactures the foreign-write that IntelliJ flags as a cache conflict whenever the session is latched degraded.
-- **R4 — mtime-heuristic drift.** `live_buffer_diverges_from_content` infers "foreign disk write vs genuine unsaved edit" from `LIVE_BUFFER_STALE_SKEW_MS` mtime only — no buffer content — so a real concurrent edit fails closed (`live_prompt_drift_after_preflight`).
-- **R5 — TOCTOU** between the FFI socket handler and the WatchService for the same patch; today guarded best-effort by EDT re-checks (dedup + generation fence), but a window remains.
-- **R6 — supervisor self-race.** A route-owned supervisor in Process 1 races the agent's own finalize writes on the same pane → "could not drain the active closeout" / exit 75.
-
-#### Recommendation — consolidate authority into Process 1
-
-Queued as **`#pcp-consolidate`** (top of backlog):
-
-1. **Single writer.** The supervisor is the only thing that touches disk; the plugin never writes directly — degraded writes route through the file-IPC patch queue so the plugin still applies via the Document API (this is `#ipc-degraded-prefers-file-ipc`). Kills R3.
-2. **Single file-watcher.** Demote the plugin WatchService to read-only buffer-state *reporting*; the supervisor's watcher is the sole disk-change reactor. Kills R1, shrinks R5.
-3. **Positive provenance instead of heuristic.** The plugin pushes authoritative buffer **content + a write-provenance/generation id** to the control pane (`#ipc-drift-writeprovenance` + `#nm1x-livebuf-content`); the control pane then *classifies* "editor ahead of disk (real edit)" vs "lagging agent-doc write" instead of guessing from mtime. Fixes R4.
-4. **Serialize the control-pane writers.** Route supervisor idle-queue/file-watch writes and agent finalize writes through one in-process write queue (one writer). Fixes R6.
-5. **Thin the FFI listener** to a pure EDT apply+ack shim — no policy in the editor.
-
-Net: the editor process keeps only the irreducible EDT `apply + saveDocument`; the control pane owns state, merge, arbitration, and provenance.
-
-### Re: queue hygiene — operator-pin position-lock, duplicate-id self-heal, race-map doc — opus-4-8
-
-
-Handled the three queued asks (operator pins, duplicate ids, save the race map). Code shipped in `src/agent-doc@b153458f` (pushed); doc + submodule pointer in `ea9401b97`. Follow-up already queued as `#queue-operator-pin-position-lock-dag`.
-
-**1. Save the "Process & race-condition map" → document.** Extracted the two-process model + mermaid + R1–R6 + `#pcp-consolidate` plan into [`tasks/agent-doc/process-race-condition-map.md`](process-race-condition-map.md) as a standalone reference.
-
-**2. `:pushpin:` is now position-locked (`#queue-operator-pin-position-lock`).** `queue::sort_prompts_by_priority` no longer floats operator pins to the top. An operator pin (`:pushpin:` / `__prioritized__`) is **anchored at its authored slot** — the `priority` attribute reorders only the *non*-operator-pinned prompts (agent pins, then unpinned by rank) into the remaining slots around it. So an item you place at a position and pin stays exactly there. Agent pins (`:round_pushpin:`) still float above unpinned among the movable slots. The preflight log now reads `operator pins position-locked`. Tests rewritten (`operator_pin_stays_in_place_while_unpinned_reorder`, `operator_pin_at_bottom_not_floated_to_top`, `operator_pins_hold_their_slots_unpinned_reorder_around`, +tier/shortcode tests) and `specs/pending-system.md` updated.
-
-**3. Duplicate ids self-heal (`#pending-redundant-self-id-strip`).** `pending::parse_item_line` now drops a bracketed `[#id]` token in an item's text that equals the item's own id (the `[#x] [recommended] [#x]` shape produced when `--pending-add` text already carried the id), collapsing the leftover space. Cross-references to *other* ids are preserved. It self-heals on parse — your existing `#stale-capture-captured-only-drift` backlog item already rendered clean this cycle (now `[#stale-capture-captured-only-drift] [recommended] Evaluate…`).
-
-**Scope note.** The position-lock lands in the `priority`-sort path — the live behavior you hit. The auto-DAG path (`sort_prompts_by_dag`, active only when `after=#id` edges exist) still tie-breaks pins by tier; I queued **`#queue-operator-pin-position-lock-dag`** to extend the anchor there, since it's a separate ordering algorithm and this queue has no deps.
-
-**Verification.** `make check` green — clippy clean, **4063 passed / 237 skipped**. `cargo build --release` + `cargo install --path .` done (both binaries, 0.34.0). agent-doc CI `27172673959` was in progress at push — closed out on local evidence per the test-bearing-turn rule.
-<!-- agent:boundary:248ca23c -->
+<!-- agent:boundary:36457be2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :round_pushpin: [#ipc-early-ack]
+- :pushpin: [#pcp-consolidate]
 - :round_pushpin: [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: [#ipc-drift-writeprovenance]
+- :round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.
+- :pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.
+- Fix **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift. Can we replace the plugin's WatchService with a client for the supervisor's file-watcher? Would the IPC lag cause race conditions? Can the race condition be prevented in the overall system?
+- Fix **R2 — EDT/save lag vs ack budget.** The listener dispatches to the EDT, then `saveDocument` + the content sidecar land *after* the EDT runs — lagging the sender's poll budget → false ack-timeout / false degrade vote (partially fixed by `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
+- Fix **R3 — disk fallback** manufactures the foreign-write that IntelliJ flags as a cache conflict whenever the session is latched degraded.
+- Fix **R4 — mtime-heuristic drift.** `live_buffer_diverges_from_content` infers "foreign disk write vs genuine unsaved edit" from `LIVE_BUFFER_STALE_SKEW_MS` mtime only — no buffer content — so a real concurrent edit fails closed (`live_prompt_drift_after_preflight`).
+- Fix **R5 — TOCTOU** between the FFI socket handler and the WatchService for the same patch; today guarded best-effort by EDT re-checks (dedup + generation fence), but a window remains.
+- Fix **R6 — supervisor self-race.** A route-owned supervisor in Process 1 races the agent's own finalize writes on the same pane → "could not drain the active closeout" / exit 75.
+- `:pushpin:` should not be reprioritized by the `priority` attribute. It should remain exactly where I placed it. If I add an item to a certain position in the queue, it should remain there with a `:pushpin:`.
 - The responses are being intermixed with older responses in the document. We are also losing part of the response.
 - What part of the stack runs in the Project Control Pane process? What are separate processes? Does the Plugin IPC live in the editor process or can it be moved into the Project Control Pane process? Draw a #mermaid.
 ---
@@ -248,7 +75,6 @@ Fix the root cause of the compounding stale-capture deadlock
   ⎿  Reset sidecars for tasks/agent-doc/agent-doc-bugs2.md from current file while preserving session state
      === cycle phase after reset ===
      phase: preflight_started capture_id: None
-
 ● The reset cleared the deadlock — cycle is now clean preflight_started, capture_id: None. Document is quiescent. Let me
   get a fresh baseline and finalize my response in one go:
 ```

@@ -52,6 +52,16 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **TurnScope manifest (`#op-scoped-drift-2`):** Phase 2 emits an operation manifest for the current turn in preflight output as `turn_scope`. An `Address` (`agent_doc_core::turn_scope::Address`) names a component occurrence, optionally narrowed to a `node_key` (a `node_key` of `null` addresses the whole component). A `TurnScope` has a `driver` (the queue node the turn answers, resolved from `prompt_targets`), a `read_set`, and a `write_set`. `TurnScope::for_driver` builds the canonical scope: read `{driver, exchange tail}`; write `{exchange append, driver strike, backlog, status, review}` — the driver appears in the write set because the turn strikes the queue item it consumes. When no driver node resolves (a non-queue prompt, or an id absent from the queue) the manifest still lists the output components every turn touches but `driver` is `null`. The manifest is the substrate the phase-3 affectedness classifier intersects incoming ops against; emitting it never blocks a cycle.
 
+**Affectedness classifier (`#op-scoped-drift-3`):** Phase 3 replaces the coarse "any divergence affects the turn" assumption with a scope-intersection router, surfaced in preflight output as `op_affectedness`. `Address::overlaps` is the `conflict` primitive: two addresses overlap when they share a component occurrence and either side is component-level or both name the same node key. `classify_op(actor, op_kind, address, scope)` routes one op into the 5-class taxonomy — `affects(O,S) = conflict(O.target, read_set) ∨ conflict(O.target, write_set)`:
+
+1. **independent** — target ∉ scope: integrate + persist, no drift (a queue item inserted beside the running one, a comment/icebox edit).
+2. **input_affecting** — target ∈ read_set: re-read the affected input (the user edits the driver item being answered).
+3. **output_contended** — target ∈ write_set with a concurrent writer: CRDT merge (two supervisors append the exchange boundary).
+4. **structural_dependency** — `remove`/`move` of a depended node: invalidate/adapt (the user deletes the running queue item).
+5. **provenance_spoofed** — a `live_buffer` actor touching an in-scope address: a lagging editor sidecar misread as a user edit, suppressed.
+
+`AffectednessClass::affects_turn` is true only for classes 2/3/4; classes 1 and 5 integrate/persist or are suppressed without disturbing the turn. `classify_cycle` classifies every node op of a cycle (actor-tagged via phase 1's op model) and sets `turn_affected` when any op is turn-affecting. Independent and provenance-spoofed edits — the false-positive drift that produced the monsterrodholders queue-churn and the lagging-sidecar finalize blocks — no longer count against the turn. Emitting the classification never blocks a cycle; wiring it into the live finalize-path drift gate (replacing `git::has_non_exchange_component_drift` and the live-buffer divergence check) is the follow-up integration step.
+
 **Standard component names:**
 
 | Component | Default `patch` | Description |

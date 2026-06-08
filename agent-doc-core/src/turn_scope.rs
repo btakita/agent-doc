@@ -59,6 +59,21 @@ impl Address {
     pub fn is_component_level(&self) -> bool {
         self.node_key.is_none()
     }
+
+    /// True when two addresses refer to overlapping document regions: the same
+    /// component occurrence, and either side is component-level or both name the
+    /// same node key. This is the `overlaps` primitive behind the affectedness
+    /// `conflict` relation (`#op-scoped-drift-3`).
+    pub fn overlaps(&self, other: &Address) -> bool {
+        if self.component != other.component || self.occurrence != other.occurrence {
+            return false;
+        }
+        match (&self.node_key, &other.node_key) {
+            (Some(a), Some(b)) => a == b,
+            // A component-level address overlaps any node in that component.
+            _ => true,
+        }
+    }
 }
 
 /// The operation manifest for the current turn.
@@ -105,6 +120,134 @@ impl TurnScope {
             read_set: dedupe_addresses(read_set),
             write_set: dedupe_addresses(write_set),
         }
+    }
+}
+
+/// The effect class an incoming operation has on the current turn
+/// (`#op-scoped-drift-3`). Mirrors the 5-class taxonomy in the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AffectednessClass {
+    /// Class 1 — target ∉ scope: integrate + persist, no drift.
+    Independent,
+    /// Class 2 — target ∈ read_set: re-read the affected input.
+    InputAffecting,
+    /// Class 3 — target ∈ write_set with a concurrent writer: CRDT merge.
+    OutputContended,
+    /// Class 4 — remove/move of a depended node: invalidate/adapt.
+    StructuralDependency,
+    /// Class 5 — non-user actor (lagging live-buffer) misread as a user edit: suppress.
+    ProvenanceSpoofed,
+}
+
+impl AffectednessClass {
+    /// Classes 2/3/4 affect the current turn; 1 (independent) and 5 (spoofed)
+    /// do not — they integrate/persist or are suppressed without disturbing it.
+    pub fn affects_turn(self) -> bool {
+        matches!(
+            self,
+            AffectednessClass::InputAffecting
+                | AffectednessClass::OutputContended
+                | AffectednessClass::StructuralDependency
+        )
+    }
+
+    /// Stable lowercase string form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AffectednessClass::Independent => "independent",
+            AffectednessClass::InputAffecting => "input_affecting",
+            AffectednessClass::OutputContended => "output_contended",
+            AffectednessClass::StructuralDependency => "structural_dependency",
+            AffectednessClass::ProvenanceSpoofed => "provenance_spoofed",
+        }
+    }
+}
+
+/// Classify a single operation against the current turn scope.
+///
+/// `affects(O,S) = conflict(O.target, read_set) ∨ conflict(O.target, write_set)`.
+/// An op that intersects no part of the scope is `Independent`. Within the
+/// scope, a `live_buffer` actor is `ProvenanceSpoofed` (a lagging sidecar, not a
+/// real edit), a `remove`/`move` is `StructuralDependency`, a read-set
+/// intersection is `InputAffecting`, and a write-set-only intersection is
+/// `OutputContended`.
+pub fn classify_op(
+    actor: crate::op_log::OpActor,
+    op_kind: &str,
+    op_address: &Address,
+    scope: &TurnScope,
+) -> AffectednessClass {
+    let in_read = scope.read_set.iter().any(|a| op_address.overlaps(a));
+    let in_write = scope.write_set.iter().any(|a| op_address.overlaps(a));
+    if !in_read && !in_write {
+        return AffectednessClass::Independent;
+    }
+    if actor == crate::op_log::OpActor::LiveBuffer {
+        return AffectednessClass::ProvenanceSpoofed;
+    }
+    if matches!(op_kind, "remove" | "move") {
+        return AffectednessClass::StructuralDependency;
+    }
+    if in_read {
+        return AffectednessClass::InputAffecting;
+    }
+    AffectednessClass::OutputContended
+}
+
+/// One classified operation in a cycle's affectedness summary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClassifiedOp {
+    pub component: String,
+    pub node_key: String,
+    pub op_kind: String,
+    pub actor: crate::op_log::OpActor,
+    pub class: AffectednessClass,
+}
+
+/// Aggregate affectedness of a cycle's operations against the turn scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CycleAffectedness {
+    /// True when any op falls in a turn-affecting class (2/3/4).
+    pub turn_affected: bool,
+    /// Per-op classification, in input order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classified: Vec<ClassifiedOp>,
+}
+
+/// The component-occurrence-narrowed address of a durable op.
+pub fn op_address(op: &crate::op_log::DocumentOp) -> Address {
+    let occurrence = op
+        .node_key
+        .split(':')
+        .nth(1)
+        .and_then(|field| field.parse().ok())
+        .unwrap_or(0);
+    Address::node(&op.component, occurrence, &op.node_key)
+}
+
+/// Classify every op in a cycle against the turn scope, routing the coarse
+/// all-drift-is-affecting assumption into the 5-class taxonomy. Independent and
+/// provenance-spoofed ops do not affect the turn.
+pub fn classify_cycle(ops: &[crate::op_log::DocumentOp], scope: &TurnScope) -> CycleAffectedness {
+    let classified: Vec<ClassifiedOp> = ops
+        .iter()
+        .map(|op| {
+            let address = op_address(op);
+            let class = classify_op(op.actor, &op.op_kind, &address, scope);
+            ClassifiedOp {
+                component: op.component.clone(),
+                node_key: op.node_key.clone(),
+                op_kind: op.op_kind.clone(),
+                actor: op.actor,
+                class,
+            }
+        })
+        .collect();
+    let turn_affected = classified.iter().any(|op| op.class.affects_turn());
+    CycleAffectedness {
+        turn_affected,
+        classified,
     }
 }
 
@@ -175,5 +318,139 @@ mod tests {
         let json = serde_json::to_string(&scope).unwrap();
         let parsed: TurnScope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, scope);
+    }
+
+    #[test]
+    fn overlaps_matches_component_level_and_same_node() {
+        let comp = Address::component("queue", 0);
+        let node_a = Address::node("queue", 0, "queue:0:a:0");
+        let node_b = Address::node("queue", 0, "queue:0:b:0");
+        // component-level overlaps any node in the same occurrence.
+        assert!(comp.overlaps(&node_a));
+        assert!(node_a.overlaps(&comp));
+        // distinct nodes don't overlap.
+        assert!(!node_a.overlaps(&node_b));
+        // different occurrence never overlaps.
+        assert!(!comp.overlaps(&Address::component("queue", 1)));
+        // different component never overlaps.
+        assert!(!comp.overlaps(&Address::component("backlog", 0)));
+    }
+
+    fn scope_for(node_key: &str) -> TurnScope {
+        TurnScope::for_driver(Some(Address::node("queue", 0, node_key)))
+    }
+
+    #[test]
+    fn classify_independent_when_outside_scope() {
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        // An insert into the icebox (not in any scope set) is independent.
+        let addr = Address::node("icebox", 0, "icebox:0:note:0");
+        assert_eq!(
+            classify_op(OpActor::User, "insert", &addr, &scope),
+            AffectednessClass::Independent
+        );
+        // A *different* queue node beside the running one is also independent.
+        let sibling = Address::node("queue", 0, "queue:0:other:0");
+        assert_eq!(
+            classify_op(OpActor::User, "insert", &sibling, &scope),
+            AffectednessClass::Independent
+        );
+    }
+
+    #[test]
+    fn classify_input_affecting_on_driver_edit() {
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        let driver = Address::node("queue", 0, "queue:0:driver:0");
+        assert_eq!(
+            classify_op(OpActor::User, "replace", &driver, &scope),
+            AffectednessClass::InputAffecting
+        );
+    }
+
+    #[test]
+    fn classify_structural_on_driver_removal() {
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        let driver = Address::node("queue", 0, "queue:0:driver:0");
+        assert_eq!(
+            classify_op(OpActor::User, "remove", &driver, &scope),
+            AffectednessClass::StructuralDependency
+        );
+    }
+
+    #[test]
+    fn classify_output_contended_on_write_set_only() {
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        // backlog is in the write set but not the read set.
+        let backlog = Address::node("backlog", 0, "backlog:0:item:0");
+        assert_eq!(
+            classify_op(OpActor::ForeignSupervisor, "replace", &backlog, &scope),
+            AffectednessClass::OutputContended
+        );
+    }
+
+    #[test]
+    fn classify_provenance_spoofed_for_live_buffer_in_scope() {
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        // A live-buffer actor touching an in-scope address is spoofed, not contended.
+        let exchange = Address::component("exchange", 0);
+        assert_eq!(
+            classify_op(OpActor::LiveBuffer, "replace", &exchange, &scope),
+            AffectednessClass::ProvenanceSpoofed
+        );
+        // ...but a live-buffer op outside scope is still just independent.
+        let icebox = Address::node("icebox", 0, "icebox:0:n:0");
+        assert_eq!(
+            classify_op(OpActor::LiveBuffer, "replace", &icebox, &scope),
+            AffectednessClass::Independent
+        );
+    }
+
+    #[test]
+    fn classify_cycle_aggregates_turn_affected() {
+        use crate::op_log::{CausalClock, DocumentOp, OpActor};
+        let scope = scope_for("queue:0:driver:0");
+        let mk = |component: &str, node_key: &str, op_kind: &str, actor: OpActor| DocumentOp {
+            document_path: "plan.md".to_string(),
+            component: component.to_string(),
+            node_key: node_key.to_string(),
+            item_id: String::new(),
+            op_kind: op_kind.to_string(),
+            actor,
+            clock: CausalClock::default(),
+            before_preview: None,
+            after_preview: None,
+            recorded_at: None,
+        };
+        // Independent op only -> turn not affected.
+        let independent = vec![mk("queue", "queue:0:other:0", "insert", OpActor::User)];
+        assert!(!classify_cycle(&independent, &scope).turn_affected);
+
+        // Add an input-affecting driver edit -> turn affected.
+        let mixed = vec![
+            mk("queue", "queue:0:other:0", "insert", OpActor::User),
+            mk("queue", "queue:0:driver:0", "replace", OpActor::User),
+        ];
+        let summary = classify_cycle(&mixed, &scope);
+        assert!(summary.turn_affected);
+        assert_eq!(summary.classified.len(), 2);
+        assert_eq!(summary.classified[0].class, AffectednessClass::Independent);
+        assert_eq!(
+            summary.classified[1].class,
+            AffectednessClass::InputAffecting
+        );
+    }
+
+    #[test]
+    fn affects_turn_matches_taxonomy() {
+        assert!(!AffectednessClass::Independent.affects_turn());
+        assert!(!AffectednessClass::ProvenanceSpoofed.affects_turn());
+        assert!(AffectednessClass::InputAffecting.affects_turn());
+        assert!(AffectednessClass::OutputContended.affects_turn());
+        assert!(AffectednessClass::StructuralDependency.affects_turn());
     }
 }

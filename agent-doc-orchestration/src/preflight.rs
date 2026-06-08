@@ -263,6 +263,12 @@ pub struct PreflightOutput {
     /// classifier reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_scope: Option<agent_doc_core::turn_scope::TurnScope>,
+    /// Affectedness classification of this cycle's node ops against `turn_scope`
+    /// (`#op-scoped-drift-3`): each op routed into the 5-class taxonomy, plus an
+    /// aggregate `turn_affected`. Independent/provenance-spoofed ops integrate
+    /// and persist without affecting the turn instead of tripping a coarse gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_affectedness: Option<agent_doc_core::turn_scope::CycleAffectedness>,
     /// Skill slash commands found in user-added diff lines (non-built-ins, e.g. `["/agent-doc foo.md", "/caveman"]`).
     /// Guards applied: code fences, blockquotes, non-added lines.
     /// Built-in Claude Code commands are excluded here — see `builtin_commands`.
@@ -3050,6 +3056,22 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // for the prompts this turn is answering.
     let turn_scope = derive_turn_scope(&diff_result_with_current.current, &prompt_targets);
 
+    // #op-scoped-drift-3: classify this cycle's node ops against the TurnScope so
+    // independent / provenance-spoofed edits integrate without affecting the turn.
+    let op_affectedness = match (semantic_diff.as_ref(), turn_scope.as_ref()) {
+        (Some(summary), Some(scope)) => {
+            let document_path = file.to_string_lossy().to_string();
+            let ops = build_ops_from_semantic_diff(
+                &document_path,
+                initial_frontmatter.session.as_deref(),
+                "",
+                summary,
+            );
+            Some(agent_doc_core::turn_scope::classify_cycle(&ops, scope))
+        }
+        _ => None,
+    };
+
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let mut parsed_commands = command_diff_result
         .as_ref()
@@ -3396,6 +3418,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         annotated_diff,
         semantic_diff,
         turn_scope,
+        op_affectedness,
         user_intent_prompt_changes: if diff_from_queue_head_only {
             // Synthetic auto-queue continuation only — no user intent this cycle.
             Vec::new()
@@ -12537,6 +12560,31 @@ mod tests {
     #[test]
     fn semantic_diff_summary_omits_empty_summary() {
         assert!(semantic_diff_summary("same\n", "same\n", &[]).is_none());
+    }
+
+    #[test]
+    fn sibling_queue_insert_beside_driver_is_independent() {
+        // The motivating case: the turn answers queue item A while the user
+        // inserts queue item B beside it. B must classify Independent and the
+        // turn must not be affected (#op-scoped-drift-3).
+        let before = "<!-- agent:queue -->\n- do [#driver-a]\n<!-- /agent:queue -->\n";
+        let after =
+            "<!-- agent:queue -->\n- do [#driver-a]\n- do [#sibling-b]\n<!-- /agent:queue -->\n";
+        let summary = semantic_diff_summary(before, after, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        // The turn is answering driver-a.
+        let scope = derive_turn_scope(after, &["do [#driver-a]".to_string()]).unwrap();
+        let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+        assert!(
+            !affectedness.turn_affected,
+            "a sibling queue insert must not affect the turn"
+        );
+        assert!(
+            affectedness
+                .classified
+                .iter()
+                .all(|op| op.class == agent_doc_core::turn_scope::AffectednessClass::Independent)
+        );
     }
 
     #[test]

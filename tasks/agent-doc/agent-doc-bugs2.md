@@ -62,7 +62,12 @@ Verification:
 - `cargo install --path .`
 
 CI: `btakita/agent-doc` CI for commit `f7d34b0e` was `in_progress` when checked after push; the superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched.
-<!-- agent:boundary:3b763fc0 -->
+
+### Re: queue continuation — gpt-5
+
+The `#ckvm` queue head is complete and the repair preflight has persisted the recovered response, reaped backlog item, done archive update, and drained queue state. No further queue prompt remains for this document.
+
+<!-- agent:boundary:7f7408cf -->
 <!-- /agent:exchange -->
 
 ## Queue

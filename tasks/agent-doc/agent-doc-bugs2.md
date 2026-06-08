@@ -35,14 +35,40 @@ complete
 Compacted content:
 - Archived 6 response topic(s): do [#nm1x-codex-clear-parity]; investigate agent-doc churn / IPC drift / File Cache Conflict; investigate agent-doc churn / IPC drift / File Cache Conflict; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:36457be2 -->
+
+### Re: #pcp-consolidate — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#pcp-consolidate]
+
+
+You pinned `#pcp-consolidate` to the top of the queue. It's the **capstone** of the IPC-drift / File-Cache-Conflict / supervisor self-race family (R1–R6): two independent disk-write authorities with no in-process serialization and no positive write provenance. It is a multi-day, multi-surface refactor (Rust orchestration + FFI + JetBrains/VS Code plugins + specs) and it changes the very write path that persists this response — so the correct first move is to **plan and decompose it**, not rip into `write.rs` in the same cycle.
+
+**This turn (committed + pushed below):**
+- Authored `tasks/agent-doc/plan-pcp-consolidate.md` — grounded in a full map of the current write/watch architecture, and tied to the existing substrate (`specs/08b`, `plan-project-controller-session-actor-mvp.md`, `plan-ipc-transport-reliability.md`, `plan-operation-scoped-drift.md`) so it doesn't duplicate them.
+- Closed out the `#pcp-consolidate` umbrella as **decomposed** and queued **seven ordered phase IDs** (`#pcp1 → #pcp7`).
+
+**The phases (dependency order):**
+1. `#pcp1` — spec the document write/watch authority in 08b (spec-only).
+2. `#pcp2` — write-provenance/generation id on disk writes (absorbs `#ipc-drift-writeprovenance`); shadow-mode additive.
+3. `#pcp3` — in-process ordered write queue in the session actor → **kills the R6 self-race / exit 75**.
+4. `#pcp4` — single controller-owned filesystem watcher → kills R1 two-watchers.
+5. `#pcp5` — early-ack IPC + degraded-prefers-file-IPC (absorbs `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`).
+6. `#pcp6` — editor-buffer CONTENT in the live-buffer sidecar (absorbs `#nm1x-livebuf-content`) → fixes R4; needs live editor verification.
+7. `#pcp7` — demote plugin WatchService to read-only + thin FFI apply+ack shim → closes R1/R2/R5 TOCTOU; needs live IntelliJ verification.
+
+The pure-Rust phases (`#pcp1`–`#pcp5`) are SimWorld/unit-testable and land first; the plugin phases (`#pcp6`, `#pcp7`) require live editor verification and land last (pairing with `#live-verify-batch`).
+
+Note on the `#spec-test-build-install-commit-push` preset: no binary code changed this turn (decomposition + plan only), so there's nothing to test/build/install yet — the spec+test+build+install verbs apply per implementation phase. The plan file is committed and pushed. `#pcp2` is the next actionable item; I can start it in the next cycle.
+<!-- agent:boundary:10243c81 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: [#pcp-consolidate]~~
 - :round_pushpin: [#ipc-early-ack]
-- :pushpin: [#pcp-consolidate]
 - :round_pushpin: [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: [#ipc-drift-writeprovenance]
 - :round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.
@@ -109,8 +135,14 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#pcp1] PCP phase 1 — Spec the document write/watch authority in specs/08b-single-process-control-plane.md (single disk writer, single watcher, ordered write queue, write provenance, plugin demotion) + SimWorld obligations. Spec-only, no behavior change. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp2] PCP phase 2 — Write-provenance/generation id on disk writes (absorbs #ipc-drift-writeprovenance). Shadow-mode additive: keep the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic as fallback. Pure Rust on op_log.rs/turn_scope.rs. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp3] PCP phase 3 — In-process ordered write queue in the session actor; serialize supervisor idle/file-watch writes and agent finalize writes (kills the R6 self-race / exit 75). SimWorld coverage. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp4] PCP phase 4 — Single controller-owned filesystem watcher replacing per-process notify watchers (kills R1 two-watchers). Binary-side first. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp5] PCP phase 5 — Early-ack IPC + degraded-prefers-file-IPC (absorbs #ipc-early-ack, #ipc-degraded-prefers-file-ipc). FFI-first: accepted/pending ack on receipt, then terminal ack; degraded routes through file-IPC, never raw disk. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp6] PCP phase 6 — Capture editor-buffer CONTENT in the live-buffer sidecar (absorbs #nm1x-livebuf-content) so a genuine unsaved edit is scope-classified vs failing closed (R4). JB+VSCode plugin + FFI classifier. Requires live editor verification. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp7] PCP phase 7 — Demote plugin WatchService to read-only buffer reporting + reduce FFI socket listener to a thin EDT apply+ack shim (closes R1/R2/R5 TOCTOU). Requires live IntelliJ/Codex verification; pairs with #live-verify-batch. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.
-- [ ] [#pcp-consolidate] [recommended] Consolidate document-state authority into the Project Control Pane process: make the supervisor the single disk writer + single file-watcher, demote the plugin WatchService to read-only buffer-state reporting (no autonomous reconcile/write), and reduce the FFI socket listener to a thin EDT apply+ack shim. Serialize supervisor idle-queue/file-watch writes and agent finalize writes through one in-process write queue to kill the supervisor self-race. Depends on/absorbs #ipc-drift-writeprovenance (provenance/generation id) + #nm1x-livebuf-content (buffer content in sidecar) so drift is positively classified instead of inferred from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic.
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-degraded-prefers-file-ipc] When genuinely degraded, route writes through the file-IPC patch queue (plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures IDEA File Cache Conflicts. Disk write becomes true last resort. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md

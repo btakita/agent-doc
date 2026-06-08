@@ -63,12 +63,16 @@ Code commit: `src/agent-doc` `19b70a1f` (`Run slash queue heads as commands`), p
 `/clear` is a builtin harness command, not an agent-doc prose prompt. Run `/clear` directly in the owner pane/terminal before continuing.
 
 The missing automation path is already captured as backlog item `#ckvm`: exchange-origin slash prompts should eventually use the same after-turn command submission flow that queue slash heads now use.
-<!-- agent:boundary:6c57cd65 -->
+
+### Re: closeout recovery — gpt-5
+
+No additional user request was added after `/clear`; this closeout only reopens the binary-owned write/commit boundary so the Codex final gate can account for the committed `/clear` response and agent-doc bookkeeping.
+<!-- agent:boundary:e41e1b8a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

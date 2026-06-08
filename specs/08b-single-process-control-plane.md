@@ -74,6 +74,77 @@ projections, and tmux transcript inference.
   after strict closeout checks pass. Failed closeout must leave those controller
   rows unadvanced.
 
+## Document write and watch authority
+
+The store actor owns `.agent-doc/state.db` as the single durable-state writer.
+This section extends that authority to the **session `.md` document file on disk**
+and its **filesystem watch**, which today are split across the binary write
+paths, the supervisor idle/file-watch path, and the editor plugin WatchService
+with only a per-operation advisory `flock` between them. That split is the
+structural root of the "File Cache Conflict" / IPC-drift / supervisor self-race
+family (the binary disk fallback and the supervisor both write; the plugin
+WatchService and the binary both watch and both write; drift is inferred from an
+mtime heuristic rather than positively attributed). Consolidating it removes the
+race class instead of papering over each symptom.
+
+- **Single disk writer.** The session actor for a document generation is the only
+  writer of that `.md` on disk. All `write`/`stream`/`finalize`/repair disk
+  writes and all supervisor idle-queue/file-watch writes are submitted to that
+  session actor and serialized through **one in-process ordered write queue**.
+  Submissions carry their `OpActor` provenance and the turn/operation scope. The
+  cross-process advisory `flock` remains a backstop against a foreign process,
+  not the primary serializer; within the controller process, ordering is the
+  write queue's responsibility. This eliminates the supervisor self-race where a
+  route-owned supervisor write and an agent finalize write interleave on the same
+  pane ("could not drain the active closeout" / exit 75).
+- **Single filesystem watcher.** The controller owns one filesystem watcher per
+  live document and feeds its events to the session actor. Editor plugins
+  (JetBrains WatchService, VS Code file watcher) are demoted to **read-only
+  buffer-state reporting**: they report buffer content, version, and dirty state
+  through the existing typing/digest FFI and never autonomously reconcile or
+  write the document. A single watch authority removes the two-watchers/two-
+  writers conflict the editor surfaces as a memory-vs-disk "File Cache Conflict".
+- **Write provenance.** Every controller/session-actor disk write is stamped with
+  a write-provenance generation id plus its `OpActor`, durably recorded alongside
+  the write (provenance sidecar or extended live-buffer digest). The visible-write
+  reconcile guard (`live_buffer_diverges_from_content` / `guard_visible_write_
+  reconcile`) attributes a foreign disk change to the controller/supervisor by
+  **reading that provenance**, not by inferring foreign-vs-unsaved-edit from the
+  `LIVE_BUFFER_STALE_SKEW_MS` mtime skew. The mtime heuristic may remain only as a
+  shadow-mode fallback during migration. Provenance builds on the existing
+  `OpActor`/`OpSource`/`CausalClock` op-log substrate.
+- **Thin editor apply/ack shim.** The FFI socket listener and the editor plugin
+  are reduced to an EDT apply+ack shim: receive a patch, apply it via the editor
+  Document API, send an early `accepted`/`pending` ack on receipt (before the
+  idle-wait apply window), then a terminal ack. The shim performs no independent
+  reconcile and no disk write; the controller's session actor remains the sole
+  disk-write authority and a genuinely degraded session routes through the
+  file-IPC patch queue (plugin still applies via Document API) rather than a raw
+  disk write that would manufacture a File Cache Conflict.
+
+Migration follows the same gate ladder as the rest of this contract (shadow →
+dual-write → read-switch → authority → removal); each gate carries a rollback
+flag and must not lose committed controller rows. Behavior changes here must
+never be landed in the same cycle that persists a live session response through
+the write path being changed.
+
+Deterministic SimWorld coverage for this authority must model at least:
+
+- a supervisor idle/file-watch write and an agent finalize write submitted
+  concurrently for one document, serialized deterministically through the single
+  write queue, with finalize never observing a half-applied supervisor write;
+- a foreign-supervisor disk write positively attributed by write provenance, and
+  a genuine unsaved editor edit (editor ahead of disk) that is NOT misclassified
+  as a foreign write and does not fail closed (`live_prompt_drift_after_preflight`);
+- a single watcher event stream driving typing/idle classification with no
+  duplicate-watcher reconcile race;
+- an early-ack decoupling sender liveness from apply latency, and a degraded
+  session that routes through file-IPC instead of a raw disk write.
+
+Live IntelliJ/VS Code coverage remains a smoke layer for the editor buffer-report
+and apply/ack boundary; the serialization and provenance matrix belongs in
+deterministic tests.
+
 ## Lifecycle invariants
 
 - A document has at most one non-closed authoritative actor generation at a
@@ -275,7 +346,11 @@ Deterministic SimWorld coverage must model at least:
 - projection lag and projection write failure;
 - supervisor heartbeat loss and reattach;
 - admin handoff, stale actor reap, queue pause/resume, and projection repair;
-- Codex, Claude Code, and OpenCode dispatch proof differences.
+- Codex, Claude Code, and OpenCode dispatch proof differences;
+- concurrent supervisor and finalize disk writes serialized through the single
+  document write queue, with provenance-attributed foreign writes and a genuine
+  unsaved editor edit that is not misclassified (see Document write and watch
+  authority).
 
 CLI integration coverage must prove the same controller API is used by `route`,
 `start`, `sync`, `session status`, `session clear`, `session restart`, `repair`,

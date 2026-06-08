@@ -383,3 +383,4 @@
 - 2026-06-08 [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
 - 2026-06-08 [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.
 - 2026-06-08 [#tsiftasttests] Add fixtures and tests for the AST/CST edit path covering comments, formatting preservation, macros or generated sections, mixed-language blocks, syntax-error work-in-progress files, and verification failures.
+- 2026-06-08 [#tsiftinitboost] Rerun plain `tsift init` in `src/boost-client` and `src/boost-client/src/monsterrodholders-dev` after the active monsterrodholders workflow stops rebasing/resetting those worktrees; commit their `AGENTS.md` updates and any resulting pointers.

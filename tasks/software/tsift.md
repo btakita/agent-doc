@@ -129,7 +129,44 @@ Verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:1239890f -->
+
+### Re: tsiftastpatch — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftastpatch]
+
+
+Completed `#tsiftastpatch`.
+
+Changed paths:
+- `src/tsift/packages/tsift-cli/src/semantic_edit.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/specs/ast-edits.md`
+
+What changed:
+- Added `patch_proposal` to semantic edit plans while keeping the existing `diff` field for compatibility.
+- Patch proposals now include schema version, `ast_cst_minimal_textual_patch` strategy, parser input/output validation, trivia-preservation policy, per-file hashes, byte/line ranges, bounded hunks, and unified diff text.
+- Refactored the diff preview into a shared minimal hunk builder used by both legacy `diff` and structured patch proposals.
+- Parser validation now gates patch proposal creation; invalid input/output parser states produce `status=unsupported`, `apply_supported=false`, and no patch proposal.
+- Added integration coverage for successful patch proposal dry runs and syntax-error refusal without file mutation.
+- Updated the AST/CST edit spec with the patch-proposal contract.
+- Committed and pushed the tsift submodule change: `03d953a` (`feat: propose semantic edit patches`).
+- Committed and pushed the agent-loop submodule pointer update: `668d2199c` (`chore: update tsift submodule`).
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_ -- --nocapture'`: passed, exit code 0, artifact `tart-c7b6e82932`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, exit code 0, artifact `tart-a67bc8ca8c`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, exit code 0, artifact `tart-3fe4bed9af`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI run was `in_progress` for `feat: propose semantic edit patches` at 2026-06-08T18:51:02Z.
+- `gh run list --workflow CI --limit 1` in the parent repo: no workflow named `CI`.
+
+Session note: preflight warned about recent closeout accretion, but the auto queue is still active, so I continued draining instead of compacting.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:737835d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +178,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#tsiftasteditspec]~~
 - ~~do [#tsiftastselect]~~
-- do [#tsiftastpatch]
+- ~~do [#tsiftastpatch]~~
 - do [#tsiftastops]
 - do [#tsiftasttests]
 <!-- /agent:queue -->
@@ -149,7 +186,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
 - [ ] [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.
 - [ ] [#tsiftasttests] Add fixtures and tests for the AST/CST edit path covering comments, formatting preservation, macros or generated sections, mixed-language blocks, syntax-error work-in-progress files, and verification failures.
 <!-- /agent:backlog -->

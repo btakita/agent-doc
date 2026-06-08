@@ -188,9 +188,48 @@ Stopping queue progression here as requested. I left the remaining queued items 
 > **Queue prompt:**
 >
 > :pushpin: stop
+Implemented `#ctrlplane-projections`.
 
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-projections]
 
-<!-- agent:boundary:31be6340 -->
+`session-actors.json`, `sessions.json`, and `last_layout.json` now sit behind the controller/SQLite authority as compatibility projections. Projection failures now persist richer SQLite diagnostics with source generation, intended projection hash, retry status, timestamp, and message, and `session status` surfaces that metadata directly. `sessions.json` projection emission now rebuilds entries from controller actor rows, preserves legacy PID/cwd/supervisor metadata when available, synthesizes compatibility fields when missing, and removes stale same-pane legacy entries that conflict with a live controller actor. Session logs and `ops.log` remain diagnostic/provenance outputs after controller state is committed.
+
+I also updated the control-plane specs to make the projection contract explicit.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-orchestration/src/sessions.rs`
+- `src/agent-doc/agent-doc-sqlite/src/state_store.rs`
+- `src/agent-doc/src/session_actor_cmd.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/08a-session-actor-contract.md`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+
+Verification:
+- `cargo test -p agent-doc-orchestration project_controller::tests::`
+- `cargo test -p agent-doc-sqlite`
+- `cargo test -p agent-doc-orchestration sessions::tests::`
+- `cargo test -p agent-doc-orchestration controller_status_reports_single_process_control_plane_runtime`
+- `make check`
+- `cargo install --path .`
+
+Commits/push:
+- `src/agent-doc`: `cf0a3f21` (`controller: make sidecars compatibility projections`), pushed to `origin/main`.
+- `agent-loop`: `d137e9781` (`agent-doc: update projection controller pointer`), pushed to `origin/main`.
+
+CI:
+- Previous `src/agent-doc` CI was green before closeout.
+- New `src/agent-doc` CI for `cf0a3f21` is `in_progress` (`27111716033`, started 2026-06-08 01:55:14Z), so I did not wait on it.
+- `agent-loop` has no workflow named `CI`.
+
+Notes:
+- The exchange is large, but the queue is active; I continued draining without compacting.
+- I left unrelated working-tree drift unstaged, including the submodule `AGENTS.md` tsift marker update and existing parent-level edits.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:210b9b73 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -202,7 +241,7 @@ Stopping queue progression here as requested. I left the remaining queued items 
 - ~~:round_pushpin: do [#ctrlplane-dispatchapi]~~
 - ~~:round_pushpin: do [#ctrlplane-sessionactor]~~
 - ~~:pushpin: stop~~
-- :round_pushpin: do [#ctrlplane-projections]
+- ~~:round_pushpin: do [#ctrlplane-projections]~~
 - :round_pushpin: do [#ctrlplane-crashrecover]
 - :round_pushpin: do [#ctrlplane-adminbp]
 - :round_pushpin: do [#ctrlplane-simworld]
@@ -235,7 +274,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
 - [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.
 - [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.
 - [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.

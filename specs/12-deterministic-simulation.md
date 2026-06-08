@@ -49,6 +49,16 @@ ObserveMissingPane
 DriftProjection
 RepairProjection
 RepairBusyProjectionWithReadyPrompt
+AdminPauseQueue
+AdminPauseQueueStale
+AdminResumeQueue
+AdminDrainQueue
+AdminHandoff
+AdminHandoffStale
+AdminReap
+AdminReapStale
+SupervisorHeartbeatReattach
+SupervisorHeartbeatStale
 SyncProtectedGrowthManual
 SyncProtectedGrowthPassive
 SyncProtectedGrowthFocusVisible
@@ -160,6 +170,14 @@ actor model:
 - Supervisor lifecycle facts can move through starting, ready, waiting-input,
   blocked, and closed states. Route dispatch is accepted only for the current
   ready generation.
+- Controller queue controls can pause, resume, or drain dispatch. Paused queues
+  and draining non-ready actors must fail closed before prompt delivery and
+  record deterministic backpressure coverage.
+- Admin handoff and reap mutate durable actor ownership only when the observed
+  generation matches the current generation; stale admin observations are
+  rejected without mutating the route projection.
+- Supervisor heartbeat reattach can repair stale/missing projection state from
+  the current durable generation, while stale heartbeat generations are rejected.
 - A JetBrains Clear Session Context simulation keeps `/clear` as an explicit
   session operator action while proving the following `Run Agent Doc` reroute
   still fails closed until the starting actor reaches a dispatch-ready prompt.

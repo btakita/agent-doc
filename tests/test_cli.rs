@@ -83,6 +83,199 @@ fn test_binary_exists() {
 }
 
 #[test]
+fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let doc = root.join("tasks/admin-cli.md");
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-cli-admin\nagent: codex\n---\nBody\n",
+    )
+    .unwrap();
+    agent_doc_orchestration::session_actor::record_session_start_direct(
+        &doc,
+        "session-cli-admin",
+        "%51",
+        "@1",
+        1,
+    )
+    .unwrap();
+    agent_doc_orchestration::session_actor::transition_state_direct(
+        &doc,
+        "session-cli-admin",
+        "%51",
+        Some(1),
+        agent_doc_orchestration::session_actor::ActorState::Ready,
+        "supervisor",
+        "prompt_ready",
+    )
+    .unwrap();
+
+    let root_arg = root.to_str().unwrap();
+    let doc_arg = doc.to_str().unwrap();
+
+    let pause = agent_doc_cmd()
+        .args([
+            "admin",
+            "queue",
+            "pause",
+            doc_arg,
+            "--project-root",
+            root_arg,
+            "--observed-generation",
+            "1",
+            "--reason",
+            "cli pause",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let pause: serde_json::Value = serde_json::from_slice(&pause).unwrap();
+    assert_eq!(pause["operation_kind"], "queue_paused");
+    assert_eq!(pause["status"], "accepted");
+    assert!(
+        pause["document_id"]
+            .as_str()
+            .unwrap()
+            .ends_with("admin-cli.md")
+    );
+
+    let stale_handoff = agent_doc_cmd()
+        .args([
+            "admin",
+            "handoff",
+            doc_arg,
+            "--to-pane",
+            "%52",
+            "--project-root",
+            root_arg,
+            "--observed-generation",
+            "0",
+            "--reason",
+            "stale cli handoff",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stale_handoff: serde_json::Value = serde_json::from_slice(&stale_handoff).unwrap();
+    assert_eq!(stale_handoff["status"], "rejected");
+    assert_eq!(stale_handoff["failed_stage"], "stale_generation");
+    assert_eq!(stale_handoff["current_generation"], 1);
+
+    let handoff = agent_doc_cmd()
+        .args([
+            "admin",
+            "handoff",
+            doc_arg,
+            "--to-pane",
+            "%52",
+            "--project-root",
+            root_arg,
+            "--observed-generation",
+            "1",
+            "--reason",
+            "cli handoff",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let handoff: serde_json::Value = serde_json::from_slice(&handoff).unwrap();
+    assert_eq!(handoff["operation_kind"], "admin_handoff");
+    assert_eq!(handoff["status"], "accepted");
+
+    let inspect = agent_doc_cmd()
+        .args([
+            "admin",
+            "inspect",
+            doc_arg,
+            "--project-root",
+            root_arg,
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let inspect: serde_json::Value = serde_json::from_slice(&inspect).unwrap();
+    assert_eq!(inspect["record"]["generation"], 2);
+    assert_eq!(inspect["record"]["pane_id"], "%52");
+    assert_eq!(inspect["queue_control"]["state"], "paused");
+    assert!(
+        inspect["admin_operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operation| operation["operation_kind"] == "queue_paused"
+                && operation["status"] == "accepted")
+    );
+    assert!(
+        inspect["admin_operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operation| operation["operation_kind"] == "admin_handoff"
+                && operation["status"] == "accepted")
+    );
+
+    let stale_reap = agent_doc_cmd()
+        .args([
+            "admin",
+            "reap",
+            doc_arg,
+            "--project-root",
+            root_arg,
+            "--observed-generation",
+            "1",
+            "--reason",
+            "stale cli reap",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stale_reap: serde_json::Value = serde_json::from_slice(&stale_reap).unwrap();
+    assert_eq!(stale_reap["status"], "rejected");
+    assert_eq!(stale_reap["failed_stage"], "stale_generation");
+    assert_eq!(stale_reap["current_generation"], 2);
+
+    let reap = agent_doc_cmd()
+        .args([
+            "admin",
+            "reap",
+            doc_arg,
+            "--project-root",
+            root_arg,
+            "--observed-generation",
+            "2",
+            "--reason",
+            "cli reap",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let reap: serde_json::Value = serde_json::from_slice(&reap).unwrap();
+    assert_eq!(reap["operation_kind"], "admin_reap");
+    assert_eq!(reap["status"], "accepted");
+}
+
+#[test]
 fn mcp_serve_handles_initialize_list_and_read() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     write!(

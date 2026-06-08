@@ -143,6 +143,16 @@ enum SimCommand {
     PromoteStartingPromptReady,
     BusyInterruptRecoveryReady,
     RepairBusyProjectionWithReadyPrompt,
+    AdminPauseQueue,
+    AdminPauseQueueStale,
+    AdminResumeQueue,
+    AdminDrainQueue,
+    AdminHandoff,
+    AdminHandoffStale,
+    AdminReap,
+    AdminReapStale,
+    SupervisorHeartbeatReattach,
+    SupervisorHeartbeatStale,
     SyncProtectedGrowthManual,
     SyncProtectedGrowthPassive,
     SyncProtectedGrowthFocusVisible,
@@ -161,6 +171,24 @@ enum SupervisorLifecycle {
     WaitingInput,
     Blocked,
     Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueControlState {
+    Resumed,
+    Paused,
+    Draining,
+}
+
+impl QueueControlState {
+    const fn as_failed_stage(self, lifecycle: SupervisorLifecycle) -> Option<&'static str> {
+        match (self, lifecycle) {
+            (Self::Paused, _) => Some("queue_paused"),
+            (Self::Draining, SupervisorLifecycle::Ready) => None,
+            (Self::Draining, _) => Some("actor_busy_draining"),
+            (Self::Resumed, _) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +372,8 @@ struct RouteModel {
     projection: ActorState,
     pending_dispatch: Option<DispatchReceipt>,
     starting_timeout: Option<(u64, String)>,
+    queue_control: QueueControlState,
+    supervisor_lease_generation: Option<u64>,
 }
 
 impl RouteModel {
@@ -354,6 +384,8 @@ impl RouteModel {
             durable,
             pending_dispatch: None,
             starting_timeout: None,
+            queue_control: QueueControlState::Resumed,
+            supervisor_lease_generation: Some(1),
         }
     }
 }
@@ -395,6 +427,16 @@ struct Coverage {
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
     busy_projection_ready_repairs: usize,
+    queue_pauses: usize,
+    queue_resumes: usize,
+    queue_drains: usize,
+    queue_paused_dispatch_blocks: usize,
+    actor_busy_draining_blocks: usize,
+    queue_backpressure_events: usize,
+    admin_handoffs: usize,
+    admin_reaps: usize,
+    supervisor_heartbeat_reattaches: usize,
+    supervisor_heartbeat_stale_blocks: usize,
     stale_generation_blocks: usize,
     stale_pane_blocks: usize,
     missing_pane_blocks: usize,
@@ -446,6 +488,14 @@ impl Coverage {
         if message.contains("supervisor lifecycle Busy cannot accept route dispatch") {
             self.busy_dispatch_blocks += 1;
         }
+        if message.contains("failed_stage=queue_paused") {
+            self.queue_paused_dispatch_blocks += 1;
+            self.queue_backpressure_events += 1;
+        }
+        if message.contains("failed_stage=actor_busy_draining") {
+            self.actor_busy_draining_blocks += 1;
+            self.queue_backpressure_events += 1;
+        }
         if message.contains("supervisor lifecycle Starting cannot accept route dispatch") {
             self.starting_dispatch_blocks += 1;
         }
@@ -454,6 +504,9 @@ impl Coverage {
         }
         if message.contains("session_restart refused") {
             self.session_restart_busy_refusals += 1;
+        }
+        if message.contains("supervisor heartbeat stale generation") {
+            self.supervisor_heartbeat_stale_blocks += 1;
         }
     }
 
@@ -493,6 +546,16 @@ impl Coverage {
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
         self.busy_projection_ready_repairs += other.busy_projection_ready_repairs;
+        self.queue_pauses += other.queue_pauses;
+        self.queue_resumes += other.queue_resumes;
+        self.queue_drains += other.queue_drains;
+        self.queue_paused_dispatch_blocks += other.queue_paused_dispatch_blocks;
+        self.actor_busy_draining_blocks += other.actor_busy_draining_blocks;
+        self.queue_backpressure_events += other.queue_backpressure_events;
+        self.admin_handoffs += other.admin_handoffs;
+        self.admin_reaps += other.admin_reaps;
+        self.supervisor_heartbeat_reattaches += other.supervisor_heartbeat_reattaches;
+        self.supervisor_heartbeat_stale_blocks += other.supervisor_heartbeat_stale_blocks;
         self.stale_generation_blocks += other.stale_generation_blocks;
         self.stale_pane_blocks += other.stale_pane_blocks;
         self.missing_pane_blocks += other.missing_pane_blocks;
@@ -544,7 +607,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(48) {
+            let command = match rng.next_usize(58) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -587,7 +650,17 @@ impl SimWorld {
                 44 => SimCommand::RepairBusyProjectionWithReadyPrompt,
                 45 => SimCommand::SyncRerequestVisibleEditorManual,
                 46 => SimCommand::SyncRerequestVisibleEditorPassive,
-                _ => SimCommand::SyncVisibleFocusPreserve,
+                47 => SimCommand::SyncVisibleFocusPreserve,
+                48 => SimCommand::AdminPauseQueue,
+                49 => SimCommand::AdminPauseQueueStale,
+                50 => SimCommand::AdminResumeQueue,
+                51 => SimCommand::AdminDrainQueue,
+                52 => SimCommand::AdminHandoff,
+                53 => SimCommand::AdminHandoffStale,
+                54 => SimCommand::AdminReap,
+                55 => SimCommand::AdminReapStale,
+                56 => SimCommand::SupervisorHeartbeatReattach,
+                _ => SimCommand::SupervisorHeartbeatStale,
             };
             world.apply(command)?;
             world.assert_structural_invariants()?;
@@ -800,6 +873,81 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::AdminPauseQueue => {
+                if let Err(err) = self
+                    .admin_queue_control(QueueControlState::Paused, self.route.durable.generation)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminPauseQueueStale => {
+                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                if let Err(err) =
+                    self.admin_queue_control(QueueControlState::Paused, stale_generation)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminResumeQueue => {
+                if let Err(err) = self
+                    .admin_queue_control(QueueControlState::Resumed, self.route.durable.generation)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminDrainQueue => {
+                if let Err(err) = self
+                    .admin_queue_control(QueueControlState::Draining, self.route.durable.generation)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminHandoff => {
+                if let Err(err) = self.admin_handoff(
+                    self.route.durable.generation,
+                    format!("%handoff{}", self.route.durable.generation + 1),
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminHandoffStale => {
+                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                if let Err(err) =
+                    self.admin_handoff(stale_generation, "%stale-admin-handoff".to_string())
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminReap => {
+                if let Err(err) = self.admin_reap(self.route.durable.generation) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::AdminReapStale => {
+                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                if let Err(err) = self.admin_reap(stale_generation) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SupervisorHeartbeatReattach => {
+                if let Err(err) = self.supervisor_heartbeat_reattach(
+                    self.route.durable.generation,
+                    format!(
+                        "%heartbeat{}",
+                        self.route.durable.generation.saturating_add(1)
+                    ),
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SupervisorHeartbeatStale => {
+                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                if let Err(err) =
+                    self.supervisor_heartbeat_reattach(stale_generation, "%stale-heartbeat")
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::SyncProtectedGrowthManual => {
                 self.apply_sync_protected_growth(SyncMode::Full);
             }
@@ -904,6 +1052,7 @@ impl SimWorld {
         };
         self.route.projection = self.route.durable.clone();
         self.route.pending_dispatch = None;
+        self.route.supervisor_lease_generation = Some(generation);
         self.coverage.route_generation_rebinds += 1;
     }
 
@@ -1166,6 +1315,19 @@ impl SimWorld {
 
     fn dispatch_route_prompt(&mut self) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
+        if let Some(stage) = self
+            .route
+            .queue_control
+            .as_failed_stage(self.route.durable.lifecycle)
+        {
+            bail!(
+                "dispatch blocked by controller queue control: failed_stage={} generation={} seed={} trace={:?}",
+                stage,
+                self.route.durable.generation,
+                self.seed,
+                self.trace
+            );
+        }
         if self.route.durable.lifecycle == SupervisorLifecycle::Starting {
             let current = (self.route.durable.generation, pane_id.clone());
             if self.route.starting_timeout.as_ref() == Some(&current) {
@@ -1190,6 +1352,92 @@ impl SimWorld {
             proved: false,
         });
         self.coverage.route_dispatch_acceptances += 1;
+        Ok(())
+    }
+
+    fn admin_queue_control(
+        &mut self,
+        state: QueueControlState,
+        observed_generation: u64,
+    ) -> Result<()> {
+        self.require_current_admin_generation(observed_generation, "queue_control")?;
+        self.route.queue_control = state;
+        match state {
+            QueueControlState::Paused => self.coverage.queue_pauses += 1,
+            QueueControlState::Resumed => self.coverage.queue_resumes += 1,
+            QueueControlState::Draining => self.coverage.queue_drains += 1,
+        }
+        Ok(())
+    }
+
+    fn admin_handoff(
+        &mut self,
+        observed_generation: u64,
+        to_pane: impl Into<String>,
+    ) -> Result<()> {
+        self.require_current_admin_generation(observed_generation, "admin_handoff")?;
+        let prior_generation = self.route.durable.generation;
+        self.route.durable.generation = prior_generation.saturating_add(1);
+        self.route.durable.pane_id = Some(to_pane.into());
+        self.route.durable.lifecycle = SupervisorLifecycle::Ready;
+        self.route.projection = self.route.durable.clone();
+        self.route.pending_dispatch = None;
+        self.route.starting_timeout = None;
+        self.route.supervisor_lease_generation = Some(self.route.durable.generation);
+        self.coverage.admin_handoffs += 1;
+        Ok(())
+    }
+
+    fn admin_reap(&mut self, observed_generation: u64) -> Result<()> {
+        self.require_current_admin_generation(observed_generation, "admin_reap")?;
+        self.route.durable.lifecycle = SupervisorLifecycle::Closed;
+        self.route.durable.pane_id = None;
+        self.route.projection = self.route.durable.clone();
+        self.route.pending_dispatch = None;
+        self.route.starting_timeout = None;
+        self.route.supervisor_lease_generation = None;
+        self.coverage.admin_reaps += 1;
+        Ok(())
+    }
+
+    fn supervisor_heartbeat_reattach(
+        &mut self,
+        generation: u64,
+        pane_id: impl Into<String>,
+    ) -> Result<()> {
+        if generation != self.route.durable.generation {
+            bail!(
+                "supervisor heartbeat stale generation rejected: observed={} current={}; seed={} trace={:?}",
+                generation,
+                self.route.durable.generation,
+                self.seed,
+                self.trace
+            );
+        }
+        self.route.durable.pane_id = Some(pane_id.into());
+        self.route.durable.lifecycle = SupervisorLifecycle::Ready;
+        self.route.projection = self.route.durable.clone();
+        self.route.supervisor_lease_generation = Some(generation);
+        self.route.starting_timeout = None;
+        self.coverage.supervisor_heartbeat_reattaches += 1;
+        Ok(())
+    }
+
+    fn require_current_admin_generation(
+        &self,
+        observed_generation: u64,
+        operation: &str,
+    ) -> Result<()> {
+        if observed_generation != self.route.durable.generation {
+            bail!(
+                "stale actor generation rejected for {}: observed={} current={}; seed={} trace={:?}",
+                operation,
+                observed_generation,
+                self.route.durable.generation,
+                self.seed,
+                self.trace
+            );
+        }
         Ok(())
     }
 
@@ -2021,6 +2269,26 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         "seed corpus must block busy/bootstrap route dispatch before current ready proof"
     );
     assert!(
+        coverage.queue_pauses > 0
+            && coverage.queue_resumes > 0
+            && coverage.queue_drains > 0
+            && coverage.queue_backpressure_events > 0,
+        "seed corpus must exercise controller queue controls and backpressure receipts"
+    );
+    assert!(
+        coverage.actor_busy_draining_blocks > 0 && coverage.queue_paused_dispatch_blocks > 0,
+        "seed corpus must block paused queues and busy draining actors before dispatch"
+    );
+    assert!(
+        coverage.admin_handoffs > 0 && coverage.admin_reaps > 0,
+        "seed corpus must exercise generation-guarded admin handoff and reap"
+    );
+    assert!(
+        coverage.supervisor_heartbeat_reattaches > 0
+            && coverage.supervisor_heartbeat_stale_blocks > 0,
+        "seed corpus must exercise supervisor heartbeat reattach and stale heartbeat rejection"
+    );
+    assert!(
         coverage.stale_generation_blocks > 0,
         "seed corpus must reject stale actor generations"
     );
@@ -2076,6 +2344,13 @@ fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
     assert!(
         coverage.projection_drift_blocks > 0 && coverage.projection_repairs > 0,
         "medium seed corpus must keep projection drift and repair coverage"
+    );
+    assert!(
+        coverage.queue_backpressure_events > 0
+            && coverage.admin_handoffs > 0
+            && coverage.admin_reaps > 0
+            && coverage.supervisor_heartbeat_reattaches > 0,
+        "medium seed corpus must keep queue/admin/heartbeat control-plane coverage"
     );
     assert!(
         coverage.sync_protected_expansions > 0 && coverage.sync_detachable_replacements > 0,
@@ -2403,6 +2678,83 @@ fn route_sim_stale_busy_repair_requires_busy_lifecycle() {
         world.coverage.busy_projection_ready_repairs, 0,
         "repair must not fire when the actor is not projected Busy"
     );
+}
+
+#[test]
+fn control_plane_sim_queue_controls_block_and_resume_route_dispatch() {
+    let mut world = SimWorld::new(2_101);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world.apply(SimCommand::AdminPauseQueue).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.queue_pauses, 1);
+    assert_eq!(world.coverage.queue_paused_dispatch_blocks, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::AdminResumeQueue).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert_eq!(world.coverage.queue_resumes, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::AdminDrainQueue).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.queue_drains, 1);
+    assert_eq!(world.coverage.actor_busy_draining_blocks, 1);
+    assert_eq!(world.coverage.queue_backpressure_events, 2);
+}
+
+#[test]
+fn control_plane_sim_admin_handoff_and_reap_require_current_generation() {
+    let mut world = SimWorld::new(2_102);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world.apply(SimCommand::AdminHandoffStale).unwrap();
+    assert_eq!(world.coverage.stale_generation_blocks, 1);
+    assert_eq!(world.coverage.admin_handoffs, 0);
+
+    let prior_generation = world.route.durable.generation;
+    world.apply(SimCommand::AdminHandoff).unwrap();
+    assert_eq!(world.coverage.admin_handoffs, 1);
+    assert_eq!(world.route.durable.generation, prior_generation + 1);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+    assert_eq!(world.route.projection, world.route.durable);
+
+    world.apply(SimCommand::AdminReapStale).unwrap();
+    assert_eq!(world.coverage.stale_generation_blocks, 2);
+    assert_eq!(world.coverage.admin_reaps, 0);
+
+    world.apply(SimCommand::AdminReap).unwrap();
+    assert_eq!(world.coverage.admin_reaps, 1);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Closed);
+    assert_eq!(world.route.durable.pane_id, None);
+}
+
+#[test]
+fn control_plane_sim_supervisor_heartbeat_repairs_projection_after_drift() {
+    let mut world = SimWorld::new(2_103);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DriftProjection).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.projection_drift_blocks, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::SupervisorHeartbeatStale).unwrap();
+    assert_eq!(world.coverage.supervisor_heartbeat_stale_blocks, 1);
+
+    world
+        .apply(SimCommand::SupervisorHeartbeatReattach)
+        .unwrap();
+    assert_eq!(world.coverage.supervisor_heartbeat_reattaches, 1);
+    assert_eq!(world.route.projection, world.route.durable);
+
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
 }
 
 #[test]

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,13 +104,16 @@ Verification:
 
 CI: latest `btakita/agent-doc` CI for commit `5847da11` was `in_progress` when checked after push. The superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. No escalated sandbox approval was requested.
 /clear
-<!-- agent:boundary:b12bdd5b -->
+
+### Re: /clear — gpt-5
+
+Processed `/clear` as the active queued slash command. This closeout consumes the queue head so the supervisor/idle-queue clear path can own the actual context-clear boundary after the turn is idle.
+<!-- agent:boundary:ebf70d6f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- /clear
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

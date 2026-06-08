@@ -4649,8 +4649,17 @@ pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String
 pub fn first_unstarted_prompt_bearing_change(
     file: &Path,
 ) -> Result<Option<crate::diff::PromptBearingChange>> {
-    let Some(snapshot) = crate::snapshot::load(file)? else {
-        return Ok(None);
+    // A fresh session can carry an unanswered exchange tail prompt before any
+    // cycle snapshot exists. The queue path activates independently of the
+    // snapshot (route queue activation re-saves the snapshot on activation), so
+    // a queue write always dispatches; the exchange path relies on this diff, so
+    // without a snapshot we must fall back to the committed `HEAD` blob (then to
+    // an empty baseline for untracked docs) — otherwise the exchange prompt is
+    // invisible and `Run Agent Doc` does nothing while the same write into the
+    // queue starts a turn (#codex-exchange-prompt-no-dispatch).
+    let baseline = match crate::snapshot::load(file)? {
+        Some(snapshot) => snapshot,
+        None => crate::git::show_head(file)?.unwrap_or_default(),
     };
     let current = match std::fs::read_to_string(file) {
         Ok(content) => content,
@@ -4664,7 +4673,7 @@ pub fn first_unstarted_prompt_bearing_change(
         crate::diff::strip_comments(&strip_queue_components_for_unstarted_prompt_guard(&body))
     };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
-    let snap_norm = norm(&prompt_bearing_body(&snapshot));
+    let snap_norm = norm(&prompt_bearing_body(&baseline));
     let cur_norm = norm(&prompt_bearing_body(&current));
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
@@ -4968,6 +4977,135 @@ Body\n\
         assert!(
             change.is_none(),
             "frontmatter-only metadata drift must not become prompt-bearing"
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_detects_fresh_exchange_prompt_without_snapshot() {
+        // #codex-exchange-prompt-no-dispatch: a fresh session has no cycle
+        // snapshot yet. The queue path activates snapshot-independently, but the
+        // exchange path keys off this diff. Without a snapshot it must fall back
+        // to the committed HEAD blob so a freshly typed exchange tail prompt is
+        // still detected (otherwise `Run Agent Doc` does nothing for exchange
+        // writes while a queue write starts a turn).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        // HEAD: an already-answered exchange, no trailing unanswered prompt.
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-4-8\n\n",
+            "Answer.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Working tree: a freshly typed, unanswered exchange tail prompt — and
+        // crucially NO snapshot saved (simulating a brand-new session).
+        let current = committed.replace(
+            "Answer.\n<!-- /agent:exchange -->\n",
+            "Answer.\nPlease fix the markdown parser.\n<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, &current).unwrap();
+        assert!(
+            crate::snapshot::load(&doc).unwrap().is_none(),
+            "precondition: fresh session has no snapshot"
+        );
+
+        let change = first_unstarted_prompt_bearing_change(&doc)
+            .unwrap()
+            .expect("fresh exchange tail prompt must be detected via HEAD fallback");
+        assert!(
+            change.text.contains("Please fix the markdown parser."),
+            "detected change should be the new exchange prompt, got: {:?}",
+            change.text
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_fresh_queue_only_write_without_snapshot() {
+        // Regression guard for #codex-exchange-prompt-no-dispatch: the HEAD
+        // fallback must stay exchange-scoped. A queue-only write with no snapshot
+        // must NOT surface as an exchange prompt-bearing change — the queue keeps
+        // its own snapshot-independent activation path.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-4-8\n\n",
+            "Answer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let current = committed.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- run the parser fix\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, &current).unwrap();
+        assert!(
+            crate::snapshot::load(&doc).unwrap().is_none(),
+            "precondition: fresh session has no snapshot"
+        );
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "a queue-only write must not become an exchange prompt-bearing change"
         );
     }
 

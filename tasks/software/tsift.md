@@ -63,7 +63,33 @@ Validation completed:
 - `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
 
 Committed and pushed tsift: `a39d6e5 feat: columnize source-read envelopes`. Superproject pointer committed: `bc60866a9 chore: update tsift submodule`.
-<!-- agent:boundary:b9fe3bee -->
+
+### Re: AGENTS install runbook reference — gpt-5
+
+Yes, but not as a runbook-only install. The practical Codex/OpenCode reuse pattern is that `AGENTS.md` must stay self-contained because those harnesses can reuse the prompt-visible block directly without loading extra files. The better shape is hybrid: keep the generated Code Navigation block compact and complete enough to run, and point repositories that ship current deeper docs back to `.claude/skills/tsift/SKILL.md` or `runbooks/code-navigation.md` for command detail.
+
+Implemented that hybrid:
+
+- `tsift init` now injects a self-contained Codex/OpenCode line that references current deeper tsift runbooks when present.
+- `src/tsift/AGENTS.md` and `specs/search-navigation.md` were updated to match the generated contract.
+- `VERSIONS.md` records the behavior.
+- The parent `runbooks/code-navigation.md` was refreshed from `0.1.62` to the current `0.1.64` guidance, including `source-read`, `symbol-read`, the current rewrite fallback wording, and the simplified CI check instruction.
+
+Commits:
+
+- `src/tsift`: `0f0aae3 docs: reference current tsift runbooks in init`
+- parent repo: `b9152265 docs: refresh tsift code navigation runbook`
+
+Verification:
+
+- `cargo test -p tsift-index init_creates_agents_md_when_none_exists -- --nocapture`
+- `git diff --check` for the tsift submodule and parent runbook
+- `make check` passed end to end on the final tree
+- `cargo install --path .` installed the final binary
+- `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
+
+No escalation was needed. Confidence is high: the install now restores the runbook reference where it helps, without breaking standalone checkouts or forcing Codex/OpenCode to load a separate document before using tsift.
+<!-- agent:boundary:30e19ab6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,8 +98,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- I notice that we stopped install the runbook. Should we go back to the runbook approach with the latest Codex reuse data?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->- I notice that we stopped referencing the runbook in AGENTS.md in the install. Should we go back to the runbook approach with the latest Codex reuse data?
 <!-- /agent:queue -->
 
 ## Backlog

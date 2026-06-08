@@ -130,15 +130,38 @@ Shipped phase 4 — the **behavioral swap**: `op_affectedness` is now wired into
 **Still open (queued `#nm1x-livebuf-content`):** the live-buffer gate only suppresses the *editor-matches-disk* false positive. A genuine **unsaved** independent edit still blocks conservatively, because the live-buffer sidecar stores only a length/hash — no content to classify. Capturing the buffer text needs an editor-plugin change; queued as its own item.
 
 (Exchange is large but the queue is active, so I'm not stalling to compact.) Next in the queue: the JB `Run Agent Doc` / `/clear` item.
-<!-- agent:boundary:9f829e27 -->
+
+### Re: JB Run Agent Doc should not pre-emptively run /clear — opus-4-8
+
+> **Queue prompt:**
+>
+> On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.
+
+Fixed, and root-caused from this session's own logs rather than guessed. Shipped agent-doc `003e8a15` (submodule bump `8668b85bb`); pushed to origin/main.
+
+**What was actually happening.** I traced the `/clear` for this Claude doc through `.agent-doc/logs/*.log`: the source is `auto_trigger_clear` from the **supervisor idle-queue watch** (`start.rs`), not the route/dispatch path and not the Codex hook (the `idle_queue_watch_context_reset` log lines were all `harness=codex`, other docs). The watch interleaves `/clear` before a queue head whenever session accretion is "unhealthy" — and this session's exchange is large, so it fired **12+ times** (the churn you saw). It was gated only on *pane idle + not mid-turn*, which still (a) churns the session and (b) races a turn that starts between the check and the keystroke → `'/clear' is disabled while a task is in progress`.
+
+**The fix — pre-emptive clear is now opt-in, default off.**
+
+- New setting `agent_doc_queue_context_reset` (document frontmatter takes precedence, then `.agent-doc/config.toml`), mirroring the existing `agent_doc_auto_compact` opt-in for automatic context management.
+- The supervisor idle-queue watch consults it before signalling an accretion-driven reset; **without the opt-in it never fires a pre-emptive `/clear`**. A manual `Run Agent Doc` (or an auto-loop drain) now leaves the queue-head dispatch un-preceded by `/clear`.
+- **Deferred *operator* clears stay live** — an explicit `session clear` / `interrupt-clear` that was deferred past a busy turn is a separate path and still delivers. Only the *automatic accretion-driven* clear is gated.
+
+**Scope I deliberately did not change:** the Codex Stop-hook and `run.rs` also call the shared accretion policy. Your directive was specific to *JB Run Agent Doc* (Claude), and the logs confirmed the supervisor watch as the source, so I gated only that. Whether the no-pre-emptive-clear policy should be product-wide (Codex too) is a real but separate decision — queued as `#nm1x-codex-clear-parity [recommended]`.
+
+**Verification:** unit tests (opt-in defaults off + honors frontmatter; the accretion-reason tests stay green; the Codex fresh-context test stays green because its path is untouched); full `make check` green (clippy clean); release + `cargo install` rebuilt both binaries. The running supervisor for *this* session is the previous binary, so this change takes effect on the next supervisor start — it can't disrupt the loop currently draining this queue. CI `27166737079` queued; the prior `#nm1x` run `27165660753` went green.
+
+That drains the queue. (Exchange is large but I'm not stalling to compact mid-active-queue.)
+<!-- agent:boundary:5c0cd0ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#nm1x]~~
-- On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.
-- ~~do [#canonical-session-close-autodetect]~~
+- ~~On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.~~
+- On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold.
+- do [#nm1x-livebuf-content]
+- Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.
 <!-- /agent:queue -->
 ###
 <!--
@@ -166,6 +189,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#nm1x-codex-clear-parity] [recommended] Decide whether the Codex Stop-hook and `run.rs` accretion-driven context-reset (`queue_context_reset_reason`) should also respect the new `agent_doc_queue_context_reset` opt-in. #nm1x-no-preempt-clear scoped the off-by-default gate to the supervisor idle-queue watch (the confirmed JB/Claude Run source); the Codex and run paths keep firing the accretion `/clear` block. If the no-pre-emptive-clear policy is product-wide, gate those two call sites the same way (and update their codex_hook fresh-context tests). Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 - [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 <!-- /agent:backlog -->
 

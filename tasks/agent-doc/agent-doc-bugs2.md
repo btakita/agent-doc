@@ -56,7 +56,14 @@ Verification passed:
 - Latest GitHub Actions CI run on `main` was already `completed success`.
 
 Code commit: `src/agent-doc` `19b70a1f` (`Run slash queue heads as commands`), pushed to `origin/main`. Superproject pointer commit: `0ff4619c6` (`Update agent-doc slash queue support`).
-<!-- agent:boundary:242b15a5 -->
+❯ /clear
+
+### Re: /clear — gpt-5
+
+`/clear` is a builtin harness command, not an agent-doc prose prompt. Run `/clear` directly in the owner pane/terminal before continuing.
+
+The missing automation path is already captured as backlog item `#ckvm`: exchange-origin slash prompts should eventually use the same after-turn command submission flow that queue slash heads now use.
+<!-- agent:boundary:6c57cd65 -->
 <!-- /agent:exchange -->
 
 ## Queue

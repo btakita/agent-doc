@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,12 +35,16 @@ complete
 Compacted content:
 - Archived 1 response topic(s): sidecar rearchitecture backlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3dab8a3d -->
+<!-- agent:boundary:e0974ae9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- :round_pushpin: do [#ctrlplane-adminbp]
+- :round_pushpin: do [#ctrlplane-simworld]
+- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
+- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
 <!-- /agent:queue -->
 ###
 <!--

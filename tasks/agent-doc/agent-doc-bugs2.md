@@ -92,21 +92,46 @@ Commits/push:
 
 CI:
 - `src/agent-doc` latest CI for `91da5c42` was `in_progress` at closeout (`27110075916`, 2026-06-08 00:52:49Z), so I did not wait on it.
-<!-- agent:boundary:ed14a6bb -->
+Implemented `#ctrlplane-memoryauth`.
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-memoryauth]
+
+
+The active project controller now owns a `ControllerRuntime` with a live in-memory actor map loaded from `.agent-doc/state.db` at startup. Controller IPC actor reads use that memory snapshot for actor binding, dispatch authorization, supervisor registration/heartbeat, lifecycle checks, operator commands, and attach handling. Accepted actor mutations remain SQLite write-through: the handler commits through the existing `store_actor_record` transaction first, then refreshes the runtime memory map before returning the accepted result. Failed commits therefore do not advance memory.
+
+`agent-doc controller status` now exposes the active session-actor memory authority through `control_plane.session_actors.categories`, including `actor_records`, `map_backend_std_btree_map`, and `write_through_sqlite`. The specs document the current `BTreeMap` baseline and the acceptance criteria for evaluating `lazily-rs` later: it can replace the map/index layer only if it preserves the same post-commit memory update and failed-commit-no-memory-change contract.
+
+Verification:
+- `cargo test -p agent-doc-orchestration controller_runtime_refreshes_memory_after_write_through_commit`
+- `cargo test -p agent-doc-orchestration controller_status_reports_single_process_control_plane_runtime`
+- `cargo test -p agent-doc-orchestration project_controller::tests::`
+- `make check`
+- `cargo install --path .`
+
+Commits/push:
+- `src/agent-doc`: `ac213a76 controller: make actor state memory authoritative`, pushed to `origin/main`.
+- `agent-loop`: `5d223ff1c agent-doc(agent-doc): update memory authority pointer`, pushed to `origin/main`.
+
+CI:
+- `src/agent-doc` latest CI for `ac213a76` was `in_progress` at closeout (`27110402938`, 2026-06-08 01:05:26Z), so I did not wait on it.
+<!-- agent:boundary:bc46b981 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#ctrlplane-process]~~
-- do [#ctrlplane-storeactor]
-- do [#ctrlplane-memoryauth]
-- do [#ctrlplane-dispatchapi]
-- do [#ctrlplane-sessionactor]
-- do [#ctrlplane-projections]
-- do [#ctrlplane-crashrecover]
-- do [#ctrlplane-adminbp]
-- do [#ctrlplane-simworld]
+- ~~:round_pushpin: do [#ctrlplane-memoryauth]~~
+- :pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?
+- :round_pushpin: do [#ctrlplane-dispatchapi]
+- :round_pushpin: do [#ctrlplane-sessionactor]
+- :round_pushpin: do [#ctrlplane-projections]
+- :round_pushpin: do [#ctrlplane-crashrecover]
+- :round_pushpin: do [#ctrlplane-adminbp]
+- :round_pushpin: do [#ctrlplane-simworld]
+- ~~do [#ctrlplane-storeactor]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -132,7 +157,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
+- [x] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
 - [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
 - [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.

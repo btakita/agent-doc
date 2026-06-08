@@ -30,80 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-021353.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-025049.md`*
 
 Compacted content:
-- Archived 1 response topic(s): sidecar rearchitecture backlog
+- Archived 7 response topic(s): ctrlplane-adminbp; active queue continuation closeout; `#ctrlplane-adminbp-data`; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: ctrlplane-adminbp — gpt-5
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#ctrlplane-adminbp]
-
-
-Created `tasks/agent-doc/plan-controller-admin-backpressure.md` for the controller-backed admin/backpressure slice.
-
-The plan ties this work to the existing `#ipc-admin-api`, Project Controller MVP, and `specs/08b-single-process-control-plane.md` contracts. It scopes the next implementation around controller-owned `AdminControl` and `QueueControl` operations: actor inspection, queue pause/resume/drain, typed queue backpressure, stale actor reap, generation-checked manual handoff, projection repair from SQLite state, and thin CLI/FFI/editor wrappers.
-
-I closed `#ctrlplane-adminbp` as the planning item and added three follow-up implementation phases to the backlog, all pointing at the plan file: controller data/receipts, CLI/admin operations, and queue/projection/FFI integration. `#ctrlplane-simworld` should stay after those primitives, since it depends on them for deterministic race coverage.
-
-Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpressure.md` passed. I did not run the Rust suite because this cycle only added a plan document and backlog mutations.
-
-### Re: active queue continuation closeout — gpt-5
-
-Closed the active Codex continuation after the `#ctrlplane-adminbp` queue response. No additional task work was needed beyond committing the recovered plan/backlog closeout and repairing the queue metadata drift.
-
-Verification after the repair path: the ordinary `agent-doc session-check` reported the queue drained with no next head. I am rerunning the strict Codex final gate after this binary-owned closeout.
-
-### Re: `#ctrlplane-adminbp-data` — gpt-5
-
-> **Queue prompt:**
->
-> do [#ctrlplane-adminbp-data]
-
-
-Implemented the controller-backed admin/backpressure data and CLI slices.
-
-Changed paths: `agent-doc-sqlite/src/state_store.rs`, `agent-doc-orchestration/src/project_controller.rs`, `agent-doc-orchestration/src/admin.rs`, `src/main.rs`, `README.md`, `SPEC.md`, `specs/08b-single-process-control-plane.md`, plus the parent `src/agent-doc` submodule pointer.
-
-What changed: SQLite now stores queue controls and queue backpressure facts; controller inspect includes queue/admin/backpressure context; admin CLI exposes inspect, queue pause/resume/drain, reap, handoff, and projection repair; document-scoped mutations require observed generation; dispatch blocks paused/draining queues with typed `queue_paused` / `actor_busy_draining` receipts before external input.
-
-Closeout: marked `#ctrlplane-adminbp-data` and `#ctrlplane-adminbp-cli` done. I narrowed `#ctrlplane-adminbp-queue` to the remaining FFI/editor wrappers and dashboard/status pressure surfacing instead of closing work that is not finished.
-
-Verification: `cargo test -p agent-doc-sqlite control_plane_store_counts_extended_fact_categories -- --nocapture`; `cargo test -p agent-doc-orchestration project_controller -- --nocapture`; `cargo check -p agent-doc-orchestration -p agent-doc-sqlite`; `make check`; `make build-release install`; `agent-doc --version`; `gh run list --workflow CI --limit 1`.
-
-Commits: submodule `3b645117 feat: add controller-backed admin queue controls` pushed to `agent-doc/main`; parent pointer commit `9d3f64fca agent-doc: update controller admin controls` is ready to push with this closeout commit.
-
-Escalation: none. Confidence: high for the completed data and CLI phases; full local suite passed and latest CI was `completed/success`.
-
-### Re: final-gate recovery after `#ctrlplane-adminbp-data` — gpt-5
-
-The `#ctrlplane-adminbp-data` queue head was already implemented and committed in the document response above; this cycle closes the follow-up preflight I opened while checking the final gate.
-
-Final repo state: submodule commits `3b645117` and `4c8dfe16` are pushed to `agent-doc/main`; parent commit `16ea33934` records the updated `src/agent-doc` pointer. The earlier verification remains valid: focused controller/storage/CLI tests, `make check`, `make build-release install`, installed `agent-doc 0.34.0`, and latest CI `completed/success`.
-
-No new actionable follow-up items were created by this final-gate recovery cycle.
-
-### Re: final-gate metadata convergence — gpt-5
-
-No additional task work was needed in this cycle. This write closes the preflight opened while reconciling the visible boundary/queue metadata after the completed `#ctrlplane-adminbp-data` closeout.
-
-No new actionable follow-up items were created by this metadata-convergence cycle.
-
-### Re: Codex stop-hook closeout — gpt-5
-
-The completed `#ctrlplane-adminbp-data` closeout has already been written and committed; this hook recovery only closes the active Codex turn metadata so the final gate can pass.
-
-No new actionable follow-up items were created by this stop-hook recovery cycle.
-
-### Re: backlog-capture rubric closeout — gpt-5
-
-This cycle only corrects the closeout wording for the Codex stop-hook recovery; the `#ctrlplane-adminbp-data` work and backlog state are unchanged.
-
-There were no actionable follow-up items to capture.
-<!-- agent:boundary:864aad73 -->
+<!-- agent:boundary:d62f0d50 -->
 <!-- /agent:exchange -->
 
 ## Queue

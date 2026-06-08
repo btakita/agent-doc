@@ -734,7 +734,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // must use the same visible editor drift guard as active-head queue consume.
         // +2 for the audited explicit-baseline replay guard: one guard function and
         // one strict write call site reject stale-baseline responses after commit.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 74,
+        // +10 for the audited #ipc-drift-visbuf-reconcile foreign-disk-write
+        // reconcile path: the `guard_visible_write_reconcile` function plus its
+        // production call sites in `run_template`/`run_stream`, the
+        // `reconcile_visible_write` loop helper references, and the
+        // deterministic reconcile unit tests. A clean CRDT merge that hits a
+        // foreign agent-doc disk append re-merges instead of failing closed.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 84,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

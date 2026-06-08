@@ -6400,6 +6400,12 @@ const STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO: f64 = 0.90;
 const VISIBLE_WRITE_TYPING_DEBOUNCE_MS: u64 = 500;
 const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 5_000;
 
+/// Max re-merge attempts when reconciling the visible-write guard with a
+/// foreign disk write that landed after the merge was computed
+/// (#ipc-drift-visbuf-reconcile). After this many drifting re-reads, fall back
+/// to the fail-closed guard so the operator retries.
+const VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS: usize = 3;
+
 pub fn guard_visible_write_idle(file: &Path, source: &str) -> Result<()> {
     guard_visible_write_idle_with_budget(
         file,
@@ -6452,11 +6458,63 @@ fn guard_visible_write_idle_with_budget(
     )
 }
 
+/// Outcome of reconciling the visible-write guard with the on-disk state.
+///
+/// Distinguishes a *pending user edit in the editor* (which must still fail
+/// closed) from a *foreign agent-doc disk write* that landed after the response
+/// merge was computed (which is CRDT-reconcilable via a re-merge instead of
+/// stranding the captured response outside HEAD — `#ipc-drift-visbuf-reconcile`).
+pub(crate) enum VisibleWriteReconcile {
+    /// Disk and the live editor buffer agree with the expected content; the
+    /// caller may write its computed `final_content`.
+    Clean,
+    /// The on-disk file drifted to a foreign agent-doc write *after* the
+    /// response merge was computed, but the live editor buffer did NOT diverge
+    /// (no pending user edit). Carries the fresh disk content so the caller can
+    /// re-merge the captured response against it and retry.
+    DiskDrifted { fresh_current: String },
+}
+
 fn guard_visible_write_idle_and_current(
     file: &Path,
     source: &str,
     expected_current: &str,
 ) -> Result<()> {
+    match guard_visible_write_reconcile(file, source, expected_current)? {
+        VisibleWriteReconcile::Clean => Ok(()),
+        VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::document_mutation::visible_write_current_changed_event(source),
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "visible_write_deferred_current_changed file={} source={} expected_hash={} current_hash={}",
+                    file.display(),
+                    source,
+                    crate::ops_log::content_hash(expected_current),
+                    crate::ops_log::content_hash(&fresh_current)
+                ),
+            );
+            anyhow::bail!(
+                "visible document write for {} deferred: document changed after the response merge was computed; retry after typing stops",
+                file.display()
+            )
+        }
+    }
+}
+
+/// Like [`guard_visible_write_idle_and_current`] but, instead of failing closed
+/// when the on-disk file drifted *after* the merge was computed, reports the
+/// fresh disk content so a CRDT-merge caller can re-merge the captured response
+/// and retry. A genuine live editor-buffer divergence (pending user edit) still
+/// fails closed — only a clean foreign disk write is reported as reconcilable.
+fn guard_visible_write_reconcile(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+) -> Result<VisibleWriteReconcile> {
     guard_visible_write_idle(file, source)?;
     let indicator_path = file
         .canonicalize()
@@ -6491,27 +6549,64 @@ fn guard_visible_write_idle_and_current(
     let actual_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
     if actual_current == expected_current {
-        return Ok(());
+        return Ok(VisibleWriteReconcile::Clean);
     }
 
-    crate::flow::proof::log_flow_event(
-        file,
-        crate::flow::document_mutation::visible_write_current_changed_event(source),
-    );
+    // Disk drifted but the live editor buffer did not diverge: a foreign
+    // agent-doc supervisor appended to the same document mid-generation. This
+    // is reconcilable — report the fresh disk content so the caller re-merges
+    // instead of failing closed and stranding the captured response.
     crate::ops_log::log_op(
         file,
         &format!(
-            "visible_write_deferred_current_changed file={} source={} expected_hash={} current_hash={}",
+            "visible_write_disk_drift_reconcilable file={} source={} expected_hash={} current_hash={}",
             file.display(),
             source,
             crate::ops_log::content_hash(expected_current),
             crate::ops_log::content_hash(&actual_current)
         ),
     );
-    anyhow::bail!(
-        "visible document write for {} deferred: document changed after the response merge was computed; retry after typing stops",
-        file.display()
-    )
+    Ok(VisibleWriteReconcile::DiskDrifted {
+        fresh_current: actual_current,
+    })
+}
+
+/// Drive the visible-write reconcile loop (#ipc-drift-visbuf-reconcile).
+///
+/// Starting from `initial_current`/`initial_payload` (the merge computed against
+/// the first disk read), repeatedly consult `guard`. On a [`VisibleWriteReconcile::Clean`]
+/// outcome the merge is safe to write and `(current, payload)` is returned. On a
+/// [`VisibleWriteReconcile::DiskDrifted`] outcome — a foreign agent-doc write that
+/// landed after the merge — re-merge via `recompute` against the fresh disk content
+/// and retry, up to `max_attempts`. If the document keeps drifting past that bound,
+/// fall back to `fail_closed` (which fails the cycle so the operator retries).
+///
+/// Factored out so the loop logic is unit-testable with injected guard/recompute
+/// closures, without needing a mid-write disk mutation race.
+fn reconcile_visible_write<T>(
+    file: &Path,
+    initial_current: String,
+    initial_payload: T,
+    max_attempts: usize,
+    mut guard: impl FnMut(&Path, &str) -> Result<VisibleWriteReconcile>,
+    mut recompute: impl FnMut(&str) -> Result<T>,
+    fail_closed: impl FnOnce(&Path, &str) -> Result<()>,
+) -> Result<(String, T)> {
+    let mut current = initial_current;
+    let mut payload = initial_payload;
+    for _ in 0..max_attempts {
+        match guard(file, &current)? {
+            VisibleWriteReconcile::Clean => return Ok((current, payload)),
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                current = fresh_current;
+                payload = recompute(&current)?;
+            }
+        }
+    }
+    // Document kept changing under us across every reconcile attempt; fall back
+    // to the fail-closed guard so the operator retries.
+    fail_closed(file, &current)?;
+    Ok((current, payload))
 }
 
 fn stale_snapshot_reset_drift(snapshot_doc: &str, current_doc: &str) -> Option<(usize, usize)> {
@@ -7646,46 +7741,68 @@ pub fn run_template(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
-        file,
-        base,
-        &content_ours,
-        &content_current,
-        snapshot_doc.as_deref(),
-        &response,
-    )? {
-        eprintln!(
-            "[write] response already present in current file; adopting normalized current content"
-        );
-        repaired_current
-    } else if content_current == base {
-        content_ours.clone()
-    } else {
-        eprintln!("[write] File was modified during response generation. Merging...");
-        merge::merge_contents(base, &content_ours, &content_current)?
-    };
-    let mut final_content = normalize_final_template_content(
-        file,
-        base,
-        snapshot_doc.as_deref(),
-        Some(&content_current),
-        &final_content,
-        Some(&response),
-    )?;
-    let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
-        file,
-        base,
-        &content_current,
-        &final_content,
-    )?;
-    let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
-    if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content = normalize_template_structure_or_fail_preserving(
-            &cleaned,
+    // Recompute the merged + normalized content for a given on-disk `current`.
+    // Factored so the reconcile loop below can re-merge against a fresh disk
+    // state when a foreign agent-doc writer appends mid-generation.
+    let recompute_final = |content_current: &str| -> Result<(String, bool)> {
+        let final_content = if let Some(repaired_current) =
+            adopt_current_response_without_duplication(
+                file,
+                base,
+                &content_ours,
+                content_current,
+                snapshot_doc.as_deref(),
+                &response,
+            )? {
+            eprintln!(
+                "[write] response already present in current file; adopting normalized current content"
+            );
+            repaired_current
+        } else if content_current == base {
+            content_ours.clone()
+        } else {
+            eprintln!("[write] File was modified during response generation. Merging...");
+            merge::merge_contents(base, &content_ours, content_current)?
+        };
+        let mut final_content = normalize_final_template_content(
             file,
-            Some(&content_current),
+            base,
+            snapshot_doc.as_deref(),
+            Some(content_current),
+            &final_content,
+            Some(&response),
         )?;
-    }
+        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+            file,
+            base,
+            content_current,
+            &final_content,
+        )?;
+        let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
+        if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+            final_content =
+                normalize_template_structure_or_fail_preserving(&cleaned, file, Some(content_current))?;
+        }
+        Ok((final_content, cleaned_applied))
+    };
+
+    let initial_payload = recompute_final(&content_current)?;
+
+    // Reconcile the visible-write guard with the CRDT merge: if a foreign
+    // agent-doc writer appended to the document after the merge was computed
+    // (disk drift, not a pending user edit), re-merge the captured response
+    // against the fresh disk state and retry instead of failing closed and
+    // stranding the response outside HEAD (#ipc-drift-visbuf-reconcile).
+    let (content_current, (final_content, cleaned_resolved_backlog_prompts_applied)) =
+        reconcile_visible_write(
+            file,
+            content_current,
+            initial_payload,
+            VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
+            |f, expected| guard_visible_write_reconcile(f, "run_template", expected),
+            recompute_final,
+            |f, current| guard_visible_write_idle_and_current(f, "run_template", current),
+        )?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -7730,7 +7847,7 @@ pub fn run_template(
         &patches,
         &unmatched,
     );
-    guard_visible_write_idle_and_current(file, "run_template", &content_current)?;
+    // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -8462,69 +8579,90 @@ pub fn run_stream(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, mut crdt_state) = if let Some(repaired_current) =
-        adopt_current_response_without_duplication(
+    // Recompute the CRDT-merged + normalized content (and its encoded state)
+    // for a given on-disk `current`. Factored so the reconcile loop below can
+    // re-merge against a fresh disk state when a foreign agent-doc writer
+    // appends mid-generation (#ipc-drift-visbuf-reconcile).
+    let recompute_final = |content_current: &str| -> Result<(String, Vec<u8>, bool)> {
+        let (final_content, mut crdt_state) = if let Some(repaired_current) =
+            adopt_current_response_without_duplication(
+                file,
+                base,
+                &content_ours,
+                content_current,
+                snapshot_doc.as_deref(),
+                &response,
+            )? {
+            eprintln!(
+                "[write] response already present in current file; adopting normalized current content"
+            );
+            let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
+            (repaired_current, doc.encode_state())
+        } else if content_current == base {
+            // No edits — build CRDT state from result
+            let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+            (content_ours.clone(), doc.encode_state())
+        } else {
+            eprintln!("[write] File was modified during response generation. CRDT merging...");
+            // Use baseline as CRDT base instead of stored state from previous cycle.
+            // The baseline is the exact content both sides (ours and theirs) diverged
+            // from, giving clean diffs. Using a stale stored state causes character-level
+            // interleaving when the agent replaces component content while the user
+            // appends within the same region (lazily-rs.md corruption bug).
+            let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
+            // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
+            match merge::merge_contents_crdt(Some(&base_state), &content_ours, content_current) {
+                Ok(merged) => merged,
+                Err(e) => {
+                    eprintln!(
+                        "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
+                        e
+                    );
+                    let spliced = splice_pending_component(&content_ours, content_current);
+                    let doc = crate::crdt::CrdtDoc::from_text(&spliced);
+                    (spliced, doc.encode_state())
+                }
+            }
+        };
+        let mut final_content = normalize_final_template_content(
             file,
             base,
-            &content_ours,
-            &content_current,
             snapshot_doc.as_deref(),
-            &response,
-        )? {
-        eprintln!(
-            "[write] response already present in current file; adopting normalized current content"
-        );
-        let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
-        (repaired_current, doc.encode_state())
-    } else if content_current == base {
-        // No edits — build CRDT state from result
-        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours.clone(), doc.encode_state())
-    } else {
-        eprintln!("[write] File was modified during response generation. CRDT merging...");
-        // Use baseline as CRDT base instead of stored state from previous cycle.
-        // The baseline is the exact content both sides (ours and theirs) diverged
-        // from, giving clean diffs. Using a stale stored state causes character-level
-        // interleaving when the agent replaces component content while the user
-        // appends within the same region (lazily-rs.md corruption bug).
-        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
-        // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
-        match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
-            Ok(merged) => merged,
-            Err(e) => {
-                eprintln!(
-                    "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
-                    e
-                );
-                let spliced = splice_pending_component(&content_ours, &content_current);
-                let doc = crate::crdt::CrdtDoc::from_text(&spliced);
-                (spliced, doc.encode_state())
-            }
-        }
-    };
-    let mut final_content = normalize_final_template_content(
-        file,
-        base,
-        snapshot_doc.as_deref(),
-        Some(&content_current),
-        &final_content,
-        Some(&response),
-    )?;
-    let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
-        file,
-        base,
-        &content_current,
-        &final_content,
-    )?;
-    let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
-    if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content = normalize_template_structure_or_fail_preserving(
-            &cleaned,
-            file,
-            Some(&content_current),
+            Some(content_current),
+            &final_content,
+            Some(&response),
         )?;
-        crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
-    }
+        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+            file,
+            base,
+            content_current,
+            &final_content,
+        )?;
+        let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
+        if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+            final_content =
+                normalize_template_structure_or_fail_preserving(&cleaned, file, Some(content_current))?;
+            crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
+        }
+        Ok((final_content, crdt_state, cleaned_applied))
+    };
+
+    let initial_payload = recompute_final(&content_current)?;
+
+    // Reconcile the visible-write guard with the CRDT merge: re-merge the
+    // captured response against a foreign disk append landed after the merge
+    // was computed instead of failing closed and stranding the response
+    // outside HEAD (#ipc-drift-visbuf-reconcile).
+    let (content_current, (final_content, crdt_state, cleaned_resolved_backlog_prompts_applied)) =
+        reconcile_visible_write(
+            file,
+            content_current,
+            initial_payload,
+            VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
+            |f, expected| guard_visible_write_reconcile(f, "run_stream", expected),
+            recompute_final,
+            |f, current| guard_visible_write_idle_and_current(f, "run_stream", current),
+        )?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -8579,7 +8717,7 @@ pub fn run_stream(
         &patches,
         &unmatched,
     );
-    guard_visible_write_idle_and_current(file, "run_stream", &content_current)?;
+    // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
     snapshot::save(file, snapshot_content)?;
     snapshot::save_document_crdt(file, &snapshot_crdt_state, snapshot_content)?;
 
@@ -14792,6 +14930,132 @@ scratch
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=visible_write_current_changed:test_live_buffer_changed"));
         assert!(log.contains("visible_write_deferred_live_buffer_changed"));
+    }
+
+    #[test]
+    fn visible_write_reconcile_reports_clean_when_disk_matches() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, expected).unwrap();
+
+        let outcome = guard_visible_write_reconcile(&doc, "test_clean", expected).unwrap();
+        assert!(matches!(outcome, VisibleWriteReconcile::Clean));
+    }
+
+    #[test]
+    fn visible_write_reconcile_reports_disk_drift_without_live_buffer_edit() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        // Disk grew under us with a foreign agent-doc append (no live editor buffer
+        // sidecar = no pending user edit), so the guard must report it as a
+        // reconcilable drift rather than failing closed (#ipc-drift-visbuf-reconcile).
+        let drifted = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: foreign\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &drifted).unwrap();
+
+        let outcome = guard_visible_write_reconcile(&doc, "test_drift", expected).unwrap();
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, drifted);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("visible_write_disk_drift_reconcilable"));
+    }
+
+    #[test]
+    fn reconcile_visible_write_remerges_foreign_append_then_lands_clean() {
+        // The first guard call sees a foreign disk append; the loop must re-merge
+        // the captured response against the fresh disk content and then succeed
+        // without failing closed and stranding the response (#ipc-drift-visbuf-reconcile).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed\n").unwrap();
+
+        let base = "BASE";
+        let foreign = "BASE+FOREIGN";
+        let guard_calls = std::cell::RefCell::new(0usize);
+        let recompute_calls = std::cell::RefCell::new(0usize);
+
+        let guard = |_f: &Path, expected: &str| -> Result<VisibleWriteReconcile> {
+            let mut n = guard_calls.borrow_mut();
+            *n += 1;
+            if *n == 1 {
+                assert_eq!(expected, base);
+                Ok(VisibleWriteReconcile::DiskDrifted {
+                    fresh_current: foreign.to_string(),
+                })
+            } else {
+                assert_eq!(expected, foreign);
+                Ok(VisibleWriteReconcile::Clean)
+            }
+        };
+        let recompute = |current: &str| -> Result<String> {
+            *recompute_calls.borrow_mut() += 1;
+            // The re-merge incorporates the foreign disk content + the response.
+            Ok(format!("{current}+RESPONSE"))
+        };
+        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+            panic!("must not fail closed on a reconcilable foreign append");
+        };
+
+        let (current, payload) = reconcile_visible_write(
+            &doc,
+            base.to_string(),
+            format!("{base}+RESPONSE"),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap();
+
+        assert_eq!(current, foreign);
+        assert_eq!(payload, "BASE+FOREIGN+RESPONSE");
+        assert_eq!(*guard_calls.borrow(), 2);
+        assert_eq!(*recompute_calls.borrow(), 1);
+    }
+
+    #[test]
+    fn reconcile_visible_write_falls_back_to_fail_closed_when_drift_never_settles() {
+        // A document that keeps drifting past the attempt bound must fall back to
+        // the fail-closed guard so the operator retries instead of looping forever.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed\n").unwrap();
+
+        let counter = std::cell::RefCell::new(0usize);
+        let guard = |_f: &Path, _e: &str| -> Result<VisibleWriteReconcile> {
+            let mut n = counter.borrow_mut();
+            *n += 1;
+            Ok(VisibleWriteReconcile::DiskDrifted {
+                fresh_current: format!("drift-{n}"),
+            })
+        };
+        let recompute = |current: &str| -> Result<String> { Ok(current.to_string()) };
+        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+            anyhow::bail!("document still changing");
+        };
+
+        let err = reconcile_visible_write(
+            &doc,
+            "start".to_string(),
+            "start".to_string(),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("document still changing"));
+        assert_eq!(*counter.borrow(), 3);
     }
 
     #[test]

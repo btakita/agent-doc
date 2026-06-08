@@ -6,6 +6,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Clean CRDT merges reconcile foreign disk writes instead of stranding the
+  response (`#ipc-drift-visbuf-reconcile`).** When the on-disk document diverges
+  from the merge input but the live editor buffer does *not* (a foreign
+  agent-doc supervisor appended mid-generation, not a pending user edit), the
+  template/stream write paths now re-read the fresh disk content
+  (`visible_write_disk_drift_reconcilable`), re-merge the captured response
+  against it, and retry — bounded to a few attempts — rather than failing closed
+  with "visible editor buffer differs" and leaving the captured response outside
+  HEAD (the `stuck_captured_cycle` symptom). A genuine unsaved editor-buffer edit
+  still fails closed. Only persistent drift past the attempt bound falls back to
+  the old fail-closed behavior.
 - **Route-owned queued reruns no longer write `agent:queue auto`.** Busy
   dispatch-only reroutes now create or update a plain `agent:queue`, strip a
   legacy `auto` attribute from any touched queue tag, and use `queue_active:

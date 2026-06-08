@@ -610,10 +610,12 @@ fn tracked_repeated_queue_recovery_response(
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
-    let context_reset_reason =
-        crate::session_accretion::queue_context_reset_reason(file, state.last_context_clear_at)
-            .ok()
-            .flatten();
+    let context_reset_reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
+        file,
+        state.last_context_clear_at,
+    )
+    .ok()
+    .flatten();
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -651,9 +653,10 @@ fn marker_repeated_queue_recovery_response(
         });
     }
     crate::queue_continuation::record_requested_head(file, &next_prompt)?;
-    let context_reset_reason = crate::session_accretion::queue_context_reset_reason(file, None)
-        .ok()
-        .flatten();
+    let context_reset_reason =
+        crate::session_accretion::queue_context_reset_reason_if_opted_in(file, None)
+            .ok()
+            .flatten();
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -715,10 +718,12 @@ fn auto_queue_continuation_response(
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
-    let context_reset_reason =
-        crate::session_accretion::queue_context_reset_reason(file, state.last_context_clear_at)
-            .ok()
-            .flatten();
+    let context_reset_reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
+        file,
+        state.last_context_clear_at,
+    )
+    .ok()
+    .flatten();
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -799,9 +804,10 @@ fn marker_fallback_continuation_response(
     }
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
-    let context_reset_reason = crate::session_accretion::queue_context_reset_reason(&file, None)
-        .ok()
-        .flatten();
+    let context_reset_reason =
+        crate::session_accretion::queue_context_reset_reason_if_opted_in(&file, None)
+            .ok()
+            .flatten();
     // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
     // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
@@ -2725,6 +2731,15 @@ agent-doc {}\n",
     #[test]
     fn stop_marker_fallback_requires_clear_after_exchange_compaction() {
         let dir = setup_project();
+        // `#nm1x-codex-clear-parity`: the Codex Stop-hook pre-emptive `/clear`
+        // continuation is now gated on the `agent_doc_queue_context_reset` opt-in
+        // (off by default, product-wide). This test exercises the fresh-context
+        // path, so the project must opt in via `.agent-doc/config.toml`.
+        fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\n",
+        )
+        .unwrap();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");

@@ -170,6 +170,27 @@ pub fn queue_context_reset_reason(
     )))
 }
 
+/// Accretion-driven context-reset reason, gated on the
+/// `agent_doc_queue_context_reset` opt-in (`#nm1x-codex-clear-parity`).
+///
+/// `#nm1x-no-preempt-clear` scoped the off-by-default opt-in to the supervisor
+/// idle-queue watch; this helper extends the same gate to the Codex Stop-hook
+/// continuation instructions and the `run.rs` queue-continuation fresh-session
+/// decision so the no-pre-emptive-clear policy is product-wide. Without an
+/// explicit opt-in (frontmatter or `.agent-doc/config.toml`), every accretion
+/// path returns `None`, so a manual `Run Agent Doc` / auto-loop drain never
+/// interleaves a pre-emptive `/clear`. Deferred *operator* clears stay a
+/// separate live path.
+pub fn queue_context_reset_reason_if_opted_in(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    if !queue_context_reset_opted_in(file) {
+        return Ok(None);
+    }
+    queue_context_reset_reason(file, last_context_clear_at)
+}
+
 /// Compaction guidance line for an over-accreted exchange.
 ///
 /// Queue-aware (`#no-compact-prompt-during-queue-drain`): while an `agent:queue`
@@ -756,6 +777,43 @@ mod tests {
 
         assert!(reason.contains("session accretion is warn"), "{reason}");
         assert!(reason.contains("exchange_lines="), "{reason}");
+    }
+
+    #[test]
+    fn queue_context_reset_reason_if_opted_in_gates_codex_and_run_paths() {
+        // `#nm1x-codex-clear-parity`: the Codex Stop-hook continuation
+        // instructions and the run-path queue-continuation fresh-session decision
+        // route through this gated helper. A large/unhealthy exchange that
+        // `queue_context_reset_reason` would flag must still return `None` without
+        // the `agent_doc_queue_context_reset` opt-in, so neither path fires a
+        // pre-emptive `/clear` by default. An explicit opt-in re-enables it.
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let off = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir_off, doc_off) = setup_doc(&off);
+        // The raw reason still flags the unhealthy exchange...
+        assert!(queue_context_reset_reason(&doc_off, None).unwrap().is_some());
+        // ...but the gated helper suppresses it without the opt-in.
+        assert!(
+            queue_context_reset_reason_if_opted_in(&doc_off, None)
+                .unwrap()
+                .is_none(),
+            "context reset must default off for Codex/run paths"
+        );
+
+        let on = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir_on, doc_on) = setup_doc(&on);
+        let reason = queue_context_reset_reason_if_opted_in(&doc_on, None)
+            .unwrap()
+            .expect("explicit opt-in re-enables the accretion-driven reset");
+        assert!(reason.contains("session accretion is warn"), "{reason}");
     }
 
     #[test]

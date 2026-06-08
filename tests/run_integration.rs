@@ -296,8 +296,13 @@ fn active_large_auto_queue_doc_with_resume() -> String {
         .map(|idx| format!("prior exchange line {idx}"))
         .collect::<Vec<_>>()
         .join("\n");
+    // `#nm1x-codex-clear-parity`: the run-path accretion-driven fresh-session
+    // decision is now gated on the `agent_doc_queue_context_reset` opt-in (off by
+    // default, product-wide). This fixture exercises the fresh-session behavior,
+    // so it must explicitly opt in; without it the run path never starts a fresh
+    // agent session before the next queue head.
     format!(
-        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nresume: old-session\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nresume: old-session\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
     )
 }
 

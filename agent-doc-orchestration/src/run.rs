@@ -779,7 +779,7 @@ fn should_continue_auto_queue(
     match active_queue_prompt_state(file)? {
         ActiveQueuePromptState::Ready { prompt } => {
             let force_fresh_agent_session =
-                match crate::session_accretion::queue_context_reset_reason(
+                match crate::session_accretion::queue_context_reset_reason_if_opted_in(
                     file,
                     last_context_clear_at,
                 ) {

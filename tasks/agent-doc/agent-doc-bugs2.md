@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -187,12 +187,13 @@ sequenceDiagram
 - **BUILD:** (1) actor + causal tagging on ops + a durable **sqlite op-log** (extend `agent_doc_write: crdt`); (2) **TurnScope** manifest at turn start; (3) the **affectedness classifier** that replaces the coarse drift gate with scope intersection so Independent ops integrate + persist without affecting the turn.
 
 Plan: [`tasks/agent-doc/plan-operation-scoped-drift.md`](plan-operation-scoped-drift.md), phased `#op-scoped-drift-1/2/3` (tag+log → scope manifest → classifier), each its own spec/test/build/install/commit cycle. Queued in backlog as `#op-scoped-drift`.
-<!-- agent:boundary:962fa8eb -->
+<!-- agent:boundary:5d058847 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- Add backlog items to complete [#ipc-crdt-response-drift]
 <!-- /agent:queue -->
 ###
 <!--

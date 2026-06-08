@@ -111,6 +111,11 @@ Confidence: high.
 
 ### Re: prompt cache invalidation — gpt-5
 
+> **Queue prompt:**
+>
+> Please describe how cache invalidation works for our prompt cache system.
+
+
 The prompt cache system should treat invalidation as a stable-prefix contract, not as an explicit `clear cache` operation owned by tsift.
 
 For the current `session-cost` surface, tsift observes cache effectiveness from transcript usage. The live cache itself belongs to the model provider or runtime adapter. That means a cache miss usually means the runtime sent a different cache key, different routing affinity, or different prefix bytes than the provider saw on the previous warm call.
@@ -144,7 +149,45 @@ Verification: no code changed in this cycle, so no build/test suite was rerun.
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:b32671f1 -->
+
+### Re: prompt cache invalidation — gpt-5
+
+Prompt cache invalidation is mostly a provider/runtime behavior. In tsift, the `prompt_cache_plan` is a diagnostic report emitted by `session-cost`; it observes cache reads, cache creation, ratios, and churn, but it does not own or clear the live cache.
+
+The practical rule is: a cached prefix is reusable only while the runtime sends the same stable prefix under the same cache identity and, for replica-local caches, to compatible routing. Changing any part of that identity turns reuse into a miss.
+
+The main invalidation cases are:
+- Stable system/developer context changes: the prefix bytes differ, so the previous cached prefix no longer matches.
+- Tool definitions change: the tool-prefix segment changes. With Anthropic-style explicit `cache_control` breakpoints, edits before a breakpoint invalidate that cached block and downstream material.
+- Thread/session key changes: OpenAI-style reuse depends on a stable `prompt_cache_key`; a byte-identical prefix under a different key should be treated as a new cache lineage.
+- Volatile values enter the cached prefix: timestamps, random IDs, generated headers, transient diagnostics, and one-off compaction instructions create accidental misses even when the semantic prompt feels unchanged.
+- Compaction starts cold: compaction should reuse the live warm prefix and rewrite only the transcript tail. A standalone summarizer prompt effectively creates a new cache shape.
+- Replica affinity is lost: self-hosted or edge caches can be replica-local, so byte-identical calls can still miss if routing sends the same cache key to a different replica.
+
+The analytics are meant to reveal these invalidations over time. A declining cached-input ratio points to prefix/key/routing churn. High `total_cache_creation_tokens` with low reads means we are repeatedly writing cache entries without getting enough reuse. `net_cached_input_tokens` summarizes the rough economics by comparing reads against creation tokens. The per-turn timeline is the place to locate the boundary where reuse fell and then inspect what changed at that turn: prefix bytes, tools, compaction, key, or routing.
+
+Changed paths: none.
+
+Commands:
+- `agent-doc preflight tasks/software/tsift.md` via MCP
+- `agent-doc read tasks/software/tsift.md` via MCP
+- `agent-doc plan tasks/software/tsift.md` via MCP
+- `agent-doc session-check tasks/software/tsift.md` via MCP
+- `tsift status` in `/home/brian/work/btakita/agent-loop`
+- `tsift status` in `/home/brian/work/btakita/agent-loop/src/tsift`
+- `tsift --envelope search "prompt_cache_plan" --budget normal`
+- `rg -n "prompt_cache|cache_control|prompt cache|cache invalid" .`
+- `tsift --envelope source-read "specs/digests-sessions.md" --path "/home/brian/work/btakita/agent-loop/src/tsift" --style window --start 150 --lines 25 --budget normal`
+- `tsift --envelope source-read "packages/tsift-agent-doc/src/session_cost.rs" --path "/home/brian/work/btakita/agent-loop/src/tsift" --style window --start 528 --lines 125 --budget normal`
+- `tsift --envelope source-read "packages/tsift-agent-doc/src/session_cost.rs" --path "/home/brian/work/btakita/agent-loop/src/tsift" --style window --start 650 --lines 105 --budget normal`
+- `git status --short` in parent and `src/tsift`
+
+Verification: no code changed, so no build or test suite was rerun. The explanation was checked against the current tsift spec and `session_cost.rs` implementation.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:22c5b236 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,7 +197,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please describe how cache invalidation works for our prompt cache system.
+- ~~Please describe how cache invalidation works for our prompt cache system.~~
 - do [#1zax]
 - Can the prompt cache system be integrated into the MemGraphRag?
 <!-- /agent:queue -->

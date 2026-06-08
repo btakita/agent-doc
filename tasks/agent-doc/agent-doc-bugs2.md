@@ -54,7 +54,18 @@ Proof:
 - Verification: targeted tests passed; `make check` passed with 3998 tests passed and 233 skipped; latest CI run `27118401496` on `main` was `completed success`
 - Confidence: high
 - Escalation: none
-<!-- agent:boundary:ae119624 -->
+
+### Re: #clearfast cleanup — gpt-5
+
+Closed the remaining session-document cleanup for `#clearfast`: the queue is stopped, the queue body is empty, and the completed backlog item has been reaped from the active backlog.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --probe`, `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --baseline-file ... --origin skill --stream`
+- Verification: queue body empty; `#clearfast` reaped from active backlog
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:7ebccb79 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -90,7 +101,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [x] [#clearfast] #agent-doc-bug Fix the AST-only `/clear` queue fast path: if the active queue body reduces to only `/clear` after whitespace/comment normalization, the preset/supervisor should stop the owner turn immediately, emit no exchange response, and send `/clear` only after the turn is idle; add regression coverage for surrounding whitespace.
 <!-- /agent:backlog -->
 
 ## Review

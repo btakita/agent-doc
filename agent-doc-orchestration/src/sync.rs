@@ -924,6 +924,7 @@ fn repair_outcome_label(outcome: crate::repair::RepairOutcome) -> &'static str {
         crate::repair::RepairOutcome::ReplayedResponse => "replayed_response",
         crate::repair::RepairOutcome::AlreadyApplied => "already_applied",
         crate::repair::RepairOutcome::ManualTailRemovalRespected => "manual_tail_removal_respected",
+        crate::repair::RepairOutcome::StaleCaptureRetired => "stale_capture_retired",
         crate::repair::RepairOutcome::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
         crate::repair::RepairOutcome::StalePreflightCycleAbandoned => {
             "stale_preflight_cycle_abandoned"

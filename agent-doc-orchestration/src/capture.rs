@@ -455,6 +455,34 @@ fn replay_file_hash(content: &str) -> String {
     ))
 }
 
+/// Pure check (no side effects, no benign-drift refresh): returns true when the
+/// capture's recorded baseline (file/snapshot content hashes) no longer matches
+/// the current document — i.e. [`validate_replay`] would fail closed with
+/// "captured response baseline no longer matches current document" unless the
+/// response body is still intact in the document.
+///
+/// `#stale-capture-deadlock-autoretire`: repair uses this to recognize the
+/// wedged-orphan deadlock signature (a `WriteApplied` capture whose response
+/// vanished from the document AND whose baseline drifted) so it can retire the
+/// stale capture non-destructively instead of deadlocking the document behind a
+/// manual `reset --from-current --preserve-session`.
+pub fn replay_baseline_drifted(file: &Path, capture: &CaptureRecord) -> Result<bool> {
+    let current_file = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} for capture replay drift check",
+            file.display()
+        )
+    })?;
+    let current_file_hash = replay_file_hash(&current_file);
+    let current_snapshot = crate::snapshot::load(file)?;
+    let current_snapshot_hash = current_snapshot
+        .as_deref()
+        .map(crate::ops_log::content_hash);
+    let file_mismatch = capture.file_hash.as_deref() != Some(current_file_hash.as_str());
+    let snapshot_mismatch = capture.snapshot_hash != current_snapshot_hash;
+    Ok(file_mismatch || snapshot_mismatch)
+}
+
 pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
@@ -1017,6 +1045,26 @@ mod tests {
         let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
         assert_eq!(loaded.response_body, "changed");
         assert_eq!(loaded.checkpoint_count, 2);
+    }
+
+    #[test]
+    fn replay_baseline_drifted_tracks_file_divergence() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        let capture = capture_response(&doc, "response body").unwrap();
+
+        assert!(
+            !replay_baseline_drifted(&doc, &capture).unwrap(),
+            "matching baseline must not be reported as drifted"
+        );
+
+        std::fs::write(&doc, "body changed").unwrap();
+        assert!(
+            replay_baseline_drifted(&doc, &capture).unwrap(),
+            "diverged file content must be reported as drifted"
+        );
     }
 
     #[test]

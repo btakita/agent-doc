@@ -2068,6 +2068,9 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
                     agent_doc_orchestration::repair::RepairOutcome::ManualTailRemovalRespected => {
                         "respected a manual assistant-tail removal while closing the cycle"
                     }
+                    agent_doc_orchestration::repair::RepairOutcome::StaleCaptureRetired => {
+                        "retired a wedged write-applied capture and rebuilt sidecars from the current document"
+                    }
                     agent_doc_orchestration::repair::RepairOutcome::StalePreflightLockRepaired => {
                         "closed a stale preflight-started cycle"
                     }

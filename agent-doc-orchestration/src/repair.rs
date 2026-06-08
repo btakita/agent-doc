@@ -71,6 +71,7 @@ pub enum RepairOutcome {
     ReplayedResponse,
     AlreadyApplied,
     ManualTailRemovalRespected,
+    StaleCaptureRetired,
     StalePreflightLockRepaired,
     StalePreflightCycleAbandoned,
     CommitBoundaryRecovered,
@@ -1320,6 +1321,93 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
     Ok(())
 }
 
+/// `#stale-capture-deadlock-autoretire`: retire a wedged `WriteApplied` capture
+/// whose written response has vanished from the document and whose baseline has
+/// drifted irreconcilably, instead of fail-closing with "captured response
+/// baseline no longer matches current document".
+///
+/// **Deadlock signature.** A `finalize` advanced the cycle to `write_applied`
+/// (the response was written to disk), but a concurrent editor edit / CRDT
+/// intermix then removed or fragmented that response body *and* drifted the
+/// captured baseline, so by the time `run` reaches this point the caller has
+/// already proved `response_already_applied*` is false (the body is not
+/// contiguously present in `doc_content`) and
+/// [`crate::capture::replay_baseline_drifted`] is true (the captured
+/// file/snapshot hashes no longer match), so [`crate::capture::validate_replay`]
+/// is about to fail closed. That combination wedges every later `commit` /
+/// `write --commit` / route closeout drain behind a manual
+/// `reset --from-current --preserve-session` — the compounding deadlock
+/// operators kept hitting in dogfooding.
+///
+/// **Why retiring is safe and strictly better than deadlocking.**
+///   1. Scoped to `WriteApplied` captures — the write was already attempted, so
+///      this is not a never-written pending body. A `Captured`-only orphan stays
+///      on the conservative `validate_replay` fail-closed path.
+///   2. Replaying a drifted baseline is exactly the duplicate / reorder
+///      corruption `validate_replay` exists to prevent; re-running the turn fresh
+///      on the rebuilt baseline is the correct recovery, not a regression. Queue
+///      prompts survive in `agent:queue` for the next drain to process.
+///   3. The captured body is preserved on disk as a `Discarded` record for
+///      forensics — never deleted — mirroring `reset --preserve-session`.
+///
+/// Mirrors `reset --from-current --preserve-session`: discards the capture and
+/// rebuilds the snapshot + CRDT sidecars from the current document so the merge
+/// layer cannot re-diverge, then closes the cycle as committed. Returns `true`
+/// when it retired a capture, `false` when the signature does not match (so the
+/// caller falls through to the normal `validate_replay` guard).
+fn retire_wedged_write_applied_capture_if_drifted(
+    file: &Path,
+    doc_content: &str,
+    capture: &crate::capture::CaptureRecord,
+) -> Result<bool> {
+    if capture.state != crate::capture::CaptureState::WriteApplied {
+        return Ok(false);
+    }
+    if !crate::capture::replay_baseline_drifted(file, capture)? {
+        return Ok(false);
+    }
+
+    // Retire the stale capture body (Discarded — preserved on disk) and rebuild
+    // snapshot + CRDT from the current document, matching the non-destructive
+    // `reset --from-current --preserve-session` recovery.
+    let pending_path = snapshot::pending_path_for(file)?;
+    if pending_path.exists() {
+        std::fs::remove_file(&pending_path).with_context(|| {
+            format!(
+                "failed to remove pending response while retiring stale capture {}",
+                pending_path.display()
+            )
+        })?;
+    }
+    if let Err(e) = snapshot::delete_pre_response(file) {
+        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
+    }
+    crate::capture::mark_discarded(file)?;
+    snapshot::save(file, doc_content)?;
+    let crdt = crate::crdt::CrdtDoc::from_text(doc_content).encode_state();
+    crate::snapshot::save_document_crdt(file, &crdt, doc_content)?;
+    crate::cycle_state::mark_committed(
+        file,
+        "repair_retire_wedged_write_applied_capture",
+        Some(doc_content),
+        Some(doc_content),
+    )?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_retire_wedged_write_applied_capture file={} capture_id={} cycle_id={}",
+            file.display(),
+            capture.capture_id,
+            capture.cycle_id
+        ),
+    );
+    eprintln!(
+        "[repair] retired wedged write-applied capture for {} (response missing from document + baseline drifted); rebuilt snapshot/CRDT from current and preserved the captured body for forensics",
+        file.display()
+    );
+    Ok(true)
+}
+
 fn respect_manual_exchange_tail_removal_if_safe(
     file: &Path,
     doc_content: &str,
@@ -1484,6 +1572,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     if let Some(ref capture) = capture {
         if respect_manual_exchange_tail_removal_if_safe(&canonical, &doc_content, capture)? {
             return Ok(RepairOutcome::ManualTailRemovalRespected);
+        }
+        if retire_wedged_write_applied_capture_if_drifted(&canonical, &doc_content, capture)? {
+            return Ok(RepairOutcome::StaleCaptureRetired);
         }
         crate::capture::validate_replay(&canonical, capture)?;
     }
@@ -2629,6 +2720,116 @@ mod tests {
         assert!(
             err.to_string().contains("baseline no longer matches"),
             "unexpected error: {err}"
+        );
+    }
+
+    // `#stale-capture-deadlock-autoretire`: a wedged WRITE-APPLIED capture whose
+    // response vanished from the document and whose baseline drifted must be
+    // retired non-destructively (rebuild sidecars from current, preserve the
+    // captured body as Discarded) instead of fail-closing with "captured
+    // response baseline no longer matches current document" — which otherwise
+    // deadlocks every later commit / write --commit / route closeout drain
+    // behind a manual `reset --from-current --preserve-session`.
+    #[test]
+    fn retires_wedged_write_applied_capture_on_baseline_drift() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let v1 = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-4-8\n\n",
+            "Prior answer.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do something new\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, v1).unwrap();
+        snapshot::save(&doc, v1).unwrap();
+
+        // A response that was captured + write-applied but never landed
+        // contiguously in the document (the CRDT-intermix / concurrent-edit
+        // class). It is absent from both v1 and the drifted v2.
+        let lost_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do something new — opus-4-8\n\n",
+            "The new answer that got lost.\n",
+            "<!-- /patch:exchange -->",
+        );
+        crate::capture::capture_response(&doc, lost_response).unwrap();
+        crate::capture::mark_write_applied(&doc).unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "write_applied", Some(v1), Some(v1)).unwrap();
+
+        // Concurrent user edit drifts the live file off the captured baseline.
+        let v2 = v1.replace(
+            "- do something new\n",
+            "- do something new\n- another unrelated edit\n",
+        );
+        std::fs::write(&doc, &v2).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(
+            recovered,
+            RepairOutcome::StaleCaptureRetired,
+            "wedged write-applied capture on baseline drift must be retired, not fail-closed"
+        );
+
+        // Document is left as the user's current edit — the lost response is NOT
+        // replayed onto the drifted baseline (that would duplicate/reorder).
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, v2, "current document must be preserved verbatim");
+        assert!(
+            !result.contains("The new answer that got lost"),
+            "stale captured body must not be replayed onto the drifted document:\n{result}"
+        );
+
+        // Sidecars rebuilt from current; cycle closed; capture retired (body
+        // preserved on disk as Discarded for forensics, not deleted).
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, v2, "snapshot must follow the current document");
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert!(!state.is_open(), "cycle must be closed after retire");
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
+        assert_eq!(
+            capture.response_body, lost_response,
+            "captured body must be preserved for forensics"
+        );
+
+        // Session-check accepts the recovered state (no open cycle, no drift).
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(_) => {}
+            crate::session_check::SessionCheckStatus::Interrupted(msg) => {
+                panic!("session-check must accept the retired-capture recovery: {msg}")
+            }
+        }
+    }
+
+    // A `Captured`-only orphan (write never attempted) must STAY on the
+    // conservative fail-closed path even when the baseline drifts — the retire
+    // path is scoped to `WriteApplied` captures only.
+    #[test]
+    fn captured_only_orphan_on_drift_still_fails_closed() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let v1 = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, v1).unwrap();
+        snapshot::save(&doc, v1).unwrap();
+
+        let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost.\n<!-- /patch:exchange -->";
+        crate::capture::capture_response(&doc, lost).unwrap();
+        // NOTE: no mark_write_applied — capture stays `Captured`.
+
+        let v2 = v1.replace("Prior.", "Prior, edited.");
+        std::fs::write(&doc, &v2).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("baseline no longer matches"),
+            "captured-only orphan must keep failing closed: {err}"
         );
     }
 

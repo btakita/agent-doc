@@ -107,7 +107,7 @@ Shipped phase 3: the **affectedness classifier + 5-class router** — the capsto
 **The three phases together** give the full substrate: phase 1 actor-tags every op and persists it to the durable Lamport-ordered op log, phase 2 emits the TurnScope manifest at turn start, and phase 3 intersects ops against that scope to route the coarse all-drift-is-affecting assumption into the 5 classes — so independent and spoofed edits integrate and persist without disturbing the turn.
 
 **Follow-up queued** (`agent:backlog`): the remaining step is the *behavioral swap on the live gate* — wiring `op_affectedness` into the finalize-path drift gate (`git::has_non_exchange_component_drift` + the live-buffer divergence check). I deferred it to its own session deliberately: it changes the very gate this active queue-draining session depends on, so doing it mid-session would be reckless. The decision logic it needs is now shipped and tested.
-<!-- agent:boundary:1385c3b1 -->
+<!-- agent:boundary:7f01d262 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,7 +145,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority --> 
 - [ ] [#nm1x] Wire op_affectedness into the live finalize-path drift gate: replace git::has_non_exchange_component_drift + the live-buffer divergence check with TurnScope scope-intersection so independent/provenance-spoofed ops integrate+persist instead of blocking finalize. The classifier substrate (op-scoped-drift-1/2/3) is shipped; this is the behavioral swap on the live gate, deferred to its own session because it changes the gate the active session depends on. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
-- [ ] [#canonical-session-close-autodetect] :round_pushpin: [recommended] Extend superseded-session close to the auto-resync drift path (registered panes span multiple tmux sessions with no configured canonical). Needs a canonical-determination rule decision: newest session vs the session holding the active agent-doc window vs the current pane. Reuse resync::close_superseded_session once canonical is resolved.
 <!-- /agent:backlog -->
 
 ## Review

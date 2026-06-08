@@ -378,3 +378,8 @@
 - 2026-06-07 [#trt1watermark] Staleness gating on authored-finding freshness via community_graph_watermark: mark findings whose observed_at_unix predates the current watermark as stale in findings/injection output.
 - 2026-06-07 [#trt1capture] Opt-in/passive capture of findings from agent-doc session archives: parse .agent-doc archives, extract authored finding/decision/note items, upsert via authored_node_projection. Opt-in only.
 - 2026-06-07 [#trt1project] md/html on-demand projection of the findings graph (graph store stays source of truth); render finding/decision/note nodes + annotates edges grouped by anchor.
+- 2026-06-08 [#tsiftasteditspec] Update `src/tsift/SPEC.md` to define the hybrid AST/CST edit strategy: AST for selection/validation, minimal textual patch output for mutation, refusal modes, diff visibility, and verification requirements.
+- 2026-06-08 [#tsiftastselect] Prototype AST/CST edit-target selection that maps `search` / `symbol-read` / graph handles to concrete node spans without mutating files.
+- 2026-06-08 [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
+- 2026-06-08 [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.
+- 2026-06-08 [#tsiftasttests] Add fixtures and tests for the AST/CST edit path covering comments, formatting preservation, macros or generated sections, mixed-language blocks, syntax-error work-in-progress files, and verification failures.

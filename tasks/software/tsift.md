@@ -199,20 +199,13 @@ Escalation: none.
 
 Confidence: high.
 
-### Re: do [#tsiftastops] — gpt-5
-
-> **Queue prompt:**
->
-> do [#tsiftastops]
-
-
-I can’t run `/clear` from inside this loaded context. Please run `/clear`, then re-invoke `agent-doc tasks/software/tsift.md` in the fresh context.
-Completed `#tsiftasttests` and repaired the prior `#tsiftastops` closeout.
+### Re: tsiftasttests — gpt-5
 
 > **Queue prompt:**
 >
 > do [#tsiftasttests]
 
+Completed `#tsiftasttests` and repaired the prior `#tsiftastops` closeout.
 
 Changed paths:
 - `src/tsift/packages/tsift-cli/src/semantic_edit.rs`
@@ -249,7 +242,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

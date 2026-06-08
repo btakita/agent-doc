@@ -54,6 +54,12 @@ projections, and tmux transcript inference.
 - The in-memory actor map is a write-through cache of SQLite state. A successful
   mutation updates memory and commits one SQLite transaction before reporting an
   accepted state-changing result.
+- The first in-memory implementation may use the controller-local standard
+  `BTreeMap` snapshot. `lazily-rs` remains an implementation candidate for
+  indexed/lazy map maintenance, but it must preserve the same synchronous
+  write-through contract: accepted mutations update the live memory authority
+  only after the SQLite transaction commits, and failed commits must leave the
+  memory snapshot unchanged.
 - JSON projection failures are recorded as projection diagnostics with source
   generation, intended projection hash, error, and retry status. They must not
   roll back or weaken the authoritative actor state.

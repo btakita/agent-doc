@@ -154,6 +154,77 @@ pub struct ControlPlaneActorStatus {
     pub categories: BTreeMap<String, usize>,
 }
 
+#[derive(Debug)]
+struct ControllerMemoryState {
+    actor_store: BTreeMap<String, crate::session_actor::ActorRecord>,
+    map_backend: &'static str,
+}
+
+impl ControllerMemoryState {
+    fn load(project_root: &Path) -> Result<Self> {
+        Ok(Self {
+            actor_store: load_actor_store(project_root)?,
+            map_backend: "std_btree_map",
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ControllerRuntime {
+    bootstrap: Mutex<ControllerBootstrap>,
+    memory: Mutex<ControllerMemoryState>,
+}
+
+impl ControllerRuntime {
+    fn new(bootstrap: ControllerBootstrap) -> Result<Self> {
+        let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
+        Ok(Self {
+            bootstrap: Mutex::new(bootstrap),
+            memory: Mutex::new(memory),
+        })
+    }
+
+    fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
+        self.bootstrap
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))
+            .map(|guard| guard.clone())
+    }
+
+    fn actor_record(&self, document_id: &str) -> Result<Option<crate::session_actor::ActorRecord>> {
+        self.memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
+            .map(|memory| memory.actor_store.get(document_id).cloned())
+    }
+
+    fn refresh_memory(&self) -> Result<()> {
+        let project_root = self.bootstrap_snapshot()?.project_root;
+        let next = ControllerMemoryState::load(&project_root)?;
+        let mut memory = self
+            .memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        *memory = next;
+        Ok(())
+    }
+
+    fn memory_categories(&self) -> Result<BTreeMap<String, usize>> {
+        let memory = self
+            .memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        Ok(status_categories([
+            ("actor_records", memory.actor_store.len()),
+            (
+                "map_backend_std_btree_map",
+                usize::from(memory.map_backend == "std_btree_map"),
+            ),
+            ("write_through_sqlite", 1),
+        ]))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerHandoffState {
@@ -191,7 +262,7 @@ fn default_control_plane_status() -> ControlPlaneStatus {
         },
         session_actors: ControlPlaneActorStatus {
             role: "session_actor".to_string(),
-            authority: "per_document_generation".to_string(),
+            authority: "in_memory_actor_map".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
             categories: BTreeMap::new(),
@@ -220,11 +291,25 @@ fn status_categories<const N: usize>(pairs: [(&str, usize); N]) -> BTreeMap<Stri
         .collect()
 }
 
-fn control_plane_status(project_root: &Path, active: bool) -> Result<ControlPlaneStatus> {
+fn control_plane_status(
+    project_root: &Path,
+    active: bool,
+    memory_categories: Option<BTreeMap<String, usize>>,
+) -> Result<ControlPlaneStatus> {
     let conn = open_state_db(project_root)?;
     let counts = load_control_plane_store_counts(&conn)?;
     let actor_state = if active { "ready" } else { "offline" };
     let store_state = if active { "ready" } else { "durable_offline" };
+    let mut session_categories = memory_categories
+        .unwrap_or_else(|| status_categories([("actor_records", counts.live_actor_documents)]));
+    session_categories.insert("queue_heads".to_string(), counts.queue_heads);
+    session_categories.insert("document_cycles".to_string(), counts.document_cycles);
+    let session_owned_items = session_categories
+        .get("actor_records")
+        .copied()
+        .unwrap_or(counts.live_actor_documents)
+        + counts.queue_heads
+        + counts.document_cycles;
 
     Ok(ControlPlaneStatus {
         dispatch_actor: ControlPlaneActorStatus {
@@ -252,12 +337,8 @@ fn control_plane_status(project_root: &Path, active: bool) -> Result<ControlPlan
         },
         session_actors: ControlPlaneActorStatus {
             state: actor_state.to_string(),
-            owned_items: counts.live_actor_documents + counts.queue_heads + counts.document_cycles,
-            categories: status_categories([
-                ("live_actor_documents", counts.live_actor_documents),
-                ("queue_heads", counts.queue_heads),
-                ("document_cycles", counts.document_cycles),
-            ]),
+            owned_items: session_owned_items,
+            categories: session_categories,
             ..default_control_plane_status().session_actors
         },
         supervisor_adapters: ControlPlaneActorStatus {
@@ -282,6 +363,7 @@ fn control_plane_status(project_root: &Path, active: bool) -> Result<ControlPlan
 fn controller_status_from_bootstrap(
     bootstrap: &ControllerBootstrap,
     active: bool,
+    memory_categories: Option<BTreeMap<String, usize>>,
 ) -> Result<ControllerStatus> {
     Ok(ControllerStatus {
         active,
@@ -299,7 +381,7 @@ fn controller_status_from_bootstrap(
             &bootstrap.project_root,
             Some(bootstrap.pid),
         ),
-        control_plane: control_plane_status(&bootstrap.project_root, active)?,
+        control_plane: control_plane_status(&bootstrap.project_root, active, memory_categories)?,
     })
 }
 
@@ -326,7 +408,7 @@ fn inactive_controller_status(
             .as_ref()
             .and_then(|state| state.previous_controller_pid),
         stale_duplicate_pids: discover_stale_duplicate_pids(project_root, None),
-        control_plane: control_plane_status(project_root, false)?,
+        control_plane: control_plane_status(project_root, false, None)?,
     })
 }
 
@@ -1319,6 +1401,7 @@ pub fn mark_lifecycle(
         };
         return handle_mark_lifecycle(
             &bootstrap,
+            None,
             ControllerRequest {
                 command: "mark_lifecycle".to_string(),
                 file: Some(request.file),
@@ -1378,6 +1461,7 @@ pub fn refresh_supervisor_lease(
         };
         return handle_supervisor_heartbeat(
             &bootstrap,
+            None,
             ControllerRequest {
                 command: "supervisor_heartbeat".to_string(),
                 file: Some(request.file),
@@ -1480,6 +1564,7 @@ pub fn authorize_dispatch(
         };
         return handle_dispatch(
             &bootstrap,
+            None,
             ControllerRequest {
                 command: "dispatch".to_string(),
                 file: Some(request.file),
@@ -1597,6 +1682,7 @@ pub fn authorize_operator_command(
         };
         return handle_operator_command(
             &bootstrap,
+            None,
             ControllerRequest {
                 command: "operator_command".to_string(),
                 file: Some(file.to_path_buf()),
@@ -2003,16 +2089,16 @@ fn serve_with_options(
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
 
-    let bootstrap = Arc::new(Mutex::new(bootstrap));
+    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let should_stop = Arc::new(AtomicBool::new(false));
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
-                let bootstrap = Arc::clone(&bootstrap);
+                let runtime = Arc::clone(&runtime);
                 let should_stop = Arc::clone(&should_stop);
                 let sock = sock.clone();
                 std::thread::spawn(move || {
-                    if let Err(err) = serve_client(stream, &bootstrap, &should_stop, &sock) {
+                    if let Err(err) = serve_client(stream, &runtime, &should_stop, &sock) {
                         eprintln!("[controller] client error: {err}");
                     }
                 });
@@ -2029,7 +2115,7 @@ fn serve_with_options(
 
 fn serve_client(
     stream: interprocess::local_socket::Stream,
-    bootstrap: &Arc<Mutex<ControllerBootstrap>>,
+    runtime: &Arc<ControllerRuntime>,
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
@@ -2044,7 +2130,7 @@ fn serve_client(
             Ok(0) => return Ok(()),
             Ok(_) => {
                 let mut request_should_stop = false;
-                let response = handle_request_locked(&line, bootstrap, &mut request_should_stop)?;
+                let response = handle_request_locked(&line, runtime, &mut request_should_stop)?;
                 writer_half.write_all(response.as_bytes())?;
                 writer_half.write_all(b"\n")?;
                 writer_half.flush()?;
@@ -2052,7 +2138,7 @@ fn serve_client(
                 if request_should_stop {
                     should_stop.store(true, Ordering::SeqCst);
                     let _ = std::fs::remove_file(sock);
-                    if let Ok(bootstrap) = bootstrap.lock()
+                    if let Ok(bootstrap) = runtime.bootstrap.lock()
                         && bootstrap.socket_path != sock
                     {
                         let _ = std::fs::remove_file(&bootstrap.socket_path);
@@ -2082,26 +2168,29 @@ fn handle_request(
     bootstrap: &ControllerBootstrap,
     should_stop: &mut bool,
 ) -> Result<String> {
-    handle_request_locked(line, &Arc::new(Mutex::new(bootstrap.clone())), should_stop)
+    handle_request_locked(
+        line,
+        &Arc::new(ControllerRuntime::new(bootstrap.clone())?),
+        should_stop,
+    )
 }
 
 fn handle_request_locked(
     line: &str,
-    bootstrap: &Arc<Mutex<ControllerBootstrap>>,
+    runtime: &Arc<ControllerRuntime>,
     should_stop: &mut bool,
 ) -> Result<String> {
     let request: ControllerRequest = serde_json::from_str(line.trim())?;
-    let bootstrap_snapshot = bootstrap
-        .lock()
-        .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?
-        .clone();
+    let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
     match request.command.as_str() {
         "status" => Ok(serde_json::to_string(&controller_status_from_bootstrap(
             &bootstrap_snapshot,
             true,
+            Some(runtime.memory_categories()?),
         )?)?),
         "prepare_handoff" => {
-            let mut state = bootstrap
+            let mut state = runtime
+                .bootstrap
                 .lock()
                 .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
             state.handoff_state = ControllerHandoffState::Preparing;
@@ -2110,7 +2199,8 @@ fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "promote_handoff" => {
-            let mut state = bootstrap
+            let mut state = runtime
+                .bootstrap
                 .lock()
                 .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
             state.socket_path = socket_path(&state.project_root);
@@ -2121,7 +2211,8 @@ fn handle_request_locked(
         }
         "retire_after_handoff" => {
             {
-                let mut state = bootstrap
+                let mut state = runtime
+                    .bootstrap
                     .lock()
                     .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
                 state.handoff_state = ControllerHandoffState::Retiring;
@@ -2134,25 +2225,49 @@ fn handle_request_locked(
             *should_stop = true;
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
-        "start_session" => controller_envelope(handle_start_session(&bootstrap_snapshot, request)),
-        "register_supervisor" => {
-            controller_envelope(handle_register_supervisor(&bootstrap_snapshot, request))
-        }
-        "mark_lifecycle" => {
-            controller_envelope(handle_mark_lifecycle(&bootstrap_snapshot, request))
-        }
-        "supervisor_heartbeat" => {
-            controller_envelope(handle_supervisor_heartbeat(&bootstrap_snapshot, request))
-        }
-        "actor_binding" => controller_envelope(handle_actor_binding(&bootstrap_snapshot, request)),
-        "dispatch" => controller_envelope(handle_dispatch(&bootstrap_snapshot, request)),
+        "start_session" => controller_envelope(handle_start_session(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "register_supervisor" => controller_envelope(handle_register_supervisor(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "mark_lifecycle" => controller_envelope(handle_mark_lifecycle(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "supervisor_heartbeat" => controller_envelope(handle_supervisor_heartbeat(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "actor_binding" => controller_envelope(handle_actor_binding(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "dispatch" => controller_envelope(handle_dispatch(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
         "session_status" => {
             controller_envelope(handle_session_status(&bootstrap_snapshot, request))
         }
-        "attach_pane" => controller_envelope(handle_attach_pane(&bootstrap_snapshot, request)),
-        "operator_command" => {
-            controller_envelope(handle_operator_command(&bootstrap_snapshot, request))
-        }
+        "attach_pane" => controller_envelope(handle_attach_pane(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
+        "operator_command" => controller_envelope(handle_operator_command(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
         other => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": format!("unknown controller command: {other}")
@@ -2171,6 +2286,25 @@ fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<String> {
             "error": err.to_string()
         }))?),
     }
+}
+
+fn actor_record_from_authority(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    document_id: &str,
+) -> Result<Option<crate::session_actor::ActorRecord>> {
+    if let Some(runtime) = runtime {
+        runtime.actor_record(document_id)
+    } else {
+        load_actor_record(&bootstrap.project_root, document_id)
+    }
+}
+
+fn refresh_runtime_after_actor_write(runtime: Option<&ControllerRuntime>) -> Result<()> {
+    if let Some(runtime) = runtime {
+        runtime.refresh_memory()?;
+    }
+    Ok(())
 }
 
 fn request_file(request: &ControllerRequest) -> Result<PathBuf> {
@@ -2192,6 +2326,7 @@ fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
 
 fn handle_start_session(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<crate::session_actor::ActorRecord> {
     let file = request_file(&request)?;
@@ -2199,12 +2334,32 @@ fn handle_start_session(
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let window_id = request_string(&request.window_id, "window_id")?;
     let generation = request_u64(request.generation, "generation")?;
-    let record = crate::session_actor::record_session_start_direct(
-        &file,
-        &session_id,
-        &pane_id,
-        &window_id,
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let harness =
+        crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id);
+    let record = crate::session_actor::ActorRecord {
+        document_id: document_id.clone(),
+        session_id: session_id.clone(),
         generation,
+        pane_id: pane_id.clone(),
+        window_id: window_id.clone(),
+        harness,
+        state: crate::session_actor::ActorState::Starting,
+        last_transition: crate::session_actor::ActorLastTransition {
+            caller: "start".to_string(),
+            reason: "session_start".to_string(),
+            timestamp: timestamp_secs(),
+            prior_generation: generation.saturating_sub(1),
+            new_generation: generation,
+        },
+    };
+    let record = store_actor_record(
+        &bootstrap.project_root,
+        Some(generation.saturating_sub(1)),
+        &record,
     )
     .with_context(|| {
         format!(
@@ -2212,6 +2367,7 @@ fn handle_start_session(
             file.display()
         )
     })?;
+    refresh_runtime_after_actor_write(runtime)?;
     let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
     crate::ops_log::log_op(
         &file,
@@ -2228,6 +2384,7 @@ fn handle_start_session(
 
 fn handle_register_supervisor(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<crate::session_actor::ActorRecord> {
     let file = request_file(&request)?;
@@ -2242,7 +2399,7 @@ fn handle_register_supervisor(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
     if record.session_id != session_id
         || record.pane_id != pane_id
@@ -2278,6 +2435,7 @@ fn handle_register_supervisor(
 
 fn handle_mark_lifecycle(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<crate::session_actor::ActorRecord> {
     let file = request_file(&request)?;
@@ -2293,16 +2451,47 @@ fn handle_mark_lifecycle(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = crate::session_actor::transition_state_in(
-        &bootstrap.project_root,
-        &document_id,
-        &session_id,
-        &pane_id,
-        Some(generation),
-        state,
-        &caller,
-        &reason,
-    )?;
+    let current = actor_record_from_authority(bootstrap, runtime, &document_id)?
+        .with_context(|| format!("missing authoritative actor record for {document_id}"))?;
+    if current.session_id != session_id {
+        anyhow::bail!(
+            "stale actor transition for {}: session {} no longer owns generation {} (current session {})",
+            document_id,
+            session_id,
+            current.generation,
+            current.session_id
+        );
+    }
+    if current.generation != generation && current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor transition for {}: generation {} pane {} no longer current (current generation {} pane {})",
+            document_id,
+            generation,
+            pane_id,
+            current.generation,
+            current.pane_id
+        );
+    }
+    if current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor transition for {}: pane {} no longer owns generation {} (current pane {})",
+            document_id,
+            pane_id,
+            current.generation,
+            current.pane_id
+        );
+    }
+    let mut record = current.clone();
+    record.state = state;
+    record.last_transition = crate::session_actor::ActorLastTransition {
+        caller: caller.clone(),
+        reason: reason.clone(),
+        timestamp: timestamp_secs(),
+        prior_generation: current.generation,
+        new_generation: current.generation,
+    };
+    let record = store_actor_record(&bootstrap.project_root, Some(current.generation), &record)?;
+    refresh_runtime_after_actor_write(runtime)?;
     upsert_supervisor_lease(
         &bootstrap.project_root,
         &record,
@@ -2327,6 +2516,7 @@ fn handle_mark_lifecycle(
 
 fn handle_supervisor_heartbeat(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<SupervisorLeaseStatus> {
     let file = request_file(&request)?;
@@ -2341,7 +2531,7 @@ fn handle_supervisor_heartbeat(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
     if record.session_id != session_id
         || record.pane_id != pane_id
@@ -2382,6 +2572,7 @@ fn handle_supervisor_heartbeat(
 
 fn handle_actor_binding(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<ActorBindingResponse> {
     let file = request_file(&request)?;
@@ -2389,7 +2580,7 @@ fn handle_actor_binding(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = load_actor_record(&bootstrap.project_root, &document_id)?;
+    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
     Ok(match record {
         Some(record) => ActorBindingResponse {
             status: ActorBindingStatus::Bound,
@@ -2404,6 +2595,7 @@ fn handle_actor_binding(
 
 fn handle_dispatch(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<DispatchAuthorization> {
     let file = request_file(&request)?;
@@ -2420,7 +2612,7 @@ fn handle_dispatch(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
     let mut failed_stage = None;
     let mut failure = None;
@@ -2527,27 +2719,53 @@ fn handle_session_status(
 
 fn handle_attach_pane(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<crate::session_actor::ActorRecord> {
     let file = request_file(&request)?;
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let window_id = request_string(&request.window_id, "window_id")?;
-    crate::session_actor::project_binding_in(
-        &bootstrap.project_root,
-        &file.to_string_lossy(),
-        &session_id,
-        &pane_id,
-        &window_id,
-        request.caller.as_deref().unwrap_or("session"),
-        request.reason.as_deref().unwrap_or("manual_attach"),
-    )?;
     let document_id = crate::session_actor::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = load_actor_record(&bootstrap.project_root, &document_id)?
-        .with_context(|| format!("missing actor record after attach for {}", file.display()))?;
+    let prior = actor_record_from_authority(bootstrap, runtime, &document_id)?;
+    let prior_generation = prior.as_ref().map(|record| record.generation).unwrap_or(0);
+    let generation = prior
+        .as_ref()
+        .filter(|record| record.pane_id == pane_id)
+        .map(|record| record.generation)
+        .unwrap_or_else(|| prior_generation.saturating_add(1).max(1));
+    let harness = prior
+        .as_ref()
+        .map(|record| record.harness.clone())
+        .filter(|harness| !harness.trim().is_empty())
+        .unwrap_or_else(|| {
+            crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id)
+        });
+    let record = crate::session_actor::ActorRecord {
+        document_id: document_id.clone(),
+        session_id: session_id.clone(),
+        generation,
+        pane_id: pane_id.clone(),
+        window_id: window_id.clone(),
+        harness,
+        state: crate::session_actor::ActorState::Ready,
+        last_transition: crate::session_actor::ActorLastTransition {
+            caller: request.caller.as_deref().unwrap_or("session").to_string(),
+            reason: request
+                .reason
+                .as_deref()
+                .unwrap_or("manual_attach")
+                .to_string(),
+            timestamp: timestamp_secs(),
+            prior_generation,
+            new_generation: generation,
+        },
+    };
+    let record = store_actor_record(&bootstrap.project_root, Some(prior_generation), &record)?;
+    refresh_runtime_after_actor_write(runtime)?;
     crate::ops_log::log_op(
         &file,
         &format!(
@@ -2563,6 +2781,7 @@ fn handle_attach_pane(
 
 fn handle_operator_command(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<DispatchAuthorization> {
     let file = request_file(&request)?;
@@ -2576,7 +2795,7 @@ fn handle_operator_command(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let Some(record) = load_actor_record(&bootstrap.project_root, &document_id)? else {
+    let Some(record) = actor_record_from_authority(bootstrap, runtime, &document_id)? else {
         let _ = insert_dispatch_attempt_record(
             &bootstrap.project_root,
             &document_id,
@@ -3397,7 +3616,7 @@ mod tests {
             command_kind: None,
             diagnostic_payload: None,
         };
-        let lease = handle_supervisor_heartbeat(&bootstrap, heartbeat).unwrap();
+        let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
         assert_eq!(lease.runtime_state.as_deref(), Some("ready"));
         assert_eq!(lease.supervisor_pid, Some(1001));
         assert_eq!(lease.supervisor_socket.as_deref(), Some("/tmp/new.sock"));
@@ -4174,6 +4393,101 @@ mod tests {
         assert_eq!(status.control_plane.supervisor_adapters.owned_items, 1);
         assert!(status.control_plane.projection_workers.owned_items >= 1);
         assert!(status.control_plane.store_actor.owned_items >= 10);
+    }
+
+    #[test]
+    fn controller_runtime_refreshes_memory_after_write_through_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/memory-auth.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-memory-auth\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let mut should_stop = false;
+        let doc_id = doc.to_string_lossy().to_string();
+
+        assert!(runtime.actor_record(&doc_id).unwrap().is_none());
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-memory-auth".to_string()),
+            pane_id: Some("%88".to_string()),
+            window_id: Some("@8".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let memory_record = runtime.actor_record(&doc_id).unwrap().unwrap();
+        assert_eq!(memory_record.session_id, "session-memory-auth");
+        assert_eq!(memory_record.pane_id, "%88");
+
+        let status = ControllerRequest {
+            command: "status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("actor_records"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("write_through_sqlite"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("map_backend_std_btree_map"),
+            Some(&1)
+        );
     }
 
     #[test]

@@ -550,6 +550,10 @@ transitions, dispatch receipts, queue heads, document cycles, projection
 diagnostics, admin operations, crash-recovery markers, and layout state. Active
 controllers report the live runtime shape; inactive status reports the durable
 offline shape from SQLite without launching a process.
+For active controllers, the session-actor role snapshot reports the live memory
+authority (`actor_records`) plus the current map backend and write-through
+marker; this distinguishes the in-process actor map from the durable SQLite
+store while keeping the store counts visible.
 
 The controller owns project-level bootstrap identity and the live actor
 authority used by route/start/sync:

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -113,12 +113,14 @@ Commits pushed:
 - parent `btakita/agent-loop` `aac77a39c` (`agent-doc: update route queue handling`)
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:48103e35 -->
+/clear
+<!-- agent:boundary:5fa43957 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+/clear
 <!-- /agent:queue -->
 ###
 <!--

@@ -6,6 +6,18 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Overlay-as-merge-base is order-stable for the append case
+  (`#ipc-drift-order-stable-merge`).** Verified the suspect overlay merge-base
+  path (`5fd64b26`) cannot reverse a new `### Re:` response's lines or hoist it
+  above the prior committed response when a foreign supervisor appends to the
+  document tail mid-generation. The overlay source is used as the merge base
+  only when its markdown projection is byte-identical to the cycle baseline
+  (otherwise the merge falls back to the baseline text), so the derived base can
+  never reorder committed exchange content. Added an end-to-end test
+  (`overlay_merge_base_is_order_stable_for_exchange_append`) driving the real
+  `crdt_merge_base_state` overlay path for an exchange-with-response document,
+  fixed a stale client-id comment in `crdt::merge`, and documented the invariant
+  in the document-format spec.
 - **Concurrent-supervisor superproject write-back is serialized
   (`#ipc-drift-writeback-serialize`).** The git-dir-scoped commit lock already
   serializes the staging/commit critical section per resolved git dir; this is

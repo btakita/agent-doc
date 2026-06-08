@@ -1240,6 +1240,91 @@ mod tests {
         );
     }
 
+    /// #ipc-drift-order-stable-merge: the overlay-as-merge-base path (suspect
+    /// 5fd64b26) must stay order-stable for the append case. With a prior
+    /// committed `### Re:` response in the baseline, a foreign tail append
+    /// landing during generation must not reverse the new response's lines or
+    /// hoist it above the prior committed response. This drives the real
+    /// `crdt_merge_base_state` overlay path end-to-end (not a hand-built
+    /// `from_text` base), so a non-byte-stable overlay projection of an
+    /// exchange-with-response document is caught here.
+    #[test]
+    fn overlay_merge_base_is_order_stable_for_exchange_append() {
+        let (_dir, doc) = setup();
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let exchange_committed = "\
+❯ first question
+
+### Re: first question — opus-4-8
+
+First answer here. Already committed to HEAD.
+
+❯ second question
+";
+        let queue_open = "<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n";
+        let queue_close = "<!-- /agent:queue -->\n";
+
+        // Baseline: prior response committed, new prompt typed, boundary at tail.
+        let base_markdown = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}{queue_close}"
+        );
+
+        // Persist the overlay sidecar from the baseline (what a prior cycle saves).
+        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        save_document_crdt(&doc, &stale_legacy, &base_markdown).unwrap();
+
+        // The overlay merge base must project to exactly the baseline text — the
+        // order-stability guarantee — whether it uses the overlay or falls back.
+        let base = crdt_merge_base_state(&doc, &base_markdown).unwrap();
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&base.state).unwrap().to_text(),
+            base_markdown,
+            "overlay merge base is not byte-stable against the baseline (source={})",
+            base.source.as_str()
+        );
+
+        // Ours: agent replaces the boundary with a new multi-line response.
+        let agent_response = "\
+### Re: second question — opus-4-8
+
+Second answer line one.
+Second answer line two.
+Second answer line three.
+
+";
+        let ours = format!(
+            "{header}{exchange_committed}{agent_response}<!-- agent:boundary:new-id -->\n{queue_open}{queue_close}"
+        );
+        // Theirs: a foreign supervisor appended a queue item at the tail mid-cycle.
+        let theirs = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}- do [#foreign-task]\n{queue_close}"
+        );
+
+        let merged = crate::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
+
+        assert!(
+            merged.contains("### Re: second question — opus-4-8"),
+            "new response heading dropped under overlay base:\n{merged}"
+        );
+        let l1 = merged.find("Second answer line one.").expect("line one missing");
+        let l2 = merged.find("Second answer line two.").expect("line two missing");
+        let l3 = merged.find("Second answer line three.").expect("line three missing");
+        assert!(
+            l1 < l2 && l2 < l3,
+            "response lines reversed under overlay base (l1={l1} l2={l2} l3={l3}):\n{merged}"
+        );
+        let prior = merged.find("### Re: first question").expect("prior response missing");
+        let current = merged.find("### Re: second question").unwrap();
+        assert!(
+            prior < current,
+            "new response hoisted above prior HEAD response under overlay base (prior={prior} current={current}):\n{merged}"
+        );
+        assert!(
+            merged.contains("do [#foreign-task]"),
+            "foreign queue append lost under overlay base:\n{merged}"
+        );
+    }
+
     #[test]
     fn crdt_load_returns_none_when_missing() {
         let (_dir, doc) = setup();

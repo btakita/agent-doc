@@ -298,9 +298,11 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
             .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
     }
 
-    // Read merged result. With agent=client_id(2) and human=client_id(1),
-    // Yrs natively places agent content before human content at the same
-    // insertion point. No post-merge reorder needed.
+    // Read merged result. With agent/ours=client_id(1) and theirs=client_id(2)
+    // (see the client-id assignment above), Yrs natively orders concurrent
+    // inserts at the same position by ascending client id, so agent content
+    // lands before foreign content at the append boundary. No post-merge
+    // reorder needed.
     let merged = {
         let text = ours_doc.get_or_insert_text(TEXT_KEY);
         let txn = ours_doc.transact();

@@ -2775,32 +2775,33 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // keeps `diff_result` non-None here, so this flag stays false and the
     // prompt is surfaced normally.
     let mut diff_from_queue_head_only = false;
-    let mut queue_head_slash_command_only: Option<String> = None;
     if diff_result.is_none()
         && let Some(head_prompt) = queue_state.queue_prompts.first()
     {
-        queue_head_slash_command_only = crate::queue_command::slash_command_text(head_prompt);
-        let prompt_source = queue_head_slash_command_only
-            .as_deref()
-            .unwrap_or(head_prompt);
+        let slash_command = crate::queue_command::slash_command_text(head_prompt);
+        let prompt_source = slash_command.as_deref().unwrap_or(head_prompt);
         diff_result = Some(diff::synthetic_added_lines_diff(prompt_source, "queue"));
         classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
         diff_from_queue_head_only = true;
     }
 
+    let slash_command_only_diff_commands = diff_result
+        .as_deref()
+        .and_then(diff::parse_slash_command_only_added_diff);
     let no_changes = diff_result.is_none();
     if !no_changes {
-        if let Some(command) = queue_head_slash_command_only.as_deref() {
+        if let Some(commands) = slash_command_only_diff_commands.as_ref() {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "preflight_queue_slash_command_handoff file={} cmd={:?}",
+                    "preflight_slash_command_only_handoff file={} commands={:?}",
                     file.display(),
-                    command
+                    commands
                 ),
             );
             eprintln!(
-                "[preflight] queue: active slash command head {command:?} is command-only; skipping preflight_started so the supervisor can submit it after the turn is idle"
+                "[preflight] slash command diff {:?} is command-only; skipping preflight_started so the harness/supervisor can submit it without an agent-doc response cycle",
+                commands
             );
         } else if options.probe {
             // `#preflight-probe-side-effect-free`: a pure inspection probe must
@@ -2848,7 +2849,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             diff::suppress_inactive_queue_additions(d, &diff_result_with_current.current)
         }
     });
-    let prompt_diff_result = if queue_head_slash_command_only.is_some() {
+    let prompt_diff_result = if slash_command_only_diff_commands.is_some() {
         None
     } else {
         command_diff_result.clone()

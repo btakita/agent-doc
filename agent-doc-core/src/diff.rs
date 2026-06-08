@@ -360,23 +360,24 @@ fn is_exchange_close_marker_line(content: &str) -> bool {
     content.trim() == "<!-- /agent:exchange -->"
 }
 
-fn line_looks_like_slash_command(line: &str) -> bool {
+fn parse_slash_command_candidate(line: &str) -> Option<String> {
     let trimmed = line.trim();
-    let Some(rest) = trimmed.strip_prefix('/') else {
-        return false;
-    };
+    let rest = trimmed.strip_prefix('/')?;
     let token_end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     let token = &rest[..token_end];
     if token.is_empty() {
-        return false;
+        return None;
     }
     let mut chars = token.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_lowercase()
+    let first = chars.next()?;
+    let command_like = first.is_ascii_lowercase()
         && chars
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, ':' | '_' | '-'))
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, ':' | '_' | '-'));
+    command_like.then(|| trimmed.to_string())
+}
+
+fn line_looks_like_slash_command(line: &str) -> bool {
+    parse_slash_command_candidate(line).is_some()
 }
 
 fn line_looks_like_prompt_target(line: &str) -> bool {
@@ -1599,6 +1600,68 @@ pub fn parse_slash_commands_classified(diff: &str) -> ParsedSlashCommands {
     }
 }
 
+/// Return the slash commands when every substantive added diff line is a slash
+/// command outside fences and blockquotes. Returns `None` for mixed prompt text,
+/// fenced examples, blockquotes, or diffs with no slash commands.
+pub fn parse_slash_command_only_added_diff(diff: &str) -> Option<Vec<String>> {
+    let mut commands = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+        let trimmed = content.trim_start();
+        let was_in_fence = in_fence;
+        let mut fence_delimiter = false;
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    fence_delimiter = true;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                    fence_delimiter = true;
+                }
+            }
+        }
+
+        if !line.starts_with('+') || line.starts_with("+++") {
+            continue;
+        }
+
+        if content.trim().is_empty() {
+            continue;
+        }
+        if was_in_fence || fence_delimiter || trimmed.starts_with('>') {
+            return None;
+        }
+        let command = parse_slash_command_candidate(content)?;
+        commands.push(command);
+    }
+
+    (!commands.is_empty()).then_some(commands)
+}
+
 /// Extract slash commands from user-added lines in a unified diff.
 ///
 /// Guards against false positives:
@@ -1662,8 +1725,6 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
             continue;
         }
 
-        let command_candidate = content.trim();
-
         // Skip blockquotes.
         if content.trim_start().starts_with('>') {
             continue;
@@ -1673,29 +1734,9 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
         // Grammar: `/[a-z][a-z0-9:_-]*` with no additional `/` in the token.
         // This rejects absolute paths like `/home/brian/...` and `/tmp/foo`
         // that look like slash commands but are really filesystem paths.
-        if !command_candidate.starts_with('/') {
-            continue;
+        if let Some(command) = parse_slash_command_candidate(content) {
+            commands.push(command);
         }
-        let token_end = command_candidate[1..]
-            .find(|c: char| c.is_whitespace())
-            .map(|i| i + 1)
-            .unwrap_or(command_candidate.len());
-        let token = &command_candidate[1..token_end];
-        if token.is_empty() {
-            continue;
-        }
-        let first = token.chars().next().unwrap();
-        if !first.is_ascii_lowercase() {
-            continue;
-        }
-        let rest_ok = token
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, ':' | '_' | '-'));
-        if !rest_ok {
-            continue;
-        }
-
-        commands.push(command_candidate.to_string());
     }
 
     commands
@@ -3335,6 +3376,30 @@ Done.\n\
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n context\n+/clear\n";
         let cmds = parse_slash_commands(diff);
         assert_eq!(cmds, vec!["/clear"]);
+    }
+
+    #[test]
+    fn parse_slash_command_only_added_diff_accepts_bare_clear() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n context\n+/clear\n";
+        assert_eq!(
+            parse_slash_command_only_added_diff(diff),
+            Some(vec!["/clear".to_string()])
+        );
+    }
+
+    #[test]
+    fn parse_slash_command_only_added_diff_rejects_mixed_prompt_text() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n context\n+/clear\n+Why was this answered?\n";
+        assert_eq!(parse_slash_command_only_added_diff(diff), None);
+    }
+
+    #[test]
+    fn parse_slash_command_only_added_diff_rejects_fenced_or_blockquoted_commands() {
+        let fenced = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n+```\n+/clear\n+```\n";
+        assert_eq!(parse_slash_command_only_added_diff(fenced), None);
+
+        let quoted = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+> /clear\n";
+        assert_eq!(parse_slash_command_only_added_diff(quoted), None);
     }
 
     #[test]

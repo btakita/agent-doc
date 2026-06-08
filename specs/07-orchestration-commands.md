@@ -94,6 +94,11 @@ Before a **queue-sourced** auto-run (`--from-queue`, sequential or dag) executes
   resumes draining the remaining queue.
 - Codex Stop-hook and `session-check --codex-final-gate` diagnostics must report slash
   command heads as commands to submit, not as prompts to answer.
+- A diff whose substantive added lines are only slash commands (for example a
+  user appending `/clear` at the `agent:exchange` tail) is a command handoff, not
+  prompt work: preflight must surface it in `slash_commands` / `builtin_commands`
+  and must not open `preflight_started`, emit `prompt_bearing_changes`, or require
+  a finalize/write closeout for that diff.
 - Dispatch priority is:
   1. Inline execution for binary-owned commands such as `/model` or `/compact`
   2. Supervisor IPC

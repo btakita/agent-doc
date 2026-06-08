@@ -6,7 +6,7 @@ use predicates::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 fn agent_doc_cmd() -> Command {
@@ -51,6 +51,21 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     let hash = hex::encode(hasher.finalize());
     let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
     fs::write(snapshot, content).unwrap();
+}
+
+fn cycle_state_path(root: &Path, doc: &Path) -> PathBuf {
+    let canonical = doc.canonicalize().unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hex::encode(hasher.finalize());
+    root.join(".agent-doc/state/cycles")
+        .join(format!("{hash}.json"))
+}
+
+fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
+    let content = fs::read_to_string(cycle_state_path(root, doc)).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json["phase"].as_str().map(str::to_string)
 }
 
 fn extract_preflight_baseline(output: &str) -> String {
@@ -1231,6 +1246,74 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
             .unwrap_or_default()
             .is_empty(),
         "queue head should remain in prompt_bearing_changes: {parsed}"
+    );
+}
+
+#[test]
+fn test_preflight_exchange_slash_command_is_command_only() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let baseline = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior — gpt-5\n\nDone.\n\
+        <!-- /agent:exchange -->\n";
+    fs::write(&doc, baseline).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, baseline);
+
+    let current = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "/clear\n<!-- /agent:exchange -->",
+    );
+    fs::write(&doc, current).unwrap();
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("preflight stdout must be JSON");
+
+    assert_eq!(parsed["no_changes"], false);
+    assert_eq!(parsed["builtin_commands"][0], "/clear");
+    assert!(
+        parsed
+            .get("prompt_bearing_changes")
+            .and_then(|value| value.as_array())
+            .is_none_or(|changes| changes.is_empty()),
+        "slash-only exchange diff must not be answered as a prompt target: {parsed}"
+    );
+    assert!(
+        parsed
+            .get("user_intent_prompt_changes")
+            .and_then(|value| value.as_array())
+            .is_none_or(|changes| changes.is_empty()),
+        "slash-only exchange diff must not count as user intent prompt work: {parsed}"
+    );
+    let phase = read_cycle_phase(root, &doc);
+    assert!(
+        !matches!(
+            phase.as_deref(),
+            Some("preflight_started" | "response_captured" | "write_applied")
+        ),
+        "slash-only exchange command must not open a response cycle, got {phase:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("command-only"),
+        "preflight should explain the command-only handoff:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("preflight_diff_start"),
+        "command-only handoff must not start a normal response cycle:\n{stderr}"
     );
 }
 

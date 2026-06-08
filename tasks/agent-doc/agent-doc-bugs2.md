@@ -74,14 +74,31 @@ Done — added a **"Document write and watch authority"** section to `specs/08b-
 Spec-only, no behavior change. `make check` green (clippy + test + sim-medium + version-sync, exit 0). Committed + pushed: submodule `334fc639`, superproject pointer `f15e9081a`.
 
 Next in the pinned queue is `#pcp2` — the first code phase: write-provenance/generation id on disk writes, shadow-mode additive so it can't wedge the live finalize path.
-<!-- agent:boundary:c58b1bc3 -->
+
+### Re: #pcp2 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#pcp2]
+
+
+Done — implemented write-provenance positive drift attribution on disk writes (absorbs `#ipc-drift-writeprovenance`).
+
+What changed: `atomic_write` now stamps every editor-visible document write (skipping `.agent-doc/` sidecars) with a `WriteProvenance` record — path, len, hash, a fresh `write_id`, actor, and agent-doc's own write timestamp — under `.agent-doc/write-provenance/`, keyed by the same canonicalized path the visible-write reconcile guard uses. `live_buffer_diverges_from_content` then positively attributes a stale editor digest to agent-doc's own write when that recorded write time is newer than the editor's last report. Because both timestamps come from the same `SystemTime` clock domain, this is a definitive signal — strictly more reliable than the `LIVE_BUFFER_STALE_SKEW_MS` filesystem-mtime guess, which stays as a shadow-mode fallback. A genuine unsaved edit (editor reports *after* agent-doc's write) is still protected.
+
+This is shadow-mode-additive: it can only suppress *more* false-positive divergences, never block a write that previously succeeded — so it can't wedge the live finalize path. The first finalize on the new binary has no prior provenance yet (falls through to the mtime fallback, same as before); future writes accumulate provenance and benefit. That directly targets the `live_prompt_drift_after_preflight` false-positive this very session has been hitting.
+
+Tests: provenance roundtrip, positive suppression beyond the mtime heuristic, genuine-unsaved-edit protection, and the document-vs-sidecar recording gate. `make check` green (clippy + test + sim-medium + version-sync). Built + installed both binaries. Committed + pushed: submodule `9777622d`, pointer `e3b94e2f1`. CI is in progress for that commit (continuing on the green local suite per the test-bearing-turn rule).
+
+Next pinned item is `#pcp3` — the in-process ordered write queue in the session actor (kills the supervisor self-race / exit 75).
+<!-- agent:boundary:25eead02 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#pcp1]~~
-- :pushpin: [#pcp2]
+- ~~:pushpin: [#pcp2]~~
 - :pushpin: [#pcp3]
 - :pushpin: [#pcp4]
 - :pushpin: [#pcp5]
@@ -154,7 +171,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcp2] PCP phase 2 — Write-provenance/generation id on disk writes (absorbs #ipc-drift-writeprovenance). Shadow-mode additive: keep the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic as fallback. Pure Rust on op_log.rs/turn_scope.rs. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp3] PCP phase 3 — In-process ordered write queue in the session actor; serialize supervisor idle/file-watch writes and agent finalize writes (kills the R6 self-race / exit 75). SimWorld coverage. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp4] PCP phase 4 — Single controller-owned filesystem watcher replacing per-process notify watchers (kills R1 two-watchers). Binary-side first. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp5] PCP phase 5 — Early-ack IPC + degraded-prefers-file-IPC (absorbs #ipc-early-ack, #ipc-degraded-prefers-file-ipc). FFI-first: accepted/pending ack on receipt, then terminal ack; degraded routes through file-IPC, never raw disk. Plan: tasks/agent-doc/plan-pcp-consolidate.md

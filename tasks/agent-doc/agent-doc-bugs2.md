@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,19 +35,34 @@ complete
 Compacted content:
 - Archived 1 response topic(s): sidecar rearchitecture backlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e0974ae9 -->
+
+### Re: ctrlplane-adminbp — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-adminbp]
+
+
+Created `tasks/agent-doc/plan-controller-admin-backpressure.md` for the controller-backed admin/backpressure slice.
+
+The plan ties this work to the existing `#ipc-admin-api`, Project Controller MVP, and `specs/08b-single-process-control-plane.md` contracts. It scopes the next implementation around controller-owned `AdminControl` and `QueueControl` operations: actor inspection, queue pause/resume/drain, typed queue backpressure, stale actor reap, generation-checked manual handoff, projection repair from SQLite state, and thin CLI/FFI/editor wrappers.
+
+I closed `#ctrlplane-adminbp` as the planning item and added three follow-up implementation phases to the backlog, all pointing at the plan file: controller data/receipts, CLI/admin operations, and queue/projection/FFI integration. `#ctrlplane-simworld` should stay after those primitives, since it depends on them for deterministic race coverage.
+
+Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpressure.md` passed. I did not run the Rust suite because this cycle only added a plan document and backlog mutations.
+<!-- agent:boundary:ed7ab030 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#ctrlplane-adminbp]
-- :round_pushpin: do [#ctrlplane-simworld]
-- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
-- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--
+- :round_pushpin: do [#ctrlplane-simworld]
+- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
+- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
+---
 A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.
 ---
 agent-doc reentrant run on equityfundingsource.md had recovery churn.
@@ -69,8 +84,10 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.
+<!-- agent:backlog priority --> 
+- [ ] [#ctrlplane-adminbp-data] Implement Phase 1 controller data and receipt model from tasks/agent-doc/plan-controller-admin-backpressure.md: state-store schema, QueueControl/AdminControl/ProjectionRepair request types, stale-generation rejection, and typed backpressure serialization.
+- [ ] [#ctrlplane-adminbp-cli] Implement Phase 2 CLI/admin operations from tasks/agent-doc/plan-controller-admin-backpressure.md: admin inspect, queue pause/resume/drain, reap, handoff, repair-projection, preserving list/detect/dashboard.
+- [ ] [#ctrlplane-adminbp-queue] Implement Phases 3-4 queue integration, projection repair, FFI/editor receipt envelope, and dashboard/status pressure fields from tasks/agent-doc/plan-controller-admin-backpressure.md.
 - [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.
 <!-- /agent:backlog -->
 

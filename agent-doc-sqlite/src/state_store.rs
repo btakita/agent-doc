@@ -135,6 +135,36 @@ pub struct SessionOperatorStatus {
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlPlaneStoreCounts {
+    pub actor_documents: usize,
+    pub live_actor_documents: usize,
+    pub actor_transitions: usize,
+    pub supervisor_leases: usize,
+    pub dispatch_receipts: usize,
+    pub queue_heads: usize,
+    pub document_cycles: usize,
+    pub projection_diagnostics: usize,
+    pub admin_operations: usize,
+    pub crash_recovery_markers: usize,
+    pub layout_states: usize,
+}
+
+impl ControlPlaneStoreCounts {
+    pub fn total_authoritative_rows(&self) -> usize {
+        self.actor_documents
+            + self.actor_transitions
+            + self.supervisor_leases
+            + self.dispatch_receipts
+            + self.queue_heads
+            + self.document_cycles
+            + self.projection_diagnostics
+            + self.admin_operations
+            + self.crash_recovery_markers
+            + self.layout_states
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Connection + schema.
 // ---------------------------------------------------------------------------
@@ -158,6 +188,8 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 5000;
 
         CREATE TABLE IF NOT EXISTS documents (
             document_id TEXT PRIMARY KEY,
@@ -216,6 +248,46 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
             timestamp INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS queue_heads (
+            document_id TEXT NOT NULL,
+            queue_name TEXT NOT NULL,
+            head_id TEXT,
+            prompt TEXT NOT NULL,
+            state TEXT NOT NULL,
+            selected_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (document_id, queue_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS document_cycles (
+            document_id TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            queue_head_id TEXT,
+            response_commit TEXT,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (document_id, cycle_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS admin_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation_kind TEXT NOT NULL,
+            document_id TEXT,
+            status TEXT NOT NULL,
+            diagnostic_payload TEXT,
+            timestamp INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS crash_recovery_markers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            marker_kind TEXT NOT NULL,
+            document_id TEXT,
+            generation INTEGER,
+            status TEXT NOT NULL,
+            diagnostic_payload TEXT,
+            timestamp INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS layout_states (
             scope TEXT PRIMARY KEY,
             columns_json TEXT NOT NULL,
@@ -243,6 +315,61 @@ pub fn timestamp_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn count_rows(conn: &Connection, sql: &str, label: &str) -> Result<usize> {
+    let count: i64 = conn
+        .query_row(sql, [], |row| row.get(0))
+        .with_context(|| format!("failed to count {label} in controller state"))?;
+    usize::try_from(count).with_context(|| format!("{label} count is negative"))
+}
+
+pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlaneStoreCounts> {
+    Ok(ControlPlaneStoreCounts {
+        actor_documents: count_rows(conn, "SELECT COUNT(*) FROM documents", "actor documents")?,
+        live_actor_documents: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM documents WHERE actor_state != 'closed'",
+            "live actor documents",
+        )?,
+        actor_transitions: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM actor_transitions",
+            "actor transitions",
+        )?,
+        supervisor_leases: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM supervisor_leases",
+            "supervisor leases",
+        )?,
+        dispatch_receipts: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM dispatch_attempts",
+            "dispatch attempts",
+        )?,
+        queue_heads: count_rows(conn, "SELECT COUNT(*) FROM queue_heads", "queue heads")?,
+        document_cycles: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM document_cycles",
+            "document cycles",
+        )?,
+        projection_diagnostics: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM projection_diagnostics",
+            "projection diagnostics",
+        )?,
+        admin_operations: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM admin_operations",
+            "admin operations",
+        )?,
+        crash_recovery_markers: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM crash_recovery_markers",
+            "crash recovery markers",
+        )?,
+        layout_states: count_rows(conn, "SELECT COUNT(*) FROM layout_states", "layout states")?,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -838,6 +965,142 @@ pub fn migrate_actor_store_tx(
 }
 
 // ---------------------------------------------------------------------------
+// Control-plane durable facts.
+// ---------------------------------------------------------------------------
+
+pub fn upsert_queue_head_in_db(
+    conn: &Connection,
+    document_id: &str,
+    queue_name: &str,
+    head_id: Option<&str>,
+    prompt: &str,
+    state: &str,
+) -> Result<()> {
+    let now = sqlite_i64(timestamp_secs(), "queue head timestamp")?;
+    conn.execute(
+        r#"
+        INSERT INTO queue_heads (
+            document_id,
+            queue_name,
+            head_id,
+            prompt,
+            state,
+            selected_at,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        ON CONFLICT(document_id, queue_name) DO UPDATE SET
+            head_id = excluded.head_id,
+            prompt = excluded.prompt,
+            state = excluded.state,
+            updated_at = excluded.updated_at
+        "#,
+        params![document_id, queue_name, head_id, prompt, state, now],
+    )?;
+    Ok(())
+}
+
+pub fn upsert_document_cycle_state_in_db(
+    conn: &Connection,
+    document_id: &str,
+    cycle_id: &str,
+    state: &str,
+    queue_head_id: Option<&str>,
+    response_commit: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO document_cycles (
+            document_id,
+            cycle_id,
+            state,
+            queue_head_id,
+            response_commit,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(document_id, cycle_id) DO UPDATE SET
+            state = excluded.state,
+            queue_head_id = excluded.queue_head_id,
+            response_commit = excluded.response_commit,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            document_id,
+            cycle_id,
+            state,
+            queue_head_id,
+            response_commit,
+            sqlite_i64(timestamp_secs(), "document cycle timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn insert_admin_operation_in_db(
+    conn: &Connection,
+    operation_kind: &str,
+    document_id: Option<&str>,
+    status: &str,
+    diagnostic_payload: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO admin_operations (
+            operation_kind,
+            document_id,
+            status,
+            diagnostic_payload,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+        params![
+            operation_kind,
+            document_id,
+            status,
+            diagnostic_payload,
+            sqlite_i64(timestamp_secs(), "admin operation timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn insert_crash_recovery_marker_in_db(
+    conn: &Connection,
+    marker_kind: &str,
+    document_id: Option<&str>,
+    generation: Option<u64>,
+    status: &str,
+    diagnostic_payload: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO crash_recovery_markers (
+            marker_kind,
+            document_id,
+            generation,
+            status,
+            diagnostic_payload,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+        params![
+            marker_kind,
+            document_id,
+            generation
+                .map(|value| sqlite_i64(value, "crash recovery marker generation"))
+                .transpose()?,
+            status,
+            diagnostic_payload,
+            sqlite_i64(timestamp_secs(), "crash recovery marker timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Layout state.
 // ---------------------------------------------------------------------------
 
@@ -883,4 +1146,109 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
         )
         .optional()?;
     Ok(exists.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_plane_store_counts_extended_fact_categories() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let record = ActorRecord {
+            document_id: "tasks/control-plane.md".to_string(),
+            session_id: "session-control-plane".to_string(),
+            generation: 1,
+            pane_id: "%1".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "store_actor_categories".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+
+        store_actor_record_tx(
+            &mut conn,
+            None,
+            &record,
+            Some("managed".to_string()),
+            Some(7),
+        )?;
+        upsert_supervisor_lease_in_db(
+            &conn,
+            &record,
+            Some(1234),
+            Some("supervisor.sock"),
+            "ready",
+        )?;
+        insert_dispatch_attempt_in_db(
+            &conn,
+            &record.document_id,
+            record.generation,
+            "managed_reopen",
+            Some("accepted"),
+            None,
+            "store actor count test",
+        )?;
+        upsert_queue_head_in_db(
+            &conn,
+            &record.document_id,
+            "agent:queue",
+            Some("ctrlplane-storeactor"),
+            "do [#ctrlplane-storeactor]",
+            "selected",
+        )?;
+        upsert_document_cycle_state_in_db(
+            &conn,
+            &record.document_id,
+            "cycle-storeactor",
+            "preflight_started",
+            Some("ctrlplane-storeactor"),
+            None,
+        )?;
+        insert_projection_diagnostic(
+            &conn,
+            "session-actors.json",
+            &record.document_id,
+            "projection lag",
+        )?;
+        insert_admin_operation_in_db(
+            &conn,
+            "projection_repair",
+            Some(&record.document_id),
+            "accepted",
+            Some("store actor count test"),
+        )?;
+        insert_crash_recovery_marker_in_db(
+            &conn,
+            "startup_reconcile",
+            Some(&record.document_id),
+            Some(record.generation),
+            "pending",
+            Some("store actor count test"),
+        )?;
+        store_layout_state_in_db(&conn, "default", &["%1".to_string()])?;
+
+        let counts = load_control_plane_store_counts(&conn)?;
+        assert_eq!(counts.actor_documents, 1);
+        assert_eq!(counts.live_actor_documents, 1);
+        assert_eq!(counts.actor_transitions, 1);
+        assert_eq!(counts.supervisor_leases, 1);
+        assert_eq!(counts.dispatch_receipts, 1);
+        assert_eq!(counts.queue_heads, 1);
+        assert_eq!(counts.document_cycles, 1);
+        assert_eq!(counts.projection_diagnostics, 1);
+        assert_eq!(counts.admin_operations, 1);
+        assert_eq!(counts.crash_recovery_markers, 1);
+        assert_eq!(counts.layout_states, 1);
+        assert_eq!(counts.total_authoritative_rows(), 10);
+
+        Ok(())
+    }
 }

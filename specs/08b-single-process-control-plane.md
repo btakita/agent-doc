@@ -120,7 +120,10 @@ its `control_plane` JSON field. That field identifies the project-scoped
 single-process model, the controller IPC external boundary, `.agent-doc/state.db`
 state authority, compatibility-only projection authority, and role snapshots for
 the dispatch actor, store actor, per-document session actors, supervisor
-adapters, and projection workers.
+adapters, and projection workers. Store role snapshots include per-category
+SQLite counts for actor documents, lifecycle transitions, supervisor leases,
+dispatch receipts, queue heads, document cycles, projection diagnostics, admin
+operations, crash-recovery markers, and layout state.
 
 Read-only admin calls may be served from the in-memory snapshot when the result
 includes the snapshot generation/version. Mutating admin calls must enter through

@@ -544,8 +544,12 @@ project_scoped_single_process`, `external_boundary = controller_ipc`,
 `.agent-doc/state.db` as state authority, compatibility projections as
 non-authoritative output, and role snapshots for the dispatch actor, store
 actor, per-document session actors, supervisor adapters, and projection
-workers. Active controllers report the live runtime shape; inactive status
-reports the durable offline shape from SQLite without launching a process.
+workers. Role snapshots include `owned_items` plus category counts for the
+durable SQLite families the role owns, including actor records, lifecycle
+transitions, dispatch receipts, queue heads, document cycles, projection
+diagnostics, admin operations, crash-recovery markers, and layout state. Active
+controllers report the live runtime shape; inactive status reports the durable
+offline shape from SQLite without launching a process.
 
 The controller owns project-level bootstrap identity and the live actor
 authority used by route/start/sync:

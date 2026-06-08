@@ -25,8 +25,9 @@ pub use state_store::{
 };
 use state_store::{
     Connection, insert_projection_diagnostic, load_actor_record_from_db, load_actor_store_from_db,
-    load_layout_state_from_db, load_session_operator_status_from_db, load_supervisor_lease_from_db,
-    open_state_db, store_layout_state_in_db, timestamp_secs,
+    load_control_plane_store_counts, load_layout_state_from_db,
+    load_session_operator_status_from_db, load_supervisor_lease_from_db, open_state_db,
+    store_layout_state_in_db, timestamp_secs,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
@@ -149,6 +150,8 @@ pub struct ControlPlaneActorStatus {
     pub authority: String,
     pub state: String,
     pub owned_items: usize,
+    #[serde(default)]
+    pub categories: BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,96 +180,99 @@ fn default_control_plane_status() -> ControlPlaneStatus {
             authority: "mutating_command_admission".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
+            categories: BTreeMap::new(),
         },
         store_actor: ControlPlaneActorStatus {
             role: "store_actor".to_string(),
             authority: "sqlite_write_serialization".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
+            categories: BTreeMap::new(),
         },
         session_actors: ControlPlaneActorStatus {
             role: "session_actor".to_string(),
             authority: "per_document_generation".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
+            categories: BTreeMap::new(),
         },
         supervisor_adapters: ControlPlaneActorStatus {
             role: "supervisor_adapter".to_string(),
             authority: "managed_harness_child".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
+            categories: BTreeMap::new(),
         },
         projection_workers: ControlPlaneActorStatus {
             role: "projection_worker".to_string(),
             authority: "compatibility_projection".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
+            categories: BTreeMap::new(),
         },
     }
 }
 
-fn sqlite_count(conn: &Connection, sql: &str, label: &str) -> Result<usize> {
-    let count: i64 = conn
-        .query_row(sql, [], |row| row.get(0))
-        .with_context(|| format!("failed to count {label} in controller state"))?;
-    usize::try_from(count).with_context(|| format!("{label} count is negative"))
+fn status_categories<const N: usize>(pairs: [(&str, usize); N]) -> BTreeMap<String, usize> {
+    pairs
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect()
 }
 
 fn control_plane_status(project_root: &Path, active: bool) -> Result<ControlPlaneStatus> {
     let conn = open_state_db(project_root)?;
-    let document_rows = sqlite_count(&conn, "SELECT COUNT(*) FROM documents", "actor documents")?;
-    let live_documents = sqlite_count(
-        &conn,
-        "SELECT COUNT(*) FROM documents WHERE actor_state != 'closed'",
-        "live actor documents",
-    )?;
-    let supervisor_leases = sqlite_count(
-        &conn,
-        "SELECT COUNT(*) FROM supervisor_leases",
-        "supervisor leases",
-    )?;
-    let dispatch_receipts = sqlite_count(
-        &conn,
-        "SELECT COUNT(*) FROM dispatch_attempts",
-        "dispatch attempts",
-    )?;
-    let projection_diagnostics = sqlite_count(
-        &conn,
-        "SELECT COUNT(*) FROM projection_diagnostics",
-        "projection diagnostics",
-    )?;
-    let layout_rows = sqlite_count(&conn, "SELECT COUNT(*) FROM layout_states", "layout states")?;
+    let counts = load_control_plane_store_counts(&conn)?;
     let actor_state = if active { "ready" } else { "offline" };
     let store_state = if active { "ready" } else { "durable_offline" };
 
     Ok(ControlPlaneStatus {
         dispatch_actor: ControlPlaneActorStatus {
             state: actor_state.to_string(),
-            owned_items: dispatch_receipts,
+            owned_items: counts.dispatch_receipts,
+            categories: status_categories([("dispatch_receipts", counts.dispatch_receipts)]),
             ..default_control_plane_status().dispatch_actor
         },
         store_actor: ControlPlaneActorStatus {
             state: store_state.to_string(),
-            owned_items: document_rows
-                + supervisor_leases
-                + dispatch_receipts
-                + projection_diagnostics
-                + layout_rows,
+            owned_items: counts.total_authoritative_rows(),
+            categories: status_categories([
+                ("actor_documents", counts.actor_documents),
+                ("actor_transitions", counts.actor_transitions),
+                ("supervisor_leases", counts.supervisor_leases),
+                ("dispatch_receipts", counts.dispatch_receipts),
+                ("queue_heads", counts.queue_heads),
+                ("document_cycles", counts.document_cycles),
+                ("projection_diagnostics", counts.projection_diagnostics),
+                ("admin_operations", counts.admin_operations),
+                ("crash_recovery_markers", counts.crash_recovery_markers),
+                ("layout_states", counts.layout_states),
+            ]),
             ..default_control_plane_status().store_actor
         },
         session_actors: ControlPlaneActorStatus {
             state: actor_state.to_string(),
-            owned_items: live_documents,
+            owned_items: counts.live_actor_documents + counts.queue_heads + counts.document_cycles,
+            categories: status_categories([
+                ("live_actor_documents", counts.live_actor_documents),
+                ("queue_heads", counts.queue_heads),
+                ("document_cycles", counts.document_cycles),
+            ]),
             ..default_control_plane_status().session_actors
         },
         supervisor_adapters: ControlPlaneActorStatus {
             state: actor_state.to_string(),
-            owned_items: supervisor_leases,
+            owned_items: counts.supervisor_leases,
+            categories: status_categories([("supervisor_leases", counts.supervisor_leases)]),
             ..default_control_plane_status().supervisor_adapters
         },
         projection_workers: ControlPlaneActorStatus {
             state: actor_state.to_string(),
-            owned_items: projection_diagnostics,
+            owned_items: counts.projection_diagnostics,
+            categories: status_categories([(
+                "projection_diagnostics",
+                counts.projection_diagnostics,
+            )]),
             ..default_control_plane_status().projection_workers
         },
         ..default_control_plane_status()
@@ -4043,12 +4049,51 @@ mod tests {
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
+        let doc_id = doc.to_string_lossy().to_string();
         record_projection_diagnostic(
             dir.path(),
             "session-actors.json",
-            &doc.to_string_lossy(),
+            &doc_id,
             "test projection lag",
         );
+        let conn = open_state_db(dir.path()).unwrap();
+        state_store::upsert_queue_head_in_db(
+            &conn,
+            &doc_id,
+            "agent:queue",
+            Some("ctrlplane-storeactor"),
+            "do [#ctrlplane-storeactor]",
+            "selected",
+        )
+        .unwrap();
+        state_store::upsert_document_cycle_state_in_db(
+            &conn,
+            &doc_id,
+            "cycle-control-plane",
+            "preflight_started",
+            Some("ctrlplane-storeactor"),
+            None,
+        )
+        .unwrap();
+        state_store::insert_admin_operation_in_db(
+            &conn,
+            "projection_repair",
+            Some(&doc_id),
+            "accepted",
+            Some("control-plane status test"),
+        )
+        .unwrap();
+        state_store::insert_crash_recovery_marker_in_db(
+            &conn,
+            "startup_reconcile",
+            Some(&doc_id),
+            Some(1),
+            "pending",
+            Some("control-plane status test"),
+        )
+        .unwrap();
+        state_store::store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, &["@7".to_string()])
+            .unwrap();
 
         let status = ControllerRequest {
             command: "status".to_string(),
@@ -4085,10 +4130,50 @@ mod tests {
             "compatibility_output"
         );
         assert_eq!(status.control_plane.dispatch_actor.owned_items, 1);
-        assert_eq!(status.control_plane.session_actors.owned_items, 1);
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("queue_heads"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("document_cycles"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("admin_operations"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("crash_recovery_markers"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("layout_states"),
+            Some(&1)
+        );
+        assert_eq!(status.control_plane.session_actors.owned_items, 3);
         assert_eq!(status.control_plane.supervisor_adapters.owned_items, 1);
         assert!(status.control_plane.projection_workers.owned_items >= 1);
-        assert!(status.control_plane.store_actor.owned_items >= 4);
+        assert!(status.control_plane.store_actor.owned_items >= 10);
     }
 
     #[test]

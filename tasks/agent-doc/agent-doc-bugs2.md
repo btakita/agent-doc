@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -69,13 +69,46 @@ The `#ckvm` queue head is complete and the repair preflight has persisted the re
 Closeout repair for the active Codex continuation: the `#ckvm` implementation response is already committed, and this pass persists the drained queue/done-archive maintenance state for the same completed queue head.
 /clear
 Processed `/clear` as a literal queue slash command and consumed the active queue head.
-<!-- agent:boundary:ce5e70fc -->
+
+### Re: I ran `/clear`, but the session was not cleared — gpt-5
+
+> **Queue prompt:**
+>
+> I ran `/clear`, but the session was not cleared. You have to wait for the turn to stop, then use the supervisor to send `/clear` after the turn. Ideally this can be done fast with minimal processing. This is not supposed to be a full turn. But if there is other prompts, that would need to be processed as well.
+
+
+Implemented the queued `/clear` fix.
+
+The supervisor idle-queue watcher now waits for the hook-owned turn-active marker to clear before it drains queued work, so a visually idle prompt cannot race ahead of the full Stop/idle boundary. That gate is scoped to the owned pane so an unrelated active pane in the same project does not stall this queue. Queued `/clear` / `/new`, deferred operator clears, and automatic queue context resets now use the supervisor clear submit path rather than generic prompt dispatch, while still submitting Enter to the owner pane.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/turn_status.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc` submodule pointer in the superproject
+
+Commits/pushes:
+- `src/agent-doc`: `5847da11` (`queue slash clears wait for turn idle`), pushed to `btakita/agent-doc main`
+- superproject: `de4c68e92` (`agent-doc: update queue slash clear handling`), pushed to `btakita/agent-loop main`
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration idle_queue -- --nocapture`
+- `cargo test -p agent-doc-orchestration turn_active_for_pane -- --nocapture`
+- `cargo test -p agent-doc-orchestration auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter -- --nocapture`
+- `make check` passed: clippy, 3,987 nextest tests, doctests, and medium SimWorld seed
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+
+CI: latest `btakita/agent-doc` CI for commit `5847da11` was `in_progress` when checked after push. The superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. No escalated sandbox approval was requested.
+<!-- agent:boundary:cffc2081 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- I ran `/clear`, but the session was not cleared. You have to wait for the turn to stop, then use the supervisor to send `/clear` after the turn. Ideally this can be done fast with minimal processing. This is not supposed to be a full turn. But if there is other prompts, that would need to be processed as well.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

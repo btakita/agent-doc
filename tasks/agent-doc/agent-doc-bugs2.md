@@ -30,41 +30,18 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-054723.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-055224.md`*
 
 Compacted content:
-- Archived 8 response topic(s): do [#ckvm]; queue continuation; I ran `/clear`, but the session was not cleared; 5 more
+- Archived 2 response topic(s): /clear; session bookkeeping
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-/clear
-
-### Re: /clear — gpt-5
-
-`/clear` is a harness builtin, not repo work I can complete inside this document. Run `/clear` in the terminal/owner pane before continuing the queue.
-
-Proof:
-- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
-- Commands: `tsift status`, `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`
-- Verification: plan contract required only the terminal instruction for `/clear`
-- Confidence: high
-- Escalation: none
-<!-- no-free-text-queue-head-guard -->
-
-### Re: session bookkeeping — gpt-5
-
-The only new live-file diff was agent-doc bookkeeping from the prior `/clear` closeout: the `(HEAD)` marker and the queue activation token cleanup. I did not run `#spec-test-build-install-commit-push`; there is no active `go` directive in the live queue.
-
-Proof:
-- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
-- Commands: `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`
-- Verification: this closes the bookkeeping diff only; no code or tests changed
-- Confidence: high
-- Escalation: none
-<!-- agent:boundary:b32c64a1 -->
+<!-- agent:boundary:45be4d1c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- I cancelled the last turn. The last turn should have just immediately stopped, run `/clear`, that's it. 0 tokens should have been spent. It should have been quick.
 <!-- /agent:queue -->
 ###
 <!--

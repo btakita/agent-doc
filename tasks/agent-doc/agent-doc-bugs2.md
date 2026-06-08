@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -108,12 +108,13 @@ CI: latest `btakita/agent-doc` CI for commit `5847da11` was `in_progress` when c
 ### Re: /clear — gpt-5
 
 Processed `/clear` as the active queued slash command. This closeout consumes the queue head so the supervisor/idle-queue clear path can own the actual context-clear boundary after the turn is idle.
-<!-- agent:boundary:ebf70d6f -->
+<!-- agent:boundary:38f5ba48 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- The last turn's diff should have detected that `/clear` was the only eligable content to run, immediately stopped the turn, notify the supervisor, and the supervisor should have called `/clear` after the turn was idle.
 <!-- /agent:queue -->
 ###
 <!--

@@ -89,7 +89,28 @@ The monsterrodholders interleave from the report (`d4182b0e1 ... (submodule poin
 **Verification.** `make check`: 4016 passed, 0 failed, clippy clean. Built release + `cargo install --path .`. Committed + pushed to `agent-doc` main (`37783c89`). Prior cycle's CI run (visbuf-reconcile) is now green; this push's CI is in progress, closing on local evidence per the test-bearing-turn rule.
 
 Next in queue: `#ipc-drift-order-stable-merge` (order-stable CRDT overlay-as-merge-base for the append case — the suspected `5fd64b26` reversal/hoist).
-<!-- agent:boundary:7ae4f8af -->
+
+### Re: do [#ipc-drift-order-stable-merge] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]
+
+
+Done — overlay-as-merge-base verified order-stable for the append case, with the missing end-to-end coverage added. This completes the IPC-drift plan trio.
+
+**Finding.** The suspect `5fd64b26` path (`snapshot::crdt_merge_base_state`) is order-stable *by construction*: the structured overlay is used as the merge base **only when its markdown projection is byte-identical to the cycle baseline**; any mismatch (or a missing/corrupt sidecar) falls back to the explicit baseline text and logs the reason. So the derived merge base can never reorder committed exchange content — a concurrent foreign tail append during generation cannot reverse a new `### Re:` response's lines or hoist it above the prior committed response. The `crdt::merge` layer additionally protects committed `### Re:` history (`guard_committed_responses`, from the earlier `#ipc-crdt-response-drift` merge fix) and orders concurrent appends by client id (agent/ours=1 before foreign=2).
+
+**Coverage seam closed.** The existing tests split the proof: `crdt_merge_base_state_*` covered the overlay-base byte-stability but only for queue docs; `merge_foreign_tail_append_preserves_response_order` covered merge ordering but with a hand-built `from_text` base. Neither drove the overlay path for an *exchange-with-response* document. Added `overlay_merge_base_is_order_stable_for_exchange_append` (in `snapshot.rs`): persists an overlay sidecar from a baseline carrying a prior committed `### Re:` + new prompt + boundary, drives the real `crdt_merge_base_state`, asserts the base projects byte-for-byte to the baseline, then runs `merge()` with the foreign-append ours/theirs and asserts heading intact, lines in author order, new response after the prior, and foreign append preserved.
+
+**Also.** Fixed a stale client-id comment in `crdt::merge` (it claimed `agent=client_id(2)` while the code assigns ours/agent=1, theirs=2) and documented the order-stability invariant in `specs/02-document-format.md`.
+
+**Verification.** `make check`: 4017 passed, 0 failed, clippy clean. Built release + `cargo install --path .`. Committed + pushed to `agent-doc` main (`b9c3408c`). Prior two CI runs (visbuf-reconcile, writeback-serialize) are green; this push's CI is in progress, closing on local evidence per the test-bearing-turn rule.
+
+The three `#ipc-drift-*` plan items (`tasks/agent-doc/plan-ipc-crdt-response-drift.md`) are now all closed: visbuf-reconcile (fix), writeback-serialize (verify+cover), order-stable-merge (verify+cover). The remaining `#ipc-crdt-response-drift` review item's gated subtasks are satisfied; I'll reconcile that review item next pass.
+
+Next in queue: canonical-tmux-session closing, then the operations-taxonomy backlog capture.
+<!-- agent:boundary:d9fe91f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -97,7 +118,7 @@ Next in queue: `#ipc-drift-order-stable-merge` (order-stable CRDT overlay-as-mer
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-visbuf-reconcile]~~
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]~~
-- :pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]
+- ~~:pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]~~
 - :pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.
 - :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
 <!-- /agent:queue -->
@@ -127,7 +148,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#ipc-drift-order-stable-merge] Make CRDT overlay-as-merge-base order-stable for the append case so a concurrent foreign append (theirs>base) cannot reverse response lines or hoist them above the prior HEAD response. Files: agent-doc-orchestration/src/{merge.rs,crdt.rs} (suspect 5fd64b26 "Use overlay CRDT as merge base"). SimWorld: foreign append during generation -> merged Exchange keeps append order + ### Re: header intact (no reversal, no hoist). Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
 <!-- /agent:backlog -->
 
 ## Review

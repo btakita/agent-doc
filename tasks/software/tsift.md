@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -308,13 +308,85 @@ Commands:
 - `rg -n "MemGraphRag|MemGraph|memgraph|RAG|rag" .` in `src/tsift`
 - `sed -n` source reads for `packages/tsift-cli/src/cli.rs`, `packages/tsift-cli/src/commands/memory.rs`, and `packages/tsift-sqlite/src/lib.rs`
 - `git status --short` in the parent repo
+- Official provider docs lookup for OpenAI, Anthropic, Z.AI, and OpenCode
+- `rg -n "prompt cache|prompt_cache|cache" ...` in `src/tsift` and the fetched Codex manual
+- `node /home/brian/.codex/skills/.system/openai-docs/scripts/fetch-codex-manual.mjs`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `agent-doc --version`
+- `tsift status` in `/home/brian/work/btakita/agent-loop`
+- Codex manual fetched via the OpenAI docs skill: `/tmp/openai-docs-cache/codex-manual.md`
+- OpenCode provider configuration: https://opencode.ai/docs/providers/
+- Z.AI Context Caching: https://docs.z.ai/guides/capabilities/cache
+- Anthropic Prompt Caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+- OpenAI Prompt Caching: https://developers.openai.com/api/docs/guides/prompt-caching
+- `provider_cache_line_id`: hash of the provider, model, endpoint family, org/account boundary, retention/cache-key policy, tokenization-sensitive prefix bytes, and tool schema hash. This is not portable; it is the per-provider cache target.
+- `shared_prefix_artifact_id`: hash of the canonical prompt blocks after redaction/normalization. This is portable across harnesses.
+- Optional warmup scheduling: warm each provider/model cache line separately, using the same stable prefix manifest, without pretending the provider caches are the same storage object.
+- Shared analytics: normalize `cached_input_tokens`, cache-creation/write tokens, read/create ratio, cached ratio trend, invalidation diagnostics, and the turn boundary where reuse dropped.
+- Adapter hints: Anthropic gets `cache_control` placement, OpenAI gets a stable `prompt_cache_key` and retention setting when the runtime can pass them, Z.AI/GLM gets stable repeated system/context placement and cached-token observation, and OpenCode passes through only what its chosen provider adapter supports.
+- A provider/model cache-line identity: `{provider, endpoint, model, account scope, retention policy, stable_prefix_hash, tool_schema_hash, provider_cache_key_or_breakpoint_hash}`.
+- Stable prefix artifacts: canonical ordered blocks for repo instructions, tool schemas, runbooks, document context, and durable examples, each with content hashes.
 
 Verification: no code changed for this answer cycle, so no additional build/test suite was run. The answer was checked against the existing `#memgraphrag2` projection and `#memgraphrag-ont` ontology code paths.
 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:427f073e -->
+
+### Re: cross-provider prompt cache — gpt-5
+
+> **Queue prompt:**
+>
+> Can we share the prompt cache across models and providers (Claude Code, Codex, Opencode/GLM)?
+
+
+Not as one shared server-side prompt cache. Yes as a shared cache-control and telemetry layer.
+
+The live cache entries are provider/model-local. OpenAI routes requests by a prompt-prefix hash plus optional `prompt_cache_key`, and its docs say prompt caches are not shared between organizations. Anthropic's API cache is driven by `cache_control` breakpoints over the `tools`, `system`, and `messages` prefix, with provider-owned 5-minute/1-hour TTL behavior. Z.AI/GLM describes automatic context caching with cached-token accounting. Those mechanisms are not portable KV tensors: model weights, tokenization, endpoint routing, retention policy, account/org scope, and provider privacy boundaries all differ.
+
+What tsift can share across Claude Code, Codex, OpenCode/GLM, and future runtimes is the provider-neutral cache lineage:
+- Stable prefix artifacts: canonical ordered blocks for repo instructions, tool schemas, runbooks, document context, and durable examples, each with content hashes.
+- A provider/model cache-line identity: `{provider, endpoint, model, account scope, retention policy, stable_prefix_hash, tool_schema_hash, provider_cache_key_or_breakpoint_hash}`.
+- Adapter hints: Anthropic gets `cache_control` placement, OpenAI gets a stable `prompt_cache_key` and retention setting when the runtime can pass them, Z.AI/GLM gets stable repeated system/context placement and cached-token observation, and OpenCode passes through only what its chosen provider adapter supports.
+- Shared analytics: normalize `cached_input_tokens`, cache-creation/write tokens, read/create ratio, cached ratio trend, invalidation diagnostics, and the turn boundary where reuse dropped.
+- Optional warmup scheduling: warm each provider/model cache line separately, using the same stable prefix manifest, without pretending the provider caches are the same storage object.
+
+For Codex specifically, the public Codex manual shows model/provider selection and usage records with `cached_input_tokens`, but I did not find a public Codex CLI/App control surface for directly setting OpenAI API prompt-cache parameters. So Codex should be treated as observable first: preserve stable prompt prefixes, record cached-input usage, and only emit provider controls where the runtime adapter exposes them.
+
+The implementation shape I would use in tsift is two IDs:
+- `shared_prefix_artifact_id`: hash of the canonical prompt blocks after redaction/normalization. This is portable across harnesses.
+- `provider_cache_line_id`: hash of the provider, model, endpoint family, org/account boundary, retention/cache-key policy, tokenization-sensitive prefix bytes, and tool schema hash. This is not portable; it is the per-provider cache target.
+
+That gives us cross-runtime coordination without violating provider boundaries. A Claude Code, Codex, and OpenCode/GLM run can all agree that they are using the same stable prefix artifact, while analytics still report separate cache lines for Anthropic, OpenAI, and Z.AI. A miss then becomes diagnosable: the shared prefix changed, the tool schema changed, the model/provider changed, the cache key/retention changed, or routing/replica affinity was lost.
+
+Sources checked:
+- OpenAI Prompt Caching: https://developers.openai.com/api/docs/guides/prompt-caching
+- Anthropic Prompt Caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+- Z.AI Context Caching: https://docs.z.ai/guides/capabilities/cache
+- OpenCode provider configuration: https://opencode.ai/docs/providers/
+- Codex manual fetched via the OpenAI docs skill: `/tmp/openai-docs-cache/codex-manual.md`
+
+Changed paths: none outside this session document.
+
+Commands:
+- `tsift status` in `/home/brian/work/btakita/agent-loop`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
+- `node /home/brian/.codex/skills/.system/openai-docs/scripts/fetch-codex-manual.mjs`
+- `rg -n "prompt cache|prompt_cache|cache" ...` in `src/tsift` and the fetched Codex manual
+- Official provider docs lookup for OpenAI, Anthropic, Z.AI, and OpenCode
+
+Verification: no code changed, so no build/test suite was rerun. The answer was checked against the current provider docs and the existing tsift prompt-cache diagnostics context in the session.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:808e2ddb -->
+<!-- agent:boundary:b84388e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -324,7 +396,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Can we share the prompt cache across models and providers (Claude Code, Codex, Opencode/GLM)?
 <!-- /agent:queue -->
 
 ## Backlog

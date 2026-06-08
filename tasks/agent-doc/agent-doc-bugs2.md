@@ -91,12 +91,18 @@ No new actionable follow-up items were created by this final-gate recovery cycle
 No additional task work was needed in this cycle. This write closes the preflight opened while reconciling the visible boundary/queue metadata after the completed `#ctrlplane-adminbp-data` closeout.
 
 No new actionable follow-up items were created by this metadata-convergence cycle.
-<!-- agent:boundary:d9ee8949 -->
+
+### Re: Codex stop-hook closeout — gpt-5
+
+The completed `#ctrlplane-adminbp-data` closeout has already been written and committed; this hook recovery only closes the active Codex turn metadata so the final gate can pass.
+
+No new actionable follow-up items were created by this stop-hook recovery cycle.
+<!-- agent:boundary:9552011a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

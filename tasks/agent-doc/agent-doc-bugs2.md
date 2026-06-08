@@ -30,12 +30,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-061523.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-061527.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #clearfast; #clearfast cleanup; session closeout cleanup; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:05f3dfc7 -->
+<!-- agent:boundary:5359a9a2 -->
 <!-- /agent:exchange -->
 
 ## Queue

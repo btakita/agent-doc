@@ -1,9 +1,9 @@
 ---
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
+agent: claude
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
-claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -14,6 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: stop
 ---
 
 # agent-loop operations
@@ -37,17 +38,47 @@ Operational task document for agent-loop workspace management.
 Compacted content:
 - Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-<!-- agent:boundary:5875cbe5 -->
+- **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
+- ⚠️ **corky** — the `v0.28.2` workspace split added 5 member crates (corky-core/google/mail/social/transcribe), **none on crates.io**, all path+version-depended by the root. Publishing now means claiming 5 new public crate names (all currently available) and a dependency-ordered multi-crate publish that can partially fail — an irreversible namespace decision I won't make unilaterally. Recommended: lockstep `0.29.0`, publish members in dep order, then root + PyPI/maturin via CI. Or keep corky binary/PyPI-only and mark members `publish = false`.
+- ✅ **instruction-files v0.3.0** → crates.io (new `check-policy` CLI subcommand + Library Context Policy spec). Folded in the legit `Cargo.lock` drift from the `glob` dep.
+- ✅ **chromium-bridge v0.3.0** → crates.io (5 feat commits: accessibility snapshots, network inspection, persistent browser state, corky ingest). Tag push also triggered the GitHub binary-release workflow (building now).
+
+### Re: Release + publish submodules with pending releases — opus-4-8
+
+Swept every submodule, excluding the 5 actively worked in other live panes (**lazily-rs** %26, **tagpath** %40, **tmux-router** %43, **tsift** %25, **agent-doc** via agent-doc-bugs/bugs2 %22/%30).
+
+**Released + published this cycle:**
+- ✅ **chromium-bridge v0.3.0** → crates.io (5 feat commits: accessibility snapshots, network inspection, persistent browser state, corky ingest). Tag push also triggered the GitHub binary-release workflow.
+- ✅ **instruction-files v0.3.0** → crates.io (new `check-policy` CLI subcommand + Library Context Policy spec). Folded in the legit `Cargo.lock` drift from the `glob` dep.
+
+Both verified live on crates.io at 0.3.0; superproject pointers bumped.
+
+**Blocked — needs your decision (`#jq1r`, plan: `tasks/software/corky-workspace-publish.md`):**
+- ⚠️ **corky** — the `v0.28.2` workspace split added 5 member crates (corky-core/google/mail/social/transcribe), **none on crates.io**, all path+version-depended by the root. Publishing now means claiming 5 new public crate names (all currently available) and a dependency-ordered multi-crate publish that can partially fail — an irreversible namespace decision I won't make unilaterally. Recommended: lockstep `0.29.0`, publish members in dep order, then root + PyPI/maturin via CI. Or keep corky binary/PyPI-only and mark members `publish = false`.
+
+**Skipped — no release-worthy code** (unreleased commits are only chore/ci/docs/lockfile/tsift-init):
+- **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
+
+Net: no crate had an *unpublished tag* to move forward — every last-tag matched its crates.io version — so each release required a deliberate version bump, which I did only for the two with genuine feature deltas.
+<!-- agent:boundary:6bb81f62 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:pending -->
+## Queue
+
+<!-- agent:queue go -->
+<!-- /agent:queue -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#jq1r] corky workspace-split crates.io publish blocked on a topology decision (claim 5 new corky-* crate names + dependency-ordered publish, or keep binary/PyPI-only). Plan + recommendation: tasks/software/corky-workspace-publish.md
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
-<!-- /agent:pending -->
+<!-- /agent:backlog -->
 
 ## Completed / Reaped
 

@@ -488,6 +488,70 @@ fn semantic_diff_summary(
     })
 }
 
+/// Build durable op-log records from this cycle's semantic node events
+/// (`#op-scoped-drift-1`). Preflight observes a snapshot↔document diff, so every
+/// node op is classified as a `user` edit (the agent's committed output already
+/// lives in the snapshot). Pure so it can be unit-tested without a database.
+fn build_ops_from_semantic_diff(
+    document_path: &str,
+    origin_session: Option<&str>,
+    recorded_at: &str,
+    summary: &SemanticDiffSummary,
+) -> Vec<agent_doc_core::op_log::DocumentOp> {
+    use agent_doc_core::op_log::{CausalClock, DocumentOp, OpSource, classify_actor};
+    let actor = classify_actor(OpSource::SnapshotDiff);
+    summary
+        .node_events
+        .iter()
+        .map(|event| DocumentOp {
+            document_path: document_path.to_string(),
+            component: event.component.clone(),
+            node_key: event.node_key.clone(),
+            item_id: event.item_id.clone(),
+            op_kind: event.op.clone(),
+            actor,
+            clock: CausalClock {
+                lamport: 0,
+                origin_session: origin_session.map(str::to_string),
+            },
+            before_preview: event.before_preview.clone(),
+            after_preview: event.after_preview.clone(),
+            recorded_at: Some(recorded_at.to_string()),
+        })
+        .collect()
+}
+
+/// Persist the cycle's node ops to the durable sqlite op log. Best effort:
+/// failures are logged to stderr and never propagate, so the durable substrate
+/// can never block a preflight cycle.
+fn persist_op_log(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+    origin_session: Option<&str>,
+    summary: &SemanticDiffSummary,
+) {
+    if summary.node_events.is_empty() {
+        return;
+    }
+    let Some(project_root) = rc.project_root() else {
+        return;
+    };
+    let document_path = file.to_string_lossy().to_string();
+    let recorded_at = op_log_timestamp().to_string();
+    let ops = build_ops_from_semantic_diff(&document_path, origin_session, &recorded_at, summary);
+    if let Err(err) = agent_doc_sqlite::op_log::append_ops(&project_root, &ops) {
+        eprintln!("[preflight] op-log persist skipped: {err}");
+    }
+}
+
+fn op_log_timestamp() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
 fn semantic_component_changes(previous: &str, current: &str) -> Vec<SemanticComponentChange> {
     let before = semantic_component_snapshots("before", previous);
     let after = semantic_component_snapshots("after", current);
@@ -2896,6 +2960,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         &diff_result_with_current.current,
         &prompt_bearing_changes,
     );
+
+    // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
+    // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
+    // the durable substrate must never block or fail a preflight cycle.
+    if let Some(summary) = semantic_diff.as_ref() {
+        persist_op_log(file, &rc, initial_frontmatter.session.as_deref(), summary);
+    }
 
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let mut parsed_commands = command_diff_result
@@ -12383,6 +12454,25 @@ mod tests {
     #[test]
     fn semantic_diff_summary_omits_empty_summary() {
         assert!(semantic_diff_summary("same\n", "same\n", &[]).is_none());
+    }
+
+    #[test]
+    fn build_ops_from_semantic_diff_tags_user_actor_and_session() {
+        let before = "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n";
+        let after = "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n";
+        let summary = semantic_diff_summary(before, after, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "100", &summary);
+        assert!(!ops.is_empty());
+        let beta = ops
+            .iter()
+            .find(|op| op.node_key == "queue:0:beta:0")
+            .expect("beta op present");
+        assert_eq!(beta.actor, agent_doc_core::op_log::OpActor::User);
+        assert_eq!(beta.op_kind, "insert");
+        assert_eq!(beta.component, "queue");
+        assert_eq!(beta.clock.origin_session.as_deref(), Some("sess-1"));
+        // Lamport assignment is owned by the durable store; the builder leaves 0.
+        assert_eq!(beta.clock.lamport, 0);
     }
 
     #[test]

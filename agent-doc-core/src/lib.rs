@@ -20,6 +20,7 @@ pub mod heuristics;
 pub mod id;
 pub mod ipc_corruption;
 pub mod model_tier;
+pub mod op_log;
 pub mod pending;
 pub mod project_config;
 pub mod replay_guard;

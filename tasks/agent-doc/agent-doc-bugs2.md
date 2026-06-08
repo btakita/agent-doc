@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -98,59 +98,83 @@ Verification:
 - `gh run list --workflow CI --limit 1` showed latest CI success: run `27108302074`, `2026-06-07T23:39:34Z`
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:dd1376f7 -->
+
+### Re: agent-doc on monsterrodholders.md missed the response when I added a queue item mid-turn with auto-queue off. I requested in another prompt to add the response but the response was missed in the turn. I got a JB `File Cache Conflict` but nothing showed up. The response is in the session:
+
+> **Queue prompt:**
+>
+> agent-doc on monsterrodholders.md missed the response when I added a queue item mid-turn with auto-queue off. I requested in another prompt to add the response but the response was missed in the turn. I got a JB `File Cache Conflict` but nothing showed up. The response is in the session:
+> ```
+> ↳ Interacted with background terminal · agent-doc write --commit /home/brian/work/btakita/agent-loop/src/boost-client/
+> tasks/monsterrodholders.md
+>   └ ### Re: Learn GSC, Shopping, and Product Cards - codex-5-5
+>
+>     Short answer: do not update Search Console manually today, and do not replace every Learn product link with product
+>     cards.
+>
+>     The 2026-06-07 read-only discovery monitor already did the useful Search Console work: 22/22 public targets
+>     returned final HTTP 200, had no public noindex, and were present in the expected public sitemaps; Search Console
+>     access returned siteOwner; the 9 sitemap records were pending=false with 0 errors and 0 warnings; URL Inspection
+>     showed normal processing lag on newer Learn/June 4/regional URLs, while all four Popular Products URLs were
+>     submitted/indexed. That means this is not a sitemap-resubmit or request-indexing moment. The next organic read
+>     should wait for the 7-14 day window, 2026-06-11T23:58Z through 2026-06-18T23:58Z, unless a specific page is
+>     materially changed and passes the manual indexing checklist.
+>
+>     There is still Learn work, but it is content/product-fit governance and later measurement, not a GSC push. The
+>     immediate Learn cleanup path has mostly been handled: the Ohio duplicate was resolved, the first-10 guides were
+>     completed/cross-linked, regional triage was clean, and the broader boat/install evidence gate now blocks public fit
+>     claims until real photos, dimensions, stock/visibility checks, image rights, and Brian/Ron/Steve review exist. Keep
+>     that discipline.
+>
+>     I do not see evidence that Learn is cannibalizing Shopping right now. The product URLs still carry the strongest
+>     measured organic product demand in the May 9 through June 5 GSC window, and the Popular Products issue is still
+>     Merchant/ProductView/feed-processing plus review-threshold timing, not Learn pages stealing product-page
+>     visibility. The risk is future dilution: Learn pages should not target buy/shop/exact-product terms, and they
+>     should not carry exact PDP modules unless the article has a real setup problem that the product solves.
+>
+>     For product cards: use them selectively, not globally. The existing pipeline rule is the right one: product links
+>     are practical next steps after setup is clear, not generic shopping blocks. Category-first product paths are safest
+>     for informational Learn pages. Exact PDP cards should be limited to high-intent Learn pages where stock,
+>     visibility, sync state, fit proof, and wording are current and approved. For boat-brand/install/kayak/cleat
+>     content, exact product cards stay blocked until the evidence gate clears.
+>
+>     Decision: keep Search Console on wait/read-only, keep Learn as top/mid-funnel support for shopping rather than a
+>     replacement for PDPs/category pages, and pilot product-card treatment on one or two high-intent Learn pages after
+>     the 7-14 day monitor, rather than doing a site-wide card swap.
+> ```
+
+
+Investigated and fixed the source-side failure mode.
+
+The Monster response was captured at `src/boost-client/.agent-doc/captures/7b9f2a6394de97c213efeb3ec1e3d33b7b966229655f4720376409f6abef299f/cycle-1780875769946.json` with heading `### Re: Learn GSC, Shopping, and Product Cards - codex-5-5`. I did not run the Monster queue. I used session-check/log/capture inspection only.
+
+Root cause: the response did land once. The ops log shows the 8512-byte snapshot committed at `1780875965`, then a later stale prompt-only 6524-byte snapshot/file pair committed at `1780876244` after `late_fallback_patch_rejected`. The existing guard only blocked the missing captured-response case when the staged snapshot already matched HEAD, so this normal staged-commit path could overwrite the response-bearing HEAD with stale sidecar content.
+
+Fix: `agent-doc-orchestration/src/git.rs` now checks the active captured response against the blob about to be staged for every normal commit, not only the already-current/no-op branch. If the active captured response is missing from that staged content, commit fails closed and logs `commit_blocked_missing_captured_response ... basis=staged` instead of advancing HEAD.
+
+Regression added: `commit_blocks_stale_snapshot_commit_when_active_capture_response_missing` simulates a captured response plus a stale prompt-only snapshot that differs from HEAD and verifies HEAD does not advance.
+
+Verification passed:
+- `cargo test -q -p agent-doc-orchestration commit_blocks_ -- --nocapture`
+- `cargo test -q -p agent-doc-orchestration commit_blocks_stale_snapshot_commit_when_active_capture_response_missing`
+- `cargo check -q -p agent-doc-orchestration`
+- `git diff --check`
+- `make check` (3,956 tests, doctests, closeout sim target)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+
+Commits:
+- `src/agent-doc`: `8d7b0c11 fix: block stale snapshot commits missing captured response`
+- parent `agent-loop`: `89779ba25 chore: update agent-doc submodule`
+
+CI: latest `agent-doc` CI for `8d7b0c11` was in progress at closeout check, not failing; parent repo has no workflow named `CI`.
+
+<!-- agent:boundary:e81f78b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#adoc-semantic-diff-nav]~~
-- ~~:round_pushpin: [#adoc-harness-simworld]~~
-- ~~:pushpin: monsterrodholders.md queue responses are still not going into the exchange.~~
-- ~~:round_pushpin: [#adoc-auto-dag-priority]~~
-- ~~A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now because I need to see the responses. Please investigate and fix.~~
-- ~~If I move an item in the queue, you should add a `:pushpin:` to the item so it does not become de-prioritized.~~
----
-agent-doc on monsterrodholders.md missed the response when I added a queue item mid-turn with auto-queue off. I requested in another prompt to add the response but the response was missed in the turn. I got a JB `File Cache Conflict` but nothing showed up. The response is in the session:
-```
-↳ Interacted with background terminal · agent-doc write --commit /home/brian/work/btakita/agent-loop/src/boost-client/
-tasks/monsterrodholders.md
-  └ ### Re: Learn GSC, Shopping, and Product Cards - codex-5-5
-
-    Short answer: do not update Search Console manually today, and do not replace every Learn product link with product
-    cards.
-
-    The 2026-06-07 read-only discovery monitor already did the useful Search Console work: 22/22 public targets
-    returned final HTTP 200, had no public noindex, and were present in the expected public sitemaps; Search Console
-    access returned siteOwner; the 9 sitemap records were pending=false with 0 errors and 0 warnings; URL Inspection
-    showed normal processing lag on newer Learn/June 4/regional URLs, while all four Popular Products URLs were
-    submitted/indexed. That means this is not a sitemap-resubmit or request-indexing moment. The next organic read
-    should wait for the 7-14 day window, 2026-06-11T23:58Z through 2026-06-18T23:58Z, unless a specific page is
-    materially changed and passes the manual indexing checklist.
-
-    There is still Learn work, but it is content/product-fit governance and later measurement, not a GSC push. The
-    immediate Learn cleanup path has mostly been handled: the Ohio duplicate was resolved, the first-10 guides were
-    completed/cross-linked, regional triage was clean, and the broader boat/install evidence gate now blocks public fit
-    claims until real photos, dimensions, stock/visibility checks, image rights, and Brian/Ron/Steve review exist. Keep
-    that discipline.
-
-    I do not see evidence that Learn is cannibalizing Shopping right now. The product URLs still carry the strongest
-    measured organic product demand in the May 9 through June 5 GSC window, and the Popular Products issue is still
-    Merchant/ProductView/feed-processing plus review-threshold timing, not Learn pages stealing product-page
-    visibility. The risk is future dilution: Learn pages should not target buy/shop/exact-product terms, and they
-    should not carry exact PDP modules unless the article has a real setup problem that the product solves.
-
-    For product cards: use them selectively, not globally. The existing pipeline rule is the right one: product links
-    are practical next steps after setup is clear, not generic shopping blocks. Category-first product paths are safest
-    for informational Learn pages. Exact PDP cards should be limited to high-intent Learn pages where stock,
-    visibility, sync state, fit proof, and wording are current and approved. For boat-brand/install/kayak/cleat
-    content, exact product cards stay blocked until the evidence gate clears.
-
-    Decision: keep Search Console on wait/read-only, keep Learn as top/mid-funnel support for shopping rather than a
-    replacement for PDPs/category pages, and pilot product-card treatment on one or two high-intent Learn pages after
-    the 7-14 day monitor, rather than doing a site-wide card swap.
-```
----
 <!-- /agent:queue -->
 ###
 <!--

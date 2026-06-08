@@ -169,7 +169,7 @@ CI:
 - New `src/agent-doc` CI for `3978a949` is `in_progress` (`27110969213`, started 2026-06-08 01:27:01Z), so I did not wait on it.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:a75563a2 -->
+<!-- agent:boundary:09f77b28 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -210,7 +210,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [x] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
 - [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
 - [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.

@@ -102,12 +102,16 @@ That matches "reversed lines / missing header / fragments above the old response
 **Plan:** [`tasks/agent-doc/plan-ipc-crdt-response-drift.md`](plan-ipc-crdt-response-drift.md) — deterministic SimWorld repro (foreign append mid-generation), merge-base ordering fix, control-plane-owned write-back serialization, visible-buffer/CRDT reconciliation, and the three Claude Code SimWorld scenarios you asked for.
 
 **Why plan instead of fix-now:** editing the CRDT/IPC write path *inside a document that is actively drifting* (this one, right now, with another supervisor racing it) risks compounding the corruption — the fix and its verification need a quiescent session with other supervisors idle. Added to the backlog as `#ipc-crdt-response-drift`. `do #ipc-crdt-response-drift` from a fresh session and I'll implement it end-to-end with the SimWorld tests.
-<!-- agent:boundary:da032db9 -->
+
+### Re: queue deactivated — opus-4-8
+
+Noted — the queue's `go` token was removed, so the queue is inactive (it was already drained last cycle). No prompt to act on; syncing the document state and closing the cycle. The one carried-over gated review item remains; `#ipc-crdt-response-drift` is still queued in the backlog for a fresh quiescent session.
+<!-- agent:boundary:5bd2b6be -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,12 +35,12 @@ complete
 Compacted content:
 - Archived 2 response topic(s): /clear; session bookkeeping
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:45be4d1c -->
+<!-- agent:boundary:98b3c63d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
 - I cancelled the last turn. The last turn should have just immediately stopped, run `/clear`, that's it. 0 tokens should have been spent. It should have been quick.
 <!-- /agent:queue -->
 ###

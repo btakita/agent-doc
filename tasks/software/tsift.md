@@ -86,12 +86,15 @@ Commands used for evidence:
 - source reads for `specs/memgraphrag-direction.md`, `specs/architecture.md`, `packages/tsift-summarize/src/summarize.rs`, and `packages/tsift-memory/src/lib.rs`
 
 Verification: no new code changes in this cycle; prior cache extraction verification remains recorded in the previous response. Confidence is high. Escalation: none.
-Yes. MemGraphRAG should live in its own crate.
+
+### Re: extract MemGraphRAG crate — gpt-5
 
 > **Queue prompt:**
 >
 > I like tsift-llm. Should the memgraphrag live in its own crate? If yes, extract memgraphrag to its own crate.
 
+
+Yes. MemGraphRAG should live in its own crate.
 
 I extracted it into `tsift-memgraphrag`, keeping the dependency direction explicit:
 

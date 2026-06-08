@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,7 +71,48 @@ No follow-up backlog item was created for this cycle; the implemented `prompt_ca
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:0a782a4a -->
+
+### Re: prompt cache analytics — gpt-5
+
+> **Queue prompt:**
+>
+> Please add analytics to the prompt cache. I want to be able to review effective it is over time.
+
+
+Implemented prompt cache effectiveness analytics for `tsift session-cost`.
+
+What changed:
+- Added bounded `prompt_cache_plan.analytics` with sample count, effective flag, trend (`single_sample`, `stable`, `improving`, `declining`, `insufficient_data`), average/first/last cached-input ratios, ratio delta, net cached-read minus cache-creation tokens, optional read/create ratio, timeline truncation flag, and a first-plus-latest per-turn cache timeline.
+- Added compact and human text output for the analytics so cache effectiveness can be reviewed without raw JSON.
+- Updated the session digest spec and unreleased changelog entry.
+- Added library and compiled CLI regression coverage for improving, stable, and candidate uncached prompt-cache analytics.
+
+Changed paths:
+- `src/tsift/VERSIONS.md`
+- `src/tsift/packages/tsift-agent-doc/src/session_cost.rs`
+- `src/tsift/packages/tsift-cli/src/commands/digests.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/specs/digests-sessions.md`
+- parent pointer: `src/tsift`
+
+Commits:
+- tsift submodule: `7b9da33` (`add prompt cache analytics`), pushed to `origin/main`.
+- parent repo: `220cbf472` (`update tsift prompt cache analytics`), pushed to `origin/main`.
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-agent-doc prompt_cache_plan_summarizes_effectiveness_over_time -- --nocapture'`: passed, artifact `tart-e2cfb2ea68`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture'`: passed, artifact `tart-02a5c5c8a8`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-35d22ae8c2`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `git diff --check`: passed.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was completed/success for `add session prompt cache plan` at 2026-06-08T21:25:43Z.
+
+Preflight warnings surfaced: the prior captured cycle had been auto-recovered before this response, and the post-exchange `#next-steps` HTML comment remains preserved as a non-executable note unless moved into exchange or queue.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:f772a8ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +122,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please add analytics to the prompt cache. I want to be able to review effective it is over time.
 <!-- /agent:queue -->
 
 ## Backlog

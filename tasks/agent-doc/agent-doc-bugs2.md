@@ -67,7 +67,17 @@ Verification:
 Pushed:
 - `btakita/agent-doc main` to `12215ab6`
 - `btakita/agent-loop main` to `c8e816bbd`
-<!-- agent:boundary:13f9d9bf -->
+
+### Re: active continuation closeout — gpt-5
+
+The fix is already implemented, verified, committed, installed, and pushed. This extra closeout is only for the later Codex continuation prompt that arrived after the original preflight cycle; preflight reopened a fresh cycle so the final gate can bind this current turn to a committed agent-doc closeout.
+
+Code fix: `src/agent-doc` commit `12215ab6 agent-doc: block stale finalize replay`.
+Parent pointer: `c8e816bbd agent-doc: update stale finalize replay fix`.
+
+The churn cause and fix remain the same: repeated explicit-baseline finalize after a `committed` cycle could append another response and boundary state; strict finalize now rejects that replay and requires a fresh preflight for any new prompt.
+
+<!-- agent:boundary:bc4cf31a -->
 <!-- /agent:exchange -->
 
 ## Queue

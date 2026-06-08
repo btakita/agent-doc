@@ -308,26 +308,6 @@ Commands:
 - `rg -n "MemGraphRag|MemGraph|memgraph|RAG|rag" .` in `src/tsift`
 - `sed -n` source reads for `packages/tsift-cli/src/cli.rs`, `packages/tsift-cli/src/commands/memory.rs`, and `packages/tsift-sqlite/src/lib.rs`
 - `git status --short` in the parent repo
-- Official provider docs lookup for OpenAI, Anthropic, Z.AI, and OpenCode
-- `rg -n "prompt cache|prompt_cache|cache" ...` in `src/tsift` and the fetched Codex manual
-- `node /home/brian/.codex/skills/.system/openai-docs/scripts/fetch-codex-manual.mjs`
-- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` via MCP
-- `agent-doc --version`
-- `tsift status` in `/home/brian/work/btakita/agent-loop`
-- Codex manual fetched via the OpenAI docs skill: `/tmp/openai-docs-cache/codex-manual.md`
-- OpenCode provider configuration: https://opencode.ai/docs/providers/
-- Z.AI Context Caching: https://docs.z.ai/guides/capabilities/cache
-- Anthropic Prompt Caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-- OpenAI Prompt Caching: https://developers.openai.com/api/docs/guides/prompt-caching
-- `provider_cache_line_id`: hash of the provider, model, endpoint family, org/account boundary, retention/cache-key policy, tokenization-sensitive prefix bytes, and tool schema hash. This is not portable; it is the per-provider cache target.
-- `shared_prefix_artifact_id`: hash of the canonical prompt blocks after redaction/normalization. This is portable across harnesses.
-- Optional warmup scheduling: warm each provider/model cache line separately, using the same stable prefix manifest, without pretending the provider caches are the same storage object.
-- Shared analytics: normalize `cached_input_tokens`, cache-creation/write tokens, read/create ratio, cached ratio trend, invalidation diagnostics, and the turn boundary where reuse dropped.
-- Adapter hints: Anthropic gets `cache_control` placement, OpenAI gets a stable `prompt_cache_key` and retention setting when the runtime can pass them, Z.AI/GLM gets stable repeated system/context placement and cached-token observation, and OpenCode passes through only what its chosen provider adapter supports.
-- A provider/model cache-line identity: `{provider, endpoint, model, account scope, retention policy, stable_prefix_hash, tool_schema_hash, provider_cache_key_or_breakpoint_hash}`.
-- Stable prefix artifacts: canonical ordered blocks for repo instructions, tool schemas, runbooks, document context, and durable examples, each with content hashes.
 
 Verification: no code changed for this answer cycle, so no additional build/test suite was run. The answer was checked against the existing `#memgraphrag2` projection and `#memgraphrag-ont` ontology code paths.
 
@@ -386,7 +366,7 @@ Escalation: none.
 
 Confidence: high.
 
-### Re: closeout repair — gpt-5
+### Re: closeout repair — gpt-5 (HEAD)
 
 I repaired the closeout artifact from the previous write: the cross-provider prompt-cache answer is intact, and the stray duplicated bullets were removed from the prior MemGraph response's `Commands` list.
 
@@ -417,7 +397,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

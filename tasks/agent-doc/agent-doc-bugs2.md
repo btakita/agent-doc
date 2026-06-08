@@ -30,44 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-033244.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-040220.md`*
 
 Compacted content:
-- Archived 4 response topic(s): `#ctrlplane-adminbp-queue`; `#ctrlplane-simworld`; active queue continuation closeout; 1 more
+- Archived 2 response topic(s): /clear; closeout recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-Yes. I treated this as a real queue-control path rather than just a backlog note and implemented the preparatory queue support now.
-
-What changed:
-- Added shared slash-command classification in `agent-doc-orchestration/src/queue_command.rs` so queue/exchange-like prompt text can distinguish ordinary prompts from literal harness commands.
-- Wired the idle queue drain path so a queue head like `/clear`, `/new`, `/model sonnet`, or any other non-empty slash command is submitted literally to the owner pane after the current turn reaches idle, instead of being wrapped as an agent-doc continuation prompt.
-- After a slash queue command is submitted, the queue head is consumed with the existing force-disk queue consumption path and committed, so the remaining queue can continue.
-- Kept `/clear` and `/new` as context-reset commands for the existing Codex/OpenCode hook bookkeeping, while allowing other slash commands to run as generic slash commands.
-- Updated Codex Stop-hook and `session-check --codex-final-gate` diagnostics so slash queue heads are reported as queued commands to submit, not prompts to answer.
-- Updated the orchestration command spec and release notes.
-
-I also added the requested backlog follow-up `#ckvm` for the remaining exchange-origin variant: literal slash commands typed in `agent:exchange` should use the same after-turn command submission flow rather than being answered as prose.
-
-Verification passed:
-- Focused slash-command and queue-dispatch tests.
-- Focused idle queue slash command tests, including `/clear`, generic `/model sonnet`, Stop-hook diagnostics, and consume+commit behavior.
-- `make check`.
-- `make install`.
-- `git diff --check`.
-- Latest GitHub Actions CI run on `main` was already `completed success`.
-
-Code commit: `src/agent-doc` `19b70a1f` (`Run slash queue heads as commands`), pushed to `origin/main`. Superproject pointer commit: `0ff4619c6` (`Update agent-doc slash queue support`).
-❯ /clear
-
-### Re: /clear — gpt-5
-
-`/clear` is a builtin harness command, not an agent-doc prose prompt. Run `/clear` directly in the owner pane/terminal before continuing.
-
-The missing automation path is already captured as backlog item `#ckvm`: exchange-origin slash prompts should eventually use the same after-turn command submission flow that queue slash heads now use.
-
-### Re: closeout recovery — gpt-5
-
-No additional user request was added after `/clear`; this closeout only reopens the binary-owned write/commit boundary so the Codex final gate can account for the committed `/clear` response and agent-doc bookkeeping.
-<!-- agent:boundary:e41e1b8a -->
+<!-- agent:boundary:0bc9b5f9 -->
 <!-- /agent:exchange -->
 
 ## Queue

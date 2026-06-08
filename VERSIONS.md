@@ -6,6 +6,18 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Concurrent-supervisor superproject write-back is serialized
+  (`#ipc-drift-writeback-serialize`).** The git-dir-scoped commit lock already
+  serializes the staging/commit critical section per resolved git dir; this is
+  now verified for the cross-supervisor superproject case the drift report hit
+  (a monsterrodholders submodule session's `submodule pointer` commit
+  interleaving with another session's superproject commit). A submodule
+  document's parent-gitlink update and a sibling superproject-root document's
+  closeout contend on the same superproject lock, so two supervisors writing
+  back to one superproject cannot interleave partial commits or strand a
+  captured response outside `HEAD`. Added a deterministic concurrent test
+  (`superproject_writeback_serializes_pointer_update_and_root_commit`) plus the
+  closeout-spec invariant.
 - **Clean CRDT merges reconcile foreign disk writes instead of stranding the
   response (`#ipc-drift-visbuf-reconcile`).** When the on-disk document diverges
   from the merge input but the live editor buffer does *not* (a foreign

@@ -8552,6 +8552,172 @@ Done.
         );
     }
 
+    /// #ipc-drift-writeback-serialize: two supervisors writing back to the same
+    /// superproject must serialize on one repo-scoped lock, so a submodule doc's
+    /// parent-pointer commit cannot interleave with a concurrent superproject-root
+    /// commit. Both must land cleanly (no interleaved partial commits, no
+    /// stranded response) once the shared lock is released.
+    #[test]
+    fn superproject_writeback_serializes_pointer_update_and_root_commit() {
+        use std::fs;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        fn git(cwd: &Path, args: &[&str]) {
+            let out = Command::new("git").current_dir(cwd).args(args).output().unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // Submodule origin repo.
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        git(sub_origin, &["init"]);
+        git(sub_origin, &["config", "user.email", "test@test.com"]);
+        git(sub_origin, &["config", "user.name", "Test"]);
+        git(sub_origin, &["config", "protocol.file.allow", "always"]);
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        git(sub_origin, &["add", "README.md"]);
+        git(sub_origin, &["commit", "-m", "init sub", "--no-verify"]);
+
+        // Superproject repo with the submodule wired in.
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        git(outer, &["init"]);
+        git(outer, &["config", "user.email", "test@test.com"]);
+        git(outer, &["config", "user.name", "Test"]);
+        git(outer, &["config", "protocol.file.allow", "always"]);
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        git(outer, &["add", "README.md"]);
+        git(outer, &["commit", "-m", "init outer", "--no-verify"]);
+        let sub_url = format!("file://{}", sub_origin.display());
+        git(
+            outer,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ],
+        );
+        git(outer, &["commit", "-m", "add submodule", "--no-verify"]);
+
+        let submodule_path = outer.join("src/sub");
+        git(&submodule_path, &["config", "user.email", "test@test.com"]);
+        git(&submodule_path, &["config", "user.name", "Test"]);
+
+        // A submodule-owned session doc and a superproject-root session doc.
+        let initial = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
+        let sub_doc = submodule_path.join("session.md");
+        let root_doc = outer.join("root-doc.md");
+        fs::write(&sub_doc, initial).unwrap();
+        fs::write(&root_doc, initial).unwrap();
+        git(&submodule_path, &["add", "session.md"]);
+        git(&submodule_path, &["commit", "-m", "add sub doc", "--no-verify"]);
+        git(outer, &["add", "root-doc.md"]);
+        git(outer, &["commit", "-m", "add root doc", "--no-verify"]);
+
+        // Agent responses land in both docs; snapshots stage the committed image.
+        let sub_updated =
+            "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nSUB\n\n";
+        let root_updated =
+            "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nROOT\n\n";
+        fs::write(&sub_doc, sub_updated).unwrap();
+        fs::write(&root_doc, root_updated).unwrap();
+        fs::create_dir_all(outer.join(".agent-doc/snapshots")).unwrap();
+        crate::snapshot::save(&sub_doc, sub_updated).unwrap();
+        crate::snapshot::save(&root_doc, root_updated).unwrap();
+
+        // Externally hold the superproject commit lock so both write-back paths
+        // (the submodule pointer update and the root commit) must wait on it.
+        let super_lock_path = commit_lock_path_for_git_root(outer).unwrap();
+        fs::create_dir_all(super_lock_path.parent().unwrap()).unwrap();
+        let held = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&super_lock_path)
+            .unwrap();
+        held.lock_exclusive().unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let mut handles = Vec::new();
+        for doc in [sub_doc.clone(), root_doc.clone()] {
+            let tx = tx.clone();
+            handles.push(thread::spawn(move || {
+                let result = commit(&doc);
+                tx.send((doc, result)).unwrap();
+            }));
+        }
+        drop(tx);
+
+        // Neither write-back may finish while the superproject lock is held: the
+        // root commit blocks at lock acquisition and the submodule pointer update
+        // blocks before touching the parent index.
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "neither superproject write-back should complete while the shared lock is held"
+        );
+
+        held.unlock().unwrap();
+
+        let results = vec![
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        ];
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        for (doc, result) in results {
+            let did_commit =
+                result.unwrap_or_else(|e| panic!("commit should succeed for {}: {e}", doc.display()));
+            assert!(did_commit, "{} should create a git commit", doc.display());
+        }
+
+        // The superproject HEAD chain holds both write-backs without interleave:
+        // the submodule pointer update and the root-doc closeout each landed.
+        let outer_log = Command::new("git")
+            .current_dir(outer)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let outer_log_str = String::from_utf8_lossy(&outer_log.stdout);
+        assert!(
+            outer_log_str.contains("(submodule pointer)"),
+            "superproject log should contain the submodule pointer update, got:\n{outer_log_str}"
+        );
+        assert!(
+            outer_log_str.contains("agent-doc(root-doc):"),
+            "superproject log should contain the root-doc closeout, got:\n{outer_log_str}"
+        );
+
+        // The captured response landed in each repo's HEAD (no stuck_captured_cycle).
+        let sub_head = Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&sub_head.stdout).contains("SUB"),
+            "submodule HEAD should carry the captured response"
+        );
+        let root_head = Command::new("git")
+            .current_dir(outer)
+            .args(["show", "HEAD:root-doc.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&root_head.stdout).contains("ROOT"),
+            "superproject HEAD should carry the captured response"
+        );
+    }
+
     #[test]
     fn redact_component_contents_handles_nested_components() {
         let body = r#"## Status

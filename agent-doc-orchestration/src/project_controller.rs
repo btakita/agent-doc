@@ -304,12 +304,14 @@ fn control_plane_status(
         .unwrap_or_else(|| status_categories([("actor_records", counts.live_actor_documents)]));
     session_categories.insert("queue_heads".to_string(), counts.queue_heads);
     session_categories.insert("document_cycles".to_string(), counts.document_cycles);
+    session_categories.insert("pending_mutations".to_string(), counts.pending_mutations);
     let session_owned_items = session_categories
         .get("actor_records")
         .copied()
         .unwrap_or(counts.live_actor_documents)
         + counts.queue_heads
-        + counts.document_cycles;
+        + counts.document_cycles
+        + counts.pending_mutations;
 
     Ok(ControlPlaneStatus {
         dispatch_actor: ControlPlaneActorStatus {
@@ -328,6 +330,7 @@ fn control_plane_status(
                 ("dispatch_receipts", counts.dispatch_receipts),
                 ("queue_heads", counts.queue_heads),
                 ("document_cycles", counts.document_cycles),
+                ("pending_mutations", counts.pending_mutations),
                 ("projection_diagnostics", counts.projection_diagnostics),
                 ("admin_operations", counts.admin_operations),
                 ("crash_recovery_markers", counts.crash_recovery_markers),
@@ -940,6 +943,87 @@ fn insert_admin_operation_record(
         status: status.to_string(),
         diagnostic_payload: diagnostic_payload.map(ToOwned::to_owned),
     })
+}
+
+pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    let Some(project_root) = crate::snapshot::find_project_root(file) else {
+        return Ok(false);
+    };
+    let document_id =
+        crate::session_actor::canonical_document_id_in(&project_root, &file.to_string_lossy());
+    let queue_head_prompt = state
+        .active_queue_heads
+        .first()
+        .or_else(|| state.active_free_text_queue_heads.first())
+        .map(String::as_str);
+    let queue_head_id = queue_head_prompt.and_then(queue_head_id_from_prompt);
+    let response_commit = state
+        .file_hash
+        .as_deref()
+        .or(state.normalized_file_hash.as_deref())
+        .or(state.capture_id.as_deref());
+    let mutations = session_actor_closeout_mutations(&state);
+
+    let mut conn = open_state_db(&project_root)?;
+    state_store::commit_session_actor_closeout_in_db(
+        &mut conn,
+        &state_store::SessionActorCloseoutCommit {
+            document_id: &document_id,
+            cycle_id: &state.cycle_id,
+            cycle_state: cycle_phase_store_label(state.phase),
+            queue_name: "agent:queue",
+            queue_head_id: queue_head_id.as_deref(),
+            queue_head_prompt,
+            queue_head_state: "consumed",
+            response_commit,
+            mutations,
+        },
+    )?;
+    Ok(true)
+}
+
+fn cycle_phase_store_label(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+    }
+}
+
+fn queue_head_id_from_prompt(prompt: &str) -> Option<String> {
+    crate::session_check::do_directive_target_ids(&[prompt.to_string()])
+        .into_iter()
+        .next()
+}
+
+fn session_actor_closeout_mutations(
+    state: &crate::cycle_state::CycleState,
+) -> Vec<state_store::SessionActorCloseoutMutation<'_>> {
+    let mut mutations = Vec::new();
+    append_closeout_mutations(&mut mutations, &state.pending_done_ids, "done");
+    append_closeout_mutations(&mut mutations, &state.pending_gated_ids, "gated");
+    append_closeout_mutations(&mut mutations, &state.pending_kept_open_ids, "kept_open");
+    append_closeout_mutations(&mut mutations, &state.reaped_pending_ids, "reaped");
+    mutations
+}
+
+fn append_closeout_mutations<'a>(
+    mutations: &mut Vec<state_store::SessionActorCloseoutMutation<'a>>,
+    ids: &'a [String],
+    status: &'static str,
+) {
+    for item_id in ids.iter().map(String::as_str).filter(|id| !id.is_empty()) {
+        mutations.push(state_store::SessionActorCloseoutMutation {
+            item_id,
+            mutation_kind: "backlog_completion",
+            status,
+        });
+    }
 }
 
 pub fn load_actor_store(
@@ -4461,6 +4545,84 @@ mod tests {
     }
 
     #[test]
+    fn session_actor_closeout_persists_queue_head_cycle_and_pending_mutations() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/session-closeout.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = "---\nagent_doc_session: session-closeout\nagent: codex\n---\n\
+agent:queue\n\
+- do [#ctrlplane-sessionactor]\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let state =
+            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::record_active_queue_heads(
+            &doc,
+            &["do [#ctrlplane-sessionactor]".to_string()],
+        )
+        .unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["ctrlplane-sessionactor".to_string()])
+            .unwrap();
+        crate::cycle_state::record_pending_gated_ids(&doc, &["held-item".to_string()]).unwrap();
+        crate::cycle_state::record_pending_kept_open_ids(&doc, &["later-item".to_string()])
+            .unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["stale-item".to_string()]).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
+            .unwrap();
+
+        assert!(persist_session_actor_closeout(&doc).unwrap());
+
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let cycle: (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT state, queue_head_id, response_commit FROM document_cycles WHERE document_id = ?1 AND cycle_id = ?2",
+                params![&document_id, &state.cycle_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(cycle.0, "committed");
+        assert_eq!(cycle.1.as_deref(), Some("ctrlplane-sessionactor"));
+        assert!(cycle.2.is_some());
+
+        let queue: (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT head_id, prompt, state FROM queue_heads WHERE document_id = ?1 AND queue_name = 'agent:queue'",
+                params![&document_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(queue.0.as_deref(), Some("ctrlplane-sessionactor"));
+        assert_eq!(queue.1, "do [#ctrlplane-sessionactor]");
+        assert_eq!(queue.2, "consumed");
+
+        let mutations: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT item_id, status FROM pending_mutations WHERE document_id = ?1 AND cycle_id = ?2 ORDER BY item_id",
+                )
+                .unwrap();
+            stmt.query_map(params![&document_id, &state.cycle_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+        };
+        assert_eq!(
+            mutations,
+            vec![
+                ("ctrlplane-sessionactor".to_string(), "done".to_string()),
+                ("held-item".to_string(), "gated".to_string()),
+                ("later-item".to_string(), "kept_open".to_string()),
+                ("stale-item".to_string(), "reaped".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn controller_status_reports_single_process_control_plane_runtime() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -4575,6 +4737,27 @@ mod tests {
             None,
         )
         .unwrap();
+        drop(conn);
+        let mut conn = open_state_db(dir.path()).unwrap();
+        state_store::commit_session_actor_closeout_in_db(
+            &mut conn,
+            &state_store::SessionActorCloseoutCommit {
+                document_id: &doc_id,
+                cycle_id: "cycle-control-plane",
+                cycle_state: "committed",
+                queue_name: "agent:queue",
+                queue_head_id: Some("ctrlplane-storeactor"),
+                queue_head_prompt: Some("do [#ctrlplane-storeactor]"),
+                queue_head_state: "consumed",
+                response_commit: Some("commit-control-plane"),
+                mutations: vec![state_store::SessionActorCloseoutMutation {
+                    item_id: "ctrlplane-storeactor",
+                    mutation_kind: "backlog_completion",
+                    status: "done",
+                }],
+            },
+        )
+        .unwrap();
         state_store::insert_admin_operation_in_db(
             &conn,
             "projection_repair",
@@ -4651,6 +4834,14 @@ mod tests {
                 .control_plane
                 .store_actor
                 .categories
+                .get("pending_mutations"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
                 .get("admin_operations"),
             Some(&1)
         );
@@ -4670,10 +4861,10 @@ mod tests {
                 .get("layout_states"),
             Some(&1)
         );
-        assert_eq!(status.control_plane.session_actors.owned_items, 3);
+        assert_eq!(status.control_plane.session_actors.owned_items, 4);
         assert_eq!(status.control_plane.supervisor_adapters.owned_items, 1);
         assert!(status.control_plane.projection_workers.owned_items >= 1);
-        assert!(status.control_plane.store_actor.owned_items >= 10);
+        assert!(status.control_plane.store_actor.owned_items >= 11);
     }
 
     #[test]

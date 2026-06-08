@@ -45,8 +45,8 @@ projections, and tmux transcript inference.
 ## State authority
 
 - `.agent-doc/state.db` is the authoritative store for actor records,
-  generations, dispatch attempts, queue heads, document cycles, supervisor
-  leases, admin operations, and projection diagnostics.
+  generations, dispatch attempts, queue heads, document cycles, pending backlog
+  mutations, supervisor leases, admin operations, and projection diagnostics.
 - `session-actors.json`, `sessions.json`, layout JSON, session logs, and
   `ops.log` are compatibility or diagnostic projections. Normal route, start,
   sync, clear, restart, and queue-dispatch paths must not treat them as write
@@ -63,6 +63,10 @@ projections, and tmux transcript inference.
 - JSON projection failures are recorded as projection diagnostics with source
   generation, intended projection hash, error, and retry status. They must not
   roll back or weaken the authoritative actor state.
+- Session actor closeout persists the selected queue head, response/cycle
+  terminal state, and tracked pending mutations as one controller transaction
+  after strict closeout checks pass. Failed closeout must leave those controller
+  rows unadvanced.
 
 ## Lifecycle invariants
 
@@ -139,8 +143,8 @@ state authority, compatibility-only projection authority, and role snapshots for
 the dispatch actor, store actor, per-document session actors, supervisor
 adapters, and projection workers. Store role snapshots include per-category
 SQLite counts for actor documents, lifecycle transitions, supervisor leases,
-dispatch receipts, queue heads, document cycles, projection diagnostics, admin
-operations, crash-recovery markers, and layout state.
+dispatch receipts, queue heads, document cycles, pending mutations, projection
+diagnostics, admin operations, crash-recovery markers, and layout state.
 
 Read-only admin calls may be served from the in-memory snapshot when the result
 includes the snapshot generation/version. Mutating admin calls must enter through

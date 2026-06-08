@@ -161,6 +161,7 @@ pub struct ControlPlaneStoreCounts {
     pub dispatch_receipts: usize,
     pub queue_heads: usize,
     pub document_cycles: usize,
+    pub pending_mutations: usize,
     pub projection_diagnostics: usize,
     pub admin_operations: usize,
     pub crash_recovery_markers: usize,
@@ -175,11 +176,32 @@ impl ControlPlaneStoreCounts {
             + self.dispatch_receipts
             + self.queue_heads
             + self.document_cycles
+            + self.pending_mutations
             + self.projection_diagnostics
             + self.admin_operations
             + self.crash_recovery_markers
             + self.layout_states
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionActorCloseoutMutation<'a> {
+    pub item_id: &'a str,
+    pub mutation_kind: &'a str,
+    pub status: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionActorCloseoutCommit<'a> {
+    pub document_id: &'a str,
+    pub cycle_id: &'a str,
+    pub cycle_state: &'a str,
+    pub queue_name: &'a str,
+    pub queue_head_id: Option<&'a str>,
+    pub queue_head_prompt: Option<&'a str>,
+    pub queue_head_state: &'a str,
+    pub response_commit: Option<&'a str>,
+    pub mutations: Vec<SessionActorCloseoutMutation<'a>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +309,17 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
             response_commit TEXT,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (document_id, cycle_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS pending_mutations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            mutation_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL,
+            UNIQUE(document_id, cycle_id, item_id, mutation_kind)
         );
 
         CREATE TABLE IF NOT EXISTS admin_operations (
@@ -403,6 +436,11 @@ pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlane
             conn,
             "SELECT COUNT(*) FROM document_cycles",
             "document cycles",
+        )?,
+        pending_mutations: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM pending_mutations",
+            "pending mutations",
         )?,
         projection_diagnostics: count_rows(
             conn,
@@ -1104,6 +1142,101 @@ pub fn upsert_document_cycle_state_in_db(
     Ok(())
 }
 
+pub fn commit_session_actor_closeout_in_db(
+    conn: &mut Connection,
+    closeout: &SessionActorCloseoutCommit<'_>,
+) -> Result<()> {
+    let now = sqlite_i64(timestamp_secs(), "session actor closeout timestamp")?;
+    let tx = conn.transaction()?;
+
+    if let Some(prompt) = closeout.queue_head_prompt {
+        tx.execute(
+            r#"
+            INSERT INTO queue_heads (
+                document_id,
+                queue_name,
+                head_id,
+                prompt,
+                state,
+                selected_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            ON CONFLICT(document_id, queue_name) DO UPDATE SET
+                head_id = excluded.head_id,
+                prompt = excluded.prompt,
+                state = excluded.state,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                closeout.document_id,
+                closeout.queue_name,
+                closeout.queue_head_id,
+                prompt,
+                closeout.queue_head_state,
+                now
+            ],
+        )?;
+    }
+
+    tx.execute(
+        r#"
+        INSERT INTO document_cycles (
+            document_id,
+            cycle_id,
+            state,
+            queue_head_id,
+            response_commit,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(document_id, cycle_id) DO UPDATE SET
+            state = excluded.state,
+            queue_head_id = excluded.queue_head_id,
+            response_commit = excluded.response_commit,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            closeout.document_id,
+            closeout.cycle_id,
+            closeout.cycle_state,
+            closeout.queue_head_id,
+            closeout.response_commit,
+            now
+        ],
+    )?;
+
+    for mutation in &closeout.mutations {
+        tx.execute(
+            r#"
+            INSERT INTO pending_mutations (
+                document_id,
+                cycle_id,
+                item_id,
+                mutation_kind,
+                status,
+                recorded_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(document_id, cycle_id, item_id, mutation_kind) DO UPDATE SET
+                status = excluded.status,
+                recorded_at = excluded.recorded_at
+            "#,
+            params![
+                closeout.document_id,
+                closeout.cycle_id,
+                mutation.item_id,
+                mutation.mutation_kind,
+                mutation.status,
+                now
+            ],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn insert_admin_operation_in_db(
     conn: &Connection,
     operation_kind: &str,
@@ -1284,6 +1417,24 @@ mod tests {
             Some("ctrlplane-storeactor"),
             None,
         )?;
+        commit_session_actor_closeout_in_db(
+            &mut conn,
+            &SessionActorCloseoutCommit {
+                document_id: &record.document_id,
+                cycle_id: "cycle-storeactor",
+                cycle_state: "committed",
+                queue_name: "agent:queue",
+                queue_head_id: Some("ctrlplane-storeactor"),
+                queue_head_prompt: Some("do [#ctrlplane-storeactor]"),
+                queue_head_state: "consumed",
+                response_commit: Some("commit-storeactor"),
+                mutations: vec![SessionActorCloseoutMutation {
+                    item_id: "ctrlplane-storeactor",
+                    mutation_kind: "backlog_completion",
+                    status: "done",
+                }],
+            },
+        )?;
         insert_projection_diagnostic(
             &conn,
             "session-actors.json",
@@ -1315,11 +1466,12 @@ mod tests {
         assert_eq!(counts.dispatch_receipts, 1);
         assert_eq!(counts.queue_heads, 1);
         assert_eq!(counts.document_cycles, 1);
+        assert_eq!(counts.pending_mutations, 1);
         assert_eq!(counts.projection_diagnostics, 1);
         assert_eq!(counts.admin_operations, 1);
         assert_eq!(counts.crash_recovery_markers, 1);
         assert_eq!(counts.layout_states, 1);
-        assert_eq!(counts.total_authoritative_rows(), 10);
+        assert_eq!(counts.total_authoritative_rows(), 11);
 
         Ok(())
     }

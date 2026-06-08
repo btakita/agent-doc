@@ -153,6 +153,8 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         return Err(err);
     }
     timer.mark("session_check");
+    crate::project_controller::persist_session_actor_closeout(file)?;
+    timer.mark("session_actor_closeout");
     cleanup_fallback_patch_files(file);
     timer.mark("fallback_cleanup");
     timer.finish();

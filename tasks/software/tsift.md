@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -71,7 +71,7 @@ No follow-up backlog item was created for this cycle; the implemented `prompt_ca
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:d33a3af8 -->
+<!-- agent:boundary:0a782a4a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +81,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Please add analytics to the prompt cache. I want to be able to review effective it is over time.
 <!-- /agent:queue -->
 
 ## Backlog

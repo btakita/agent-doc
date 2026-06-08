@@ -109,7 +109,11 @@ Commits and push:
 - parent repo: `2fccb161c chore: update agent-doc submodule`, pushed to `origin/main`.
 
 Escalation: none.
-<!-- agent:boundary:450eabb2 -->
+
+### Re: active queue continuation closeout — gpt-5
+
+Closeout recovery only: the `#ctrlplane-simworld` response is already present, the queue is drained, and the backlog item is reaped. This commit reopens and closes the current continuation turn through the binary-owned write/commit path so the final gate can verify the session state.
+<!-- agent:boundary:10437abc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -118,8 +122,7 @@ Escalation: none.
 <!-- /agent:queue -->
 ###
 <!--
-- :round_pushpin: do [#ctrlplane-simworld]
-- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
+- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`. Extract the stop turn + `/clear` functionality in preparation to support a literal `/clear` prompt or any other `/` command in the exchange or queue, which will run the `/` command after the turn is complete.
 - When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
 ---
 A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): column-based JSONL token efficiency
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:32a62e88 -->
+<!-- agent:boundary:828a1b5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +44,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- Please evaluate the output format of the tsift --envelope source-read. I see much repetition with the keys in metrics. Please look at real-world examples, such as with the agent-doc-bugs2.md session history. Make the output more token efficient. Is JSON the best format? Should we use a column-based strategy for these sort of lists?
 <!-- /agent:queue -->
 
 ## Backlog

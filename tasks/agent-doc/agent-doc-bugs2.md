@@ -166,7 +166,8 @@ Verification passed: focused parser/preflight tests, adjacent active-queue slash
 Closeout repair note: the implementation answer is above, but this response is intentionally anchored after the remaining prompt tail so `session-check` can prove the prompt has been answered in the current document order.
 
 The root fix is shipped in `btakita/agent-doc` `7a1a999b`: slash-only added diffs now stay command-only in preflight, surface through `slash_commands` / `builtin_commands`, and do not open a normal response cycle. The parent pointer is pushed as `btakita/agent-loop` `7d3baaaa1`.
-<!-- agent:boundary:967a4de7 -->
+/clear
+<!-- agent:boundary:2cf8422d -->
 <!-- /agent:exchange -->
 
 ## Queue

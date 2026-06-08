@@ -46,13 +46,39 @@ Compacted content:
 Assuming "Control Pane" means the existing `Single Process Control Plane` contract: yes, that should be the target, but it is not fully landed yet. Current code already uses the project controller and `.agent-doc/state.db` for actor records; the rearchitecture should finish consolidating controller, session, store, and supervisor actors into one project-scoped control-plane process, with external CLIs/editors still talking to it over IPC.
 
 I added backlog slices for the unified process, the SQLite write-through store, lazily-rs-backed in-memory authority evaluation, dispatch/session actors, projection cleanup, crash recovery, admin/backpressure, and deterministic SimWorld coverage. I kept them ordered so authority moves to the controller before obsolete sidecar writers are removed.
-<!-- agent:boundary:04fff25c -->
+Implemented `#ctrlplane-process`.
+
+> **Queue prompt:**
+>
+> do [#ctrlplane-process]
+
+
+`agent-doc controller status` now reports an explicit `control_plane` snapshot for the existing project-scoped single-process controller. The JSON names the controller IPC boundary, `.agent-doc/state.db` as the durable state authority, compatibility projection output as the projection authority, and role snapshots for dispatch/store/session/supervisor/projection ownership. The active controller RPC path and inactive/offline status fallback both use the same status builder, and the new unit coverage exercises start/register/dispatch/status/projection facts through the controller path.
+
+Updated specs:
+- `specs/07-session-tmux-commands.md` documents the `control_plane` status field.
+- `specs/08b-single-process-control-plane.md` documents the admin/status surface for this contract.
+
+Verification:
+- `cargo test -p agent-doc-orchestration controller_status_reports_single_process_control_plane_runtime`
+- `cargo test -p agent-doc-orchestration project_controller::tests::`
+- `make check`
+- `cargo install --path .`
+
+Commits/push:
+- `src/agent-doc`: `a1abe8c7 controller: expose control-plane status`, pushed to `origin/main`.
+- `agent-loop`: `ee4e9b30f agent-doc(agent-doc): update control-plane status pointer`, pushed to `origin/main`.
+
+CI:
+- `src/agent-doc` latest CI for `a1abe8c7` was `in_progress` at closeout (`27109791646`, 2026-06-08 00:41:17Z), so I did not wait on it.
+- `agent-loop` has no workflow named `CI`.
+<!-- agent:boundary:1559fb4c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#ctrlplane-process]
+- ~~do [#ctrlplane-process]~~
 - do [#ctrlplane-storeactor]
 - do [#ctrlplane-memoryauth]
 - do [#ctrlplane-dispatchapi]
@@ -86,7 +112,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-process] #agent-doc-bug Implement the unified project-scoped control-plane process: host the dispatch actor, store actor, per-document session actors, supervisor adapters, and projection workers in one controller-owned runtime while keeping CLI/editor IPC as the external boundary.
 - [ ] [#ctrlplane-storeactor] #agent-doc-bug Extend the `.agent-doc/state.db` store actor beyond actor records: one WAL SQLite writer owns actor state, lifecycle transitions, dispatch receipts, queue heads, closeout/cycle state, projection diagnostics, admin operations, and crash-recovery markers.
 - [ ] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
 - [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.

@@ -110,7 +110,38 @@ Done — overlay-as-merge-base verified order-stable for the append case, with t
 The three `#ipc-drift-*` plan items (`tasks/agent-doc/plan-ipc-crdt-response-drift.md`) are now all closed: visbuf-reconcile (fix), writeback-serialize (verify+cover), order-stable-merge (verify+cover). The remaining `#ipc-crdt-response-drift` review item's gated subtasks are satisfied; I'll reconcile that review item next pass.
 
 Next in queue: canonical-tmux-session closing, then the operations-taxonomy backlog capture.
-<!-- agent:boundary:d9fe91f3 -->
+
+### Re: close the non-canonical tmux session when a new session becomes canonical — opus-4-8
+
+Done and shipped. `agent-doc session set <name>` now closes the superseded session and prunes it from the model once the new session becomes canonical, instead of leaving registered panes spanning two tmux sessions (the exact "session drift: registered panes span 2 tmux sessions: 0, 5" warning preflight raised this cycle).
+
+**What changed.** After `session set` migrates the `agent-doc` + `stash` windows to the new canonical session, it calls a new `resync::close_superseded_session(old)`:
+- If tmux already auto-destroyed the old session (the migration left it with no windows), it is reported as already closed.
+- Otherwise the old session is closed (`tmux kill-session`) **only** when it is a *pure agent-doc orphan*: every remaining window is agent-doc-managed (`agent-doc`, `stash`, `stash-*`) **and** no pane runs a live agent process. The registry is then pruned of the now-dead panes.
+- A session that still holds any unmanaged user window or a live agent is preserved (and logged) — so superseding a canonical session never destroys unrelated work.
+
+**Why the safety gate.** "Close the other session" is destructive (`kill-session`), so I refused to guess. The gate kills only what is unambiguously a stray agent-doc session; anything with your own windows or a running agent is left alone.
+
+**Scope note.** This wires the *configured-canonical* path (`session set`), where "canonical" is unambiguous. The auto-detect drift path (panes span sessions with **no** configured canonical) needs a canonical-determination rule decision — queued as `#canonical-session-close-autodetect`.
+
+**Verification.** New `tmux-router` helpers `list_window_names` / `list_session_panes` / `kill_session`. Live-tmux coverage in `resync.rs` (kills a pure orphan, preserves a user-window session, treats an already-gone session as closed) — all 3 pass against a real isolated tmux server. `make check`: green, clippy clean. Built release + `cargo install --path .` (both binaries, 0.34.0). Spec: `specs/07-session-tmux-commands.md`; VERSIONS entry. Committed + pushed: `tmux-router` `3fdfd0a`, `agent-doc` `f8557d2b`.
+
+### Re: backlog items for the operations taxonomy + implementation — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.
+
+
+Captured. The operations-taxonomy work is the operation-scoped-drift / turn-affectedness model already drafted in `tasks/agent-doc/plan-operation-scoped-drift.md` (`#op-scoped-drift`): formalize each document op as `{target, kind, actor, causal}`, derive a per-turn `TurnScope` (read/write set + driver), and replace the coarse drift gate with an affectedness classifier that routes ops into the 5-class taxonomy (Independent / Input-affecting / Output-contended / Structural-dependency / Provenance-spoofed). Only the goal sentence was truncated in the queue, but it lines up with the plan's "distinguish between ops that affect the current turn vs. independent ops that just integrate + persist."
+
+Added three actionable phase IDs to the top of the backlog (priority order), each referencing the plan:
+- `#op-scoped-drift-1` — actor + causal (Lamport/session-origin) tagging on `node_events`; sqlite op-log schema + writer.
+- `#op-scoped-drift-2` — `TurnScope` manifest (read/write set, driver) from preflight `prompt_targets` / plan `write_scope`.
+- `#op-scoped-drift-3` — affectedness classifier + 5-class router; replace the coarse gate with scope-intersection so independent ops integrate + persist without affecting the turn.
+
+Top of backlog: `#op-scoped-drift-1`.
+<!-- agent:boundary:ba15db32 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -119,7 +150,7 @@ Next in queue: canonical-tmux-session closing, then the operations-taxonomy back
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-visbuf-reconcile]~~
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]~~
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]~~
-- :pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.
+- ~~:pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.~~
 - :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
 <!-- /agent:queue -->
 ###
@@ -148,6 +179,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#op-scoped-drift-1] :round_pushpin: Actor + causal (Lamport/session-origin) tagging on node_events; sqlite op-log schema + writer for the durable op log. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#op-scoped-drift-2] :round_pushpin: TurnScope manifest (read_set/write_set/driver) emitted at turn start from preflight prompt_targets / plan write_scope. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#op-scoped-drift-3] :round_pushpin: Affectedness classifier + 5-class router; replace the coarse drift gate with TurnScope scope-intersection so independent ops integrate+persist without affecting the turn. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#canonical-session-close-autodetect] :round_pushpin: [recommended] Extend superseded-session close to the auto-resync drift path (registered panes span multiple tmux sessions with no configured canonical). Needs a canonical-determination rule decision: newest session vs the session holding the active agent-doc window vs the current pane. Reuse resync::close_superseded_session once canonical is resolved.
 <!-- /agent:backlog -->
 
 ## Review

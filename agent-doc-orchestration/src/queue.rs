@@ -520,11 +520,15 @@ pub fn sync_backlog_into_queue(
 /// `Some(new_entries)` when the order changes, `None` otherwise.
 /// Two-tier manual-priority pin markers (`#queue-manual-priority-override`).
 ///
-/// A queue / backlog / icebox item prefixed with a pin marker floats above the
-/// `priority`-rank-ordered tail and is held there across the per-turn recompute
-/// (it lives in the document text). Releasing a pin is just deleting the marker
-/// — the item reverts to its `priority`-attribute rank. There are two tiers, so
-/// operator priority always outranks agent priority:
+/// Releasing a pin is just deleting the marker. There are two tiers with
+/// different effects on the per-turn `priority` recompute:
+///
+/// - **Operator** pin (`#queue-operator-pin-position-lock`) is *position-locked*:
+///   the `priority` attribute never moves it. It stays at the exact slot where
+///   the operator placed it (the marker lives in the document text, so it is
+///   sticky), and the unpinned / agent-pinned prompts reorder *around* it.
+/// - **Agent** pin floats above the unpinned `priority`-rank-ordered tail (but
+///   never above an operator pin) among the slots not held by an operator pin.
 ///
 /// The marker is a markdown-emphasis wrap of the word `prioritized`, so it
 /// renders distinctly in the editor and is released by deleting it:
@@ -714,7 +718,9 @@ pub fn annotate_operator_priority_reorders(
 }
 
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
-/// unpinned. Lower tiers sort first; agent pins never outrank operator pins.
+/// unpinned. Tier 0 (operator pin) is position-locked by
+/// `sort_prompts_by_priority` (`#queue-operator-pin-position-lock`); among the
+/// reorderable remainder, agent pins (tier 1) sort before unpinned (tier 2).
 fn priority_tier(text: &str) -> u8 {
     if is_prioritized(text) {
         0
@@ -744,13 +750,18 @@ pub fn sort_prompts_by_priority(
     if positions.len() < 2 {
         return None;
     }
-    // Sort key (tier, rank): operator pins (`__prioritized__`, tier 0) float to
-    // the top, then agent pins (`_prioritized_`, tier 1), then the unpinned tail
-    // (tier 2) in backlog-priority rank order. Pinned tiers use a constant
-    // secondary key so the stable sort holds their document order. Deleting a
-    // marker drops the prompt down a tier (ultimately into the rank-ordered tail).
-    let key = |e: &QueueEntry| -> (u8, u8) {
-        let tier = entry_priority_tier(e);
+    let prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
+    let n = prompts.len();
+    // Operator pins (`__prioritized__` / `:pushpin:`, tier 0) are POSITION-LOCKED
+    // (`#queue-operator-pin-position-lock`): the `priority` attribute must never
+    // move an operator-pinned prompt — it stays at the exact slot where the
+    // operator placed it. Only agent pins (`_prioritized_`, tier 1) and the
+    // unpinned tail (tier 2) are reordered, and they fill *only the slots not
+    // held by an operator pin*, agent pins first then unpinned in backlog rank
+    // order. A constant secondary key for agent pins keeps their document order.
+    let key = |idx: usize| -> (u8, u8) {
+        let e = &prompts[idx];
+        let tier = entry_priority_tier(e); // 1 (agent pin) or 2 (unpinned) here
         if tier < 2 {
             (tier, 0)
         } else {
@@ -760,16 +771,31 @@ pub fn sort_prompts_by_priority(
             (2, r)
         }
     };
-    let mut prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
-    let before: Vec<(u8, u8)> = prompts.iter().map(key).collect();
-    prompts.sort_by_key(key);
-    let after: Vec<(u8, u8)> = prompts.iter().map(key).collect();
-    if before == after {
+    let mut movable: Vec<usize> = (0..n)
+        .filter(|&i| entry_priority_tier(&prompts[i]) != 0)
+        .collect();
+    movable.sort_by_key(|&i| key(i));
+    // Reassemble: walk the prompt slots in document order. An operator-pinned
+    // slot keeps its own prompt (anchored); every other slot draws the next
+    // entry from the reordered `movable` queue.
+    let mut mv = movable.into_iter();
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    for (i, prompt) in prompts.iter().enumerate() {
+        if entry_priority_tier(prompt) == 0 {
+            order.push(i);
+        } else {
+            order.push(
+                mv.next()
+                    .expect("movable slot count matches non-operator-pin prompts"),
+            );
+        }
+    }
+    if order.iter().enumerate().all(|(slot, &i)| slot == i) {
         return None;
     }
     let mut out = entries.to_vec();
     for (slot, &pos) in positions.iter().enumerate() {
-        out[pos] = prompts[slot].clone();
+        out[pos] = prompts[order[slot]].clone();
     }
     Some(out)
 }
@@ -1435,34 +1461,50 @@ mod tests {
     }
 
     #[test]
-    fn prioritized_marker_floats_pinned_prompt_to_top() {
-        // #queue-manual-priority-override: a `__prioritized__` pin floats above
-        // higher-backlog-rank items regardless of its own rank.
-        let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n- do [#c]\n").unwrap();
+    fn operator_pin_stays_in_place_while_unpinned_reorder() {
+        // #queue-operator-pin-position-lock: a `__prioritized__` operator pin
+        // stays at its authored slot; only the unpinned prompts reorder around it.
+        let entries = parse("- do [#c]\n- __prioritized__ do [#b]\n- do [#a]\n").unwrap();
         let mut rank = std::collections::HashMap::new();
-        rank.insert("a".to_string(), 1u8);
-        rank.insert("b".to_string(), 9u8); // worst rank, but pinned → top
+        rank.insert("a".to_string(), 1u8); // best rank → first among unpinned
+        rank.insert("b".to_string(), 9u8); // worst rank, but pinned → frozen in middle
         rank.insert("c".to_string(), 2u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pin should float");
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("unpinned reorder");
+        // Pin #b holds slot 1; unpinned #a (rank1) and #c (rank2) fill slots 0,2.
         assert_eq!(
             render(&sorted),
-            "- __prioritized__ do [#b]\n- do [#a]\n- do [#c]\n"
+            "- do [#a]\n- __prioritized__ do [#b]\n- do [#c]\n"
         );
     }
 
     #[test]
-    fn prioritized_marker_floats_multiple_pins_in_document_order() {
-        // Multiple pins keep their document order at the top; unpinned tail keeps rank order.
+    fn operator_pin_at_bottom_not_floated_to_top() {
+        // The exact operator complaint: a pinned item at the bottom must NOT be
+        // hoisted to the top by the priority attribute — it stays put.
+        let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        rank.insert("b".to_string(), 9u8);
+        // #a is already in rank order at slot 0 and the pin is anchored at slot 1
+        // → nothing moves.
+        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
+    }
+
+    #[test]
+    fn operator_pins_hold_their_slots_unpinned_reorder_around() {
+        // Multiple operator pins each hold their own slot; the unpinned prompts
+        // reorder among the remaining slots in rank order.
         let entries =
             parse("- do [#a]\n- __prioritized__ [#z]\n- do [#b]\n- __prioritized__ [#y]\n")
                 .unwrap();
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pins should float");
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("unpinned reorder");
+        // Pins #z, #y stay at slots 1,3; unpinned #b (rank1), #a (rank2) fill 0,2.
         assert_eq!(
             render(&sorted),
-            "- __prioritized__ [#z]\n- __prioritized__ [#y]\n- do [#b]\n- do [#a]\n"
+            "- do [#b]\n- __prioritized__ [#z]\n- do [#a]\n- __prioritized__ [#y]\n"
         );
     }
 
@@ -1478,12 +1520,12 @@ mod tests {
     }
 
     #[test]
-    fn prioritized_marker_floats_pin_with_empty_rank_map() {
-        // No backlog priority at all, but a pin must still float to the top.
+    fn operator_pin_position_locked_with_empty_rank_map() {
+        // No backlog priority at all: the operator pin stays exactly where placed
+        // (previously it floated to the top — that is the behavior being removed).
         let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n").unwrap();
         let rank = std::collections::HashMap::new();
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("pin floats sans rank");
-        assert_eq!(render(&sorted), "- __prioritized__ do [#b]\n- do [#a]\n");
+        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
     }
 
     #[test]
@@ -1495,9 +1537,10 @@ mod tests {
     }
 
     #[test]
-    fn pin_tiers_operator_then_agent_then_unpinned() {
-        // #queue-agent-vs-operator-pin-tier: operator pin (__) outranks agent pin (_)
-        // outranks unpinned, regardless of backlog rank.
+    fn operator_pin_anchored_while_agent_pin_floats_among_movable() {
+        // #queue-agent-vs-operator-pin-tier + #queue-operator-pin-position-lock:
+        // the operator pin (__) is anchored at its slot; among the remaining
+        // (movable) slots the agent pin (_) still floats above unpinned.
         let entries = parse(concat!(
             "- do [#a]\n",
             "- _prioritized_ do [#b]\n",
@@ -1505,13 +1548,15 @@ mod tests {
         ))
         .unwrap();
         let mut rank = std::collections::HashMap::new();
-        rank.insert("a".to_string(), 1u8); // best rank, but unpinned → bottom
+        rank.insert("a".to_string(), 1u8); // best rank, but unpinned
         rank.insert("b".to_string(), 5u8);
-        rank.insert("c".to_string(), 9u8); // worst rank, but operator-pinned → top
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        rank.insert("c".to_string(), 9u8); // operator-pinned → stays at slot 2
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("agent pin floats");
+        // Operator pin #c stays at the bottom (slot 2); agent pin #b floats above
+        // unpinned #a in the two movable slots.
         assert_eq!(
             render(&sorted),
-            "- __prioritized__ do [#c]\n- _prioritized_ do [#b]\n- do [#a]\n"
+            "- _prioritized_ do [#b]\n- do [#a]\n- __prioritized__ do [#c]\n"
         );
     }
 
@@ -1568,7 +1613,9 @@ mod tests {
                 "not operator: {m}"
             );
         }
-        // Tier ordering with emoji shortcodes.
+        // Tier ordering with emoji shortcodes: the operator pin (:pushpin:) is
+        // position-locked at its slot; the agent pin (:round_pushpin:) floats
+        // above the unpinned prompt among the remaining slots.
         let entries = parse(concat!(
             "- do [#a]\n",
             "- :round_pushpin: do [#b]\n",
@@ -1580,7 +1627,7 @@ mod tests {
         let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
         assert_eq!(
             render(&sorted),
-            "- :pushpin: do [#c]\n- :round_pushpin: do [#b]\n- do [#a]\n"
+            "- :round_pushpin: do [#b]\n- do [#a]\n- :pushpin: do [#c]\n"
         );
     }
 
@@ -1675,6 +1722,8 @@ mod tests {
 
     #[test]
     fn pin_tiers_with_asterisk_emphasis() {
+        // Operator pin (**strong**) is position-locked at slot 2; agent pin
+        // (*italic*) floats above the unpinned prompt in the movable slots.
         let entries = parse(concat!(
             "- do [#a]\n",
             "- *prioritized* do [#b]\n",
@@ -1686,7 +1735,7 @@ mod tests {
         let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
         assert_eq!(
             render(&sorted),
-            "- **prioritized** do [#c]\n- *prioritized* do [#b]\n- do [#a]\n"
+            "- *prioritized* do [#b]\n- do [#a]\n- **prioritized** do [#c]\n"
         );
     }
 

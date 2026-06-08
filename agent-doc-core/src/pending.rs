@@ -575,6 +575,18 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         (String::new(), after_box.to_string())
     };
 
+    // Self-heal a redundant self-referential `[#id]` token embedded in the text
+    // (`#pending-redundant-self-id-strip`): when an item was created with its own
+    // id repeated inside the content (e.g. `[#x] [recommended] [#x] ...` from a
+    // `--pending-add` whose text already carried the id), the leading `[#x]`
+    // becomes the parsed id and the second `[#x]` would otherwise render as a
+    // duplicate. Cross-references to *other* ids are left intact.
+    let text = if id.is_empty() {
+        text
+    } else {
+        strip_redundant_self_id_tag(&text, &id)
+    };
+
     Some(PendingItem {
         marker,
         id,
@@ -583,6 +595,57 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         text: text.trim_end().to_string(),
         continuation: String::new(),
     })
+}
+
+/// Remove the first bracketed `[#id]` token in `text` that equals the item's own
+/// `id`, collapsing the surrounding spaces it leaves behind. Only a token that
+/// matches the item's own id is removed; references to other ids stay.
+fn strip_redundant_self_id_tag(text: &str, id: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut stripped = false;
+    while let Some(pos) = rest.find("[#") {
+        if !stripped {
+            let after = &rest[pos + 2..];
+            if let Some(close) = after.find(']') {
+                let tok = &after[..close];
+                if is_valid_pending_id(tok) && tok.eq_ignore_ascii_case(id) {
+                    out.push_str(&rest[..pos]);
+                    rest = &after[close + 1..];
+                    stripped = true;
+                    continue;
+                }
+            }
+        }
+        let keep_to = pos + 2;
+        out.push_str(&rest[..keep_to]);
+        rest = &rest[keep_to..];
+    }
+    out.push_str(rest);
+    if stripped {
+        collapse_inline_spaces(&out)
+    } else {
+        out
+    }
+}
+
+/// Collapse runs of ASCII spaces/tabs to a single space and trim ends, leaving
+/// newlines intact. Used after removing an inline token from a one-line item.
+fn collapse_inline_spaces(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev_space = false;
+    for ch in text.chars() {
+        if ch == ' ' || ch == '\t' {
+            if !prev_space {
+                out.push(' ');
+            }
+            prev_space = true;
+        } else {
+            prev_space = false;
+            out.push(ch);
+        }
+    }
+    out.trim().to_string()
 }
 
 fn parse_parent_list_marker(line: &str) -> Option<(PendingListMarker, &str)> {
@@ -2326,6 +2389,27 @@ mod tests {
         assert_eq!(items[0].id, "a3f2");
         assert_eq!(items[1].marker, PendingListMarker::Ordered(2));
         assert_eq!(items[1].state, PendingState::Done);
+    }
+
+    #[test]
+    fn strips_redundant_self_id_tag_from_text() {
+        // #pending-redundant-self-id-strip: a self-id repeated after a tag is dropped.
+        let body =
+            "- [ ] [#stale-x] [recommended] [#stale-x] Evaluate the retire path.\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "stale-x");
+        assert_eq!(items[0].text, "[recommended] Evaluate the retire path.");
+    }
+
+    #[test]
+    fn preserves_cross_reference_ids_in_text() {
+        // Only the item's OWN id is stripped; references to other ids stay.
+        let body = "- [ ] [#a] depends on [#b] and [#c] downstream.\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "a");
+        assert_eq!(items[0].text, "depends on [#b] and [#c] downstream.");
     }
 
     #[test]

@@ -4549,7 +4549,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             .map(|s| ("auto-dag dependency order (blockers + pins)", s))
             .or_else(|| {
                 crate::queue::sort_prompts_by_priority(&entries, &rank)
-                    .map(|s| ("backlog priority (pins floated to top)", s))
+                    .map(|s| ("backlog priority (operator pins position-locked)", s))
             });
         if let Some((how, sorted)) = sorted {
             let sorted = crate::queue::annotate_agent_priority_promotions(&entries, &sorted)

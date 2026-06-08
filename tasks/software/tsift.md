@@ -42,6 +42,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> Please add analytics to the prompt cache. I want to be able to review effective it is over time.
+
+
+> **Queue prompt:**
+>
 > Can tsift implement Prompt Caching? See https://viktor.com/blog/how-we-built-viktor-around-prompt-caching
 
 
@@ -65,6 +70,38 @@ Verification:
 - `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-ffffe139d0`.
 - `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
 - `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was completed/success for `test semantic ast edit edge cases` at 2026-06-08T19:08:05Z.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was completed/success for `add session prompt cache plan` at 2026-06-08T21:25:43Z.
+- `tsift status` in `src/tsift`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `net_cached_input_tokens` gives a coarse effectiveness signal: cache reads minus creation tokens. Negative or small positive values are a warning sign even when cache reads are present.
+- `total_cache_creation_tokens` and `cache_read_to_creation_ratio` expose rewrite churn. High creation with low reads means the runtime is repeatedly creating cache entries without getting enough warm reuse.
+- `timeline` shows which turns had a ratio drop, so the next step is to inspect what changed at that boundary: prefix text, tools, cache key, compaction, or routing.
+- `average_cached_input_ratio`, first/last ratios, and `cached_input_ratio_delta` show whether reuse is holding, improving, or degrading.
+- Self-hosted or edge caches may be replica-local. Without routing affinity for the same cache key, a byte-identical prompt can still miss because it lands on a different replica.
+- Compaction should preserve the live warm prefix and rewrite only the transcript tail. A cold standalone summarizer prompt effectively starts a new cache shape.
+- Volatile values inside the cached prefix, such as timestamps, generated IDs, transient diagnostics, or one-off compaction instructions, should be treated as accidental invalidation sources.
+- Thread or session key changes should invalidate OpenAI-style keyed reuse because the same byte-identical prefix is no longer associated with the same `prompt_cache_key`.
+- Tool definition changes should invalidate the tool-prefix segment. For Anthropic-style explicit breakpoints, edits before a `cache_control` breakpoint invalidate that block and downstream cached material.
+- A stable system/developer prefix change should invalidate the cache for that prefix because the bytes are no longer identical.
+- `git diff --check`: passed.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-35d22ae8c2`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture'`: passed, artifact `tart-02a5c5c8a8`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-agent-doc prompt_cache_plan_summarizes_effectiveness_over_time -- --nocapture'`: passed, artifact `tart-e2cfb2ea68`.
+- parent repo: `220cbf472` (`update tsift prompt cache analytics`), pushed to `origin/main`.
+- tsift submodule: `7b9da33` (`add prompt cache analytics`), pushed to `origin/main`.
+- parent pointer: `src/tsift`
+- `src/tsift/specs/digests-sessions.md`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/packages/tsift-cli/src/commands/digests.rs`
+- `src/tsift/packages/tsift-agent-doc/src/session_cost.rs`
+- `src/tsift/VERSIONS.md`
+- Added library and compiled CLI regression coverage for improving, stable, and candidate uncached prompt-cache analytics.
+- Updated the session digest spec and unreleased changelog entry.
+- Added compact and human text output for the analytics so cache effectiveness can be reviewed without raw JSON.
+- Added bounded `prompt_cache_plan.analytics` with sample count, effective flag, trend (`single_sample`, `stable`, `improving`, `declining`, `insufficient_data`), average/first/last cached-input ratios, ratio delta, net cached-read minus cache-creation tokens, optional read/create ratio, timeline truncation flag, and a first-plus-latest per-turn cache timeline.
 
 No follow-up backlog item was created for this cycle; the implemented `prompt_cache_plan` is the tsift-owned surface, and live provider adapter calls belong to the runtime that invokes the model.
 
@@ -72,47 +109,42 @@ Escalation: none.
 
 Confidence: high.
 
-### Re: prompt cache analytics — gpt-5
+### Re: prompt cache invalidation — gpt-5
 
-> **Queue prompt:**
->
-> Please add analytics to the prompt cache. I want to be able to review effective it is over time.
+The prompt cache system should treat invalidation as a stable-prefix contract, not as an explicit `clear cache` operation owned by tsift.
 
+For the current `session-cost` surface, tsift observes cache effectiveness from transcript usage. The live cache itself belongs to the model provider or runtime adapter. That means a cache miss usually means the runtime sent a different cache key, different routing affinity, or different prefix bytes than the provider saw on the previous warm call.
 
-Implemented prompt cache effectiveness analytics for `tsift session-cost`.
+Practical invalidation rules:
+- A stable system/developer prefix change should invalidate the cache for that prefix because the bytes are no longer identical.
+- Tool definition changes should invalidate the tool-prefix segment. For Anthropic-style explicit breakpoints, edits before a `cache_control` breakpoint invalidate that block and downstream cached material.
+- Thread or session key changes should invalidate OpenAI-style keyed reuse because the same byte-identical prefix is no longer associated with the same `prompt_cache_key`.
+- Volatile values inside the cached prefix, such as timestamps, generated IDs, transient diagnostics, or one-off compaction instructions, should be treated as accidental invalidation sources.
+- Compaction should preserve the live warm prefix and rewrite only the transcript tail. A cold standalone summarizer prompt effectively starts a new cache shape.
+- Self-hosted or edge caches may be replica-local. Without routing affinity for the same cache key, a byte-identical prompt can still miss because it lands on a different replica.
 
-What changed:
-- Added bounded `prompt_cache_plan.analytics` with sample count, effective flag, trend (`single_sample`, `stable`, `improving`, `declining`, `insufficient_data`), average/first/last cached-input ratios, ratio delta, net cached-read minus cache-creation tokens, optional read/create ratio, timeline truncation flag, and a first-plus-latest per-turn cache timeline.
-- Added compact and human text output for the analytics so cache effectiveness can be reviewed without raw JSON.
-- Updated the session digest spec and unreleased changelog entry.
-- Added library and compiled CLI regression coverage for improving, stable, and candidate uncached prompt-cache analytics.
+How the new analytics help review invalidation over time:
+- `average_cached_input_ratio`, first/last ratios, and `cached_input_ratio_delta` show whether reuse is holding, improving, or degrading.
+- `timeline` shows which turns had a ratio drop, so the next step is to inspect what changed at that boundary: prefix text, tools, cache key, compaction, or routing.
+- `total_cache_creation_tokens` and `cache_read_to_creation_ratio` expose rewrite churn. High creation with low reads means the runtime is repeatedly creating cache entries without getting enough warm reuse.
+- `net_cached_input_tokens` gives a coarse effectiveness signal: cache reads minus creation tokens. Negative or small positive values are a warning sign even when cache reads are present.
 
-Changed paths:
-- `src/tsift/VERSIONS.md`
-- `src/tsift/packages/tsift-agent-doc/src/session_cost.rs`
-- `src/tsift/packages/tsift-cli/src/commands/digests.rs`
-- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
-- `src/tsift/specs/digests-sessions.md`
-- parent pointer: `src/tsift`
+The recommended backlog item `#1zax` now tracks explicit invalidation diagnostics on top of the analytics, so tsift can eventually classify likely causes instead of only reporting symptoms.
 
-Commits:
-- tsift submodule: `7b9da33` (`add prompt cache analytics`), pushed to `origin/main`.
-- parent repo: `220cbf472` (`update tsift prompt cache analytics`), pushed to `origin/main`.
+Changed paths: none in this explanation cycle.
 
-Verification:
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-agent-doc prompt_cache_plan_summarizes_effectiveness_over_time -- --nocapture'`: passed, artifact `tart-e2cfb2ea68`.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture'`: passed, artifact `tart-02a5c5c8a8`.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-35d22ae8c2`.
-- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
-- `git diff --check`: passed.
-- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was completed/success for `add session prompt cache plan` at 2026-06-08T21:25:43Z.
+Commands:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `tsift status` in `src/tsift`
 
-Preflight warnings surfaced: the prior captured cycle had been auto-recovered before this response, and the post-exchange `#next-steps` HTML comment remains preserved as a non-executable note unless moved into exchange or queue.
+Verification: no code changed in this cycle, so no build/test suite was rerun.
 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:f772a8ad -->
+<!-- agent:boundary:035a5367 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,12 +153,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Please describe how cache invalidation works for our prompt cache system.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#1zax] [recommended] Add prompt-cache invalidation diagnostics that classify likely prefix/key/replica churn from analytics timeline drops, creation-token spikes, and read/create regressions.
 <!-- /agent:backlog -->
 
 ## Review

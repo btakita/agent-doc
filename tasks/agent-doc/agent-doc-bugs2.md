@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -75,12 +75,13 @@ The guard conflated the two and failed closed on case 2 — exactly what hit you
 **Installed** as you asked: `cargo build --release` + `cargo install --path .` + `agent-doc lib-install` (binary, `.bin` release target, and the JB-plugin FFI `.so` — all 0.34.0). This very closeout runs on the fixed binary.
 
 This is the visible-buffer slice of `#ipc-crdt-response-drift` (now fixed + installed, alongside the earlier merge-layer fix `c9d276b9`). Still gated for the remaining reversed/hoisted symptom under `theirs>base` and cross-supervisor write-back serialization, which need a clean-session live repro.
-<!-- agent:boundary:05182cb8 -->
+<!-- agent:boundary:4fba1a98 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- We need to use the AST + document model to understand where the document changes occurred and who made the changes. So if you made a change, even uncommitted, that should not cause drift. If I made a change in an area that does not effect the current turn, such as adding text into a comment, another queue item, etc, the drift should just me added to the model + sent to the durable sqlite db...but the turn should not be affected.
 <!-- /agent:queue -->
 ###
 <!--

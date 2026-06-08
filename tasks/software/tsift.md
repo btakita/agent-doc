@@ -37,7 +37,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): prompt caching; prompt cache invalidation; prompt cache invalidation; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:430e0582 -->
+- `btakita/agent-loop` `05cd11f10` (`chore: update tsift submodule`)
+- `btakita/tsift` `5ca3d6b` (`refactor: extract tsift-cache crate`)
+- `cargo install --path . --locked --force`
+- `cargo build --workspace`
+- `make check` after the release workflow/test updates
+- affected release-order tests in `packages/tsift-cli/tests/exit_code.rs`
+- `cargo check -p tsift-quality -p tsift-cli`
+- `cargo test -p tsift-cli --test cycle_packet_cache`
+- `cargo test -p tsift-cache`
+<!-- agent:boundary:44902b1f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +56,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Is the cache logic in a tsift-cache crate? It should be. agent-doc may want to use this as a dependency.
+- ~~Is the cache logic in a tsift-cache crate? It should be. agent-doc may want to use this as a dependency.~~
+- Create a model provider agnostic layer. Does this belong in memgraphrag or a separate layer? What crate is the memgraphrag implementation? Should cache + memgraphrag be in the same crate? If not, explain the dependency relationship.
 <!-- /agent:queue -->
 
 ## Backlog

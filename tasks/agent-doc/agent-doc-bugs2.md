@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -77,12 +77,14 @@ Parent pointer: `c8e816bbd agent-doc: update stale finalize replay fix`.
 
 The churn cause and fix remain the same: repeated explicit-baseline finalize after a `committed` cycle could append another response and boundary state; strict finalize now rejects that replay and requires a fresh preflight for any new prompt.
 
-<!-- agent:boundary:bc4cf31a -->
+/clear
+<!-- agent:boundary:1aa910b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+/clear
 <!-- /agent:queue -->
 ###
 <!--

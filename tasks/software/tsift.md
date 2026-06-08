@@ -90,7 +90,24 @@ Verification: no code changed; this is a design tradeoff response only.
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:406d3740 -->
+❯ Add backlog items to complete the strategy you discussed.
+
+### Re: AST edit backlog — gpt-5
+
+Added backlog items in priority order to carry the AST/CST editing strategy from design into implementation.
+
+Top backlog item: `#tsiftasteditspec`.
+
+Changed paths: `tasks/software/tsift.md`.
+
+Commands: `tsift status`, `agent-doc --version`, `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`, `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`, `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`, `agent-doc read --component backlog /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`, `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --baseline-file /home/brian/work/btakita/agent-loop/.agent-doc/baselines/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c.md --origin skill --stream --force-disk`.
+
+Verification: no code changed; verified the backlog was empty before adding the ordered items. `tsift status` still reports workspace index staleness from unrelated workspace scope state, but this turn did not rely on tsift search/explain/graph results.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:83511cf4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,6 +122,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#tsiftasteditspec] Update `src/tsift/SPEC.md` to define the hybrid AST/CST edit strategy: AST for selection/validation, minimal textual patch output for mutation, refusal modes, diff visibility, and verification requirements.
+- [ ] [#tsiftastselect] Prototype AST/CST edit-target selection that maps `search` / `symbol-read` / graph handles to concrete node spans without mutating files.
+- [ ] [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
+- [ ] [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.
+- [ ] [#tsiftasttests] Add fixtures and tests for the AST/CST edit path covering comments, formatting preservation, macros or generated sections, mixed-language blocks, syntax-error work-in-progress files, and verification failures.
 <!-- /agent:backlog -->
 
 ## Review

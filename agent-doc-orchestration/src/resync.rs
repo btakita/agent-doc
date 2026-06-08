@@ -2160,6 +2160,97 @@ pub fn close_superseded_session(tmux: &Tmux, old_session: &str) -> Result<bool> 
     Ok(true)
 }
 
+/// Query the tmux session name hosting a pane, if it is alive.
+fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Distinct tmux sessions hosting alive registered panes — the auto-resync
+/// drift candidate set. Order is first-seen for determinism.
+pub fn registered_pane_sessions(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<String> {
+    let mut sessions = Vec::new();
+    for entry in registry.values() {
+        if let Some(session) = pane_session_name(tmux, &entry.pane)
+            && !sessions.contains(&session)
+        {
+            sessions.push(session);
+        }
+    }
+    sessions
+}
+
+/// Resolve the canonical tmux session for a document: the session holding the
+/// live agent-doc supervisor registered for `file`
+/// (`#canonical-session-close-autodetect`, canonical rule = active agent-doc
+/// window session). Returns `None` when no registered pane for the document
+/// currently runs a live agent-doc process.
+pub fn canonical_session_for_document(
+    tmux: &Tmux,
+    registry: &sessions::SessionRegistry,
+    file: &Path,
+) -> Option<String> {
+    let target = file.canonicalize().ok();
+    registry.values().find_map(|entry| {
+        if entry.file.is_empty() {
+            return None;
+        }
+        let entry_path = Path::new(&entry.file);
+        let matches = match (&target, entry_path.canonicalize().ok()) {
+            (Some(target), Some(entry_canonical)) => *target == entry_canonical,
+            _ => entry_path == file,
+        };
+        if !matches {
+            return None;
+        }
+        // Only a pane running a live agent-doc supervisor is canonical.
+        match classify_pane_process(tmux, &entry.pane) {
+            PaneProcessKind::Agent(_) => pane_session_name(tmux, &entry.pane),
+            _ => None,
+        }
+    })
+}
+
+/// The drift sessions that should be closed: every candidate except the
+/// canonical one, deduped, order-stable. Pure — the destructive close is
+/// delegated to `close_superseded_session`.
+pub fn superseded_candidates(canonical: &str, drift_sessions: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for session in drift_sessions {
+        if session == canonical || out.iter().any(|s| s == session) {
+            continue;
+        }
+        out.push(session.clone());
+    }
+    out
+}
+
+/// Close superseded tmux sessions on the auto-resync drift path: every session
+/// in `drift_sessions` other than `canonical` gets the safe
+/// `close_superseded_session` treatment (which still preserves any session with
+/// a live agent or an unmanaged user window). Returns the number closed.
+pub fn close_superseded_drift_sessions(
+    tmux: &Tmux,
+    canonical: &str,
+    drift_sessions: &[String],
+) -> Result<usize> {
+    let mut closed = 0;
+    for session in superseded_candidates(canonical, drift_sessions) {
+        if close_superseded_session(tmux, &session)? {
+            closed += 1;
+        }
+    }
+    Ok(closed)
+}
+
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
 fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
     apply_fixes_with_base(tmux, issues, relocate_session, None)
@@ -4530,6 +4621,61 @@ mod tests {
         assert_eq!(
             new_session, "correct",
             "agent pane should be relocated to the correct session"
+        );
+    }
+
+    #[test]
+    fn superseded_candidates_excludes_canonical_and_dedupes() {
+        // The canonical (active agent-doc window) session is never a close target;
+        // the rest are closed once each, order-stable.
+        let drift = vec![
+            "0".to_string(),
+            "5".to_string(),
+            "5".to_string(),
+            "8".to_string(),
+        ];
+        assert_eq!(
+            superseded_candidates("0", &drift),
+            vec!["5".to_string(), "8".to_string()]
+        );
+        // Canonical absent from the drift set → all are candidates.
+        assert_eq!(
+            superseded_candidates("9", &["0".to_string(), "5".to_string()]),
+            vec!["0".to_string(), "5".to_string()]
+        );
+        // Single session (no drift) → nothing to close.
+        assert!(superseded_candidates("0", &["0".to_string()]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn close_superseded_drift_sessions_skips_canonical_closes_others() {
+        // Canonical session is preserved; a sibling pure agent-doc orphan is closed.
+        let iso = IsolatedTmux::new("resync-drift-superseded");
+        let cwd = std::env::current_dir().unwrap();
+
+        let _canon = iso.new_session("canon", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", "canon:", "agent-doc"])
+            .output()
+            .unwrap();
+        iso.ensure_stash_window("canon").unwrap();
+
+        let _orphan = iso.new_session("orphan", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", "orphan:", "agent-doc"])
+            .output()
+            .unwrap();
+        iso.ensure_stash_window("orphan").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let drift = vec!["canon".to_string(), "orphan".to_string()];
+        let closed = close_superseded_drift_sessions(&iso, "canon", &drift).unwrap();
+        assert_eq!(closed, 1, "only the non-canonical orphan should be closed");
+        assert!(iso.session_alive("canon"), "canonical session must survive");
+        assert!(
+            !iso.session_alive("orphan"),
+            "superseded orphan should be closed"
         );
     }
 

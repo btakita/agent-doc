@@ -1461,12 +1461,51 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
         } else {
             // Reset after successful fix — next cycle re-evaluates.
             let _ = std::fs::remove_file(&counter_path);
+            // #canonical-session-close-autodetect: if registered panes still span
+            // multiple tmux sessions after resync, close the superseded ones
+            // around the canonical (active agent-doc window) session.
+            close_superseded_drift_sessions(file);
         }
     } else {
         eprintln!(
             "[preflight] session drift detected (count={}) — will auto-resync on next detection",
             next
         );
+    }
+}
+
+/// After an auto-resync, close tmux sessions superseded by the canonical
+/// (active agent-doc window) session when registered panes still span more than
+/// one session (`#canonical-session-close-autodetect`). Best effort: never
+/// blocks a cycle, and `close_superseded_session` preserves any session with a
+/// live agent or an unmanaged user window.
+fn close_superseded_drift_sessions(file: &std::path::Path) {
+    let tmux = sessions::Tmux::default_server();
+    let registry = match sessions::load() {
+        Ok(registry) => registry,
+        Err(e) => {
+            eprintln!("[preflight] session-drift close: registry load failed: {}", e);
+            return;
+        }
+    };
+    let drift_sessions = resync::registered_pane_sessions(&tmux, &registry);
+    if drift_sessions.len() <= 1 {
+        return;
+    }
+    let Some(canonical) = resync::canonical_session_for_document(&tmux, &registry, file) else {
+        eprintln!(
+            "[preflight] session-drift: no canonical agent-doc session resolved for {}; preserving all sessions",
+            file.display()
+        );
+        return;
+    };
+    match resync::close_superseded_drift_sessions(&tmux, &canonical, &drift_sessions) {
+        Ok(0) => {}
+        Ok(n) => eprintln!(
+            "[preflight] session-drift: closed {} superseded session(s) around canonical '{}'",
+            n, canonical
+        ),
+        Err(e) => eprintln!("[preflight] session-drift superseded close failed: {}", e),
     }
 }
 

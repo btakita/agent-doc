@@ -366,6 +366,21 @@ spanning two tmux sessions. After the window migration, `set` calls
   preserved (and logged), so superseding the canonical session never destroys
   unrelated work.
 
+**Auto-resync superseded close (`#canonical-session-close-autodetect`).** The same
+superseded-session close also runs on the auto-resync drift path, with no
+configured canonical session. When preflight detects session drift twice
+consecutively (registered panes span more than one tmux session) it runs
+`resync --fix`; afterward, if panes still span multiple sessions, it closes the
+superseded ones around the **canonical** session. The canonical-determination
+rule is the **active agent-doc window session**: `resync::canonical_session_for_document`
+resolves the session of the registered pane for the current document that runs a
+live agent-doc supervisor. Every other drift session is passed to
+`resync::close_superseded_drift_sessions`, which applies the same safe
+`close_superseded_session` treatment per session — so a session with a live agent
+or an unmanaged user window is still preserved. When no canonical agent-doc
+session resolves, all sessions are preserved and the condition is logged. The
+step is best effort and never blocks a cycle.
+
 `agent-doc session clear` with no file still clears the configured tmux-session
 pin and returns the project to auto-detect mode.
 

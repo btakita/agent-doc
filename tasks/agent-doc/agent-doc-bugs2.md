@@ -35,12 +35,51 @@ complete
 Compacted content:
 - Archived 7 response topic(s): ctrlplane-adminbp; active queue continuation closeout; `#ctrlplane-adminbp-data`; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d62f0d50 -->
+❯ do [#ctrlplane-adminbp-queue]. #spec-test-build-install-commit-push
+### Re: `#ctrlplane-adminbp-queue` — gpt-5
+
+Implemented the remaining controller admin/backpressure integration slice.
+
+Changed paths:
+- `src/agent-doc/src/ffi.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-orchestration/src/dashboard.rs`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
+- `src/agent-doc/editors/vscode/src/native.ts`
+- `src/agent-doc/editors/jetbrains/gradle.properties`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+
+What changed:
+- Added controller-backed C ABI wrappers for `admin inspect`, queue pause/resume/drain, reap, handoff, and projection repair. They return the same typed JSON receipt/inspection envelopes as the CLI `--json` paths.
+- Added JetBrains and VS Code native wrappers so editor integrations can call those controller APIs without sidecar ownership decisions.
+- Extended the admin dashboard model/render output with queue control state, latest queue pressure class, and projection lag per actor.
+- Added deterministic Rust coverage for accepted/rejected FFI queue receipts, FFI inspect diagnostics, and dashboard pressure/projection flags.
+- Updated the control-plane spec and bumped the JetBrains plugin patch version for the Kotlin binding change.
+
+Verification:
+- `cargo test -p agent-doc admin_ -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration queue_pressure_and_projection_lag_flag_dashboard_row -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration project_controller -- --nocapture` passed.
+- `cargo test -p agent-doc test_cli_admin -- --nocapture` ran and matched zero tests; current suite has no `test_cli_admin` test name.
+- `npm test` in `src/agent-doc/editors/vscode` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains` passed after the version bump.
+- `make check` passed.
+- `make build-release install` passed.
+- `agent-doc --version` prints `agent-doc 0.34.0`.
+- Latest GitHub Actions `CI` run checked once: completed success (`docs: update tsift navigation marker`, run `27112968121`).
+
+Commits and push:
+- `src/agent-doc`: `7eb726ad feat: expose controller admin FFI controls`, pushed to `origin/main`.
+- parent repo: `0cd4e1b0f chore: update agent-doc submodule`, pushed to `origin/main`.
+
+Escalation: none.
+<!-- agent:boundary:61558134 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ctrlplane-simworld]
 <!-- /agent:queue -->
 ###
 <!--
@@ -70,7 +109,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#ctrlplane-adminbp-queue] Finish the remaining Phase 3-4 controller admin/backpressure integration from tasks/agent-doc/plan-controller-admin-backpressure.md: add FFI/editor wrappers that return the typed receipt envelope, surface queue pressure/projection lag in dashboard/status output, and add any missing deterministic coverage for those wrappers.
 - [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.
 <!-- /agent:backlog -->
 

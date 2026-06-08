@@ -35,7 +35,34 @@ complete
 Compacted content:
 - Archived 2 response topic(s): /clear; closeout recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:665f0c73 -->
+
+### Re: do [#ckvm] — gpt-5
+
+Implemented `#ckvm`.
+
+Exchange-origin slash prompts now use the same after-turn command path as queue slash heads. A pending routed `agent:exchange` prompt whose text is a literal slash command such as `/clear` is copied into `agent:queue auto` as an unpinned literal command head, then the managed idle-queue supervisor submits and consumes it at the next idle prompt instead of reopening agent-doc and answering it as prose.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/route.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/tests.rs`
+- `src/agent-doc/agent-doc-orchestration/src/queue_command.rs`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc` submodule pointer in the superproject
+
+Commits/pushes:
+- `src/agent-doc`: `f7d34b0e` (`route exchange slash commands through queue drain`), pushed to `btakita/agent-doc main`
+- superproject: `3c5b6425d` (`agent-doc: update submodule for exchange slash queue drain`), pushed to `btakita/agent-loop main`
+
+Verification:
+- `cargo test -p agent-doc-orchestration route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_command -- --nocapture`
+- `cargo fmt`
+- `make check` passed: clippy, 3,982 tests, doctests, and medium SimWorld seed
+- `cargo build`
+- `cargo install --path .`
+
+CI: `btakita/agent-doc` CI for commit `f7d34b0e` was `in_progress` when checked after push; the superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched.
+<!-- agent:boundary:3b763fc0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -69,7 +96,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#ckvm] Extend the new slash-command classifier and after-turn command submission flow to exchange-origin slash prompts, so a literal `/clear` or other `/` command typed in `agent:exchange` is submitted after the current turn instead of answered as prose.
 <!-- /agent:backlog -->
 
 ## Review

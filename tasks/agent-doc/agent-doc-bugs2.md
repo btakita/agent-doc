@@ -35,7 +35,26 @@ complete
 Compacted content:
 - Archived 2 response topic(s): `/clear` fast path; queue bookkeeping
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:facfc65d -->
+
+### Re: #clearfast — gpt-5
+
+Implemented `#clearfast`.
+
+The fix keeps exact context-clear queue heads (`/clear` and `/new`) out of the Codex Stop-hook continuation cycle. When the active queue head is a context-clear command, the Stop hook now lets the current turn close instead of spending another in-pane response; the managed idle-queue supervisor can then submit the literal command at the idle prompt. Generic slash commands such as `/model sonnet` still use the existing guarded slash-command path.
+
+I also made raw slash-command queue lines actionable prompts, so a queue body that is just whitespace plus `/clear` is detected as the literal head instead of being preserved as inert freeform text. Rendering preserves raw slash-command lines, which keeps the idle-queue classifier seeing `/clear` exactly.
+
+Commits:
+- `src/agent-doc`: `980b100d fix: fast path context-clear queue heads`
+- parent repo: `b83c2d03e chore: update agent-doc submodule`
+
+Proof:
+- Changed paths: `src/agent-doc/agent-doc-orchestration/src/codex_hook.rs`, `src/agent-doc/agent-doc-orchestration/src/queue.rs`, `src/agent-doc/agent-doc-orchestration/src/route/tests.rs`, `src/agent-doc`, `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `cargo fmt`; `cargo test -p agent-doc-orchestration parse_bare`; `cargo test -p agent-doc-orchestration stop_passes_through`; `cargo test -p agent-doc-orchestration stop_blocks_clean_closeout_when_auto_queue_has_generic_slash_command`; `cargo test -p agent-doc-orchestration route_enqueue_ -- --exact route::tests::route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain route::tests::route_enqueue_bare_exchange_slash_command_for_idle_drain`; `make check`; `gh run list --workflow CI --limit 1`
+- Verification: targeted tests passed; `make check` passed with 3998 tests passed and 233 skipped; latest CI run `27118401496` on `main` was `completed success`
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:ae119624 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -71,7 +90,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#clearfast] #agent-doc-bug Fix the AST-only `/clear` queue fast path: if the active queue body reduces to only `/clear` after whitespace/comment normalization, the preset/supervisor should stop the owner turn immediately, emit no exchange response, and send `/clear` only after the turn is idle; add regression coverage for surrounding whitespace.
+- [x] [#clearfast] #agent-doc-bug Fix the AST-only `/clear` queue fast path: if the active queue body reduces to only `/clear` after whitespace/comment normalization, the preset/supervisor should stop the owner turn immediately, emit no exchange response, and send `/clear` only after the turn is idle; add regression coverage for surrounding whitespace.
 <!-- /agent:backlog -->
 
 ## Review

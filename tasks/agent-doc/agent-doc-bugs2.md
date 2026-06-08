@@ -30,88 +30,18 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-161626.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-164616.md`*
 
 Compacted content:
-- Archived 6 response topic(s): churn from repeated committed-cycle finalize; active continuation closeout; previous few turns issues; 3 more
+- Archived 4 response topic(s): Codex `Run Agent Doc` ignores exchange-only prompts on a fresh session; do #codex-exchange-prompt-no-dispatch; monsterrodholders.md IPC/CRDT drift + Claude Code SimWorld tests; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Codex `Run Agent Doc` ignores exchange-only prompts on a fresh session — opus-4-8
-
-Triaged as a bug and planned (not yet fixed — this doc's `#agent-doc-bug` convention is plan + backlog, and the queue here is inactive so I did not run the attached `#spec-test-build-install-commit-push` preset).
-
-**What I found.** Two independent signals drive `route` dispatch, and only the queue one is robust on a fresh session:
-
-- **Queue write** activates via a snapshot-independent signal (`fm.queue_active` at `route.rs:2121` plus preflight queue-trigger resolution). It dispatches even before any cycle snapshot exists — which is why typing into `agent:queue` starts the turn.
-- **Exchange write** is detected through `pending_prompt_bearing_context_for_route` (`route.rs:7727`) → `first_unstarted_prompt_bearing_change` (`session_check.rs:4649`). That function has two gates that hide a fresh-session exchange prompt: it returns `None` when no snapshot exists (`session_check.rs:4652`), and it strips `agent:queue` content before diffing (`session_check.rs:4707`). On a brand-new session there is no committed cycle snapshot (or the snapshot already equals the file), so the exchange tail prompt is never seen as "unstarted" → nothing happens.
-
-So the asymmetry is real and structural: the queue path has a fresh-session activation signal, the exchange path doesn't.
-
-**Plan:** [`tasks/agent-doc/plan-codex-exchange-prompt-no-dispatch.md`](plan-codex-exchange-prompt-no-dispatch.md) — repro, root-cause trace, the snapshot-absent fallback fix, and route + session_check test coverage.
-
-**Backlog:** added `#codex-exchange-prompt-no-dispatch` at the top of the backlog.
-
-Say the word (or `do #codex-exchange-prompt-no-dispatch`) and I'll implement + test + build + commit per the preset.
-
-### Re: do #codex-exchange-prompt-no-dispatch — opus-4-8
-
-Fixed, tested, built, installed, committed, and pushed.
-
-**Root cause.** `first_unstarted_prompt_bearing_change` (`session_check.rs:4649`) returned `None` whenever no cycle snapshot existed. On a fresh session that's exactly the state: a freshly typed exchange tail prompt has no snapshot to diff against, so the exchange path saw nothing and `Run Agent Doc` did nothing. The queue path activates snapshot-independently (route queue activation re-saves the snapshot), so the same text in `agent:queue` started a turn — the asymmetry you hit.
-
-**Fix.** When no snapshot exists, the detector now falls back to the committed `HEAD` blob (`git::show_head`), then to an empty baseline for untracked docs. A freshly typed exchange tail prompt is therefore detected and routed. The fallback stays exchange-scoped — queue components are still stripped from this diff and keep their own activation path.
-
-**Verification.**
-- `cargo test -p agent-doc-orchestration first_unstarted_prompt_bearing_change` — 9 passed, including two new tests: `..._detects_fresh_exchange_prompt_without_snapshot` (HEAD fallback) and `..._ignores_fresh_queue_only_write_without_snapshot` (regression guard that the fallback stays exchange-scoped).
-- `make check` — clippy `-D warnings` clean, full suite green.
-- `cargo build --release` + `cargo install --path .` — both binaries refreshed (`.bin/agent-doc` → release, tmux → `~/.cargo/bin`), still `0.34.0`.
-
-**Shipped.**
-- `src/agent-doc` `agent-doc-orchestration/src/session_check.rs` (fix + tests) and `SPEC.md` (new rule) — committed `4f963e53`, pushed to `btakita/agent-doc` `main`.
-- Superproject: pointer bump + plan file committed locally; pushing now.
-
-**Live-verify note.** Logic is covered by deterministic tests, but the end-to-end JB **Run Agent Doc** → fresh Codex pane path can't be exercised from this Claude session. Worth a one-off live confirmation next time you start a fresh Codex session: type into `agent:exchange`, hit Run Agent Doc, and confirm the turn now starts.
-
-### Re: monsterrodholders.md IPC/CRDT drift + Claude Code SimWorld tests — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: The agent-doc monsterrodholders.md has drift issues. We recently refactored to a control pane process. Please fix. Add Claude Code Simworld tests.
-> ```
-> ● The IPC/CRDT drift garbled my response (reversed lines, missing header) — the known drift situation. Let me
->   reconstruct the Exchange cleanly, then reset sidecars from the corrected file. First, the exact current bytes:
->
->   Read 1 file (ctrl+o to expand)
->
-> ● The corruption is clear — lines 37–43 are my response fragments inserted reversed above the old HEAD response. Let me
->   reconstruct cleanly with two edits.
-> ```
-
-
-Triaged and planned — but deliberately **not** attempting the write-path fix inside this document, and I want to be straight about why.
-
-**I reproduced your exact symptom this turn.** Closing out the previous fix, `finalize` hit it head-on:
-- `[write] File was modified during response generation. CRDT merging... base_len=5797 ours_len=7895 theirs_len=6386` — the on-disk file grew *during* generation.
-- A second supervisor (a `monsterrodholders` agent-doc session) committed to this same superproject concurrently (`d4182b0e1 ... (submodule pointer)`), interleaved with this session's commits.
-- CRDT said `merge successful — no conflicts possible`, yet the visible-buffer guard then fired and my response did **not** land on the first try; preflight reported a `stuck_captured_cycle` (response committed but absent from HEAD). I recovered it via `write --commit`.
-
-That matches "reversed lines / missing header / fragments above the old response" precisely: a concurrent foreign write changes `theirs` mid-generation, overlay-CRDT-as-merge-base mis-orders the appended response, and the commit/visible-buffer boundary then disagrees.
-
-**Suspected area** — the recent single-process control-plane refactor: `5fd64b26 Use overlay CRDT as merge base` (ordering), `a45121b0 Apply IPC node patches in editors`, `b76a3099 de-wedge slow ipc listener`, `ac213a76 controller: make actor state memory authoritative`, `84b2d690 single-process control plane`. The "single process owns actor state" intent is in place, but **git write-back is still multi-writer** — I watched two supervisors interleave commits on the same repo. That seam is the likely root cause.
-
-**Plan:** [`tasks/agent-doc/plan-ipc-crdt-response-drift.md`](plan-ipc-crdt-response-drift.md) — deterministic SimWorld repro (foreign append mid-generation), merge-base ordering fix, control-plane-owned write-back serialization, visible-buffer/CRDT reconciliation, and the three Claude Code SimWorld scenarios you asked for.
-
-**Why plan instead of fix-now:** editing the CRDT/IPC write path *inside a document that is actively drifting* (this one, right now, with another supervisor racing it) risks compounding the corruption — the fix and its verification need a quiescent session with other supervisors idle. Added to the backlog as `#ipc-crdt-response-drift`. `do #ipc-crdt-response-drift` from a fresh session and I'll implement it end-to-end with the SimWorld tests.
-
-### Re: queue deactivated — opus-4-8
-
-Noted — the queue's `go` token was removed, so the queue is inactive (it was already drained last cycle). No prompt to act on; syncing the document state and closing the cycle. The one carried-over gated review item remains; `#ipc-crdt-response-drift` is still queued in the backlog for a fresh quiescent session.
-<!-- agent:boundary:5bd2b6be -->
+<!-- agent:boundary:09db98d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ipc-crdt-response-drift]
 <!-- /agent:queue -->
 ###
 <!--

@@ -351,6 +351,21 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc session set <name>` updates config and migrates the `agent-doc` and `stash` windows when possible.
 
+**Superseded-session close.** Once `session set <name>` makes a new session
+canonical, the old session is closed and dropped from the model rather than left
+spanning two tmux sessions. After the window migration, `set` calls
+`resync::close_superseded_session(old)`:
+
+- If tmux already auto-destroyed the old session (no windows remained after the
+  migration), it is reported as already closed.
+- Otherwise the old session is closed (`tmux kill-session`) **only** when it is a
+  pure agent-doc orphan: every remaining window is agent-doc-managed (`agent-doc`,
+  `stash`, `stash-*`) **and** no pane runs a live agent process. The registry is
+  then pruned of the now-dead panes.
+- A session that still holds any unmanaged user window or a live agent is
+  preserved (and logged), so superseding the canonical session never destroys
+  unrelated work.
+
 `agent-doc session clear` with no file still clears the configured tmux-session
 pin and returns the project to auto-detect mode.
 

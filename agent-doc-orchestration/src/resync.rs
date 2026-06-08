@@ -90,7 +90,7 @@
 //!   two in window W1 and one in window W2 → the W2 pane produces a `WrongWindow`
 //!   issue; the W1 panes do not.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -2097,6 +2097,67 @@ fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &st
     }
     crate::sync::find_live_owner_pane(tmux, std::path::Path::new(file), key).as_deref()
         == Some(pane)
+}
+
+/// Close a tmux session that has been superseded by a newly-canonical session.
+///
+/// Contract (`agent-doc session set <new>`): once a new tmux session becomes
+/// canonical, a leftover *other* session should be closed and removed from the
+/// model. Call this only after the agent-doc / stash windows have been migrated
+/// to the new canonical session.
+///
+/// Safety — close `old_session` only when it is a pure agent-doc orphan:
+/// - if tmux already auto-destroyed it (no windows remained), report it gone;
+/// - otherwise close it only when every remaining window is agent-doc-managed
+///   (`agent-doc`, `stash`, `stash-*`) **and** no pane runs a live agent process.
+///
+/// A session that still holds any unmanaged user window or a live agent is
+/// preserved (and logged), so superseding a canonical session never destroys
+/// unrelated work.
+///
+/// Returns `Ok(true)` when the session was closed (or was already gone), and
+/// `Ok(false)` when it was deliberately preserved.
+pub fn close_superseded_session(tmux: &Tmux, old_session: &str) -> Result<bool> {
+    if !tmux.session_alive(old_session) {
+        eprintln!(
+            "[session] superseded session '{}' already closed (no windows remained)",
+            old_session
+        );
+        return Ok(true);
+    }
+
+    let windows = tmux.list_window_names(old_session);
+    let all_managed = !windows.is_empty()
+        && windows
+            .iter()
+            .all(|w| w == "agent-doc" || is_stash_window_name(w));
+    if !all_managed {
+        eprintln!(
+            "[session] preserving superseded session '{}': it still holds unmanaged window(s): [{}]",
+            old_session,
+            windows.join(", ")
+        );
+        return Ok(false);
+    }
+
+    for pane in tmux.list_session_panes(old_session) {
+        if let PaneProcessKind::Agent(cmd) = classify_pane_process(tmux, &pane) {
+            eprintln!(
+                "[session] preserving superseded session '{}': pane {} still runs live agent '{}'",
+                old_session, pane, cmd
+            );
+            return Ok(false);
+        }
+    }
+
+    tmux.kill_session(old_session)
+        .with_context(|| format!("closing superseded tmux session '{}'", old_session))?;
+    eprintln!(
+        "[session] closed superseded tmux session '{}' (only managed windows remained: [{}])",
+        old_session,
+        windows.join(", ")
+    );
+    Ok(true)
 }
 
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
@@ -4470,6 +4531,68 @@ mod tests {
             new_session, "correct",
             "agent pane should be relocated to the correct session"
         );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn close_superseded_session_kills_pure_agent_doc_orphan() {
+        // A superseded session holding only agent-doc + stash windows (idle shells,
+        // no live agent) is a pure orphan → closed.
+        let iso = IsolatedTmux::new("resync-close-superseded-orphan");
+        let cwd = std::env::current_dir().unwrap();
+
+        let _pane = iso.new_session("oldcanon", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", "oldcanon:", "agent-doc"])
+            .output()
+            .unwrap();
+        iso.ensure_stash_window("oldcanon").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(iso.session_alive("oldcanon"));
+
+        let closed = close_superseded_session(&iso, "oldcanon").unwrap();
+        assert!(closed, "pure agent-doc orphan should be closed");
+        assert!(
+            !iso.session_alive("oldcanon"),
+            "superseded session should be killed"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn close_superseded_session_preserves_session_with_user_window() {
+        // A session that still holds an unmanaged user window must NOT be closed.
+        let iso = IsolatedTmux::new("resync-close-superseded-userwin");
+        let cwd = std::env::current_dir().unwrap();
+
+        let _pane = iso.new_session("oldcanon2", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", "oldcanon2:", "agent-doc"])
+            .output()
+            .unwrap();
+        let userwin = iso.new_window("oldcanon2", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", &userwin, "vim"])
+            .output()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let closed = close_superseded_session(&iso, "oldcanon2").unwrap();
+        assert!(!closed, "session with an unmanaged window must be preserved");
+        assert!(
+            iso.session_alive("oldcanon2"),
+            "session with a user window must stay alive"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn close_superseded_session_reports_already_gone_session() {
+        // tmux already auto-destroyed the session (no windows remained) → treated as
+        // already closed (Ok(true)).
+        let iso = IsolatedTmux::new("resync-close-superseded-gone");
+        let closed = close_superseded_session(&iso, "neverexisted").unwrap();
+        assert!(closed, "absent session is treated as already closed");
     }
 
     #[test]

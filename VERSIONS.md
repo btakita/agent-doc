@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **A newly-canonical tmux session closes the superseded session
+  (`#canonical-session-close`).** `agent-doc session set <name>` now closes the
+  old session and prunes it from the model after the new session becomes
+  canonical, instead of leaving registered panes spanning two tmux sessions
+  (the recurring "session drift: registered panes span 2 tmux sessions" warning).
+  After migrating the `agent-doc` + `stash` windows, `set` calls the new
+  `resync::close_superseded_session(old)`, which closes the old session **only**
+  when it is a pure agent-doc orphan: every remaining window is agent-doc-managed
+  (`agent-doc`, `stash`, `stash-*`) and no pane runs a live agent process. A
+  session holding any unmanaged user window or a live agent is preserved, so the
+  cleanup never destroys unrelated work. New tmux helpers `list_window_names`,
+  `list_session_panes`, and `kill_session` in `tmux-router`; live-tmux coverage in
+  `resync.rs` (kills a pure orphan, preserves a user-window session, treats an
+  already-gone session as closed); spec in `specs/07-session-tmux-commands.md`.
+
 - **Overlay-as-merge-base is order-stable for the append case
   (`#ipc-drift-order-stable-merge`).** Verified the suspect overlay merge-base
   path (`5fd64b26`) cannot reverse a new `### Re:` response's lines or hoist it

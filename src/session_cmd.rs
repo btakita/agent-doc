@@ -2,15 +2,20 @@
 //!
 //! ## Spec
 //! - `agent-doc session` — show the currently configured tmux session (or "auto-detect")
-//! - `agent-doc session set <name>` — pin to a specific session: update config.toml and
-//!   migrate all registered panes via `tmux move-window`.
+//! - `agent-doc session set <name>` — pin to a specific session: update config.toml,
+//!   migrate the agent-doc + stash windows via `tmux move-window`, then close the
+//!   superseded old session when it is left a pure agent-doc orphan.
 //! - `agent-doc session clear` — return to auto-detect mode (remove tmux_session from config).
 //!
 //! ## Agentic Contracts
 //! - `show()` reads config.toml and prints the configured session (or "auto-detect").
 //! - `set()` updates config.toml, moves the agent-doc window from the old session to the
 //!   new session, and updates registry window references. If the old session has no
-//!   agent-doc window, the command still updates config for future routing.
+//!   agent-doc window, the command still updates config for future routing. Once the new
+//!   session is canonical, the old session is closed via
+//!   `resync::close_superseded_session` and its dead panes are pruned from the model —
+//!   but only when the old session holds nothing but agent-doc-managed windows with no
+//!   live agent; sessions with unmanaged user windows or a running agent are preserved.
 //! - `clear()` removes tmux_session from config.toml, returning to auto-detect mode.
 //! - Session names are not validated against live tmux sessions — tmux will error if the
 //!   target session doesn't exist, and we propagate that error.
@@ -23,7 +28,7 @@
 
 use anyhow::{Context, Result};
 
-use agent_doc_orchestration::{config, sessions::Tmux};
+use agent_doc_orchestration::{config, resync, sessions::Tmux};
 
 /// Show the currently configured tmux session.
 pub fn show() -> Result<()> {
@@ -89,6 +94,26 @@ pub fn set(name: &str) -> Result<()> {
                 && o.status.success()
             {
                 eprintln!("[session] moved stash window to session '{}'", name);
+            }
+
+            // The new session is now canonical; close the superseded old session
+            // if it is a pure agent-doc orphan, and prune its now-dead panes from
+            // the model (registry). Sessions still holding unmanaged user windows
+            // or a live agent are preserved.
+            match resync::close_superseded_session(&tmux, old) {
+                Ok(true) => match resync::prune() {
+                    Ok(n) if n > 0 => eprintln!(
+                        "[session] pruned {} dead registry entr{} from the model",
+                        n,
+                        if n == 1 { "y" } else { "ies" }
+                    ),
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("[session] registry prune after close failed: {}", e)
+                    }
+                },
+                Ok(false) => {}
+                Err(e) => eprintln!("[session] superseded-session cleanup error: {}", e),
             }
         } else {
             eprintln!("[session] already configured to '{}'", name);

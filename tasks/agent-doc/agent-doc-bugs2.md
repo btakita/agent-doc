@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -56,13 +56,33 @@ Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpre
 Closed the active Codex continuation after the `#ctrlplane-adminbp` queue response. No additional task work was needed beyond committing the recovered plan/backlog closeout and repairing the queue metadata drift.
 
 Verification after the repair path: the ordinary `agent-doc session-check` reported the queue drained with no next head. I am rerunning the strict Codex final gate after this binary-owned closeout.
-<!-- agent:boundary:d7224ca3 -->
+
+### Re: `#ctrlplane-adminbp-data` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#ctrlplane-adminbp-data]
+
+
+Implemented the controller-backed admin/backpressure data and CLI slices.
+
+Changed paths: `agent-doc-sqlite/src/state_store.rs`, `agent-doc-orchestration/src/project_controller.rs`, `agent-doc-orchestration/src/admin.rs`, `src/main.rs`, `README.md`, `SPEC.md`, `specs/08b-single-process-control-plane.md`, plus the parent `src/agent-doc` submodule pointer.
+
+What changed: SQLite now stores queue controls and queue backpressure facts; controller inspect includes queue/admin/backpressure context; admin CLI exposes inspect, queue pause/resume/drain, reap, handoff, and projection repair; document-scoped mutations require observed generation; dispatch blocks paused/draining queues with typed `queue_paused` / `actor_busy_draining` receipts before external input.
+
+Closeout: marked `#ctrlplane-adminbp-data` and `#ctrlplane-adminbp-cli` done. I narrowed `#ctrlplane-adminbp-queue` to the remaining FFI/editor wrappers and dashboard/status pressure surfacing instead of closing work that is not finished.
+
+Verification: `cargo test -p agent-doc-sqlite control_plane_store_counts_extended_fact_categories -- --nocapture`; `cargo test -p agent-doc-orchestration project_controller -- --nocapture`; `cargo check -p agent-doc-orchestration -p agent-doc-sqlite`; `make check`; `make build-release install`; `agent-doc --version`; `gh run list --workflow CI --limit 1`.
+
+Commits: submodule `3b645117 feat: add controller-backed admin queue controls` pushed to `agent-doc/main`; parent pointer commit `9d3f64fca agent-doc: update controller admin controls` is ready to push with this closeout commit.
+
+Escalation: none. Confidence: high for the completed data and CLI phases; full local suite passed and latest CI was `completed/success`.
+<!-- agent:boundary:1a5af0c9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- do [#ctrlplane-adminbp-data]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -92,9 +112,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#ctrlplane-adminbp-data] Implement Phase 1 controller data and receipt model from tasks/agent-doc/plan-controller-admin-backpressure.md: state-store schema, QueueControl/AdminControl/ProjectionRepair request types, stale-generation rejection, and typed backpressure serialization.
-- [ ] [#ctrlplane-adminbp-cli] Implement Phase 2 CLI/admin operations from tasks/agent-doc/plan-controller-admin-backpressure.md: admin inspect, queue pause/resume/drain, reap, handoff, repair-projection, preserving list/detect/dashboard.
-- [ ] [#ctrlplane-adminbp-queue] Implement Phases 3-4 queue integration, projection repair, FFI/editor receipt envelope, and dashboard/status pressure fields from tasks/agent-doc/plan-controller-admin-backpressure.md.
+- [ ] [#ctrlplane-adminbp-queue] Finish the remaining Phase 3-4 controller admin/backpressure integration from tasks/agent-doc/plan-controller-admin-backpressure.md: add FFI/editor wrappers that return the typed receipt envelope, surface queue pressure/projection lag in dashboard/status output, and add any missing deterministic coverage for those wrappers.
 - [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.
 <!-- /agent:backlog -->
 

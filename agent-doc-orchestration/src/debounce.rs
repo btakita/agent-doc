@@ -321,18 +321,61 @@ pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
     }
 }
 
+/// Clock skew tolerance (ms) when comparing the live-buffer sidecar timestamp
+/// against the on-disk file mtime. A sidecar is only treated as stale when the
+/// disk was modified at least this much later than the editor last reported, so
+/// an editor digest stamped right after a near-simultaneous write is never
+/// misclassified as stale.
+const LIVE_BUFFER_STALE_SKEW_MS: u128 = 250;
+
+/// Disk mtime (Unix ms) for a path, or `None` if it cannot be determined.
+fn file_mtime_ms(file: &str) -> Option<u128> {
+    let meta = std::fs::metadata(file).ok()?;
+    let mtime = meta.modified().ok()?;
+    Some(
+        mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+}
+
 /// Return `Some(snapshot)` when the editor-visible buffer digest differs from
-/// the supplied content. Returns `None` when there is no editor-visible sidecar
-/// or when it matches the content.
+/// the supplied content. Returns `None` when there is no editor-visible sidecar,
+/// when it matches the content, or when the sidecar is *stale* — i.e. the file
+/// on disk was modified after the editor last reported its buffer.
+///
+/// Staleness check (#ipc-crdt-response-drift / visible-buffer false positives):
+/// the editor plugin stamps the sidecar (`agent_doc_document_changed_digest`)
+/// with the editor's buffer on every modification. A `len`/`hash` mismatch
+/// against current disk has two causes: (1) the editor holds genuine *unsaved*
+/// edits ahead of disk — protect those; or (2) a concurrent foreign writer (or
+/// agent-doc's own machinery) changed disk *after* the editor last reported, so
+/// the editor digest merely *lags* a disk change it has not observed yet — that
+/// is not a user edit and must not block the write. Case (2) is the
+/// false-positive class the user hit ("I did not edit the document"). We
+/// distinguish them by timestamp: when the disk mtime is clearly newer than the
+/// sidecar's `timestamp_ms`, the editor digest describes superseded content and
+/// cannot represent unsaved edits against the *current* disk, so it is ignored.
 pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<LiveBufferSnapshot> {
     let snapshot = live_buffer_snapshot(file)?;
     let expected_len = content.len();
     let expected_hash = content_hash(content);
     if snapshot.len == expected_len && snapshot.hash.eq_ignore_ascii_case(&expected_hash) {
-        None
-    } else {
-        Some(snapshot)
+        return None;
     }
+
+    // Stale-sidecar suppression: if disk changed after the editor last reported,
+    // the digest is lagging a disk write the editor has not seen — not a live
+    // unsaved buffer. Only suppress on a confident staleness margin so genuine
+    // unsaved edits (editor newer than disk) are still protected.
+    if let Some(disk_mtime_ms) = file_mtime_ms(file)
+        && disk_mtime_ms > snapshot.timestamp_ms.saturating_add(LIVE_BUFFER_STALE_SKEW_MS)
+    {
+        return None;
+    }
+
+    Some(snapshot)
 }
 
 /// Compute the typing indicator file path for a document.
@@ -619,6 +662,62 @@ mod tests {
         assert_eq!(snapshot.hash, content_hash(visible));
         assert!(live_buffer_diverges_from_content(&doc_str, "disk").is_some());
         assert!(live_buffer_diverges_from_content(&doc_str, visible).is_none());
+    }
+
+    /// Regression (#ipc-crdt-response-drift / visible-buffer false positives):
+    /// when the file on disk is modified *after* the editor last reported its
+    /// buffer (a concurrent foreign writer, or agent-doc's own machinery), the
+    /// sidecar is stale — it lags a disk change the editor never made — and must
+    /// NOT be reported as a divergence. The user did not edit the document.
+    #[test]
+    fn live_buffer_stale_sidecar_lagging_disk_write_is_not_divergence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("stale-sidecar.md");
+        std::fs::write(&doc, "original disk content").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor reports its buffer (matching the then-current disk).
+        let reported = "original disk content";
+        document_changed_with_digest(&doc_str, reported.len(), &content_hash(reported));
+
+        // A concurrent foreign writer grows the file AFTER the editor's report
+        // (past the skew margin). The editor never saw this change.
+        std::thread::sleep(std::time::Duration::from_millis(
+            (LIVE_BUFFER_STALE_SKEW_MS as u64) + 100,
+        ));
+        let foreign = "original disk content\nappended by a foreign supervisor\n";
+        std::fs::write(&doc, foreign).unwrap();
+
+        // The sidecar (len/hash of `reported`) differs from current disk
+        // (`foreign`), but it is stale — must be suppressed, not fired.
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, foreign).is_none(),
+            "stale sidecar lagging a foreign disk write was wrongly reported as a live divergence"
+        );
+    }
+
+    /// Complement: a genuinely fresh sidecar (editor reported AFTER the last
+    /// disk write) with unsaved edits ahead of disk must still be protected.
+    #[test]
+    fn live_buffer_fresh_sidecar_with_unsaved_edits_still_diverges() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("fresh-sidecar.md");
+        std::fs::write(&doc, "saved disk content").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor reports unsaved edits ahead of disk, AFTER the disk write.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let unsaved = "saved disk content plus a real unsaved user edit";
+        document_changed_with_digest(&doc_str, unsaved.len(), &content_hash(unsaved));
+
+        // Disk still holds the saved content; the fresh sidecar diverges and
+        // must be protected (Some).
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved disk content").is_some(),
+            "fresh sidecar with genuine unsaved edits was wrongly suppressed"
+        );
     }
 
     #[test]

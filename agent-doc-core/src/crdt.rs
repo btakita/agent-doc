@@ -148,6 +148,13 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         theirs_text.len()
     );
 
+    // Capture committed assistant response headings from the *original* base,
+    // before stale-base detection / prefix advancement can rewrite `base_text`.
+    // Committed `### Re:` blocks are append-only history; a stale or divergent
+    // `theirs` must not be able to delete them out of the merged result.
+    // (#ipc-crdt-response-drift)
+    let committed_response_headings = response_headings(&base_text);
+
     // Stale base detection: if the base text doesn't share enough content
     // with both sides, it's stale. Use ours as the base instead.
     // This prevents duplicate insertions when both sides contain text
@@ -300,8 +307,96 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         text.get_string(&txn)
     };
 
+    // Committed-response protection (#ipc-crdt-response-drift): a stale or
+    // divergent `theirs` (e.g. a concurrent foreign supervisor, or a stale
+    // editor live-buffer pushed by convergence) can present a document that has
+    // *lost* a `### Re:` response block which was already committed (present in
+    // `base`) and is still present in `ours`. The line-diff merge would honor
+    // that foreign deletion and strip the committed response from the result
+    // ("### Re: header missing" / prior response hoisted away). Foreign writers
+    // must not delete committed exchange history.
+    let merged = guard_committed_responses(
+        merged,
+        &committed_response_headings,
+        ours_text,
+        theirs_text,
+    );
+
     // Post-merge dedup: remove identical adjacent blocks (#15)
     Ok(dedup_adjacent_blocks(&merged))
+}
+
+/// True for transient/structural lines that must not count as "new content"
+/// introduced by `theirs` (boundary markers carry per-cycle ids and `(HEAD)`
+/// annotations are working-tree-only artifacts).
+fn is_transient_merge_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("<!-- agent:boundary:")
+}
+
+/// Collect normalized `### Re:` heading lines from a document, ignoring the
+/// working-tree-only ` (HEAD)` annotation and surrounding whitespace. Matches
+/// how the rest of the binary treats committed response headings.
+fn response_headings(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("### Re:"))
+        .map(|l| l.strip_suffix(" (HEAD)").unwrap_or(l).trim_end().to_string())
+        .collect()
+}
+
+/// Restore committed response history when a stale/divergent `theirs` deleted
+/// it. If the merge dropped a `### Re:` heading that exists in both `base` and
+/// `ours`, and `theirs` contributed no new non-transient content beyond what
+/// `ours` already has (i.e. `theirs` is a stale subset that only *lost*
+/// committed content), the foreign view is stale — return `ours` so the
+/// committed response is preserved. If `theirs` did introduce genuinely new
+/// content, keep the merged result (never drop real user input) but log a
+/// forensic warning. (#ipc-crdt-response-drift)
+fn guard_committed_responses(
+    merged: String,
+    committed_response_headings: &[String],
+    ours_text: &str,
+    theirs_text: &str,
+) -> String {
+    if committed_response_headings.is_empty() {
+        return merged;
+    }
+    let ours_headings = response_headings(ours_text);
+    let merged_headings = response_headings(&merged);
+    let lost: Vec<&String> = committed_response_headings
+        .iter()
+        .filter(|h| ours_headings.contains(h) && !merged_headings.contains(h))
+        .collect();
+    if lost.is_empty() {
+        return merged;
+    }
+
+    // Does `theirs` introduce any new non-empty, non-transient line that `ours`
+    // does not already contain? If so, it carries real user input we must keep.
+    let ours_lines: std::collections::HashSet<&str> = ours_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let theirs_adds_new = theirs_text
+        .lines()
+        .map(str::trim)
+        .any(|l| !l.is_empty() && !is_transient_merge_line(l) && !ours_lines.contains(l));
+
+    if theirs_adds_new {
+        eprintln!(
+            "[crdt] WARNING: merge dropped committed response heading(s) {:?} while theirs added new content; keeping merge (#ipc-crdt-response-drift)",
+            lost
+        );
+        merged
+    } else {
+        eprintln!(
+            "[crdt] stale theirs dropped committed response heading(s) {:?}; preferring ours (#ipc-crdt-response-drift)",
+            lost
+        );
+        ours_text.to_string()
+    }
 }
 
 /// Remove identical adjacent text blocks separated by blank lines.
@@ -1250,6 +1345,166 @@ commit and push all rappstack packages.
             merged.contains("The code does X."),
             "Response missing:\n{}",
             merged
+        );
+    }
+
+    /// Regression test (#ipc-crdt-response-drift): a concurrent **foreign**
+    /// writer (another supervisor / queue toggle) appends to the document at
+    /// the tail *during* response generation, growing `theirs` beyond `base`.
+    /// The agent's new `### Re:` response (ours) must:
+    ///   1. land with its heading intact (not dropped),
+    ///   2. keep its lines in author order (not reversed),
+    ///   3. appear AFTER the prior committed `### Re:` response (not hoisted
+    ///      above it),
+    ///   4. preserve the foreign tail append.
+    #[test]
+    fn merge_foreign_tail_append_preserves_response_order() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let exchange_committed = "\
+❯ first question
+
+### Re: first question — opus-4-8
+
+First answer here. Already committed to HEAD.
+
+❯ second question
+";
+        let queue_open = "<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n";
+        let queue_close = "<!-- /agent:queue -->\n";
+
+        // Base: prior response committed, new prompt typed, boundary at tail of
+        // exchange, empty queue.
+        let base = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}{queue_close}"
+        );
+
+        // Ours: agent replaces boundary with the new response (multi-line).
+        let agent_response = "\
+### Re: second question — opus-4-8
+
+Second answer line one.
+Second answer line two.
+Second answer line three.
+
+";
+        let ours = format!(
+            "{header}{exchange_committed}{agent_response}<!-- agent:boundary:new-id -->\n{queue_open}{queue_close}"
+        );
+
+        // Theirs: a foreign supervisor appended a queue item at the tail while
+        // the response was being generated (file grew, base unchanged in body).
+        let theirs = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}do [#foreign-task]\n{queue_close}"
+        );
+
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        // 1. Heading intact.
+        assert!(
+            merged.contains("### Re: second question — opus-4-8"),
+            "new response heading dropped:\n{}",
+            merged
+        );
+        // 2. Lines in author order (not reversed).
+        let l1 = merged.find("Second answer line one.").expect("line one missing");
+        let l2 = merged.find("Second answer line two.").expect("line two missing");
+        let l3 = merged
+            .find("Second answer line three.")
+            .expect("line three missing");
+        assert!(
+            l1 < l2 && l2 < l3,
+            "response lines reversed/reordered (l1={l1} l2={l2} l3={l3}):\n{merged}"
+        );
+        // 3. New response appears AFTER the prior committed response.
+        let prior = merged
+            .find("### Re: first question")
+            .expect("prior response missing");
+        let current = merged.find("### Re: second question").unwrap();
+        assert!(
+            prior < current,
+            "new response hoisted above prior HEAD response (prior={prior} current={current}):\n{merged}"
+        );
+        // 4. Foreign tail append preserved.
+        assert!(
+            merged.contains("do [#foreign-task]"),
+            "foreign queue append lost:\n{}",
+            merged
+        );
+    }
+
+    /// Regression test (#ipc-crdt-response-drift): a stale/divergent `theirs`
+    /// (e.g. a stale editor live-buffer pushed by convergence, or a concurrent
+    /// foreign supervisor) presents a document that has *lost* the prior
+    /// committed `### Re:` response block. The merge must NOT honor that foreign
+    /// deletion — the committed response and its heading must survive.
+    #[test]
+    fn merge_stale_theirs_cannot_delete_committed_response() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let committed = "❯ first question\n\n### Re: first question — opus-4-8\n\nFirst answer. Committed to HEAD.\n\n❯ second question\n";
+        let foot = "<!-- /agent:exchange -->\n";
+        let base = format!("{header}{committed}<!-- agent:boundary:base-id -->\n{foot}");
+        let resp = "### Re: second question — opus-4-8\n\nLine one.\nLine two.\nLine three.\n\n";
+        let ours = format!("{header}{committed}{resp}<!-- agent:boundary:new-id -->\n{foot}");
+
+        // Theirs: stale buffer that dropped the committed first Q&A entirely
+        // (only the boundary id differs from ours — a transient marker).
+        let theirs =
+            format!("{header}❯ second question\n<!-- agent:boundary:base-id -->\n{foot}");
+
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        assert!(
+            merged.contains("### Re: first question — opus-4-8"),
+            "committed prior response heading deleted by stale theirs:\n{merged}"
+        );
+        assert!(
+            merged.contains("First answer. Committed to HEAD."),
+            "committed prior response body deleted by stale theirs:\n{merged}"
+        );
+        assert!(
+            merged.contains("### Re: second question — opus-4-8"),
+            "new response heading missing:\n{merged}"
+        );
+        // Order preserved: prior committed response before the new one.
+        let prior = merged.find("### Re: first question").unwrap();
+        let current = merged.find("### Re: second question").unwrap();
+        assert!(prior < current, "response order inverted:\n{merged}");
+    }
+
+    /// Negative case for the committed-response guard: when `theirs` carries
+    /// genuinely new user input (a freshly typed prompt) the guard must NOT
+    /// clobber it by preferring `ours`; both the new user prompt and the
+    /// committed history must survive.
+    #[test]
+    fn merge_committed_guard_keeps_new_user_input() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let committed = "❯ first question\n\n### Re: first question — opus-4-8\n\nFirst answer. Committed to HEAD.\n\n❯ second question\n";
+        let foot = "<!-- /agent:exchange -->\n";
+        let base = format!("{header}{committed}<!-- agent:boundary:base-id -->\n{foot}");
+        let resp = "### Re: second question — opus-4-8\n\nAnswer body.\n\n";
+        let ours = format!("{header}{committed}{resp}<!-- agent:boundary:new-id -->\n{foot}");
+
+        // Theirs: user appended a brand-new prompt while the response generated.
+        let theirs = format!(
+            "{header}{committed}❯ a genuinely new third prompt\n<!-- agent:boundary:base-id -->\n{foot}"
+        );
+
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        assert!(
+            merged.contains("❯ a genuinely new third prompt"),
+            "new user prompt clobbered by committed-response guard:\n{merged}"
+        );
+        assert!(
+            merged.contains("### Re: first question"),
+            "committed prior response lost:\n{merged}"
+        );
+        assert!(
+            merged.contains("### Re: second question"),
+            "new response lost:\n{merged}"
         );
     }
 }

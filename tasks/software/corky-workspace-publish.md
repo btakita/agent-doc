@@ -1,6 +1,6 @@
 # corky — workspace-split crates.io publish
 
-**Status:** blocked on a publish-topology decision (raised 2026-06-08 during the agent-loop submodule-release sweep).
+**Status:** DONE 2026-06-08 — user approved claiming the 5 `corky-*` crate names. Lockstep `0.29.0` published to crates.io in dependency order (corky-core → corky-google/social/transcribe → corky-mail → root corky), all six verified live. Tag `v0.29.0` pushed (CI publishes PyPI wheel + GitHub release). `cargo install --features transcribe-cuda` + `make release` rebuilt local binaries; superproject pointer bumped.
 
 ## Why it's not a one-shot publish
 

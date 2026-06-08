@@ -447,6 +447,83 @@ fn record_context_clear_prompt_for_hooks(
     }
 }
 
+fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
+    crate::queue_command::slash_command_text(active_head)
+}
+
+fn complete_idle_queue_slash_command_head(
+    file: &Path,
+    expected_head: &str,
+    command: &str,
+    session_log: &mut Option<std::fs::File>,
+) -> bool {
+    match crate::write::consume_queue_prompt_force_disk(file) {
+        Ok(Some(outcome)) => {
+            if outcome.consumed_text.trim() != expected_head.trim() {
+                log_event(
+                    session_log,
+                    &format!(
+                        "idle_queue_watch_slash_command_consumed_unexpected_head expected={:?} consumed={:?} cmd={:?}",
+                        expected_head, outcome.consumed_text, command
+                    ),
+                );
+            }
+            match crate::git::commit(file) {
+                Ok(did_commit) => {
+                    log_event(
+                        session_log,
+                        &format!(
+                            "idle_queue_watch_slash_command_head_completed cmd={:?} remaining={} drained={} committed={}",
+                            command, outcome.remaining, outcome.drained, did_commit
+                        ),
+                    );
+                    true
+                }
+                Err(err) => {
+                    log_event(
+                        session_log,
+                        &format!(
+                            "idle_queue_watch_slash_command_commit_failed cmd={:?} error={:?}",
+                            command,
+                            err.to_string()
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] idle-queue watch: submitted {command:?} but failed to commit queue command completion for {}: {err:#}",
+                        file.display()
+                    );
+                    false
+                }
+            }
+        }
+        Ok(None) => {
+            log_event(
+                session_log,
+                &format!(
+                    "idle_queue_watch_slash_command_no_head_to_consume cmd={:?}",
+                    command
+                ),
+            );
+            false
+        }
+        Err(err) => {
+            log_event(
+                session_log,
+                &format!(
+                    "idle_queue_watch_slash_command_consume_failed cmd={:?} error={:?}",
+                    command,
+                    err.to_string()
+                ),
+            );
+            eprintln!(
+                "[agent-doc] idle-queue watch: submitted {command:?} but failed to consume queue command head for {}: {err:#}",
+                file.display()
+            );
+            false
+        }
+    }
+}
+
 fn codex_owner_queue_continuation_prompt(file: &str, active_head: &str) -> String {
     format!(
         "Agent-doc active queue continuation for {file}.\n\n\
@@ -464,6 +541,9 @@ fn idle_queue_drain_payload(
     harness: &crate::harness::HarnessConfig,
     active_head: &str,
 ) -> String {
+    if let Some(command) = idle_queue_head_slash_command(active_head) {
+        return command;
+    }
     if harness.binary == "codex" {
         codex_owner_queue_continuation_prompt(file, active_head)
     } else {
@@ -471,8 +551,13 @@ fn idle_queue_drain_payload(
     }
 }
 
-fn idle_queue_drain_payload_kind(harness: &crate::harness::HarnessConfig) -> &'static str {
-    if harness.binary == "codex" {
+fn idle_queue_drain_payload_kind(
+    harness: &crate::harness::HarnessConfig,
+    active_head: &str,
+) -> &'static str {
+    if idle_queue_head_slash_command(active_head).is_some() {
+        "slash_command"
+    } else if harness.binary == "codex" {
         "owner_continuation"
     } else {
         "trigger"
@@ -2013,10 +2098,31 @@ fn spawn_idle_queue_watch_thread(
                     IdleQueueDrainDecision::Dispatch => {
                         let head = active_head.expect("dispatch implies an active head");
                         let drain_payload = idle_queue_drain_payload(&file, &harness, &head);
-                        let payload_kind = idle_queue_drain_payload_kind(&harness);
+                        let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
+                        let slash_command = idle_queue_head_slash_command(&head);
                         match auto_trigger_inject_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
-                                last_dispatched = Some(head);
+                                if let Some(command) = slash_command.as_deref() {
+                                    let completed = complete_idle_queue_slash_command_head(
+                                        &path,
+                                        &head,
+                                        command,
+                                        &mut session_log,
+                                    );
+                                    if crate::queue_command::is_context_clear_command(command) {
+                                        last_context_clear_at = Some(current_epoch_secs());
+                                        last_context_reset_head = Some(head.clone());
+                                        record_context_clear_prompt_for_hooks(
+                                            &shared,
+                                            &path,
+                                            &harness,
+                                            command,
+                                        );
+                                    }
+                                    last_dispatched = if completed { None } else { Some(head) };
+                                } else {
+                                    last_dispatched = Some(head);
+                                }
                                 log_event(
                                     &mut session_log,
                                     &format!(
@@ -5583,6 +5689,13 @@ Done.
                 .starts_with("agent-doc tasks/monsterrodholders.md"),
             "Codex idle queue watch must not inject the recursive trigger"
         );
+        assert_eq!(
+            idle_queue_drain_payload_kind(
+                &crate::harness::HarnessConfig::codex(),
+                "JB Run Agent Doc on monsterrodholders.md stalled."
+            ),
+            "owner_continuation"
+        );
     }
 
     #[test]
@@ -5603,6 +5716,99 @@ Done.
             ),
             "/agent-doc tasks/monsterrodholders.md"
         );
+        assert_eq!(
+            idle_queue_drain_payload_kind(&crate::harness::HarnessConfig::claude(), "ignored"),
+            "trigger"
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_payload_submits_literal_clear_command() {
+        for harness in [
+            crate::harness::HarnessConfig::claude(),
+            crate::harness::HarnessConfig::codex(),
+            crate::harness::HarnessConfig::opencode(),
+        ] {
+            assert_eq!(
+                idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "  /clear  "),
+                "/clear"
+            );
+            assert_eq!(
+                idle_queue_drain_payload_kind(&harness, "/clear"),
+                "slash_command"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_queue_drain_payload_submits_any_literal_slash_command() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "/model sonnet"),
+            "/model sonnet"
+        );
+        assert_eq!(
+            idle_queue_drain_payload_kind(&harness, "/model sonnet"),
+            "slash_command"
+        );
+    }
+
+    #[test]
+    fn complete_idle_queue_slash_command_head_consumes_and_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("task.md");
+        let content = concat!(
+            "---\n",
+            "session: sid\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- /clear\n",
+            "- do #next\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test User"],
+            vec!["add", "task.md"],
+            vec!["commit", "-m", "initial", "--no-verify"],
+        ] {
+            let status = std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        let mut session_log = None;
+        assert!(complete_idle_queue_slash_command_head(
+            &doc,
+            "/clear",
+            "/clear",
+            &mut session_log
+        ));
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ~~/clear~~"), "{updated}");
+        assert!(updated.contains("- do #next"), "{updated}");
+        let output = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["log", "-1", "--pretty=%s"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let subject = String::from_utf8_lossy(&output.stdout);
+        assert!(subject.contains("agent-doc"), "{subject}");
     }
 
     #[test]

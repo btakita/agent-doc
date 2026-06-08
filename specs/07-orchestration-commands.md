@@ -86,6 +86,14 @@ Before a **queue-sourced** auto-run (`--from-queue`, sequential or dag) executes
 ### Command classification
 
 - Queue/orchestration items starting with `/` are commands; everything else is a prompt.
+- The managed idle-queue continuation path uses the same classification. When an active
+  queue head is a slash command (for example `/clear` or `/model sonnet`), the owner
+  pane receives that literal command at the next idle prompt instead of an
+  `agent-doc <FILE>` reopen or Codex owner-continuation prompt. After successful
+  delivery, agent-doc marks that queue head complete, commits the queue mutation, and
+  resumes draining the remaining queue.
+- Codex Stop-hook and `session-check --codex-final-gate` diagnostics must report slash
+  command heads as commands to submit, not as prompts to answer.
 - Dispatch priority is:
   1. Inline execution for binary-owned commands such as `/model` or `/compact`
   2. Supervisor IPC

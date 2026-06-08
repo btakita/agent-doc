@@ -103,6 +103,7 @@ pub mod prompt_context;
 pub mod prompt_contract;
 pub mod queue;
 pub mod queue_cmd;
+pub mod queue_command;
 pub mod queue_continuation;
 pub mod queue_preemption;
 pub mod recguard_wedge;

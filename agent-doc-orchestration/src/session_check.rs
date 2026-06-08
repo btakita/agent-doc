@@ -142,16 +142,35 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     );
                     return Ok(());
                 }
-                println!(
-                    "queue_continuation_required=true next_queue_prompt={:?}",
-                    continuation.head_prompt
-                );
-                if codex_final_gate {
-                    eprintln!(
-                        "[session-check] codex-final-gate: active `agent:queue auto` continuation required for {} — continue with `agent-doc {}` before sending any final answer.",
-                        file.display(),
-                        file.display()
+                if let Some(command) =
+                    crate::queue_command::slash_command_text(&continuation.head_prompt)
+                {
+                    println!(
+                        "queue_continuation_required=true next_queue_command={:?}",
+                        command
                     );
+                } else {
+                    println!(
+                        "queue_continuation_required=true next_queue_prompt={:?}",
+                        continuation.head_prompt
+                    );
+                }
+                if codex_final_gate {
+                    if let Some(command) =
+                        crate::queue_command::slash_command_text(&continuation.head_prompt)
+                    {
+                        eprintln!(
+                            "[session-check] codex-final-gate: active `agent:queue auto` slash command required for {} — submit {} after the current turn reaches an idle prompt before sending any final answer.",
+                            file.display(),
+                            command
+                        );
+                    } else {
+                        eprintln!(
+                            "[session-check] codex-final-gate: active `agent:queue auto` continuation required for {} — continue with `agent-doc {}` before sending any final answer.",
+                            file.display(),
+                            file.display()
+                        );
+                    }
                     std::process::exit(2);
                 }
             } else {

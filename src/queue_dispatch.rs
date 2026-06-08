@@ -60,6 +60,14 @@ pub struct QueueItem {
 /// Classify a text item as a prompt or command.
 pub fn classify(text: &str) -> QueueItem {
     let trimmed = text.trim();
+    if let Some(command) = agent_doc_orchestration::queue_command::classify(trimmed) {
+        return QueueItem {
+            kind: QueueItemKind::Command,
+            raw: command.raw,
+            command: Some(command.name),
+            args: command.args,
+        };
+    }
     if let Some(without_slash) = trimmed.strip_prefix('/') {
         let mut parts = without_slash.split_whitespace();
         let command = parts.next().unwrap_or("").to_string();

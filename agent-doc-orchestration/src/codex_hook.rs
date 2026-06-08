@@ -361,8 +361,7 @@ fn agent_doc_mcp_configured_for(file: &Path) -> bool {
 }
 
 fn is_context_clear_prompt(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    trimmed == "/clear" || trimmed == "/new"
+    crate::queue_command::is_context_clear_command(prompt)
 }
 
 fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&str>) -> String {
@@ -383,6 +382,26 @@ fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&
             "Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
             disp = file.display()
         )
+    }
+}
+
+fn slash_command_continuation_instruction(file: &Path, command: &str) -> String {
+    format!(
+        "Do NOT answer the queued slash command {command:?} as an agent-doc prompt. Let the current turn close so the managed owner-pane supervisor can submit {command:?} at the next idle prompt, mark that queue head complete, and continue the remaining queue. Do not send the final answer yet. If no managed supervisor is available, submit {command:?} in the owner pane, then run `agent-doc queue consume {disp}` and `agent-doc commit {disp}` before continuing.",
+        command = command,
+        disp = file.display()
+    )
+}
+
+fn continuation_closeout_instruction_for_head(
+    file: &Path,
+    head: &str,
+    context_reset_reason: Option<&str>,
+) -> String {
+    if let Some(command) = crate::queue_command::slash_command_text(head) {
+        slash_command_continuation_instruction(file, &command)
+    } else {
+        continuation_closeout_instruction(file, context_reset_reason)
     }
 }
 
@@ -602,7 +621,11 @@ fn tracked_repeated_queue_recovery_response(
             disp = file.display(),
             note = note,
             prompt = next_prompt,
-            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
+            instruction = continuation_closeout_instruction_for_head(
+                file,
+                &next_prompt,
+                context_reset_reason.as_deref()
+            ),
         ),
     })
 }
@@ -638,7 +661,11 @@ fn marker_repeated_queue_recovery_response(
             disp = file.display(),
             note = note,
             prompt = next_prompt,
-            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
+            instruction = continuation_closeout_instruction_for_head(
+                file,
+                &next_prompt,
+                context_reset_reason.as_deref()
+            ),
         ),
     })
 }
@@ -703,7 +730,11 @@ fn auto_queue_continuation_response(
             "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
-            instruction = continuation_closeout_instruction(file, context_reset_reason.as_deref()),
+            instruction = continuation_closeout_instruction_for_head(
+                file,
+                &prompt,
+                context_reset_reason.as_deref()
+            ),
         ),
     }))
 }
@@ -771,8 +802,12 @@ fn marker_fallback_continuation_response(
         reason: format!(
             "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
-            prompt = continuation.head_prompt,
-            instruction = continuation_closeout_instruction(&file, context_reset_reason.as_deref()),
+            prompt = continuation.head_prompt.as_str(),
+            instruction = continuation_closeout_instruction_for_head(
+                &file,
+                &continuation.head_prompt,
+                context_reset_reason.as_deref()
+            ),
         ),
     }))
 }
@@ -2448,6 +2483,66 @@ agent-doc {}\n",
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
+    }
+
+    #[test]
+    fn stop_blocks_clean_closeout_when_auto_queue_has_clear_command() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["/clear", "do #fix1"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("queued slash command"), "{reason}");
+                assert!(reason.contains("\"/clear\""), "{reason}");
+                assert!(
+                    reason.contains("managed owner-pane supervisor can submit"),
+                    "{reason}"
+                );
+                assert!(!reason.contains("answer that prompt"), "{reason}");
+            }
+            other => panic!("expected auto-queue command continuation block, got {other:?}"),
+        }
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("/clear"));
+    }
+
+    #[test]
+    fn stop_blocks_clean_closeout_when_auto_queue_has_generic_slash_command() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["/model sonnet", "do #fix1"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("queued slash command"), "{reason}");
+                assert!(reason.contains("\"/model sonnet\""), "{reason}");
+                assert!(!reason.contains("Run `/clear`"), "{reason}");
+            }
+            other => panic!("expected auto-queue command continuation block, got {other:?}"),
+        }
     }
 
     #[test]

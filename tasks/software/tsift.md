@@ -118,7 +118,12 @@ Verification:
 - Latest `Agent Doc` run `27110521399` failed before any job started because GitHub reported billing/spending-limit exhaustion, so there were no failed test logs to inspect.
 
 No escalation was needed. Remaining root dirt is pre-existing or concurrent work: `.codex/config.toml`, `src/boost-client`, `src/instruction-files`, `src/webmaster`, `tasks/agent-doc-bugs2.done.md`, plus the session document until this write commit lands.
-<!-- agent:boundary:e9370a5b -->
+
+### Re: queue marker cleanup — gpt-5
+
+<!-- no-queue-removal-guard -->
+Recorded the drained queue marker cleanup after gating `#tsiftinitboost`; there is no runnable queue item left for this cycle.
+<!-- agent:boundary:1366e790 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,7 +132,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

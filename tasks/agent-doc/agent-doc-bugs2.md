@@ -159,12 +159,22 @@ Three actionable phase IDs sit at the top of the backlog, in priority order, eac
 **Top of backlog: `#op-scoped-drift-1`.**
 
 That drains the queue — both items from this run (canonical-session close, shipped last cycle; operations-taxonomy capture, here) are now resolved.
-<!-- agent:boundary:cc394208 -->
+
+### Re: queue deactivated (go removed) — opus-4-8
+
+You struck `go` from the queue marker, so the queue is now inactive (`preset="#spec-test-build-install-commit-push"` retained, no auto-trigger). The queue body is empty — both items from the prior run are already resolved in the exchange above (canonical-session close shipped last cycle; operations-taxonomy capture this run). Nothing to drain.
+
+**Ready when you are** (no work started — queue is inactive):
+- **Backlog**, priority order: `#op-scoped-drift-1` (actor + causal tagging on `node_events`; sqlite op-log) → `#op-scoped-drift-2` (`TurnScope` manifest) → `#op-scoped-drift-3` (affectedness classifier + 5-class router). Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`. Then `#canonical-session-close-autodetect` (recommended).
+- **Review** (gated): `#ipc-crdt-response-drift` (two layers fixed + installed; remaining reversed-lines symptom needs clean-session live repro) and `#live-verify-batch` (blocked on live IntelliJ/Codex panes).
+
+Re-add `go` to the queue marker, or add a new queue item, when you want me to start `#op-scoped-drift-1`.
+<!-- agent:boundary:9ee0124e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

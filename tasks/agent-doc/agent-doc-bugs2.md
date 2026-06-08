@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -103,15 +103,19 @@ Verification:
 - `agent-doc --version` -> `agent-doc 0.34.0`
 
 CI: latest `btakita/agent-doc` CI for commit `5847da11` was `in_progress` when checked after push. The superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. No escalated sandbox approval was requested.
-<!-- agent:boundary:cffc2081 -->
+/clear
+<!-- agent:boundary:b12bdd5b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- /clear
 <!-- /agent:queue -->
 ###
 <!--
+`'/clear' is disabled while a task is in progress
+---
 - When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
 ---
 A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.

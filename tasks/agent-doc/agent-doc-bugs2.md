@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,6 +37,11 @@ Compacted content:
 
 ### Re: do #ipc-crdt-response-drift — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#ipc-crdt-response-drift]
+
+
 Worked the bug from the merge layer down. Findings + what landed:
 
 **Reproduced and fixed at the CRDT merge layer.** I built deterministic reproductions of the reported drift directly against `agent_doc_core::crdt::merge`:
@@ -47,13 +52,12 @@ Worked the bug from the merge layer down. Findings + what landed:
 **Tests / verification:** 3 new regression tests in `crdt.rs`; `make check` green (**4010 passed, 0 failed**); latest CI run green.
 
 **Not done — gated.** The merge fix is **not released** (no `cargo install` / `build --release` this turn): making an unvalidated merge-semantics change the live binary would jump the manual-testing gate, and the plan explicitly forbids editing the live write path while *this* document is mid-drift. The remaining IPC-layer fix needs a **clean quiescent session** to reproduce live — this session was actively racy (session drift across 2 tmux sessions, 10 foreign-owned docs, degraded IPC listener). I gated `#ipc-crdt-response-drift` with that exact unblock condition rather than overclaim it done.
-<!-- agent:boundary:c3a2c45e -->
+<!-- agent:boundary:35c075e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#ipc-crdt-response-drift]
 <!-- /agent:queue -->
 ###
 <!--

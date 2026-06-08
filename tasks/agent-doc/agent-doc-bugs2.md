@@ -55,7 +55,7 @@ Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpre
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

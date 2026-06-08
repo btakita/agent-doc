@@ -133,11 +133,15 @@ printf '{{"result":"<!-- patch:exchange -->\\n### Re: queue item %s — gpt-5\\n
     (script, counter, args_log)
 }
 
-fn write_mock_streaming_agent(root: &Path) -> PathBuf {
+fn write_mock_streaming_agent(root: &Path) -> (PathBuf, PathBuf) {
     let script = root.join("mock-streaming-agent.sh");
+    let release = root.join("mock-streaming-agent.release");
     fs::write(
         &script,
-        "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\"}]}}'\nsleep 1\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n\",\"session_id\":\"sess-stream\"}'\n",
+        format!(
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\"}}]}}}}'\ni=0\nwhile [ ! -f '{release}' ] && [ \"$i\" -lt 300 ]; do\n  i=$((i + 1))\n  sleep 0.1\ndone\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n\",\"session_id\":\"sess-stream\"}}'\n",
+            release = release.display()
+        ),
     )
     .unwrap();
     #[cfg(unix)]
@@ -147,7 +151,7 @@ fn write_mock_streaming_agent(root: &Path) -> PathBuf {
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).unwrap();
     }
-    script
+    (script, release)
 }
 
 fn write_sleeping_agent(root: &Path) -> PathBuf {
@@ -1082,7 +1086,7 @@ fn orchestrate_streams_step_patchback_before_finalize() {
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
 
-    let script = write_mock_streaming_agent(tmp.path());
+    let (script, release_stream) = write_mock_streaming_agent(tmp.path());
     let config_root = write_claude_config(tmp.path(), &script);
     let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
 
@@ -1108,12 +1112,18 @@ fn orchestrate_streams_step_patchback_before_finalize() {
         let has_full_body = content.contains("Implemented and verified.");
         if has_heading && !has_full_body {
             saw_partial = true;
+            let child_state = child.try_wait().unwrap();
+            fs::write(&release_stream, b"continue").unwrap();
             assert!(
-                child.try_wait().unwrap().is_none(),
+                child_state.is_none(),
                 "partial streamed patchback should land before orchestrate exits"
             );
             break;
         }
+    }
+
+    if !saw_partial {
+        let _ = fs::write(&release_stream, b"continue");
     }
 
     let status = child.wait().unwrap();

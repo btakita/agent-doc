@@ -354,6 +354,8 @@ enum IdleQueueDrainDecision {
     SkipClearCooldown,
     /// The pane is still busy on an active turn — never inject (no-inject-into-active-turn).
     SkipNotIdle,
+    /// The harness Stop/idle hook has not ended the owning pane's turn yet.
+    SkipTurnActive,
     /// No active `queue_active: true` head remains to drain.
     SkipNoActiveHead,
     /// This exact head was already dispatched and has not advanced/drained yet —
@@ -366,12 +368,14 @@ enum IdleQueueContextResetDecision {
     Reset,
     SkipNoActiveHead,
     SkipNotIdle,
+    SkipTurnActive,
     SkipAlreadyResetHead,
     SkipNoResetNeeded,
 }
 
 fn idle_queue_context_reset_decision(
     prompt_visible: bool,
+    turn_active: bool,
     active_head: Option<&str>,
     last_context_reset_head: Option<&str>,
     reset_required: bool,
@@ -381,6 +385,9 @@ fn idle_queue_context_reset_decision(
     };
     if !prompt_visible {
         return IdleQueueContextResetDecision::SkipNotIdle;
+    }
+    if turn_active {
+        return IdleQueueContextResetDecision::SkipTurnActive;
     }
     if last_context_reset_head == Some(head) {
         return IdleQueueContextResetDecision::SkipAlreadyResetHead;
@@ -402,6 +409,7 @@ fn idle_queue_context_reset_decision(
 fn idle_queue_drain_decision(
     clear_cooldown_active: bool,
     prompt_visible: bool,
+    turn_active: bool,
     active_head: Option<&str>,
     last_dispatched: Option<&str>,
 ) -> IdleQueueDrainDecision {
@@ -415,6 +423,9 @@ fn idle_queue_drain_decision(
         // Never inject while the pane is mid-turn — that is the
         // no-inject-into-active-turn invariant the route busy path enforces.
         Some(_) if !prompt_visible => IdleQueueDrainDecision::SkipNotIdle,
+        // The renderer can briefly show an idle-looking prompt before the
+        // harness Stop/idle hook has completed the whole turn.
+        Some(_) if turn_active => IdleQueueDrainDecision::SkipTurnActive,
         // Dedup against the head we already fired for. A head that is still
         // present after we dispatched (dispatch failed, or the cycle has not
         // consumed it yet) must not be re-fired every idle tick.
@@ -449,6 +460,25 @@ fn record_context_clear_prompt_for_hooks(
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
     crate::queue_command::slash_command_text(active_head)
+}
+
+fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
+    let Some(root) = crate::snapshot::find_project_root(file) else {
+        return false;
+    };
+    let Some(marker) = crate::turn_status::read_turn_active_marker(&root) else {
+        return false;
+    };
+    let owned_pane = shared.inject_pane.as_deref().or_else(|| {
+        shared
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.pane_id.as_str())
+    });
+    match owned_pane {
+        Some(pane) => marker.pane == pane,
+        None => true,
+    }
 }
 
 fn complete_idle_queue_slash_command_head(
@@ -1341,6 +1371,90 @@ fn auto_trigger_inject_command(
     }
 }
 
+fn auto_trigger_clear_command(
+    shared: &SupervisorShared,
+    stop: &AtomicBool,
+    clear_cmd: &str,
+) -> AutoTriggerOutcome {
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
+    }
+    shared.transition_actor_state(
+        crate::session_actor::ActorState::Busy,
+        "operator",
+        "auto_trigger_clear",
+    );
+    let submitted_text = crate::supervisor::ipc::normalize_submit_text(clear_cmd);
+    if let Some(pane_id) = shared.inject_pane.as_deref() {
+        crate::input_diag::log_text_submit(
+            None,
+            "supervisor.auto_trigger_clear",
+            &format!("pane:{pane_id}"),
+            &submitted_text,
+            Some(&shared.harness_binary),
+            if shared.harness_binary == "opencode" {
+                "auto_trigger_clear_kitty_return"
+            } else {
+                "auto_trigger_clear_enter"
+            },
+            if shared.harness_binary == "opencode" {
+                "KittyReturn"
+            } else {
+                "Enter"
+            },
+        );
+        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
+        {
+            Ok(()) => AutoTriggerOutcome::Sent,
+            Err(_) => AutoTriggerOutcome::SendFailed,
+        };
+    }
+
+    let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
+        return AutoTriggerOutcome::SendFailed;
+    };
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
+    }
+
+    let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
+    crate::input_diag::log_text_submit(
+        None,
+        "supervisor.auto_trigger_clear",
+        "child_pty",
+        &submitted_text,
+        Some(&shared.harness_binary),
+        "pty_clear_submit_cr",
+        "Enter",
+    );
+
+    let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
+        return AutoTriggerOutcome::Cancelled;
+    };
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
+    }
+    match writer.write_all_interruptibly(&payload, stop) {
+        Ok(()) => AutoTriggerOutcome::Sent,
+        Err(err) if err.kind() == io::ErrorKind::Interrupted && stop.load(Ordering::Relaxed) => {
+            AutoTriggerOutcome::Cancelled
+        }
+        Err(_) => AutoTriggerOutcome::SendFailed,
+    }
+}
+
+fn auto_trigger_submit_queue_command(
+    shared: &SupervisorShared,
+    stop: &AtomicBool,
+    command: &str,
+) -> AutoTriggerOutcome {
+    if crate::queue_command::is_context_clear_command(command) {
+        auto_trigger_clear_command(shared, stop, command)
+    } else {
+        auto_trigger_inject_command(shared, stop, command)
+    }
+}
+
 fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
     let mut normalized = Vec::with_capacity(bytes.len());
     let raw = bytes.as_bytes();
@@ -1920,6 +2034,7 @@ fn spawn_idle_queue_watch_thread(
 
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
+                let turn_active = turn_active_for_owned_pane(&path, &shared);
 
                 // `#autoloop-command-preemption` Phase 2b: a non-interrupting
                 // `session clear` against this busy auto-loop deferred itself
@@ -1932,7 +2047,7 @@ fn spawn_idle_queue_watch_thread(
                     .unwrap_or(None);
                 match crate::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
-                    prompt_visible,
+                    prompt_visible && !turn_active,
                 ) {
                     crate::queue_preemption::DeferredClearStep::None => {}
                     crate::queue_preemption::DeferredClearStep::WaitForIdle => {
@@ -1945,7 +2060,7 @@ fn spawn_idle_queue_watch_thread(
                             .as_ref()
                             .map(|d| d.clear_command.clone())
                             .unwrap_or_default();
-                        match auto_trigger_inject_command(&shared, &stop, &clear_cmd) {
+                        match auto_trigger_clear_command(&shared, &stop, &clear_cmd) {
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
                                 // Resume: drop the deferred-clear record AND the
@@ -2032,6 +2147,7 @@ fn spawn_idle_queue_watch_thread(
                 };
                 match idle_queue_context_reset_decision(
                     prompt_visible,
+                    turn_active,
                     active_head.as_deref(),
                     last_context_reset_head.as_deref(),
                     context_reset_reason.is_some(),
@@ -2039,7 +2155,7 @@ fn spawn_idle_queue_watch_thread(
                     IdleQueueContextResetDecision::Reset => {
                         let head = active_head.as_deref().unwrap_or("<unknown>");
                         let clear_cmd = harness.context_clear_command();
-                        match auto_trigger_inject_command(&shared, &stop, clear_cmd) {
+                        match auto_trigger_clear_command(&shared, &stop, clear_cmd) {
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
                                 last_context_clear_at = Some(current_epoch_secs());
@@ -2085,6 +2201,7 @@ fn spawn_idle_queue_watch_thread(
                     }
                     IdleQueueContextResetDecision::SkipNoActiveHead
                     | IdleQueueContextResetDecision::SkipNotIdle
+                    | IdleQueueContextResetDecision::SkipTurnActive
                     | IdleQueueContextResetDecision::SkipAlreadyResetHead
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
@@ -2092,6 +2209,7 @@ fn spawn_idle_queue_watch_thread(
                 match idle_queue_drain_decision(
                     clear_cooldown_active,
                     prompt_visible,
+                    turn_active,
                     active_head.as_deref(),
                     last_dispatched.as_deref(),
                 ) {
@@ -2100,7 +2218,7 @@ fn spawn_idle_queue_watch_thread(
                         let drain_payload = idle_queue_drain_payload(&file, &harness, &head);
                         let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
                         let slash_command = idle_queue_head_slash_command(&head);
-                        match auto_trigger_inject_command(&shared, &stop, &drain_payload) {
+                        match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
                                 if let Some(command) = slash_command.as_deref() {
                                     let completed = complete_idle_queue_slash_command_head(
@@ -2155,6 +2273,7 @@ fn spawn_idle_queue_watch_thread(
                         last_dispatched = None;
                     }
                     IdleQueueDrainDecision::SkipNotIdle
+                    | IdleQueueDrainDecision::SkipTurnActive
                     | IdleQueueDrainDecision::SkipClearCooldown
                     | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
                 }
@@ -5582,7 +5701,7 @@ Done.
     #[test]
     fn idle_queue_drain_dispatches_when_idle_with_fresh_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(false, true, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, true, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::Dispatch
         );
     }
@@ -5592,15 +5711,23 @@ Done.
         // No-inject-into-active-turn: a busy pane (no dispatch-ready prompt)
         // never receives an injected trigger, mirroring the route busy path.
         assert_eq!(
-            idle_queue_drain_decision(false, false, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipNotIdle
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_waits_for_turn_status_idle_even_with_visible_prompt() {
+        assert_eq!(
+            idle_queue_drain_decision(false, true, true, Some("/clear"), None),
+            IdleQueueDrainDecision::SkipTurnActive
         );
     }
 
     #[test]
     fn idle_queue_drain_skips_during_clear_cooldown() {
         assert_eq!(
-            idle_queue_drain_decision(true, true, Some("do [#a]"), None),
+            idle_queue_drain_decision(true, true, true, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipClearCooldown
         );
     }
@@ -5608,15 +5735,15 @@ Done.
     #[test]
     fn idle_queue_context_reset_dispatches_clear_once_per_head() {
         assert_eq!(
-            idle_queue_context_reset_decision(true, Some("do [#a]"), None, true),
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, true),
             IdleQueueContextResetDecision::Reset
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, Some("do [#a]"), Some("do [#a]"), true),
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), Some("do [#a]"), true),
             IdleQueueContextResetDecision::SkipAlreadyResetHead
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, Some("do [#b]"), Some("do [#a]"), true),
+            idle_queue_context_reset_decision(true, false, Some("do [#b]"), Some("do [#a]"), true),
             IdleQueueContextResetDecision::Reset
         );
     }
@@ -5624,27 +5751,57 @@ Done.
     #[test]
     fn idle_queue_context_reset_waits_for_idle_and_active_head() {
         assert_eq!(
-            idle_queue_context_reset_decision(false, Some("do [#a]"), None, true),
+            idle_queue_context_reset_decision(false, false, Some("do [#a]"), None, true),
             IdleQueueContextResetDecision::SkipNotIdle
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, None, None, true),
+            idle_queue_context_reset_decision(true, false, None, None, true),
             IdleQueueContextResetDecision::SkipNoActiveHead
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, Some("do [#a]"), None, false),
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, false),
             IdleQueueContextResetDecision::SkipNoResetNeeded
         );
     }
 
     #[test]
+    fn idle_queue_context_reset_waits_for_turn_status_idle() {
+        assert_eq!(
+            idle_queue_context_reset_decision(true, true, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::SkipTurnActive
+        );
+    }
+
+    #[test]
+    fn idle_queue_turn_active_gate_is_scoped_to_owned_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "doc").unwrap();
+        crate::turn_status::write_turn_active_marker(dir.path(), "%other").unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "claude",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        assert!(!turn_active_for_owned_pane(&doc, &shared));
+
+        crate::turn_status::write_turn_active_marker(dir.path(), "%owner").unwrap();
+        assert!(turn_active_for_owned_pane(&doc, &shared));
+    }
+
+    #[test]
     fn idle_queue_drain_skips_when_no_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(false, true, None, None),
+            idle_queue_drain_decision(false, true, false, None, None),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
         assert_eq!(
-            idle_queue_drain_decision(false, false, None, Some("do [#a]")),
+            idle_queue_drain_decision(false, false, true, None, Some("do [#a]")),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
     }
@@ -5655,7 +5812,7 @@ Done.
         // it yet, or the dispatch failed to drain) — suppress re-firing so a
         // stuck head cannot spin the watch every idle tick.
         assert_eq!(
-            idle_queue_drain_decision(false, true, Some("do [#a]"), Some("do [#a]")),
+            idle_queue_drain_decision(false, true, false, Some("do [#a]"), Some("do [#a]")),
             IdleQueueDrainDecision::SkipAlreadyDispatched
         );
     }
@@ -5665,7 +5822,7 @@ Done.
         // A different head than the last dispatched one re-fires — the queue
         // advanced to a new prompt that still needs an idle drain.
         assert_eq!(
-            idle_queue_drain_decision(false, true, Some("do [#b]"), Some("do [#a]")),
+            idle_queue_drain_decision(false, true, false, Some("do [#b]"), Some("do [#a]")),
             IdleQueueDrainDecision::Dispatch
         );
     }
@@ -5836,6 +5993,7 @@ Done.
             idle_queue_drain_decision(
                 false,
                 true,
+                false,
                 Some("do [#learn-ohio-duplicate-gate]"),
                 last_dispatched.as_deref(),
             ),
@@ -6237,6 +6395,26 @@ Done.
             auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
             AutoTriggerOutcome::SendFailed
         );
+    }
+
+    #[test]
+    fn auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_submit_queue_command(&shared, &stop, "/clear"),
+            AutoTriggerOutcome::Sent
+        );
+        assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
     }
 
     #[test]

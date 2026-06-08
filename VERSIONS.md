@@ -10,9 +10,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   queue heads such as `/clear` or `/model sonnet` are classified in the managed
   idle-queue drain path, submitted literally to the owner pane at the next idle
   prompt, consumed from `agent:queue`, committed, and then the remaining queue
-  resumes. Codex Stop-hook and `session-check --codex-final-gate` diagnostics now
-  name these heads as queued slash commands instead of prompts to answer. Tests:
+  resumes. The idle-queue watcher now also waits for the hook-owned turn-active
+  marker to clear before submitting queued work, so a visually idle prompt cannot
+  race ahead of the full Stop/idle boundary; queued `/clear` and context reset
+  clears use the supervisor's gate-exempt clear submit path instead of generic
+  prompt injection. Codex Stop-hook and `session-check --codex-final-gate`
+  diagnostics now name these heads as queued slash commands instead of prompts to
+  answer. Tests:
   `queue_command::tests::*`,
+  `idle_queue_drain_waits_for_turn_status_idle_even_with_visible_prompt`,
+  `idle_queue_context_reset_waits_for_turn_status_idle`,
+  `auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter`,
   `idle_queue_drain_payload_submits_literal_clear_command`,
   `idle_queue_drain_payload_submits_any_literal_slash_command`,
   `complete_idle_queue_slash_command_head_consumes_and_commits`,

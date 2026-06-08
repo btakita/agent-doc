@@ -99,9 +99,19 @@ pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMar
     Some(marker)
 }
 
+/// Read the non-expired turn-active marker under `base`, if present.
+pub fn read_turn_active_marker(base: &Path) -> Option<TurnActiveMarker> {
+    read_turn_active_marker_at(base, now_secs())
+}
+
 /// True when a non-expired turn-active marker is present under `base`.
 pub fn turn_active(base: &Path) -> bool {
-    read_turn_active_marker_at(base, now_secs()).is_some()
+    read_turn_active_marker(base).is_some()
+}
+
+/// True when the non-expired marker belongs to `pane`.
+pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
+    read_turn_active_marker(base).is_some_and(|marker| marker.pane == pane)
 }
 
 /// Title to set for a turn state. `active` → the busy title; `idle` → empty, so
@@ -212,5 +222,17 @@ mod tests {
         assert!(read_turn_active_marker_at(base, 1000 + TURN_ACTIVE_TTL_SECS - 1).is_some());
         // At/after the window → expired, treated as idle.
         assert!(read_turn_active_marker_at(base, 1000 + TURN_ACTIVE_TTL_SECS).is_none());
+    }
+
+    #[test]
+    fn turn_active_for_pane_matches_only_marker_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+
+        write_turn_active_marker_at(base, "%7", now_secs()).unwrap();
+
+        assert!(turn_active_for_pane(base, "%7"));
+        assert!(!turn_active_for_pane(base, "%8"));
     }
 }

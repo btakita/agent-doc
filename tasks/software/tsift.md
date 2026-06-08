@@ -118,8 +118,7 @@ Verification:
 - Latest `Agent Doc` run `27110521399` failed before any job started because GitHub reported billing/spending-limit exhaustion, so there were no failed test logs to inspect.
 
 No escalation was needed. Remaining root dirt is pre-existing or concurrent work: `.codex/config.toml`, `src/boost-client`, `src/instruction-files`, `src/webmaster`, `tasks/agent-doc-bugs2.done.md`, plus the session document until this write commit lands.
-<!-- agent:boundary:7e614b59 -->
-<!-- agent:boundary:e575bad2 -->
+<!-- agent:boundary:e9370a5b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,12 +133,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsiftinitboost] Rerun plain `tsift init` in `src/boost-client` and `src/boost-client/src/monsterrodholders-dev` after the active monsterrodholders workflow stops rebasing/resetting those worktrees; commit their `AGENTS.md` updates and any resulting pointers.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#tsiftinitboost] Rerun plain `tsift init` in `src/boost-client` and `src/boost-client/src/monsterrodholders-dev` after the active monsterrodholders workflow stops rebasing/resetting those worktrees; commit their `AGENTS.md` updates and any resulting pointers.
 <!-- /agent:review -->
 ###
 <!--

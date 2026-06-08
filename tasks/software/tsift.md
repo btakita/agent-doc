@@ -233,7 +233,36 @@ Session note: preflight reported session accretion, but the auto queue is active
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:5dcd6e8e -->
+Completed `#tsiftasttests` and repaired the prior `#tsiftastops` closeout.
+
+Changed paths:
+- `src/tsift/packages/tsift-cli/src/semantic_edit.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/specs/ast-edits.md`
+- `src/tsift` submodule pointer
+
+What changed:
+- Rust `insert_import` now parser-anchors insertion after the safe Rust file prelude and reparses input/output.
+- Rust `replace_function_body` now selects parsed `function_item` body ranges, honors concrete AST span targets, and only falls back after shifted same-file edits when the current target name is unique.
+- Added fixtures/tests for comments, formatting/trivia preservation metadata, generated macro sections, mixed-language Markdown fences, syntax-error work-in-progress files, verification failure blocking, import prelude placement, and string-literal false positives.
+- Updated the AST edit spec with the Rust import/body-selection promotion contract.
+- Committed and pushed the tsift submodule change: `a64605b` (`test semantic ast edit edge cases`).
+- Reverted unrelated workspace formatting churn produced during verification before the parent closeout.
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_ -- --nocapture'`: passed, artifact `tart-5f6085811e`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-8f3d6bc84c`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was `completed success` for `feat: propose semantic edit patches` at 2026-06-08T18:51:02Z.
+- `tsift status` in `src/tsift`: refreshed index; fresh.
+
+Session note: preflight reported session accretion, but the auto queue is active, so I continued draining instead of compacting.
+
+Escalation: none.
+
+Confidence: high.
+
+<!-- agent:boundary:d48ec266 -->
 <!-- /agent:exchange -->
 ###
 <!--

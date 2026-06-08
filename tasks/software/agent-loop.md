@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 # agent-loop operations
@@ -60,7 +60,24 @@ Both verified live on crates.io at 0.3.0; superproject pointers bumped.
 - **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
 
 Net: no crate had an *unpublished tag* to move forward — every last-tag matched its crates.io version — so each release required a deliberate version bump, which I did only for the two with genuine feature deltas.
-<!-- agent:boundary:d02e21b9 -->
+
+### Re: do #jq1r — publish corky workspace crates — opus-4-8
+
+> **Queue prompt:**
+>
+> do #jq1r. Yes, publish new crates.
+
+Done. Claimed all 5 `corky-*` names and published the workspace at lockstep `0.29.0`.
+
+**Published to crates.io (dependency order, all verified live at 0.29.0):** `corky-core` → `corky-google`, `corky-social`, `corky-transcribe` → `corky-mail` → root `corky`. The 5 member names were available (404) before publish; member crates already carried `description`/`license`/`repository`, so no metadata fixes were needed.
+
+**Verification + build:**
+- `make check` (clippy + tests, default features incl. `diarize`) → green, 0 failed.
+- `cargo install --path . --features transcribe-cuda` → replaced `~/.cargo/bin/corky` 0.28.2 with 0.29.0.
+- `make release` → rebuilt `.bin/corky`; `corky --version` = 0.29.0.
+
+**Pushed:** corky commit `b57a6db` + tag `v0.29.0` (tag triggered the **Release**/**CI** workflows that own the PyPI trusted-publish wheel + `gh release` — still in progress, not blocking). Superproject pointer + plan-status committed in `7c3fb4f43`. VERSIONS.md and pyproject.toml bumped in sync; plan `tasks/software/corky-workspace-publish.md` marked DONE.
+<!-- agent:boundary:e3cc02fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,13 +86,11 @@ Net: no crate had an *unpublished tag* to move forward — every last-tag matche
 ## Queue
 
 <!-- agent:queue go -->
-- do #jq1r. Yes, publish new crates.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#jq1r] corky workspace-split crates.io publish blocked on a topology decision (claim 5 new corky-* crate names + dependency-ordered publish, or keep binary/PyPI-only). Plan + recommendation: tasks/software/corky-workspace-publish.md
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
@@ -90,4 +105,5 @@ Net: no crate had an *unpublished tag* to move forward — every last-tag matche
 - 2026-05-19 [#cdvx] [recommended] Check crates.io availability for candidate public crate names before renaming skill-harness
 - 2026-05-19 [#25k6] [recommended] Keep skill-harness as the current Rust crate/package boundary, or rename only to an available precise crate name such as agent-skillkit/agent-skill-tools after checking registry availability; do not target the taken agent-skills crate name
 - 2026-05-19 [#e92b] [recommended] Move compose-skills toward skill-harness/agent-skills with Rust validation and Claude/Codex installer coverage
+- 2026-06-08 [#jq1r] corky workspace-split crates.io publish blocked on a topology decision (claim 5 new corky-* crate names + dependency-ordered publish, or keep binary/PyPI-only). Plan + recommendation: tasks/software/corky-workspace-publish.md
 <!-- /agent:done -->

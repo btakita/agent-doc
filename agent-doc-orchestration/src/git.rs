@@ -1976,6 +1976,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     }
     file_content = std::fs::read_to_string(file).unwrap_or_default();
     dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
+    ensure_active_capture_materialized_for_commit(
+        file,
+        snapshot_content.as_deref().or(Some(file_content.as_str())),
+        "staged",
+    )?;
     let elapsed_reposition = t_reposition.elapsed().as_millis();
     if elapsed_reposition > 0 {
         eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
@@ -3041,6 +3046,18 @@ fn ensure_active_capture_materialized_for_head_current_noop(
     snapshot_content: Option<&str>,
     head_doc: Option<&str>,
 ) -> Result<()> {
+    ensure_active_capture_materialized_for_commit(
+        file,
+        snapshot_content.or(head_doc),
+        "head_current",
+    )
+}
+
+fn ensure_active_capture_materialized_for_commit(
+    file: &Path,
+    staged_content: Option<&str>,
+    basis: &str,
+) -> Result<()> {
     let Some(capture) = crate::capture::load_active(file)? else {
         return Ok(());
     };
@@ -3050,7 +3067,7 @@ fn ensure_active_capture_materialized_for_head_current_noop(
     ) {
         return Ok(());
     }
-    let Some(materialized) = snapshot_content.or(head_doc) else {
+    let Some(materialized) = staged_content else {
         return Ok(());
     };
     if crate::write::response_materialized_in_content(&capture.response_body, materialized) {
@@ -3060,10 +3077,11 @@ fn ensure_active_capture_materialized_for_head_current_noop(
     crate::ops_log::log_op(
         file,
         &format!(
-            "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis=head_current",
+            "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis={}",
             file.display(),
             capture.capture_id,
-            capture.response_sha256
+            capture.response_sha256,
+            basis
         ),
     );
     crate::flow::closeout::log_closeout_guard_event(
@@ -5541,6 +5559,94 @@ Done.
         assert!(
             !log.contains("commit_already_current file="),
             "missing response materialization must not be recorded as already-current closeout:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_stale_snapshot_commit_when_active_capture_response_missing() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the prompt\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: stale sidecar — gpt-5\n\n",
+            "Recovered answer that must not be lost.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        crate::capture::capture_response(&doc, response).unwrap();
+
+        let stale_prompt_only = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the prompt\n",
+            "<!-- agent:boundary:head -->\n",
+            "❯ Later user follow-up while the response is missing\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, stale_prompt_only).unwrap();
+        crate::snapshot::save(&doc, stale_prompt_only).unwrap();
+
+        let head_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let err = commit(&doc)
+            .expect_err("stale prompt-only snapshot must not commit over captured response");
+        let head_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+
+        assert!(
+            err.to_string()
+                .contains("captured response body is not present"),
+            "error should name the missing captured response body:\n{err}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&head_before.stdout),
+            String::from_utf8_lossy(&head_after.stdout),
+            "blocked stale snapshot commit must not advance HEAD"
+        );
+        assert!(
+            !show_head(&doc)
+                .unwrap()
+                .unwrap()
+                .contains("Later user follow-up"),
+            "stale prompt-only snapshot must not be committed"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_missing_captured_response file=")
+                && log.contains("basis=staged"),
+            "blocked staged commit should be logged with staged basis:\n{log}"
         );
     }
 

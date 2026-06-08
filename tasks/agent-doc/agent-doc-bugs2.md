@@ -61,14 +61,35 @@ Shipped phase 1 of the operation-scoped drift model: **actor + causal tagging on
 **Verification:** 9 new unit tests (core/sqlite/preflight) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries. CI run `27161661385` on `a35ee064` is in progress — closing out from local evidence.
 
 This is the substrate the next phases read: `#op-scoped-drift-2` emits the TurnScope read/write set, and `#op-scoped-drift-3`'s affectedness classifier intersects incoming ops against that scope so independent edits integrate + persist without affecting the turn.
-<!-- agent:boundary:3398a0a2 -->
+
+### Re: do [#op-scoped-drift-2] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#op-scoped-drift-2]
+
+
+Shipped phase 2: the **TurnScope manifest**, emitted at turn start. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
+
+**What landed (agent-doc `8de34668`, pushed to origin/main):**
+
+- **`agent-doc-core::turn_scope`** — the manifest data layer:
+  - `Address { component, occurrence, node_key? }` — a `node_key` of `None` addresses a whole component occurrence; `Some(..)` narrows to one node.
+  - `TurnScope { driver, read_set, write_set }`. `TurnScope::for_driver` builds the canonical scope from the plan: **read** `{driver, exchange tail}`; **write** `{exchange append, driver strike, backlog, status, review}`. The driver appears in both sets because the turn strikes the queue item it consumes. Addresses dedupe preserving first-seen order.
+- **Preflight derivation** — `derive_turn_scope` resolves the driver queue node by matching each `prompt_target`'s id (`[#id]` or bare `#id`) against the queue item nodes, then emits `turn_scope` in `PreflightOutput`. A prompt with no matching queue node still yields an output-only scope with `driver: null`.
+- **Spec** — new "TurnScope manifest" subsection in `specs/02-document-format.md` §2.
+
+**Verification:** 8 new unit tests (core `turn_scope` + preflight `derive_turn_scope`/`extract_target_id`) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries.
+
+Next: `#op-scoped-drift-3` — the affectedness classifier + 5-class router, which intersects each incoming op (phase 1's actor-tagged op log) against this TurnScope so independent edits integrate and persist without affecting the turn, replacing the coarse drift gate.
+<!-- agent:boundary:aa295cf2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#op-scoped-drift-1]~~
-- do [#op-scoped-drift-2]
+- ~~do [#op-scoped-drift-2]~~
 - do [#op-scoped-drift-3]
 - do [#canonical-session-close-autodetect]
 <!-- /agent:queue -->
@@ -98,7 +119,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#op-scoped-drift-2] :round_pushpin: TurnScope manifest (read_set/write_set/driver) emitted at turn start from preflight prompt_targets / plan write_scope. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 - [ ] [#op-scoped-drift-3] :round_pushpin: Affectedness classifier + 5-class router; replace the coarse drift gate with TurnScope scope-intersection so independent ops integrate+persist without affecting the turn. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 - [ ] [#canonical-session-close-autodetect] :round_pushpin: [recommended] Extend superseded-session close to the auto-resync drift path (registered panes span multiple tmux sessions with no configured canonical). Needs a canonical-determination rule decision: newest session vs the session holding the active agent-doc window vs the current pane. Reuse resync::close_superseded_session once canonical is resolved.
 <!-- /agent:backlog -->

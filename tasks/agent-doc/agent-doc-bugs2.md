@@ -50,12 +50,19 @@ The plan ties this work to the existing `#ipc-admin-api`, Project Controller MVP
 I closed `#ctrlplane-adminbp` as the planning item and added three follow-up implementation phases to the backlog, all pointing at the plan file: controller data/receipts, CLI/admin operations, and queue/projection/FFI integration. `#ctrlplane-simworld` should stay after those primitives, since it depends on them for deterministic race coverage.
 
 Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpressure.md` passed. I did not run the Rust suite because this cycle only added a plan document and backlog mutations.
-<!-- agent:boundary:21f989d2 -->
+
+### Re: active queue continuation closeout — gpt-5
+
+Closed the active Codex continuation after the `#ctrlplane-adminbp` queue response. No additional task work was needed beyond committing the recovered plan/backlog closeout and repairing the queue metadata drift.
+
+Verification after the repair path: the ordinary `agent-doc session-check` reported the queue drained with no next head. I am rerunning the strict Codex final gate after this binary-owned closeout.
+
+<!-- agent:boundary:f3a91a48 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

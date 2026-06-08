@@ -3095,6 +3095,23 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // for the prompts this turn is answering.
     let turn_scope = derive_turn_scope(&diff_result_with_current.current, &prompt_targets);
 
+    // #nm1x: persist the scope so the later finalize-path drift gate (a separate
+    // process invocation) can intersect incoming document ops against the same
+    // scope. Best effort — a write failure must never block a preflight cycle, and
+    // a stale scope is cleared so the gate falls back to its coarse behavior.
+    match turn_scope.as_ref() {
+        Some(scope) => {
+            if let Err(err) = crate::turn_scope_store::save(file, scope) {
+                eprintln!("[preflight] turn-scope persist skipped: {err}");
+            }
+        }
+        None => {
+            if let Err(err) = crate::turn_scope_store::delete(file) {
+                eprintln!("[preflight] turn-scope clear skipped: {err}");
+            }
+        }
+    }
+
     // #op-scoped-drift-3: classify this cycle's node ops against the TurnScope so
     // independent / provenance-spoofed edits integrate without affecting the turn.
     let op_affectedness = match (semantic_diff.as_ref(), turn_scope.as_ref()) {

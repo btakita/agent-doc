@@ -55,17 +55,38 @@ impl Address {
         }
     }
 
+    /// Build a node address from a component name and a stable node key,
+    /// parsing the component occurrence out of the `comp:occurrence:id:n` node
+    /// key. This is the single source of occurrence parsing shared by
+    /// [`op_address`] and the finalize-path drift gate, so an op's address and
+    /// the scope's driver address agree for the same node key.
+    pub fn from_component_node_key(component: &str, node_key: &str) -> Self {
+        let occurrence = node_key
+            .split(':')
+            .nth(1)
+            .and_then(|field| field.parse().ok())
+            .unwrap_or(0);
+        Address::node(component, occurrence, node_key)
+    }
+
     /// True when this address targets a whole component rather than one node.
     pub fn is_component_level(&self) -> bool {
         self.node_key.is_none()
     }
 
     /// True when two addresses refer to overlapping document regions: the same
-    /// component occurrence, and either side is component-level or both name the
-    /// same node key. This is the `overlaps` primitive behind the affectedness
-    /// `conflict` relation (`#op-scoped-drift-3`).
+    /// component, and either side is component-level (whole component) or both
+    /// name the same node key. This is the `overlaps` primitive behind the
+    /// affectedness `conflict` relation (`#op-scoped-drift-3`).
+    ///
+    /// Overlap is keyed on the component name plus the node key. The `occurrence`
+    /// field is informational and is intentionally *not* part of the match: a
+    /// node key already encodes the component index (`comp:index:id:n`), and the
+    /// canonical write-set members built by [`TurnScope::for_driver`] are
+    /// whole-component addresses (`occurrence: 0`) that must match the component
+    /// wherever it sits in the document (`#nm1x`).
     pub fn overlaps(&self, other: &Address) -> bool {
-        if self.component != other.component || self.occurrence != other.occurrence {
+        if self.component != other.component {
             return false;
         }
         match (&self.node_key, &other.node_key) {
@@ -217,13 +238,7 @@ pub struct CycleAffectedness {
 
 /// The component-occurrence-narrowed address of a durable op.
 pub fn op_address(op: &crate::op_log::DocumentOp) -> Address {
-    let occurrence = op
-        .node_key
-        .split(':')
-        .nth(1)
-        .and_then(|field| field.parse().ok())
-        .unwrap_or(0);
-    Address::node(&op.component, occurrence, &op.node_key)
+    Address::from_component_node_key(&op.component, &op.node_key)
 }
 
 /// Classify every op in a cycle against the turn scope, routing the coarse
@@ -330,8 +345,10 @@ mod tests {
         assert!(node_a.overlaps(&comp));
         // distinct nodes don't overlap.
         assert!(!node_a.overlaps(&node_b));
-        // different occurrence never overlaps.
-        assert!(!comp.overlaps(&Address::component("queue", 1)));
+        // occurrence is informational: a whole-component address matches the
+        // component regardless of the occurrence field (#nm1x).
+        assert!(comp.overlaps(&Address::component("queue", 1)));
+        assert!(Address::component("queue", 1).overlaps(&node_a));
         // different component never overlaps.
         assert!(!comp.overlaps(&Address::component("backlog", 0)));
     }

@@ -6521,33 +6521,57 @@ fn guard_visible_write_reconcile(
         .unwrap_or_else(|_| file.to_path_buf())
         .to_string_lossy()
         .to_string();
+    let actual_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
     if let Some(live) =
         crate::debounce::live_buffer_diverges_from_content(&indicator_path, expected_current)
     {
-        crate::flow::proof::log_flow_event(
-            file,
-            crate::flow::document_mutation::visible_write_current_changed_event(source),
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "visible_write_deferred_live_buffer_changed file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={}",
-                file.display(),
-                source,
-                expected_current.len(),
-                crate::ops_log::content_hash(expected_current),
-                live.len,
-                live.hash,
-                live.timestamp_ms
-            ),
-        );
-        anyhow::bail!(
-            "visible editor buffer for {} differs from the expected disk state; save or discard the editor buffer, then retry",
-            file.display()
-        );
+        // #nm1x provenance suppression: when the editor-visible buffer matches the
+        // current on-disk content, the editor holds no unsaved edits *ahead* of
+        // disk. The divergence is then disk-vs-expected — an independent / foreign
+        // document edit, the reconcilable `DiskDrifted` case below — not a pending
+        // user edit. Only a genuine unsaved editor buffer ahead of disk fails
+        // closed. This replaces the coarse "any live-buffer divergence blocks
+        // finalize" gate with an actor-aware check (the live-buffer actor is not
+        // diverging when it already equals disk).
+        let disk_hash = crate::ops_log::content_hash(&actual_current);
+        let editor_matches_disk =
+            live.len == actual_current.len() && live.hash.eq_ignore_ascii_case(&disk_hash);
+        if editor_matches_disk {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "visible_write_live_buffer_matches_disk file={} source={} expected_hash={} disk_hash={}",
+                    file.display(),
+                    source,
+                    crate::ops_log::content_hash(expected_current),
+                    disk_hash
+                ),
+            );
+        } else {
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::document_mutation::visible_write_current_changed_event(source),
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "visible_write_deferred_live_buffer_changed file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={}",
+                    file.display(),
+                    source,
+                    expected_current.len(),
+                    crate::ops_log::content_hash(expected_current),
+                    live.len,
+                    live.hash,
+                    live.timestamp_ms
+                ),
+            );
+            anyhow::bail!(
+                "visible editor buffer for {} differs from the expected disk state; save or discard the editor buffer, then retry",
+                file.display()
+            );
+        }
     }
-    let actual_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
     if actual_current == expected_current {
         return Ok(VisibleWriteReconcile::Clean);
     }
@@ -14930,6 +14954,56 @@ scratch
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=visible_write_current_changed:test_live_buffer_changed"));
         assert!(log.contains("visible_write_deferred_live_buffer_changed"));
+    }
+
+    #[test]
+    fn visible_write_reconcile_treats_editor_matching_disk_as_reconcilable_drift() {
+        // #nm1x: the editor reported a buffer that diverges from `expected` but
+        // *matches the current on-disk content* (an independent document edit the
+        // editor already saved). That is not a pending unsaved user edit, so the
+        // guard must not fail closed — it reports the reconcilable DiskDrifted case
+        // instead, letting the response re-merge against the fresh disk content.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: old
+<!-- /agent:exchange -->
+";
+        // Disk + editor both carry an independent queue edit not present in
+        // `expected`; the editor digest equals disk (saved, no pending edit).
+        let drifted = expected.replace(
+            "<!-- /agent:exchange -->",
+            "<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#sibling]\n<!-- /agent:queue -->",
+        );
+        fs::write(&doc, &drifted).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest(
+            &doc_str,
+            drifted.len(),
+            &crate::debounce::content_hash(&drifted),
+        )
+        .unwrap();
+
+        let outcome =
+            guard_visible_write_reconcile(&doc, "test_editor_matches_disk", expected).unwrap();
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, drifted);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_live_buffer_matches_disk"),
+            "expected provenance-suppression log: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "must not record a fail-closed live-buffer block: {log}"
+        );
     }
 
     #[test]

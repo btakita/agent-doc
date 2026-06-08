@@ -125,6 +125,7 @@ pub mod status_cmd;
 pub mod stream;
 pub mod supervisor;
 pub mod sync;
+pub mod turn_scope_store;
 pub mod watch;
 pub mod write;
 

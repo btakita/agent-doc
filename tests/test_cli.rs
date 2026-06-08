@@ -740,7 +740,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `reconcile_visible_write` loop helper references, and the
         // deterministic reconcile unit tests. A clean CRDT merge that hits a
         // foreign agent-doc disk append re-merges instead of failing closed.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 84,
+        // +1 (#nm1x) for the audited `guard_visible_write_reconcile` call in the
+        // `visible_write_reconcile_treats_editor_matching_disk_as_reconcilable_drift`
+        // regression test: a live-buffer divergence whose editor digest equals the
+        // current disk content is reconcilable, not a fail-closed user edit — it
+        // reuses the existing visible-write guard, no new flow token.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 85,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

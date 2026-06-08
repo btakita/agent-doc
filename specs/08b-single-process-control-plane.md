@@ -173,6 +173,13 @@ the dispatch actor and produce receipts.
 - If the controller crashes before committing a response closeout, the durable
   response capture and cycle state decide repair, and the queue/backlog state
   must remain unadvanced.
+- On controller generation restart, startup runs a bounded recovery sweep before
+  accepting new requests: it reloads actor memory from SQLite, reconciles fresh
+  supervisor leases as reattached or stale, records retryable/blocked dispatch
+  receipt recovery markers based on side-effect proof scope, emits
+  `session-actors.json`, `sessions.json`, and layout projections from committed
+  rows, and records open closeout cycles as preserved without advancing queue or
+  backlog rows.
 
 ## Backpressure
 

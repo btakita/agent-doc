@@ -189,6 +189,9 @@ struct ControllerRuntime {
 
 impl ControllerRuntime {
     fn new(bootstrap: ControllerBootstrap) -> Result<Self> {
+        if controller_restart_recovery_needed(&bootstrap) {
+            recover_controller_after_restart(&bootstrap)?;
+        }
         let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
@@ -235,6 +238,230 @@ impl ControllerRuntime {
             ("write_through_sqlite", 1),
         ]))
     }
+}
+
+fn controller_restart_recovery_needed(bootstrap: &ControllerBootstrap) -> bool {
+    bootstrap.controller_generation > 1 || bootstrap.previous_controller_pid.is_some()
+}
+
+#[derive(Debug, Default)]
+struct CrashRecoveryStats {
+    actor_records: usize,
+    supervisor_reattached: usize,
+    supervisor_stale: usize,
+    dispatch_retryable: usize,
+    dispatch_blocked: usize,
+    open_cycles_preserved: usize,
+    projections_emitted: usize,
+}
+
+fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<CrashRecoveryStats> {
+    let project_root = &bootstrap.project_root;
+    let conn = open_state_db(project_root)?;
+    let store = load_actor_store_from_db(&conn)?;
+    let mut stats = CrashRecoveryStats {
+        actor_records: store.len(),
+        ..CrashRecoveryStats::default()
+    };
+
+    reconcile_supervisor_leases_after_restart(&conn, &store, &mut stats)?;
+    reconcile_open_dispatch_receipts_after_restart(&conn, &mut stats)?;
+    preserve_open_closeout_cycles_after_restart(&conn, &mut stats)?;
+    drop(conn);
+
+    if !store.is_empty() {
+        let actor_projection_hash = actor_projection_intended_hash(project_root).ok();
+        match emit_actor_projection(project_root) {
+            Ok(()) => stats.projections_emitted += 1,
+            Err(err) => {
+                let document_id = store
+                    .keys()
+                    .next()
+                    .map(String::as_str)
+                    .unwrap_or("__controller__");
+                record_projection_diagnostic_with_metadata(
+                    project_root,
+                    ACTOR_PROJECTION_FILE,
+                    document_id,
+                    None,
+                    actor_projection_hash.as_deref(),
+                    "retry_pending",
+                    &format!("failed to emit actor projection during controller recovery: {err}"),
+                );
+            }
+        }
+    }
+
+    for record in store.values() {
+        project_sessions_projection_for_actor(project_root, &record.document_id)?;
+    }
+    if !store.is_empty() {
+        stats.projections_emitted += 1;
+    }
+
+    let conn = open_state_db(project_root)?;
+    if state_store::layout_scope_exists(&conn, DEFAULT_LAYOUT_SCOPE)? {
+        drop(conn);
+        match emit_layout_projection(project_root) {
+            Ok(()) => stats.projections_emitted += 1,
+            Err(err) => record_projection_diagnostic_with_metadata(
+                project_root,
+                LAYOUT_PROJECTION_FILE,
+                "__layout__",
+                None,
+                None,
+                "retry_pending",
+                &format!("failed to emit layout projection during controller recovery: {err}"),
+            ),
+        }
+    }
+
+    let conn = open_state_db(project_root)?;
+    state_store::insert_crash_recovery_marker_in_db(
+        &conn,
+        "controller_restart_reconcile",
+        None,
+        None,
+        "completed",
+        Some(&format!(
+            "actor_records={} supervisor_reattached={} supervisor_stale={} dispatch_retryable={} dispatch_blocked={} open_cycles_preserved={} projections_emitted={}",
+            stats.actor_records,
+            stats.supervisor_reattached,
+            stats.supervisor_stale,
+            stats.dispatch_retryable,
+            stats.dispatch_blocked,
+            stats.open_cycles_preserved,
+            stats.projections_emitted
+        )),
+    )?;
+    Ok(stats)
+}
+
+fn reconcile_supervisor_leases_after_restart(
+    conn: &Connection,
+    store: &BTreeMap<String, crate::session_actor::ActorRecord>,
+    stats: &mut CrashRecoveryStats,
+) -> Result<()> {
+    let now = timestamp_secs();
+    for record in store.values() {
+        if record.state == crate::session_actor::ActorState::Closed {
+            continue;
+        }
+        let Some(lease) =
+            load_supervisor_lease_from_db(conn, &record.document_id, record.generation)?
+        else {
+            continue;
+        };
+        let fresh = supervisor_lease_is_fresh_or_alive(&lease, now, Duration::from_secs(60));
+        let status = if fresh {
+            stats.supervisor_reattached += 1;
+            "reattached"
+        } else {
+            stats.supervisor_stale += 1;
+            "stale"
+        };
+        state_store::insert_crash_recovery_marker_in_db(
+            conn,
+            "supervisor_lease_reconcile",
+            Some(&record.document_id),
+            Some(record.generation),
+            status,
+            Some(&format!(
+                "session={} pane={} runtime_state={} heartbeat={}",
+                record.session_id,
+                record.pane_id,
+                lease.runtime_state.as_deref().unwrap_or("unknown"),
+                lease
+                    .last_heartbeat
+                    .map(|timestamp| timestamp.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            )),
+        )?;
+    }
+    Ok(())
+}
+
+fn reconcile_open_dispatch_receipts_after_restart(
+    conn: &Connection,
+    stats: &mut CrashRecoveryStats,
+) -> Result<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, document_id, generation, command_kind, result_status, proof_scope, dispatch_start_proven
+        FROM dispatch_attempts
+        WHERE failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND (COALESCE(proof_scope, '') = 'accepted_only' OR dispatch_start_proven = 0)
+        "#,
+    )?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let receipt_id: i64 = row.get("id")?;
+        let document_id: String = row.get("document_id")?;
+        let generation: i64 = row.get("generation")?;
+        let command_kind: String = row.get("command_kind")?;
+        let result_status: Option<String> = row.get("result_status")?;
+        let proof_scope: Option<String> = row.get("proof_scope")?;
+        let dispatch_start_proven: i64 = row.get("dispatch_start_proven")?;
+        let status = if dispatch_start_proven == 0 {
+            stats.dispatch_retryable += 1;
+            "retryable"
+        } else {
+            stats.dispatch_blocked += 1;
+            "blocked"
+        };
+        state_store::insert_crash_recovery_marker_in_db(
+            conn,
+            "dispatch_receipt_reconcile",
+            Some(&document_id),
+            Some(state_store::sqlite_u64(generation, "dispatch generation")?),
+            status,
+            Some(&format!(
+                "receipt_id={} command_kind={} result_status={} proof_scope={} dispatch_start_proven={}",
+                state_store::sqlite_u64(receipt_id, "dispatch receipt id")?,
+                command_kind,
+                result_status.as_deref().unwrap_or("unknown"),
+                proof_scope.as_deref().unwrap_or("unknown"),
+                dispatch_start_proven != 0
+            )),
+        )?;
+    }
+    Ok(())
+}
+
+fn preserve_open_closeout_cycles_after_restart(
+    conn: &Connection,
+    stats: &mut CrashRecoveryStats,
+) -> Result<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT document_id, cycle_id, state, queue_head_id
+        FROM document_cycles
+        WHERE state NOT IN ('committed', 'abandoned')
+        "#,
+    )?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let document_id: String = row.get("document_id")?;
+        let cycle_id: String = row.get("cycle_id")?;
+        let state: String = row.get("state")?;
+        let queue_head_id: Option<String> = row.get("queue_head_id")?;
+        stats.open_cycles_preserved += 1;
+        state_store::insert_crash_recovery_marker_in_db(
+            conn,
+            "open_closeout_preserved",
+            Some(&document_id),
+            None,
+            "preserved",
+            Some(&format!(
+                "cycle_id={} state={} queue_head_id={}",
+                cycle_id,
+                state,
+                queue_head_id.as_deref().unwrap_or("none")
+            )),
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -5174,6 +5401,117 @@ agent:queue\n\
                 .get("map_backend_std_btree_map"),
             Some(&1)
         );
+    }
+
+    #[test]
+    fn controller_restart_recovery_rebuilds_memory_and_repairs_projections() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/restart.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-restart\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%88", "@8");
+        record.session_id = "session-restart".to_string();
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let conn = open_state_db(dir.path()).unwrap();
+        state_store::upsert_supervisor_lease_in_db(
+            &conn,
+            &record,
+            Some(std::process::id()),
+            Some("/tmp/supervisor.sock"),
+            "ready",
+        )
+        .unwrap();
+        state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: record.generation,
+                command_kind: "managed_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "restart recovery test",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        state_store::upsert_document_cycle_state_in_db(
+            &conn,
+            &document_id,
+            "cycle-restart",
+            "preflight_started",
+            Some("ctrlplane-crashrecover"),
+            None,
+        )
+        .unwrap();
+        state_store::store_layout_state_in_db(
+            &conn,
+            DEFAULT_LAYOUT_SCOPE,
+            &["tasks/restart.md".to_string()],
+        )
+        .unwrap();
+        drop(conn);
+
+        std::fs::write(actor_projection_path(dir.path()), "{}").unwrap();
+        let _ = std::fs::remove_file(crate::sessions::registry_path_in(dir.path()));
+        let _ = std::fs::remove_file(layout_projection_path(dir.path()));
+
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_generation = 2;
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
+
+        let memory_record = runtime.actor_record(&document_id).unwrap().unwrap();
+        assert_eq!(memory_record.pane_id, "%88");
+        assert_eq!(memory_record.session_id, "session-restart");
+
+        let actor_projection: BTreeMap<String, crate::session_actor::ActorRecord> =
+            serde_json::from_str(
+                &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(actor_projection.get(&document_id).unwrap(), &record);
+
+        let sessions_projection = crate::sessions::load_in(dir.path()).unwrap();
+        let entry = sessions_projection.get(&document_id).unwrap();
+        assert_eq!(entry.pane, "%88");
+        assert_eq!(entry.window, "@8");
+        assert_eq!(entry.session_id, "session-restart");
+
+        let layout_projection: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(layout_projection_path(dir.path())).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(layout_projection, vec!["tasks/restart.md"]);
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let marker_count = |kind: &str, status: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM crash_recovery_markers WHERE marker_kind = ?1 AND status = ?2",
+                params![kind, status],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(marker_count("supervisor_lease_reconcile", "reattached"), 1);
+        assert_eq!(marker_count("dispatch_receipt_reconcile", "retryable"), 1);
+        assert_eq!(marker_count("open_closeout_preserved", "preserved"), 1);
+        assert_eq!(marker_count("controller_restart_reconcile", "completed"), 1);
+        let cycle_state: String = conn
+            .query_row(
+                "SELECT state FROM document_cycles WHERE document_id = ?1 AND cycle_id = 'cycle-restart'",
+                params![document_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cycle_state, "preflight_started");
     }
 
     #[test]

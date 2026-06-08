@@ -37,7 +37,36 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): source-read windows vs graph; AST edits; AST edit backlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:082559e2 -->
+
+### Re: tsiftasteditspec — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftasteditspec]
+
+
+Completed `#tsiftasteditspec`.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/specs/ast-edits.md`
+
+What changed:
+- Added `specs/ast-edits.md` as the normative AST/CST edit strategy spec.
+- Updated the top-level `SPEC.md` map to route hybrid AST/CST edit strategy, target selection, minimal textual patch output, refusal modes, diff visibility, and verification requirements to that new sibling spec.
+- Committed and pushed the tsift submodule change: `773eafd` (`docs: specify ast cst edit strategy`).
+- Committed and pushed the agent-loop submodule pointer update: `ff9f88d9f` (`chore: update tsift submodule`).
+
+Verification:
+- `tsift status` in `src/tsift`: fresh index after refresh.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, exit code 0, artifact `tart-52bad9ef65`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, exit code 0, artifact `tart-22aaacb8f8`.
+- `gh run list --workflow CI --limit 1`: latest CI run was `completed success` for `chore: release v0.1.65` on 2026-06-08.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:f6409e8c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +76,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#tsiftasteditspec]
+- ~~do [#tsiftasteditspec]~~
 - do [#tsiftastselect]
 - do [#tsiftastpatch]
 - do [#tsiftastops]
@@ -57,7 +86,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsiftasteditspec] Update `src/tsift/SPEC.md` to define the hybrid AST/CST edit strategy: AST for selection/validation, minimal textual patch output for mutation, refusal modes, diff visibility, and verification requirements.
 - [ ] [#tsiftastselect] Prototype AST/CST edit-target selection that maps `search` / `symbol-read` / graph handles to concrete node spans without mutating files.
 - [ ] [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
 - [ ] [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.

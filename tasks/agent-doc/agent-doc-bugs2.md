@@ -203,7 +203,7 @@ Queued as **`#pcp-consolidate`** (top of backlog):
 5. **Thin the FFI listener** to a pure EDT apply+ack shim — no policy in the editor.
 
 Net: the editor process keeps only the irreducible EDT `apply + saveDocument`; the control pane owns state, merge, arbitration, and provenance.
-<!-- agent:boundary:e31e543f -->
+<!-- agent:boundary:6043cce8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -268,6 +268,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.
 - [ ] [#pcp-consolidate] [recommended] Consolidate document-state authority into the Project Control Pane process: make the supervisor the single disk writer + single file-watcher, demote the plugin WatchService to read-only buffer-state reporting (no autonomous reconcile/write), and reduce the FFI socket listener to a thin EDT apply+ack shim. Serialize supervisor idle-queue/file-watch writes and agent finalize writes through one in-process write queue to kill the supervisor self-race. Depends on/absorbs #ipc-drift-writeprovenance (provenance/generation id) + #nm1x-livebuf-content (buffer content in sidecar) so drift is positively classified instead of inferred from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic.
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md

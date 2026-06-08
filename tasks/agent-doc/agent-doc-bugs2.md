@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,12 +46,21 @@ Compacted content:
 Assuming "Control Pane" means the existing `Single Process Control Plane` contract: yes, that should be the target, but it is not fully landed yet. Current code already uses the project controller and `.agent-doc/state.db` for actor records; the rearchitecture should finish consolidating controller, session, store, and supervisor actors into one project-scoped control-plane process, with external CLIs/editors still talking to it over IPC.
 
 I added backlog slices for the unified process, the SQLite write-through store, lazily-rs-backed in-memory authority evaluation, dispatch/session actors, projection cleanup, crash recovery, admin/backpressure, and deterministic SimWorld coverage. I kept them ordered so authority moves to the controller before obsolete sidecar writers are removed.
-<!-- agent:boundary:f20f2891 -->
+<!-- agent:boundary:04fff25c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ctrlplane-process]
+- do [#ctrlplane-storeactor]
+- do [#ctrlplane-memoryauth]
+- do [#ctrlplane-dispatchapi]
+- do [#ctrlplane-sessionactor]
+- do [#ctrlplane-projections]
+- do [#ctrlplane-crashrecover]
+- do [#ctrlplane-adminbp]
+- do [#ctrlplane-simworld]
 <!-- /agent:queue -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -52,13 +52,13 @@ So the asymmetry is real and structural: the queue path has a fresh-session acti
 **Backlog:** added `#codex-exchange-prompt-no-dispatch` at the top of the backlog.
 
 Say the word (or `do #codex-exchange-prompt-no-dispatch`) and I'll implement + test + build + commit per the preset.
-<!-- agent:boundary:20f30f8b -->
+<!-- agent:boundary:1a99946c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do #codex-exchange-prompt-no-dispatch
 <!-- /agent:queue -->
 ###
 <!--

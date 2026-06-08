@@ -78,13 +78,47 @@ Parent pointer: `c8e816bbd agent-doc: update stale finalize replay fix`.
 The churn cause and fix remain the same: repeated explicit-baseline finalize after a `committed` cycle could append another response and boundary state; strict finalize now rejects that replay and requires a fresh preflight for any new prompt.
 
 /clear
-<!-- agent:boundary:1aa910b7 -->
+❯ The previous few turns had several issues.
+
+❯ - I typed in "monsterrodholders.md queue items still do not write into the agent:exchange." into the comment section, but that caused the finalize step to INTERRUPT. If I type in any text not related to the turn, such as in the comment area, the finalize step should continue. While this was post commit drift, it is ok to leave in and should not cause the turn to thrash.
+❯ - The `/clear` did not immediately stop the turn and have the supervisor call `/clear` in the Codex session with 0 tokens spent.
+❯ - As I was typing into the agent:queue, the turn kept on restarting despite repeated manual turn cancellations. I notice that `auto` is added to agent:queue even though I deleted it. `auto` should never be added to agent:queue.
+❯ - I ran JB `Run Agent Doc` for this prompt and nothing happened. This behavior is consistent across documents. I had to manually start this turn.
+
+### Re: previous few turns issues — gpt-5
+
+Fixed the reported agent-doc regressions and pushed the code path.
+
+Changed paths: `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/session_check.rs`, route/session-check tests, JetBrains route-output parser/tests, and the queue/routing/closeout specs plus `README.md`/`VERSIONS.md`.
+
+What changed:
+- Route-owned busy reruns now create/update plain `agent:queue`, never add `auto`, and strip legacy `auto` from queue tags they touch while preserving other attributes.
+- Existing inactive legacy `agent:queue auto` heads still activate for compatibility, but are normalized to plain queue output.
+- Queued `/clear` exchange heads stay command-only for idle supervisor submission; the route tests cover the literal `/clear` queue handoff without opening a response cycle.
+- Active-session post-commit drift now ignores ordinary scratch/comment-only edits after the exchange, while the adjacent status-component drift test still interrupts.
+- JetBrains `Run Agent Doc` queued-route detection accepts the new `active agent:queue` diagnostic and the old `agent:queue auto` wording.
+
+Verification:
+- `cargo test -p agent-doc-orchestration route_enqueue`
+- `cargo test -p agent-doc-orchestration route_activates`
+- `cargo test -p agent-doc-orchestration session_check_ignores_active_session_post_commit_comment_only_drift`
+- `cargo test -p agent-doc-orchestration session_check_interrupts_on_active_session_post_commit_drift`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `editors/jetbrains`
+- `make check` (4000 nextest tests passed, doctests passed; existing test-build warnings only)
+- `cargo install --path . --force` and `agent-doc --version` -> `agent-doc 0.34.0`
+- `gh run list --workflow CI --limit 1` -> latest CI completed success: `agent-doc: block stale finalize replay`
+
+Commits pushed:
+- `btakita/agent-doc` `667969c3` (`agent-doc: keep route queues plain`)
+- parent `btakita/agent-loop` `aac77a39c` (`agent-doc: update route queue handling`)
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:13e9776a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-/clear
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -141,17 +141,30 @@ Added three actionable phase IDs to the top of the backlog (priority order), eac
 - `#op-scoped-drift-3` — affectedness classifier + 5-class router; replace the coarse gate with scope-intersection so independent ops integrate + persist without affecting the turn.
 
 Top of backlog: `#op-scoped-drift-1`.
-<!-- agent:boundary:ba15db32 -->
+### Re: operations taxonomy backlog — captured — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
+
+
+Captured (the three phase items were added to the backlog in the previous cycle, so there are no new mutations this turn). The operations-taxonomy work is the operation-scoped-drift / turn-affectedness model in `tasks/agent-doc/plan-operation-scoped-drift.md` (`#op-scoped-drift`). The truncated goal sentence ("distinguish between …") matches the plan's core: distinguish ops that **affect the current turn** (input read-conflict, output write-contention, structural dependency) from ops that are **independent / commutative** (a new queue item beside a running one, a comment/backlog edit, a foreign-supervisor or stale live-buffer write) — the latter just integrate into the document model + durable sqlite without disturbing the turn, instead of tripping the coarse drift gate.
+
+Three actionable phase IDs sit at the top of the backlog, in priority order, each referencing the plan:
+
+- **`#op-scoped-drift-1`** — actor + causal (Lamport / session-origin) tagging on `node_events`; sqlite op-log schema + writer (the durable op log).
+- **`#op-scoped-drift-2`** — `TurnScope` manifest (read_set / write_set / driver) emitted at turn start from preflight `prompt_targets` / plan `write_scope`.
+- **`#op-scoped-drift-3`** — affectedness classifier + 5-class router; replace the coarse drift gate with scope-intersection so independent ops integrate + persist without affecting the turn.
+
+**Top of backlog: `#op-scoped-drift-1`.**
+
+That drains the queue — both items from this run (canonical-session close, shipped last cycle; operations-taxonomy capture, here) are now resolved.
+<!-- agent:boundary:cc394208 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: :round_pushpin: do [#ipc-drift-visbuf-reconcile]~~
-- ~~:pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]~~
-- ~~:pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]~~
-- ~~:pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.~~
-- :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
 <!-- /agent:queue -->
 ###
 <!--

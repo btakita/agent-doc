@@ -385,8 +385,30 @@ Verification: no code changed, so no build/test suite was rerun. The answer was 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:808e2ddb -->
-<!-- agent:boundary:b84388e3 -->
+
+### Re: closeout repair — gpt-5
+
+I repaired the closeout artifact from the previous write: the cross-provider prompt-cache answer is intact, and the stray duplicated bullets were removed from the prior MemGraph response's `Commands` list.
+
+Changed paths:
+- `tasks/software/tsift.md`
+
+Commands:
+- `sed -n '300,385p' tasks/software/tsift.md`
+- `agent-doc repair /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc write --help`
+- `agent-doc commit --help`
+- `agent-doc finalize --help`
+- `git diff -- tasks/software/tsift.md`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+- `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --template --force-disk --origin skill --status complete`
+
+Verification: no code changed, so no build/test suite was rerun. The repair was checked against the session-document diff and the intact cross-provider response.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:31274462 -->
 <!-- /agent:exchange -->
 ###
 <!--

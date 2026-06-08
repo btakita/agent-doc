@@ -37,7 +37,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:2986df88 -->
+<!-- agent:boundary:1478f1d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +58,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Review
 
 <!-- agent:review -->
-- [/] [#tsiftinitboost] Rerun plain `tsift init` in `src/boost-client` and `src/boost-client/src/monsterrodholders-dev` after the active monsterrodholders workflow stops rebasing/resetting those worktrees; commit their `AGENTS.md` updates and any resulting pointers.
 <!-- /agent:review -->
 ###
 <!--

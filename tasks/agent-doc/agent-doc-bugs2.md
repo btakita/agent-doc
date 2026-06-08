@@ -116,7 +116,28 @@ Commits/push:
 
 CI:
 - `src/agent-doc` latest CI for `ac213a76` was `in_progress` at closeout (`27110402938`, 2026-06-08 01:05:26Z), so I did not wait on it.
-<!-- agent:boundary:bc46b981 -->
+Yes, if the goal is a real Codex context reset, the turn needs to stop first.
+
+> **Queue prompt:**
+>
+> :pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?
+
+
+`/clear` is disabled while Codex is still executing an active task, so it cannot be used inside the owner-pane continuation between two queue heads. The clean flow is: finish the current queue item, persist the response with `agent-doc finalize` or `agent-doc write --commit`, let the turn end after `session-check --codex-final-gate`, run `/clear` or start a fresh Codex session, then resume the queue from the new context.
+
+If the harness immediately feeds the next queue head into the same active Codex turn, there is no safe point for `/clear` yet. In that case the options are either continue in the same pane, or change the queue driver so it intentionally stops after closeout when a context reset is desired.
+
+Changed paths: none for this prompt response.
+
+Commands/proof:
+- `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md` recovered and committed the previous `#ctrlplane-memoryauth` response.
+- `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` confirmed this `/clear` prompt was the next active queue head.
+
+Verification: not applicable; no code changes.
+
+Push: pending root document commit push after this closeout.
+
+<!-- agent:boundary:1b334455 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -124,7 +145,7 @@ CI:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#ctrlplane-process]~~
 - ~~:round_pushpin: do [#ctrlplane-memoryauth]~~
-- :pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?
+- ~~:pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?~~
 - :round_pushpin: do [#ctrlplane-dispatchapi]
 - :round_pushpin: do [#ctrlplane-sessionactor]
 - :round_pushpin: do [#ctrlplane-projections]
@@ -157,7 +178,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [x] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
 - [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
 - [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.

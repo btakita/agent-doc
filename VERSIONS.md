@@ -28,11 +28,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `stop_blocks_clean_closeout_when_auto_queue_has_generic_slash_command`.
 
 - **Exchange slash commands now enter the same after-turn command path.**
-  Routed `agent:exchange` prompts whose pending text is a literal slash command
-  such as `/clear` are copied into `agent:queue auto` as an unpinned literal
-  command head, then the managed idle-queue supervisor submits and consumes them
-  after the current turn instead of reopening agent-doc and answering them as
-  prose. Test: `route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain`.
+Routed `agent:exchange` prompts whose pending text is a literal slash command
+such as `/clear`, with or without a `❯` prompt prefix, are copied into
+`agent:queue auto` as an unpinned literal command head, then the managed
+idle-queue supervisor submits and consumes them after the current turn instead
+of reopening agent-doc and answering them as prose. Tests:
+`classify_prompt_bearing_changes_promotes_bare_slash_command_to_prompt_target`,
+`route_enqueue_bare_exchange_slash_command_for_idle_drain`, and
+`route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain`.
 
 - **Actor pane binding now recovers cross-document aliases.** Route/start actor
 store writes atomically close and clear the displaced document's pane binding

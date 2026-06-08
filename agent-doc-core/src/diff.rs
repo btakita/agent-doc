@@ -360,17 +360,40 @@ fn is_exchange_close_marker_line(content: &str) -> bool {
     content.trim() == "<!-- /agent:exchange -->"
 }
 
+fn line_looks_like_slash_command(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix('/') else {
+        return false;
+    };
+    let token_end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+    let token = &rest[..token_end];
+    if token.is_empty() {
+        return false;
+    }
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, ':' | '_' | '-'))
+}
+
 fn line_looks_like_prompt_target(line: &str) -> bool {
     let trimmed = line.trim();
     let normalized_imperative = normalize_imperative_candidate(trimmed)
         .is_some_and(|normalized| looks_like_imperative_directive(&normalized));
+    let slash_command = line_looks_like_slash_command(trimmed);
     !trimmed.is_empty()
         && !trimmed.starts_with("<!--")
         && !trimmed.starts_with("```")
         && !trimmed.starts_with("~~~")
         && !trimmed.starts_with("### Re:")
         && !line_has_known_response_label_after_prompt(trimmed)
-        && (trimmed.starts_with('❯') || trimmed.ends_with('?') || normalized_imperative)
+        && (slash_command
+            || trimmed.starts_with('❯')
+            || trimmed.ends_with('?')
+            || normalized_imperative)
 }
 
 pub fn text_line_looks_like_prompt_target(line: &str) -> bool {
@@ -402,9 +425,11 @@ pub fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
         return false;
     }
 
-    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
+    let unprefixed = trimmed.trim_start_matches('❯').trim();
+    let lower = unprefixed.to_ascii_lowercase();
     trimmed.starts_with('❯')
-        || trimmed.ends_with('?')
+        || unprefixed.ends_with('?')
+        || line_looks_like_slash_command(unprefixed)
         || lower == "go"
         || lower == "continue"
         || lower.starts_with("do #")
@@ -468,6 +493,7 @@ pub fn line_looks_like_targeted_prompt_prefix_repair_start(trimmed: &str, is_tar
     let lower = unprefixed.to_ascii_lowercase();
     lower == "go"
         || lower == "continue"
+        || line_looks_like_slash_command(unprefixed)
         || lower.starts_with("do #")
         || lower.starts_with("do [#")
         || lower.starts_with("fix #")
@@ -3076,9 +3102,9 @@ Please fix the bug.\n\
     #[test]
     fn classify_prompt_bearing_changes_promotes_plain_exchange_tail_to_prompt_target() {
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
-            Done.\n\
-            +When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n\
-            <!-- /agent:exchange -->\n";
+Done.\n\
++When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n\
+<!-- /agent:exchange -->\n";
         let changes = classify_prompt_bearing_changes(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].kind, PromptBearingChangeKind::PromptTarget);
@@ -3086,6 +3112,22 @@ Please fix the bug.\n\
             changes[0].text,
             "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
         );
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_promotes_bare_slash_command_to_prompt_target() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+### Re: older — gpt-5\n\
++/clear\n\
+<!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::PromptTarget);
+        assert_eq!(changes[0].text, "/clear");
+        assert!(line_looks_like_fresh_prompt_after_response("/clear"));
+        assert!(!text_line_looks_like_prompt_target(
+            "/home/brian/work/foo.md"
+        ));
     }
 
     #[test]

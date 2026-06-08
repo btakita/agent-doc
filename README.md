@@ -326,7 +326,7 @@ This catalog is intentionally detailed. It records user-visible capabilities and
 - **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
 - **Component-aware baseline guard** — detects stale baselines by comparing append-mode components only; user edits to replace-mode components (status, pending) don't trigger false positives
 - **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; `post_write` / `post_commit` events now include `capture_id` and `response_sha256` when a durable capture exists, the system integrates with Claude Code hooks via `PostToolUse`, and Codex installs a repo-local `UserPromptSubmit` / `Stop` bridge through `.codex/hooks.json`
-- **Slash command dispatch** — `preflight` extracts slash commands from user-added diff lines (`parse_slash_commands`); the SKILL executes them before responding; guards exclude code fences, blockquotes, and non-added lines
+- **Slash command dispatch** — `preflight` extracts slash commands from user-added diff lines (`parse_slash_commands`); the SKILL executes them before responding; guards exclude code fences, blockquotes, and non-added lines. In routed editor sessions, a bare exchange slash-command line such as `/clear` is prompt-bearing even without a `❯` prefix and is queued for the idle supervisor instead of being answered as a normal agent-doc turn.
 - **Dedupe stale patch cleanup** — after removing duplicate blocks, `dedupe` also deletes the stale `.agent-doc/patches/<hash>.json` to prevent the plugin's startup scan from re-applying removed content
 
 ## License

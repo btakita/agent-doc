@@ -691,6 +691,51 @@ fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
 }
 
 #[test]
+fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let snapshot = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n"
+    );
+    let current = snapshot.replace(
+        "<!-- /agent:exchange -->",
+        "/clear\n<!-- /agent:exchange -->",
+    );
+    std::fs::write(&doc, &current).unwrap();
+    crate::snapshot::save(&doc, snapshot).unwrap();
+
+    let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+        .unwrap()
+        .expect("bare exchange slash command should be route-visible");
+    assert_eq!(ctx.prompt_text, "/clear");
+    assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+
+    let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
+        .unwrap()
+        .expect("slash command should queue for idle drain");
+    assert!(outcome.appended);
+    assert_eq!(outcome.prompt_text, "/clear");
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: start"));
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("- /clear"), "{updated}");
+    assert_eq!(
+        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+        Some("/clear"),
+        "bare exchange slash command should be the active literal drain head"
+    );
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing() {
     // Repro of "JB Run Agent Doc error: route queue dispatch: failed to parse
     // existing agent:queue": an earlier corruption merged free-text prose into

@@ -181,13 +181,99 @@ Commands:
 - `tsift --envelope source-read "packages/tsift-agent-doc/src/session_cost.rs" --path "/home/brian/work/btakita/agent-loop/src/tsift" --style window --start 528 --lines 125 --budget normal`
 - `tsift --envelope source-read "packages/tsift-agent-doc/src/session_cost.rs" --path "/home/brian/work/btakita/agent-loop/src/tsift" --style window --start 650 --lines 105 --budget normal`
 - `git status --short` in parent and `src/tsift`
+- Latest GitHub Actions CI at check time: completed/success for `add prompt cache analytics`, run `27168741671`, timestamp `2026-06-08T21:41:20Z`.
+- `make check`: passed, artifact `tart-a8fd2b6bfb`.
+- `git diff --check`: passed.
+- `cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture`: passed, artifact `tart-6705d54bb2`.
+- `cargo test -p tsift-agent-doc prompt_cache_plan_ -- --nocapture`: passed, artifact `tart-b0ccbb4fd3`.
+- `git push origin main` in `src/tsift`
+- `git commit -m "add prompt cache invalidation diagnostics"` in `src/tsift`
+- `gh run list --workflow CI --limit 1`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture'`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-agent-doc prompt_cache_plan_ -- --nocapture'`
+- `git diff --check`
+- `cargo fmt`; then restored unrelated workspace-wide rustfmt churn and kept the intended files only
+- `tsift --envelope source-read ...` for `session_cost.rs`, `digests.rs`, `exit_code.rs`, `VERSIONS.md`, and `specs/digests-sessions.md`
+- `tsift status` in parent and `src/tsift`
+- `git restore -- tasks/software/tsift.md` to drop malformed local drift from the earlier streaming closeout; HEAD already contained the committed response
+- `agent-doc repair tasks/software/tsift.md`
+- `agent-doc read tasks/software/tsift.md` via MCP
+- `agent-doc preflight tasks/software/tsift.md` via MCP
+- parent pointer: committed with this agent-doc closeout.
+- tsift submodule: `993b130` (`add prompt cache invalidation diagnostics`), pushed to `origin/main`.
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/packages/tsift-cli/src/commands/digests.rs`
+- `src/tsift/packages/tsift-agent-doc/src/session_cost.rs`
+- `src/tsift/specs/digests-sessions.md`
+- `src/tsift/VERSIONS.md`
+- `src/tsift` parent pointer
+- `read_create_regression` when session-level cache reads are less than 2.0x cache-creation tokens, with guidance to stabilize prefix, key, and routing before treating the cache as effective.
+- `cache_creation_spike` when cache creation is at least 20% of a turn's prompt tokens, with likely causes covering fresh prefix creation, system/developer/tool block churn, and compaction/transient instructions entering the cached prefix.
+- `cached_ratio_drop` when adjacent turns lose at least 20 percentage points of cached-input reuse, with likely causes covering prefix byte changes, `prompt_cache_key` or thread/session changes, and replica-local routing loss.
 
 Verification: no code changed, so no build or test suite was rerun. The explanation was checked against the current tsift spec and `session_cost.rs` implementation.
 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:22c5b236 -->
+
+### Re: #1zax prompt-cache invalidation diagnostics — gpt-5
+
+> **Queue prompt:**
+>
+> do [#1zax]
+
+
+Implemented `#1zax` in `src/tsift`.
+
+`session-cost` now classifies likely prompt-cache invalidation symptoms inside `prompt_cache_plan.analytics.diagnostics`:
+- `cached_ratio_drop` when adjacent turns lose at least 20 percentage points of cached-input reuse, with likely causes covering prefix byte changes, `prompt_cache_key` or thread/session changes, and replica-local routing loss.
+- `cache_creation_spike` when cache creation is at least 20% of a turn's prompt tokens, with likely causes covering fresh prefix creation, system/developer/tool block churn, and compaction/transient instructions entering the cached prefix.
+- `read_create_regression` when session-level cache reads are less than 2.0x cache-creation tokens, with guidance to stabilize prefix, key, and routing before treating the cache as effective.
+
+The diagnostics are bounded, serialized in JSON, printed in compact output as `prompt-cache-diagnostic ...`, and shown in human output with likely causes and guidance. I also updated the session-cost spec and unreleased changelog entry.
+
+Changed paths:
+- `src/tsift` parent pointer
+- `src/tsift/VERSIONS.md`
+- `src/tsift/specs/digests-sessions.md`
+- `src/tsift/packages/tsift-agent-doc/src/session_cost.rs`
+- `src/tsift/packages/tsift-cli/src/commands/digests.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+
+Commits:
+- tsift submodule: `993b130` (`add prompt cache invalidation diagnostics`), pushed to `origin/main`.
+- parent pointer: committed with this agent-doc closeout.
+
+Commands:
+- `agent-doc preflight tasks/software/tsift.md` via MCP
+- `agent-doc read tasks/software/tsift.md` via MCP
+- `agent-doc repair tasks/software/tsift.md`
+- `git restore -- tasks/software/tsift.md` to drop malformed local drift from the earlier streaming closeout; HEAD already contained the committed response
+- `tsift status` in parent and `src/tsift`
+- `tsift --envelope source-read ...` for `session_cost.rs`, `digests.rs`, `exit_code.rs`, `VERSIONS.md`, and `specs/digests-sessions.md`
+- `cargo fmt`; then restored unrelated workspace-wide rustfmt churn and kept the intended files only
+- `git diff --check`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-agent-doc prompt_cache_plan_ -- --nocapture'`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture'`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
+- `gh run list --workflow CI --limit 1`
+- `git commit -m "add prompt cache invalidation diagnostics"` in `src/tsift`
+- `git push origin main` in `src/tsift`
+
+Verification:
+- `cargo test -p tsift-agent-doc prompt_cache_plan_ -- --nocapture`: passed, artifact `tart-b0ccbb4fd3`.
+- `cargo test -p tsift-cli --test exit_code session_cost_ -- --nocapture`: passed, artifact `tart-6705d54bb2`.
+- `git diff --check`: passed.
+- `make check`: passed, artifact `tart-a8fd2b6bfb`.
+- Latest GitHub Actions CI at check time: completed/success for `add prompt cache analytics`, run `27168741671`, timestamp `2026-06-08T21:41:20Z`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:2621ffb1 -->
+<!-- agent:boundary:11f11e2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -198,14 +284,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Please describe how cache invalidation works for our prompt cache system.~~
-- do [#1zax]
+- ~~do [#1zax]~~
 - Can the prompt cache system be integrated into the MemGraphRag?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#1zax] [recommended] Add prompt-cache invalidation diagnostics that classify likely prefix/key/replica churn from analytics timeline drops, creation-token spikes, and read/create regressions.
+- [x] [#1zax] [recommended] Add prompt-cache invalidation diagnostics that classify likely prefix/key/replica churn from analytics timeline drops, creation-token spikes, and read/create regressions.
 <!-- /agent:backlog -->
 
 ## Review

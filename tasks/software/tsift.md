@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -87,9 +87,39 @@ Verification:
 - `make check` passed end to end on the final tree
 - `cargo install --path .` installed the final binary
 - `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
+- Latest `Agent Doc` run `27110521399` failed before any job started because GitHub reported billing/spending-limit exhaustion, so there were no failed test logs to inspect.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- Marker scan confirms the committed marker-bearing files are at `tsift:code-navigation v=0.1.64`.
+- `git diff --check` passed after the final stable commit.
+- `make check` passed.
+- Latest `Agent Doc` run `27110521399` failed before any job started because GitHub reported billing/spending-limit exhaustion, so there were no failed test logs to inspect.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- Marker scan confirms the committed marker-bearing files are at `tsift:code-navigation v=0.1.64`.
+- `git diff --check` passed after the final stable commit.
+- `make check` passed.
 
 No escalation was needed. Confidence is high: the install now restores the runbook reference where it helps, without breaking standalone checkouts or forcing Codex/OpenCode to load a separate document before using tsift.
-<!-- agent:boundary:f95a2d30 -->
+❯ Run the init on all projects in agent-loop that use tsift?
+
+### Re: tsift init across agent-loop projects — gpt-5
+
+I ran plain `tsift init` across the marker-bearing projects in `agent-loop`. I intentionally did not pass `--codex` or `--opencode`, so the run refreshed the managed Code Navigation sections and did not install new Codex hooks or OpenCode shortcuts.
+
+Committed stable updates in parent commit `b459624b9 docs: refresh tsift init instructions across projects`. That records root `AGENTS.md` plus submodule pointer updates for `src/agent-doc`, `src/agent-doc-js`, `src/agent-resume`, `src/chromium-bridge`, `src/corky`, `src/ctx-core-dev`, `src/equityfundingsource-dev`, `src/existence-lang/{existence,ontology,spec}`, `src/lazily-rs`, `src/presence`, `src/session-share`, `src/tagpath`, and `src/webmaster`. `src/tsift` was already current and needed no commit.
+
+`src/boost-client` and `src/boost-client/src/monsterrodholders-dev` are the exception. I applied the init there twice, but an active monsterrodholders workflow rebased/reset those worktrees during this cycle and removed the AGENTS updates. I stopped rather than keep racing that active agent. I added a backlog item to rerun init for that pair after the active workflow settles.
+
+Verification:
+
+- `make check` passed.
+- `git diff --check` passed after the final stable commit.
+- Marker scan confirms the committed marker-bearing files are at `tsift:code-navigation v=0.1.64`.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- Latest `Agent Doc` run `27110521399` failed before any job started because GitHub reported billing/spending-limit exhaustion, so there were no failed test logs to inspect.
+
+No escalation was needed. Remaining root dirt is pre-existing or concurrent work: `.codex/config.toml`, `src/boost-client`, `src/instruction-files`, `src/webmaster`, `tasks/agent-doc-bugs2.done.md`, plus the session document until this write commit lands.
+<!-- agent:boundary:7e614b59 -->
+<!-- agent:boundary:e575bad2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,12 +128,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#tsiftinitboost]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#tsiftinitboost] Rerun plain `tsift init` in `src/boost-client` and `src/boost-client/src/monsterrodholders-dev` after the active monsterrodholders workflow stops rebasing/resetting those worktrees; commit their `AGENTS.md` updates and any resulting pointers.
 <!-- /agent:backlog -->
 
 ## Review

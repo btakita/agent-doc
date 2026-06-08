@@ -72,7 +72,27 @@ Commits/push:
 CI:
 - `src/agent-doc` latest CI for `a1abe8c7` was `in_progress` at closeout (`27109791646`, 2026-06-08 00:41:17Z), so I did not wait on it.
 - `agent-loop` has no workflow named `CI`.
-<!-- agent:boundary:1559fb4c -->
+Implemented `#ctrlplane-storeactor`.
+
+The controller SQLite state layer now explicitly covers the remaining store-actor durable fact families. `agent-doc-sqlite::state_store` initializes WAL mode and owns schema/API helpers for `queue_heads`, `document_cycles`, `admin_operations`, and `crash_recovery_markers`, alongside the existing actor documents, lifecycle transitions, supervisor leases, dispatch attempts, projection diagnostics, and layout state. The status path now reads aggregate counts through `load_control_plane_store_counts`, and `agent-doc controller status` reports per-role `categories` maps so the store actor snapshot exposes the durable families it owns.
+
+Updated specs:
+- `specs/07-session-tmux-commands.md` documents category counts in `control_plane` role snapshots.
+- `specs/08b-single-process-control-plane.md` documents the store actor's per-category SQLite status counts.
+
+Verification:
+- `cargo test -p agent-doc-sqlite control_plane_store_counts_extended_fact_categories`
+- `cargo test -p agent-doc-orchestration controller_status_reports_single_process_control_plane_runtime`
+- `make check`
+- `cargo install --path .`
+
+Commits/push:
+- `src/agent-doc`: `91da5c42 controller: extend sqlite store actor state`, pushed to `origin/main`.
+- `agent-loop`: `015cc4d84 agent-doc(agent-doc): update store actor pointer`, pushed to `origin/main`.
+
+CI:
+- `src/agent-doc` latest CI for `91da5c42` was `in_progress` at closeout (`27110075916`, 2026-06-08 00:52:49Z), so I did not wait on it.
+<!-- agent:boundary:ed14a6bb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -112,7 +132,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-storeactor] #agent-doc-bug Extend the `.agent-doc/state.db` store actor beyond actor records: one WAL SQLite writer owns actor state, lifecycle transitions, dispatch receipts, queue heads, closeout/cycle state, projection diagnostics, admin operations, and crash-recovery markers.
 - [ ] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
 - [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
 - [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.

@@ -20,8 +20,9 @@ use serde::{Deserialize, Serialize};
 // etc. stay unchanged, and the helpers used by the SQL-glue functions below are
 // imported by their original names.
 pub use state_store::{
-    ActorTransitionStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
-    SessionOperatorStatus, SupervisorLeaseStatus, state_db_path,
+    ActorTransitionStatus, AdminOperationStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
+    QueueBackpressureStatus, QueueControlStatus, QueueHeadStatus, SessionOperatorStatus,
+    SupervisorLeaseStatus, state_db_path,
 };
 use state_store::{
     Connection, ProjectionDiagnosticInsert, insert_projection_diagnostic,
@@ -542,6 +543,8 @@ fn control_plane_status(
     let mut session_categories = memory_categories
         .unwrap_or_else(|| status_categories([("actor_records", counts.live_actor_documents)]));
     session_categories.insert("queue_heads".to_string(), counts.queue_heads);
+    session_categories.insert("queue_controls".to_string(), counts.queue_controls);
+    session_categories.insert("queue_backpressure".to_string(), counts.queue_backpressure);
     session_categories.insert("document_cycles".to_string(), counts.document_cycles);
     session_categories.insert("pending_mutations".to_string(), counts.pending_mutations);
     let session_owned_items = session_categories
@@ -549,6 +552,8 @@ fn control_plane_status(
         .copied()
         .unwrap_or(counts.live_actor_documents)
         + counts.queue_heads
+        + counts.queue_controls
+        + counts.queue_backpressure
         + counts.document_cycles
         + counts.pending_mutations;
 
@@ -568,6 +573,8 @@ fn control_plane_status(
                 ("supervisor_leases", counts.supervisor_leases),
                 ("dispatch_receipts", counts.dispatch_receipts),
                 ("queue_heads", counts.queue_heads),
+                ("queue_controls", counts.queue_controls),
+                ("queue_backpressure", counts.queue_backpressure),
                 ("document_cycles", counts.document_cycles),
                 ("pending_mutations", counts.pending_mutations),
                 ("projection_diagnostics", counts.projection_diagnostics),
@@ -795,6 +802,35 @@ pub struct ControllerAdminReceipt {
     pub status: String,
     #[serde(default)]
     pub diagnostic_payload: Option<String>,
+    #[serde(default)]
+    pub failed_stage: Option<String>,
+    #[serde(default)]
+    pub unblock_hint: Option<String>,
+    #[serde(default)]
+    pub observed_generation: Option<u64>,
+    #[serde(default)]
+    pub current_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerActorInspection {
+    pub target: String,
+    #[serde(default)]
+    pub document_id: Option<String>,
+    #[serde(default)]
+    pub record: Option<crate::session_actor::ActorRecord>,
+    #[serde(default)]
+    pub supervisor_lease: Option<SupervisorLeaseStatus>,
+    #[serde(default)]
+    pub queue_head: Option<QueueHeadStatus>,
+    #[serde(default)]
+    pub queue_control: Option<QueueControlStatus>,
+    #[serde(default)]
+    pub queue_backpressure: Vec<QueueBackpressureStatus>,
+    pub projection_lag: bool,
+    pub dispatch_attempts: Vec<DispatchAttemptStatus>,
+    pub admin_operations: Vec<AdminOperationStatus>,
+    pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
 // `ActorTransitionStatus`, `SupervisorLeaseStatus`, `DispatchAttemptStatus`,
@@ -1181,6 +1217,10 @@ fn insert_admin_operation_record(
         document_id: document_id.map(ToOwned::to_owned),
         status: status.to_string(),
         diagnostic_payload: diagnostic_payload.map(ToOwned::to_owned),
+        failed_stage: None,
+        unblock_hint: None,
+        observed_generation: None,
+        current_generation: None,
     })
 }
 
@@ -2237,6 +2277,142 @@ pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<Sessi
     }
 }
 
+pub fn inspect_actor(
+    project_root: &Path,
+    file: Option<&Path>,
+    session_id: Option<&str>,
+    pane_id: Option<&str>,
+) -> Result<ControllerActorInspection> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "inspect_actor".to_string(),
+            file: file.map(Path::to_path_buf),
+            session_id: session_id.map(ToOwned::to_owned),
+            pane_id: pane_id.map(ToOwned::to_owned),
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn control_queue(
+    project_root: &Path,
+    file: Option<&Path>,
+    action: &str,
+    observed_generation: Option<u64>,
+    reason: Option<&str>,
+    item_id: Option<&str>,
+) -> Result<ControllerAdminReceipt> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "queue_control".to_string(),
+            file: file.map(Path::to_path_buf),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: observed_generation,
+            state: Some(action.to_string()),
+            caller: Some("admin".to_string()),
+            reason: reason.map(ToOwned::to_owned),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(action.to_string()),
+            diagnostic_payload: item_id.map(ToOwned::to_owned),
+        },
+    )
+}
+
+pub fn admin_reap(
+    project_root: &Path,
+    file: Option<&Path>,
+    session_id: Option<&str>,
+    pane_id: Option<&str>,
+    observed_generation: u64,
+    reason: &str,
+) -> Result<ControllerAdminReceipt> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "admin_control".to_string(),
+            file: file.map(Path::to_path_buf),
+            session_id: session_id.map(ToOwned::to_owned),
+            pane_id: pane_id.map(ToOwned::to_owned),
+            window_id: None,
+            generation: Some(observed_generation),
+            state: Some("reap".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("reap".to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn admin_handoff(
+    project_root: &Path,
+    file: &Path,
+    to_pane: &str,
+    observed_generation: u64,
+    reason: &str,
+) -> Result<ControllerAdminReceipt> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "admin_control".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(to_pane.to_string()),
+            window_id: None,
+            generation: Some(observed_generation),
+            state: Some("handoff".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("handoff".to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn repair_projection(
+    project_root: &Path,
+    file: Option<&Path>,
+    projection: &str,
+    observed_generation: Option<u64>,
+    reason: Option<&str>,
+) -> Result<ControllerAdminReceipt> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "projection_repair".to_string(),
+            file: file.map(Path::to_path_buf),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: observed_generation,
+            state: Some(projection.to_string()),
+            caller: Some("admin".to_string()),
+            reason: reason.map(ToOwned::to_owned),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("projection_repair".to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
 pub fn attach_pane(
     project_root: &Path,
     request: AttachPaneRequest,
@@ -2858,6 +3034,12 @@ fn handle_request_locked(
         "session_status" => {
             controller_envelope(handle_session_status(&bootstrap_snapshot, request))
         }
+        "inspect_actor" => controller_envelope(handle_inspect_actor(&bootstrap_snapshot, request)),
+        "queue_control" => controller_envelope(handle_queue_control(&bootstrap_snapshot, request)),
+        "admin_control" => controller_envelope(handle_admin_control(&bootstrap_snapshot, request)),
+        "projection_repair" => {
+            controller_envelope(handle_projection_repair(&bootstrap_snapshot, request))
+        }
         "attach_pane" => controller_envelope(handle_attach_pane(
             &bootstrap_snapshot,
             Some(runtime.as_ref()),
@@ -3217,6 +3399,64 @@ fn handle_dispatch(
     );
     let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
+    let queue_control = {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        state_store::load_effective_queue_control_from_db(
+            &conn,
+            &document_id,
+            &bootstrap.project_root.to_string_lossy(),
+        )?
+    };
+    let queue_block_stage = queue_control.as_ref().and_then(|control| {
+        if control.state == "paused" {
+            Some("queue_paused")
+        } else if control.state == "draining"
+            && record.state != crate::session_actor::ActorState::Ready
+        {
+            Some("actor_busy_draining")
+        } else {
+            None
+        }
+    });
+    if let Some(stage) = queue_block_stage {
+        let reason = queue_control
+            .as_ref()
+            .and_then(|control| control.reason.as_deref())
+            .unwrap_or(stage);
+        let receipt = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation: record.generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some(stage),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Blocked,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let _backpressure = state_store::insert_queue_backpressure_in_db(
+            &conn,
+            &state_store::QueueBackpressureInsert {
+                document_id: &document_id,
+                generation: Some(record.generation),
+                command_kind: &command_kind,
+                capacity_class: stage,
+                reason,
+                dispatch_receipt_id: Some(receipt.receipt_id),
+            },
+        )?;
+        anyhow::bail!(
+            "dispatch blocked for {}: failed_stage={} reason={} receipt_id={}",
+            file.display(),
+            stage,
+            reason,
+            receipt.receipt_id
+        );
+    }
     let mut failed_stage = None;
     let mut failure = None;
     let mut failure_status = ControllerDispatchResultStatus::Rejected;
@@ -3342,6 +3582,389 @@ fn handle_session_status(
     let mut conn = open_state_db(&bootstrap.project_root)?;
     migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
     load_session_operator_status_from_db(&conn, &document_id)
+}
+
+fn admin_target_record(
+    bootstrap: &ControllerBootstrap,
+    request: &ControllerRequest,
+) -> Result<(
+    String,
+    Option<String>,
+    Option<crate::session_actor::ActorRecord>,
+)> {
+    let mut conn = open_state_db(&bootstrap.project_root)?;
+    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    if let Some(file) = request.file.as_ref() {
+        let document_id = crate::session_actor::canonical_document_id_in(
+            &bootstrap.project_root,
+            &file.to_string_lossy(),
+        );
+        let record = load_actor_record_from_db(&conn, &document_id)?;
+        return Ok((file.display().to_string(), Some(document_id), record));
+    }
+    if let Some(session_id) = request.session_id.as_deref() {
+        let store = load_actor_store_from_db(&conn)?;
+        let record = store
+            .values()
+            .find(|record| record.session_id == session_id)
+            .cloned();
+        let document_id = record.as_ref().map(|record| record.document_id.clone());
+        return Ok((format!("session:{session_id}"), document_id, record));
+    }
+    if let Some(pane_id) = request.pane_id.as_deref() {
+        let store = load_actor_store_from_db(&conn)?;
+        let record = store
+            .values()
+            .find(|record| record.pane_id == pane_id)
+            .cloned();
+        let document_id = record.as_ref().map(|record| record.document_id.clone());
+        return Ok((format!("pane:{pane_id}"), document_id, record));
+    }
+    anyhow::bail!("admin request requires a document, --session, or --pane target")
+}
+
+fn handle_inspect_actor(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerActorInspection> {
+    let (target, document_id, record) = admin_target_record(bootstrap, &request)?;
+    let mut conn = open_state_db(&bootstrap.project_root)?;
+    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    let supervisor_lease = match record.as_ref() {
+        Some(record) => {
+            load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?
+        }
+        None => None,
+    };
+    let queue_head = match document_id.as_deref() {
+        Some(document_id) => {
+            state_store::load_queue_head_from_db(&conn, document_id, "agent:queue")?
+        }
+        None => None,
+    };
+    let queue_control = match document_id.as_deref() {
+        Some(document_id) => state_store::load_effective_queue_control_from_db(
+            &conn,
+            document_id,
+            &bootstrap.project_root.to_string_lossy(),
+        )?,
+        None => None,
+    };
+    let dispatch_attempts = match document_id.as_deref() {
+        Some(document_id) => state_store::load_dispatch_attempts_from_db(&conn, document_id)?,
+        None => Vec::new(),
+    };
+    let queue_backpressure = match document_id.as_deref() {
+        Some(document_id) => state_store::load_queue_backpressure_from_db(&conn, document_id, 10)?,
+        None => Vec::new(),
+    };
+    let admin_operations =
+        state_store::load_admin_operations_from_db(&conn, document_id.as_deref(), 10)?;
+    let projection_diagnostics = match document_id.as_deref() {
+        Some(document_id) => state_store::load_projection_diagnostics_from_db(&conn, document_id)?,
+        None => Vec::new(),
+    };
+    let projection_lag = projection_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.retry_status.as_deref() != Some("completed"));
+    Ok(ControllerActorInspection {
+        target,
+        document_id,
+        record,
+        supervisor_lease,
+        queue_head,
+        queue_control,
+        queue_backpressure,
+        projection_lag,
+        dispatch_attempts,
+        admin_operations,
+        projection_diagnostics,
+    })
+}
+
+fn rejected_admin_receipt(
+    bootstrap: &ControllerBootstrap,
+    operation_kind: &str,
+    document_id: Option<&str>,
+    failed_stage: &str,
+    diagnostic_payload: &str,
+    observed_generation: Option<u64>,
+    current_generation: Option<u64>,
+) -> Result<ControllerAdminReceipt> {
+    let mut receipt = insert_admin_operation_record(
+        &bootstrap.project_root,
+        operation_kind,
+        document_id,
+        "rejected",
+        Some(diagnostic_payload),
+    )?;
+    receipt.failed_stage = Some(failed_stage.to_string());
+    receipt.unblock_hint =
+        Some("inspect the actor and retry with the current observed generation".to_string());
+    receipt.observed_generation = observed_generation;
+    receipt.current_generation = current_generation;
+    Ok(receipt)
+}
+
+fn require_observed_generation(
+    bootstrap: &ControllerBootstrap,
+    operation_kind: &str,
+    document_id: Option<&str>,
+    record: Option<&crate::session_actor::ActorRecord>,
+    observed_generation: Option<u64>,
+    diagnostic_payload: &str,
+) -> Result<Option<ControllerAdminReceipt>> {
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    match observed_generation {
+        None => rejected_admin_receipt(
+            bootstrap,
+            operation_kind,
+            document_id,
+            "missing_observed_generation",
+            diagnostic_payload,
+            None,
+            Some(record.generation),
+        )
+        .map(Some),
+        Some(observed) if observed != record.generation => rejected_admin_receipt(
+            bootstrap,
+            operation_kind,
+            document_id,
+            "stale_generation",
+            diagnostic_payload,
+            Some(observed),
+            Some(record.generation),
+        )
+        .map(Some),
+        Some(_) => Ok(None),
+    }
+}
+
+fn handle_queue_control(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerAdminReceipt> {
+    let action = request_string(&request.state, "queue control action")?;
+    let control_state = match action.as_str() {
+        "pause" | "paused" => "paused",
+        "resume" | "resumed" => "resumed",
+        "drain" | "draining" => "draining",
+        other => anyhow::bail!("unknown queue control action: {other}"),
+    };
+    let operation_kind = format!("queue_{control_state}");
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("operator queue control");
+    let item_id = request.diagnostic_payload.as_deref();
+    let diagnostic_payload = match item_id {
+        Some(item_id) => format!("reason={reason} item_id={item_id}"),
+        None => format!("reason={reason}"),
+    };
+    let (_target, document_id, record) = if request.file.is_some() {
+        admin_target_record(bootstrap, &request)?
+    } else {
+        (bootstrap.project_root.display().to_string(), None, None)
+    };
+    if let Some(rejected) = require_observed_generation(
+        bootstrap,
+        &operation_kind,
+        document_id.as_deref(),
+        record.as_ref(),
+        request.generation,
+        &diagnostic_payload,
+    )? {
+        return Ok(rejected);
+    }
+    let receipt = insert_admin_operation_record(
+        &bootstrap.project_root,
+        &operation_kind,
+        document_id.as_deref(),
+        "accepted",
+        Some(&diagnostic_payload),
+    )?;
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let scope_kind = if document_id.is_some() {
+        "document"
+    } else {
+        "project"
+    };
+    let project_scope = bootstrap.project_root.to_string_lossy();
+    let scope_id = document_id.as_deref().unwrap_or(project_scope.as_ref());
+    let control = state_store::upsert_queue_control_in_db(
+        &conn,
+        &state_store::QueueControlInsert {
+            scope_kind,
+            scope_id,
+            state: control_state,
+            reason: Some(reason),
+            operation_receipt_id: Some(receipt.receipt_id),
+        },
+    )?;
+    let mut receipt = receipt;
+    receipt.diagnostic_payload = Some(format!(
+        "{diagnostic_payload} scope_kind={} scope_id={} control_receipt_id={}",
+        control.scope_kind, control.scope_id, control.receipt_id
+    ));
+    Ok(receipt)
+}
+
+fn handle_admin_control(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerAdminReceipt> {
+    let action = request_string(&request.state, "admin control action")?;
+    let operation_kind = format!("admin_{action}");
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("operator admin control");
+    let diagnostic_payload = format!("reason={reason}");
+    let (_target, document_id, record) = admin_target_record(bootstrap, &request)?;
+    let Some(record) = record else {
+        return rejected_admin_receipt(
+            bootstrap,
+            &operation_kind,
+            document_id.as_deref(),
+            "missing_actor",
+            &diagnostic_payload,
+            request.generation,
+            None,
+        );
+    };
+    if let Some(rejected) = require_observed_generation(
+        bootstrap,
+        &operation_kind,
+        Some(&record.document_id),
+        Some(&record),
+        request.generation,
+        &diagnostic_payload,
+    )? {
+        return Ok(rejected);
+    }
+    let receipt = insert_admin_operation_record(
+        &bootstrap.project_root,
+        &operation_kind,
+        Some(&record.document_id),
+        "accepted",
+        Some(&diagnostic_payload),
+    )?;
+    let mut next = record.clone();
+    match action.as_str() {
+        "reap" => {
+            next.state = crate::session_actor::ActorState::Closed;
+            next.pane_id.clear();
+            next.window_id.clear();
+            next.last_transition = crate::session_actor::ActorLastTransition {
+                caller: "admin".to_string(),
+                reason: format!("manual_reap {reason} receipt_id={}", receipt.receipt_id),
+                timestamp: timestamp_secs(),
+                prior_generation: record.generation,
+                new_generation: record.generation,
+            };
+        }
+        "handoff" => {
+            let to_pane = request_string(&request.pane_id, "to pane")?;
+            next.generation = record.generation.saturating_add(1);
+            next.pane_id = to_pane;
+            next.state = crate::session_actor::ActorState::Ready;
+            next.last_transition = crate::session_actor::ActorLastTransition {
+                caller: "admin".to_string(),
+                reason: format!("manual_handoff {reason} receipt_id={}", receipt.receipt_id),
+                timestamp: timestamp_secs(),
+                prior_generation: record.generation,
+                new_generation: record.generation.saturating_add(1),
+            };
+        }
+        other => anyhow::bail!("unknown admin control action: {other}"),
+    }
+    store_actor_record(&bootstrap.project_root, Some(record.generation), &next)?;
+    project_sessions_projection_for_actor(&bootstrap.project_root, &next.document_id)
+        .with_context(|| {
+            format!(
+                "failed to repair sessions projection for {}",
+                next.document_id
+            )
+        })?;
+    Ok(receipt)
+}
+
+fn handle_projection_repair(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerAdminReceipt> {
+    let projection = request.state.as_deref().unwrap_or("all").trim().to_string();
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("operator projection repair");
+    let diagnostic_payload = format!("projection={projection} reason={reason}");
+    let (_target, document_id, record) = if request.file.is_some() {
+        admin_target_record(bootstrap, &request)?
+    } else {
+        (bootstrap.project_root.display().to_string(), None, None)
+    };
+    if let Some(rejected) = require_observed_generation(
+        bootstrap,
+        "projection_repair",
+        document_id.as_deref(),
+        record.as_ref(),
+        request.generation,
+        &diagnostic_payload,
+    )? {
+        return Ok(rejected);
+    }
+    let receipt = insert_admin_operation_record(
+        &bootstrap.project_root,
+        "projection_repair",
+        document_id.as_deref(),
+        "accepted",
+        Some(&diagnostic_payload),
+    )?;
+    repair_projection_from_controller_state(
+        &bootstrap.project_root,
+        &projection,
+        document_id.as_deref(),
+    )?;
+    Ok(receipt)
+}
+
+fn repair_projection_from_controller_state(
+    project_root: &Path,
+    projection: &str,
+    document_id: Option<&str>,
+) -> Result<()> {
+    match projection {
+        "all" => {
+            emit_actor_projection(project_root)?;
+            repair_sessions_projection(project_root, document_id)?;
+            emit_layout_projection(project_root)?;
+        }
+        "actors" | "session-actors" | "session-actors.json" => {
+            emit_actor_projection(project_root)?;
+        }
+        "sessions" | "sessions.json" => {
+            repair_sessions_projection(project_root, document_id)?;
+        }
+        "layout" | "last_layout" | "last_layout.json" => {
+            emit_layout_projection(project_root)?;
+        }
+        other => anyhow::bail!("unknown projection repair target: {other}"),
+    }
+    Ok(())
+}
+
+fn repair_sessions_projection(project_root: &Path, document_id: Option<&str>) -> Result<()> {
+    if let Some(document_id) = document_id {
+        return project_sessions_projection_for_actor(project_root, document_id);
+    }
+    let store = load_actor_store(project_root)?;
+    for document_id in store.keys() {
+        project_sessions_projection_for_actor(project_root, document_id)?;
+    }
+    Ok(())
 }
 
 fn handle_attach_pane(
@@ -4883,6 +5506,303 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, 1);
+    }
+
+    #[test]
+    fn controller_queue_control_rejects_stale_generation_and_blocks_dispatch_when_paused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/queue-control.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-queue\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-queue", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-queue",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let stale_pause = ControllerRequest {
+            command: "queue_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(0),
+            state: Some("pause".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("test stale generation".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("pause".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&stale_pause).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let receipt = envelope.data.unwrap();
+        assert_eq!(receipt.status, "rejected");
+        assert_eq!(receipt.failed_stage.as_deref(), Some("stale_generation"));
+        assert_eq!(receipt.observed_generation, Some(0));
+        assert_eq!(receipt.current_generation, Some(1));
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let controls: i64 = conn
+            .query_row("SELECT COUNT(*) FROM queue_controls", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(controls, 0, "stale queue control must not mutate state");
+
+        let pause = ControllerRequest {
+            generation: Some(1),
+            reason: Some("operator pause".to_string()),
+            ..stale_pause
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&pause).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let receipt = envelope.data.unwrap();
+        assert_eq!(receipt.status, "accepted");
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-queue".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("paused dispatch test".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(!envelope.ok);
+        assert!(
+            envelope
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("failed_stage=queue_paused")
+        );
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let failed_stage: String = conn
+            .query_row(
+                "SELECT failed_stage FROM dispatch_attempts WHERE document_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![&document_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(failed_stage, "queue_paused");
+        let backpressure: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM queue_backpressure WHERE document_id = ?1 AND capacity_class = 'queue_paused'",
+                params![&document_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backpressure, 1);
+
+        let inspect = ControllerRequest {
+            command: "inspect_actor".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&inspect).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerActorInspection> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let inspection = envelope.data.unwrap();
+        assert_eq!(
+            inspection
+                .queue_control
+                .as_ref()
+                .map(|control| control.state.as_str()),
+            Some("paused")
+        );
+        let pressure = inspection.queue_backpressure.last().unwrap();
+        assert_eq!(pressure.capacity_class, "queue_paused");
+        assert_eq!(pressure.command_kind, "managed_reopen");
+        assert_eq!(pressure.generation, Some(1));
+        assert!(pressure.dispatch_receipt_id.is_some());
+        let pressure_json = serde_json::to_value(pressure).unwrap();
+        assert_eq!(pressure_json["capacity_class"], "queue_paused");
+        assert_eq!(pressure_json["generation"].as_u64(), pressure.generation);
+        assert!(
+            inspection
+                .admin_operations
+                .iter()
+                .any(|operation| operation.operation_kind == "queue_paused"
+                    && operation.status == "accepted")
+        );
+    }
+
+    #[test]
+    fn controller_admin_handoff_and_reap_require_observed_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/admin-control.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-admin-control\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-admin-control",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-admin-control",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let stale_handoff = ControllerRequest {
+            command: "admin_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: Some("%42".to_string()),
+            window_id: None,
+            generation: Some(0),
+            state: Some("handoff".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("test stale handoff".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("handoff".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&stale_handoff).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let receipt = envelope.data.unwrap();
+        assert_eq!(receipt.status, "rejected");
+        assert_eq!(receipt.failed_stage.as_deref(), Some("stale_generation"));
+
+        let handoff = ControllerRequest {
+            generation: Some(1),
+            reason: Some("test accepted handoff".to_string()),
+            ..stale_handoff
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&handoff).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.unwrap().status, "accepted");
+
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let record = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.pane_id, "%42");
+        assert_eq!(record.generation, 2);
+
+        let reap = ControllerRequest {
+            command: "admin_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(2),
+            state: Some("reap".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("test reap".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("reap".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&reap).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.unwrap().status, "accepted");
+
+        let record = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, crate::session_actor::ActorState::Closed);
+        assert!(record.pane_id.is_empty());
     }
 
     #[test]

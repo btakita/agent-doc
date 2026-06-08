@@ -1,8 +1,8 @@
 //! Fleet-wide operational control plane (`#ipc-admin-api`).
 //!
-//! Phase 1 implements the two read-only verbs that replace the manual
-//! `ps` / `pstree` / `pgrep` forensics required to resolve a cross-document
-//! actor contamination incident (`#xdoc-route-sweep-commits-sibling-docs`):
+//! The initial read-only verbs replaced the manual `ps` / `pstree` / `pgrep`
+//! forensics required to resolve a cross-document actor contamination incident
+//! (`#xdoc-route-sweep-commits-sibling-docs`):
 //!
 //! - `agent-doc admin list` — enumerate every actor in the project fleet (one
 //!   row per document: session, pane, window, supervisor pid, harness,
@@ -12,11 +12,11 @@
 //!   (the cross-document execution contamination), and non-closed actors whose
 //!   pane is dead (orphaned bindings that route/sync should reap).
 //!
-//! The mutating verbs (`rebind`, `stop`) and the editor surface are tracked as
-//! follow-up phases; see `tasks/agent-doc/plan-ipc-admin-api-actor-control.md`.
-//! Keeping the detect/enumerate logic here (and pure over its inputs) follows
-//! the Shared-Foundation rule: the control plane lives in the binary, and the
-//! plugins shell the CLI/FFI rather than re-deriving fleet state.
+//! Controller-backed mutating verbs now live here too: inspect, queue
+//! pause/resume/drain, stale actor reap, generation-checked handoff, and
+//! projection repair. Keeping the command logic in the binary follows the
+//! Shared-Foundation rule: editor plugins shell the CLI/FFI rather than
+//! re-deriving fleet state.
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -61,6 +61,49 @@ fn resolve_root(project_root: Option<&Path>) -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
     crate::fs_util::find_project_root(&cwd)
         .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
+}
+
+fn resolve_root_for_target(
+    project_root: Option<&Path>,
+    document: Option<&Path>,
+) -> Result<PathBuf> {
+    if let Some(root) = project_root {
+        return Ok(root.to_path_buf());
+    }
+    if let Some(document) = document
+        && let Some(root) = crate::snapshot::find_project_root(document)
+    {
+        return Ok(root);
+    }
+    resolve_root(None)
+}
+
+fn print_receipt(
+    receipt: &crate::project_controller::ControllerAdminReceipt,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(receipt)?);
+        return Ok(());
+    }
+    let mut line = format!(
+        "{} {} receipt_id={}",
+        receipt.operation_kind, receipt.status, receipt.receipt_id
+    );
+    if let Some(document_id) = receipt.document_id.as_deref() {
+        line.push_str(&format!(" document={document_id}"));
+    }
+    if let Some(stage) = receipt.failed_stage.as_deref() {
+        line.push_str(&format!(" failed_stage={stage}"));
+    }
+    if let Some(current) = receipt.current_generation {
+        line.push_str(&format!(" current_generation={current}"));
+    }
+    if let Some(hint) = receipt.unblock_hint.as_deref() {
+        line.push_str(&format!(" hint={hint}"));
+    }
+    println!("{line}");
+    Ok(())
 }
 
 /// Build the enumerated actor list from the actor store + registry, using
@@ -226,6 +269,122 @@ pub fn detect(project_root: Option<&Path>, json: bool) -> Result<()> {
         println!("  [{}] {}", f.kind, f.detail);
     }
     Ok(())
+}
+
+/// `agent-doc admin inspect` — inspect one actor plus controller receipts.
+pub fn inspect(
+    project_root: Option<&Path>,
+    document: Option<&Path>,
+    session: Option<&str>,
+    pane: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let root = resolve_root_for_target(project_root, document)?;
+    let inspection = crate::project_controller::inspect_actor(&root, document, session, pane)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&inspection)?);
+    } else if let Some(record) = inspection.record.as_ref() {
+        println!(
+            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={}",
+            inspection
+                .document_id
+                .as_deref()
+                .unwrap_or(record.document_id.as_str()),
+            record.harness,
+            record.pane_id,
+            record.generation,
+            record.state.as_str(),
+            inspection
+                .queue_control
+                .as_ref()
+                .map(|control| control.state.as_str())
+                .unwrap_or("none"),
+            inspection.projection_lag
+        );
+    } else {
+        println!("No actor found for {}", inspection.target);
+    }
+    Ok(())
+}
+
+pub fn queue_control(
+    project_root: Option<&Path>,
+    document: Option<&Path>,
+    action: &str,
+    observed_generation: Option<u64>,
+    reason: Option<&str>,
+    item_id: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let root = resolve_root_for_target(project_root, document)?;
+    let receipt = crate::project_controller::control_queue(
+        &root,
+        document,
+        action,
+        observed_generation,
+        reason,
+        item_id,
+    )?;
+    print_receipt(&receipt, json)
+}
+
+pub fn reap(
+    project_root: Option<&Path>,
+    document: Option<&Path>,
+    session: Option<&str>,
+    pane: Option<&str>,
+    observed_generation: u64,
+    reason: &str,
+    json: bool,
+) -> Result<()> {
+    let root = resolve_root_for_target(project_root, document)?;
+    let receipt = crate::project_controller::admin_reap(
+        &root,
+        document,
+        session,
+        pane,
+        observed_generation,
+        reason,
+    )?;
+    print_receipt(&receipt, json)
+}
+
+pub fn handoff(
+    project_root: Option<&Path>,
+    document: &Path,
+    to_pane: &str,
+    observed_generation: u64,
+    reason: &str,
+    json: bool,
+) -> Result<()> {
+    let root = resolve_root_for_target(project_root, Some(document))?;
+    let receipt = crate::project_controller::admin_handoff(
+        &root,
+        document,
+        to_pane,
+        observed_generation,
+        reason,
+    )?;
+    print_receipt(&receipt, json)
+}
+
+pub fn repair_projection(
+    project_root: Option<&Path>,
+    document: Option<&Path>,
+    projection: &str,
+    observed_generation: Option<u64>,
+    reason: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let root = resolve_root_for_target(project_root, document)?;
+    let receipt = crate::project_controller::repair_projection(
+        &root,
+        document,
+        projection,
+        observed_generation,
+        reason,
+    )?;
+    print_receipt(&receipt, json)
 }
 
 #[cfg(test)]

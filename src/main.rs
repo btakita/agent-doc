@@ -1223,6 +1223,23 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AdminAction {
+    /// Inspect one actor and its controller receipts
+    Inspect {
+        /// Document to inspect
+        document: Option<PathBuf>,
+        /// Inspect by session id instead of document
+        #[arg(long)]
+        session: Option<String>,
+        /// Inspect by tmux pane id instead of document
+        #[arg(long)]
+        pane: Option<String>,
+        /// Project root to inspect (defaults to document root or nearest project)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Enumerate every actor in the project fleet (one row per document)
     List {
         /// Project root to inspect (defaults to the nearest project from CWD)
@@ -1255,6 +1272,132 @@ enum AdminAction {
         /// Poll interval in milliseconds (default ~1s)
         #[arg(long, default_value_t = agent_doc_orchestration::dashboard::DEFAULT_INTERVAL_MS)]
         interval: u64,
+    },
+    /// Pause, resume, or drain queue work through the controller
+    Queue {
+        #[command(subcommand)]
+        action: AdminQueueAction,
+    },
+    /// Reap a stale actor after checking its observed generation
+    Reap {
+        /// Document to reap
+        document: Option<PathBuf>,
+        /// Reap by session id instead of document
+        #[arg(long)]
+        session: Option<String>,
+        /// Reap by tmux pane id instead of document
+        #[arg(long)]
+        pane: Option<String>,
+        /// Project root to inspect (defaults to document root or nearest project)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Generation observed by the operator before mutating actor state
+        #[arg(long)]
+        observed_generation: u64,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: String,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Handoff a document actor to another pane after generation verification
+    Handoff {
+        /// Document to hand off
+        document: PathBuf,
+        /// Destination tmux pane id
+        #[arg(long)]
+        to_pane: String,
+        /// Project root to inspect (defaults to document root or nearest project)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Generation observed by the operator before mutating actor state
+        #[arg(long)]
+        observed_generation: u64,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: String,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rebuild compatibility projections from controller SQLite state
+    RepairProjection {
+        /// Optional document scope for sessions projection repair
+        document: Option<PathBuf>,
+        /// Project root to inspect (defaults to document root or nearest project)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Projection to repair: all, actors, sessions, or layout
+        #[arg(long, default_value = "all")]
+        projection: String,
+        /// Optional generation guard when repairing a document-scoped projection
+        #[arg(long)]
+        observed_generation: Option<u64>,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AdminQueueAction {
+    /// Pause queue dispatch for a document or project
+    Pause {
+        /// Document queue to pause. Omit with --project-root for project scope.
+        document: Option<PathBuf>,
+        /// Project root for project-scoped control, or root override for document scope
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Generation observed by the operator before document-scoped mutation
+        #[arg(long)]
+        observed_generation: Option<u64>,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: String,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume queue dispatch for a document or project
+    Resume {
+        /// Document queue to resume. Omit with --project-root for project scope.
+        document: Option<PathBuf>,
+        /// Project root for project-scoped control, or root override for document scope
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Generation observed by the operator before document-scoped mutation
+        #[arg(long)]
+        observed_generation: Option<u64>,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a queue as draining; busy actors block new dispatch until ready
+    Drain {
+        /// Document queue to drain
+        document: PathBuf,
+        /// Project root override
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Generation observed by the operator before document-scoped mutation
+        #[arg(long)]
+        observed_generation: Option<u64>,
+        /// Optional queue item id to drain through
+        #[arg(long)]
+        until_id: Option<String>,
+        /// Operator reason recorded in the durable receipt
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -2695,6 +2838,19 @@ fn main() -> anyhow::Result<()> {
             }
         },
         Commands::Admin { action } => match action {
+            AdminAction::Inspect {
+                document,
+                session,
+                pane,
+                project_root,
+                json,
+            } => agent_doc_orchestration::admin::inspect(
+                project_root.as_deref(),
+                document.as_deref(),
+                session.as_deref(),
+                pane.as_deref(),
+                json,
+            ),
             AdminAction::List { project_root, json } => {
                 agent_doc_orchestration::admin::list(project_root.as_deref(), json)
             }
@@ -2711,6 +2867,101 @@ fn main() -> anyhow::Result<()> {
                 json,
                 once,
                 interval,
+            ),
+            AdminAction::Queue { action } => match action {
+                AdminQueueAction::Pause {
+                    document,
+                    project_root,
+                    observed_generation,
+                    reason,
+                    json,
+                } => agent_doc_orchestration::admin::queue_control(
+                    project_root.as_deref(),
+                    document.as_deref(),
+                    "pause",
+                    observed_generation,
+                    Some(&reason),
+                    None,
+                    json,
+                ),
+                AdminQueueAction::Resume {
+                    document,
+                    project_root,
+                    observed_generation,
+                    reason,
+                    json,
+                } => agent_doc_orchestration::admin::queue_control(
+                    project_root.as_deref(),
+                    document.as_deref(),
+                    "resume",
+                    observed_generation,
+                    reason.as_deref(),
+                    None,
+                    json,
+                ),
+                AdminQueueAction::Drain {
+                    document,
+                    project_root,
+                    observed_generation,
+                    until_id,
+                    reason,
+                    json,
+                } => agent_doc_orchestration::admin::queue_control(
+                    project_root.as_deref(),
+                    Some(document.as_path()),
+                    "drain",
+                    observed_generation,
+                    reason.as_deref(),
+                    until_id.as_deref(),
+                    json,
+                ),
+            },
+            AdminAction::Reap {
+                document,
+                session,
+                pane,
+                project_root,
+                observed_generation,
+                reason,
+                json,
+            } => agent_doc_orchestration::admin::reap(
+                project_root.as_deref(),
+                document.as_deref(),
+                session.as_deref(),
+                pane.as_deref(),
+                observed_generation,
+                &reason,
+                json,
+            ),
+            AdminAction::Handoff {
+                document,
+                to_pane,
+                project_root,
+                observed_generation,
+                reason,
+                json,
+            } => agent_doc_orchestration::admin::handoff(
+                project_root.as_deref(),
+                &document,
+                &to_pane,
+                observed_generation,
+                &reason,
+                json,
+            ),
+            AdminAction::RepairProjection {
+                document,
+                project_root,
+                projection,
+                observed_generation,
+                reason,
+                json,
+            } => agent_doc_orchestration::admin::repair_projection(
+                project_root.as_deref(),
+                document.as_deref(),
+                &projection,
+                observed_generation,
+                reason.as_deref(),
+                json,
             ),
         },
         Commands::Hook { action } => match action {

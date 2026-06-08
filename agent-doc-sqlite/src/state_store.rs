@@ -146,6 +146,71 @@ pub struct ProjectionDiagnosticStatus {
     pub timestamp: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueHeadStatus {
+    pub document_id: String,
+    pub queue_name: String,
+    pub generation: Option<u64>,
+    pub head_id: Option<String>,
+    pub prompt: String,
+    pub state: String,
+    pub priority: u64,
+    pub selected_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueControlStatus {
+    pub receipt_id: u64,
+    pub scope_kind: String,
+    pub scope_id: String,
+    pub state: String,
+    pub reason: Option<String>,
+    pub operation_receipt_id: Option<u64>,
+    pub updated_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueControlInsert<'a> {
+    pub scope_kind: &'a str,
+    pub scope_id: &'a str,
+    pub state: &'a str,
+    pub reason: Option<&'a str>,
+    pub operation_receipt_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueBackpressureStatus {
+    pub receipt_id: u64,
+    pub document_id: String,
+    pub generation: Option<u64>,
+    pub command_kind: String,
+    pub capacity_class: String,
+    pub reason: String,
+    pub dispatch_receipt_id: Option<u64>,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueBackpressureInsert<'a> {
+    pub document_id: &'a str,
+    pub generation: Option<u64>,
+    pub command_kind: &'a str,
+    pub capacity_class: &'a str,
+    pub reason: &'a str,
+    pub dispatch_receipt_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminOperationStatus {
+    pub receipt_id: u64,
+    pub operation_kind: String,
+    pub document_id: Option<String>,
+    pub status: String,
+    pub diagnostic_payload: Option<String>,
+    pub timestamp: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectionDiagnosticInsert<'a> {
     pub projection: &'a str,
@@ -177,6 +242,8 @@ pub struct ControlPlaneStoreCounts {
     pub pending_mutations: usize,
     pub projection_diagnostics: usize,
     pub admin_operations: usize,
+    pub queue_controls: usize,
+    pub queue_backpressure: usize,
     pub crash_recovery_markers: usize,
     pub layout_states: usize,
 }
@@ -192,6 +259,8 @@ impl ControlPlaneStoreCounts {
             + self.pending_mutations
             + self.projection_diagnostics
             + self.admin_operations
+            + self.queue_controls
+            + self.queue_backpressure
             + self.crash_recovery_markers
             + self.layout_states
     }
@@ -306,12 +375,36 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS queue_heads (
             document_id TEXT NOT NULL,
             queue_name TEXT NOT NULL,
+            generation INTEGER,
             head_id TEXT,
             prompt TEXT NOT NULL,
             state TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 0,
             selected_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (document_id, queue_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS queue_controls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_kind TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            reason TEXT,
+            operation_receipt_id INTEGER,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(scope_kind, scope_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS queue_backpressure (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id TEXT NOT NULL,
+            generation INTEGER,
+            command_kind TEXT NOT NULL,
+            capacity_class TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            dispatch_receipt_id INTEGER,
+            timestamp INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS document_cycles (
@@ -363,6 +456,7 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
     )?;
     ensure_dispatch_attempt_receipt_columns(conn)?;
     ensure_projection_diagnostic_columns(conn)?;
+    ensure_queue_head_columns(conn)?;
     Ok(())
 }
 
@@ -414,6 +508,17 @@ fn ensure_projection_diagnostic_columns(conn: &Connection) -> Result<()> {
         "projection_diagnostics",
         "retry_status",
         "retry_status TEXT",
+    )?;
+    Ok(())
+}
+
+fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
+    ensure_column(conn, "queue_heads", "generation", "generation INTEGER")?;
+    ensure_column(
+        conn,
+        "queue_heads",
+        "priority",
+        "priority INTEGER NOT NULL DEFAULT 0",
     )?;
     Ok(())
 }
@@ -487,6 +592,16 @@ pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlane
             conn,
             "SELECT COUNT(*) FROM admin_operations",
             "admin operations",
+        )?,
+        queue_controls: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM queue_controls",
+            "queue controls",
+        )?,
+        queue_backpressure: count_rows(
+            conn,
+            "SELECT COUNT(*) FROM queue_backpressure",
+            "queue backpressure",
         )?,
         crash_recovery_markers: count_rows(
             conn,
@@ -758,6 +873,218 @@ pub fn load_projection_diagnostics_from_db(
     }
     diagnostics.reverse();
     Ok(diagnostics)
+}
+
+pub fn load_queue_head_from_db(
+    conn: &Connection,
+    document_id: &str,
+    queue_name: &str,
+) -> Result<Option<QueueHeadStatus>> {
+    conn.query_row(
+        r#"
+        SELECT
+            document_id,
+            queue_name,
+            generation,
+            head_id,
+            prompt,
+            state,
+            priority,
+            selected_at,
+            updated_at
+        FROM queue_heads
+        WHERE document_id = ?1 AND queue_name = ?2
+        "#,
+        params![document_id, queue_name],
+        |row| {
+            let generation: Option<i64> = row.get("generation")?;
+            let priority: i64 = row.get("priority")?;
+            let selected_at: i64 = row.get("selected_at")?;
+            let updated_at: i64 = row.get("updated_at")?;
+            Ok(QueueHeadStatus {
+                document_id: row.get("document_id")?,
+                queue_name: row.get("queue_name")?,
+                generation: generation
+                    .map(|generation| sqlite_u64(generation, "queue head generation"))
+                    .transpose()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                head_id: row.get("head_id")?,
+                prompt: row.get("prompt")?,
+                state: row.get("state")?,
+                priority: sqlite_u64(priority, "queue head priority")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                selected_at: sqlite_u64(selected_at, "queue head selected_at")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                updated_at: sqlite_u64(updated_at, "queue head updated_at")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            })
+        },
+    )
+    .optional()
+    .context("failed to load queue head from controller state")
+}
+
+pub fn load_queue_control_from_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+) -> Result<Option<QueueControlStatus>> {
+    conn.query_row(
+        r#"
+        SELECT
+            id,
+            scope_kind,
+            scope_id,
+            state,
+            reason,
+            operation_receipt_id,
+            updated_at
+        FROM queue_controls
+        WHERE scope_kind = ?1 AND scope_id = ?2
+        "#,
+        params![scope_kind, scope_id],
+        |row| {
+            let receipt_id: i64 = row.get("id")?;
+            let operation_receipt_id: Option<i64> = row.get("operation_receipt_id")?;
+            let updated_at: i64 = row.get("updated_at")?;
+            Ok(QueueControlStatus {
+                receipt_id: sqlite_u64(receipt_id, "queue control receipt id")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                scope_kind: row.get("scope_kind")?,
+                scope_id: row.get("scope_id")?,
+                state: row.get("state")?,
+                reason: row.get("reason")?,
+                operation_receipt_id: operation_receipt_id
+                    .map(|value| sqlite_u64(value, "queue control operation receipt id"))
+                    .transpose()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                updated_at: sqlite_u64(updated_at, "queue control updated_at")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            })
+        },
+    )
+    .optional()
+    .context("failed to load queue control from controller state")
+}
+
+pub fn load_effective_queue_control_from_db(
+    conn: &Connection,
+    document_id: &str,
+    project_scope_id: &str,
+) -> Result<Option<QueueControlStatus>> {
+    if let Some(control) = load_queue_control_from_db(conn, "document", document_id)?
+        && control.state != "resumed"
+    {
+        return Ok(Some(control));
+    }
+    let project = load_queue_control_from_db(conn, "project", project_scope_id)?;
+    Ok(project.filter(|control| control.state != "resumed"))
+}
+
+pub fn load_admin_operations_from_db(
+    conn: &Connection,
+    document_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<AdminOperationStatus>> {
+    let limit = i64::try_from(limit.max(1)).context("admin operation limit too large")?;
+    let mut operations = Vec::new();
+    if let Some(document_id) = document_id {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, operation_kind, document_id, status, diagnostic_payload, timestamp
+            FROM admin_operations
+            WHERE document_id = ?1
+            ORDER BY id DESC
+            LIMIT ?2
+            "#,
+        )?;
+        for row in stmt.query_map(params![document_id, limit], admin_operation_from_row)? {
+            operations.push(row?);
+        }
+    } else {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, operation_kind, document_id, status, diagnostic_payload, timestamp
+            FROM admin_operations
+            ORDER BY id DESC
+            LIMIT ?1
+            "#,
+        )?;
+        for row in stmt.query_map(params![limit], admin_operation_from_row)? {
+            operations.push(row?);
+        }
+    }
+    operations.reverse();
+    Ok(operations)
+}
+
+pub fn load_queue_backpressure_from_db(
+    conn: &Connection,
+    document_id: &str,
+    limit: usize,
+) -> Result<Vec<QueueBackpressureStatus>> {
+    let limit = i64::try_from(limit.max(1)).context("queue backpressure limit too large")?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            id,
+            document_id,
+            generation,
+            command_kind,
+            capacity_class,
+            reason,
+            dispatch_receipt_id,
+            timestamp
+        FROM queue_backpressure
+        WHERE document_id = ?1
+        ORDER BY id DESC
+        LIMIT ?2
+        "#,
+    )?;
+    let mut receipts = Vec::new();
+    for row in stmt.query_map(params![document_id, limit], |row| {
+        let receipt_id: i64 = row.get("id")?;
+        let generation: Option<i64> = row.get("generation")?;
+        let dispatch_receipt_id: Option<i64> = row.get("dispatch_receipt_id")?;
+        let timestamp: i64 = row.get("timestamp")?;
+        Ok(QueueBackpressureStatus {
+            receipt_id: sqlite_u64(receipt_id, "queue backpressure receipt id")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            document_id: row.get("document_id")?,
+            generation: generation
+                .map(|generation| sqlite_u64(generation, "queue backpressure generation"))
+                .transpose()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            command_kind: row.get("command_kind")?,
+            capacity_class: row.get("capacity_class")?,
+            reason: row.get("reason")?,
+            dispatch_receipt_id: dispatch_receipt_id
+                .map(|receipt_id| sqlite_u64(receipt_id, "queue backpressure dispatch receipt id"))
+                .transpose()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            timestamp: sqlite_u64(timestamp, "queue backpressure timestamp")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        })
+    })? {
+        receipts.push(row?);
+    }
+    receipts.reverse();
+    Ok(receipts)
+}
+
+fn admin_operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AdminOperationStatus> {
+    let receipt_id: i64 = row.get("id")?;
+    let timestamp: i64 = row.get("timestamp")?;
+    Ok(AdminOperationStatus {
+        receipt_id: sqlite_u64(receipt_id, "admin operation receipt id")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        operation_kind: row.get("operation_kind")?,
+        document_id: row.get("document_id")?,
+        status: row.get("status")?,
+        diagnostic_payload: row.get("diagnostic_payload")?,
+        timestamp: sqlite_u64(timestamp, "admin operation timestamp")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+    })
 }
 
 pub fn load_session_operator_status_from_db(
@@ -1179,6 +1506,90 @@ pub fn upsert_queue_head_in_db(
     Ok(())
 }
 
+pub fn upsert_queue_control_in_db(
+    conn: &Connection,
+    control: &QueueControlInsert<'_>,
+) -> Result<QueueControlStatus> {
+    let now = sqlite_i64(timestamp_secs(), "queue control timestamp")?;
+    conn.execute(
+        r#"
+        INSERT INTO queue_controls (
+            scope_kind,
+            scope_id,
+            state,
+            reason,
+            operation_receipt_id,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+            state = excluded.state,
+            reason = excluded.reason,
+            operation_receipt_id = excluded.operation_receipt_id,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            control.scope_kind,
+            control.scope_id,
+            control.state,
+            control.reason,
+            control
+                .operation_receipt_id
+                .map(|receipt_id| sqlite_i64(receipt_id, "queue control operation receipt id"))
+                .transpose()?,
+            now
+        ],
+    )?;
+    load_queue_control_from_db(conn, control.scope_kind, control.scope_id)?
+        .context("missing queue control after upsert")
+}
+
+pub fn insert_queue_backpressure_in_db(
+    conn: &Connection,
+    backpressure: &QueueBackpressureInsert<'_>,
+) -> Result<QueueBackpressureStatus> {
+    conn.execute(
+        r#"
+        INSERT INTO queue_backpressure (
+            document_id,
+            generation,
+            command_kind,
+            capacity_class,
+            reason,
+            dispatch_receipt_id,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![
+            backpressure.document_id,
+            backpressure
+                .generation
+                .map(|generation| sqlite_i64(generation, "queue backpressure generation"))
+                .transpose()?,
+            backpressure.command_kind,
+            backpressure.capacity_class,
+            backpressure.reason,
+            backpressure
+                .dispatch_receipt_id
+                .map(|receipt_id| sqlite_i64(receipt_id, "queue backpressure dispatch receipt id"))
+                .transpose()?,
+            sqlite_i64(timestamp_secs(), "queue backpressure timestamp")?
+        ],
+    )?;
+    let receipt_id = sqlite_u64(conn.last_insert_rowid(), "queue backpressure receipt id")?;
+    Ok(QueueBackpressureStatus {
+        receipt_id,
+        document_id: backpressure.document_id.to_string(),
+        generation: backpressure.generation,
+        command_kind: backpressure.command_kind.to_string(),
+        capacity_class: backpressure.capacity_class.to_string(),
+        reason: backpressure.reason.to_string(),
+        dispatch_receipt_id: backpressure.dispatch_receipt_id,
+        timestamp: timestamp_secs(),
+    })
+}
+
 pub fn upsert_document_cycle_state_in_db(
     conn: &Connection,
     document_id: &str,
@@ -1483,6 +1894,10 @@ mod tests {
             "do [#ctrlplane-storeactor]",
             "selected",
         )?;
+        let queue_head =
+            load_queue_head_from_db(&conn, &record.document_id, "agent:queue")?.unwrap();
+        assert_eq!(queue_head.generation, None);
+        assert_eq!(queue_head.priority, 0);
         upsert_document_cycle_state_in_db(
             &conn,
             &record.document_id,
@@ -1522,6 +1937,27 @@ mod tests {
             "accepted",
             Some("store actor count test"),
         )?;
+        let queue_control = upsert_queue_control_in_db(
+            &conn,
+            &QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &record.document_id,
+                state: "paused",
+                reason: Some("store actor count test"),
+                operation_receipt_id: Some(1),
+            },
+        )?;
+        insert_queue_backpressure_in_db(
+            &conn,
+            &QueueBackpressureInsert {
+                document_id: &record.document_id,
+                generation: Some(record.generation),
+                command_kind: "managed_reopen",
+                capacity_class: "queue_paused",
+                reason: "store actor count test",
+                dispatch_receipt_id: Some(queue_control.receipt_id),
+            },
+        )?;
         insert_crash_recovery_marker_in_db(
             &conn,
             "startup_reconcile",
@@ -1543,9 +1979,11 @@ mod tests {
         assert_eq!(counts.pending_mutations, 1);
         assert_eq!(counts.projection_diagnostics, 1);
         assert_eq!(counts.admin_operations, 1);
+        assert_eq!(counts.queue_controls, 1);
+        assert_eq!(counts.queue_backpressure, 1);
         assert_eq!(counts.crash_recovery_markers, 1);
         assert_eq!(counts.layout_states, 1);
-        assert_eq!(counts.total_authoritative_rows(), 11);
+        assert_eq!(counts.total_authoritative_rows(), 13);
 
         Ok(())
     }

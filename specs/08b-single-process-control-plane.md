@@ -45,8 +45,9 @@ projections, and tmux transcript inference.
 ## State authority
 
 - `.agent-doc/state.db` is the authoritative store for actor records,
-  generations, dispatch attempts, queue heads, document cycles, pending backlog
-  mutations, supervisor leases, admin operations, and projection diagnostics.
+  generations, dispatch attempts, queue heads, queue controls, queue
+  backpressure, document cycles, pending backlog mutations, supervisor leases,
+  admin operations, and projection diagnostics.
 - `session-actors.json`, `sessions.json`, layout JSON, session logs, and
   `ops.log` are compatibility or diagnostic projections. Normal route, start,
   sync, clear, restart, and queue-dispatch paths must not treat them as write
@@ -141,6 +142,38 @@ request records an operation kind, optional document id, typed status, and
 diagnostic payload in `admin_operations`, then returns the receipt id to the
 caller.
 
+Controller queue state is stored in SQLite rather than loose marker files:
+
+- `queue_heads`: document id, queue name, actor generation when known, head id,
+  prompt text, state, priority, selected timestamp, and updated timestamp;
+- `queue_controls`: document/project scope, paused/resumed/draining state,
+  operator reason, linked admin operation receipt id, and updated timestamp;
+- `queue_backpressure`: document id, actor generation when known, rejected or
+  blocked command kind, capacity class (`queue_full`, `queue_paused`,
+  `actor_busy_draining`, etc.), reason, linked dispatch receipt id, and
+  timestamp.
+
+Actor inspection responses include the current queue head/control state and
+recent typed queue backpressure receipts, alongside dispatch/admin receipts and
+projection diagnostics.
+
+The first controller-backed mutating CLI surface is:
+
+- `agent-doc admin inspect <document|--session <id>|--pane <pane>> [--json]`;
+- `agent-doc admin queue pause|resume [document|--project-root <root>]`;
+- `agent-doc admin queue drain <document> [--until-id <id>]`;
+- `agent-doc admin reap <document|--session <id>|--pane <pane>>
+  --observed-generation <n> --reason <text>`;
+- `agent-doc admin handoff <document> --to-pane <pane>
+  --observed-generation <n> --reason <text>`;
+- `agent-doc admin repair-projection [document] --projection all|actors|sessions|layout`.
+
+Document-scoped mutating operations that target an existing actor require the
+caller's observed generation. Missing or stale generations return an
+`admin_operations` receipt with `status=rejected`, `failed_stage`, and the
+current generation; they do not mutate queue controls, actor bindings, or
+projections.
+
 `agent-doc controller status` must expose the controller-owned runtime shape in
 its `control_plane` JSON field. That field identifies the project-scoped
 single-process model, the controller IPC external boundary, `.agent-doc/state.db`
@@ -148,8 +181,9 @@ state authority, compatibility-only projection authority, and role snapshots for
 the dispatch actor, store actor, per-document session actors, supervisor
 adapters, and projection workers. Store role snapshots include per-category
 SQLite counts for actor documents, lifecycle transitions, supervisor leases,
-dispatch receipts, queue heads, document cycles, pending mutations, projection
-diagnostics, admin operations, crash-recovery markers, and layout state.
+dispatch receipts, queue heads, queue controls, queue backpressure, document
+cycles, pending mutations, projection diagnostics, admin operations,
+crash-recovery markers, and layout state.
 
 Read-only admin calls may be served from the in-memory snapshot when the result
 includes the snapshot generation/version. Mutating admin calls must enter through
@@ -191,6 +225,11 @@ the dispatch actor and produce receipts.
 - When queues are full, the controller returns a typed backpressure rejection
   with the actor id, queue depth, oldest receipt age, and the admin command that
   can pause, inspect, or drain the work.
+- When a durable queue control pauses a document or project, dispatch must return
+  `Blocked` with `failed_stage=queue_paused`, persist the dispatch receipt, and
+  add a `queue_backpressure` row before any external input is sent. When a
+  document is draining and the actor is not ready, dispatch must return
+  `failed_stage=actor_busy_draining` through the same receipt/backpressure path.
 
 ## Migration gates
 

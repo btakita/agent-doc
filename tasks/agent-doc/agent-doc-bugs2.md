@@ -114,7 +114,38 @@ Commits pushed:
 
 Escalation: none. Confidence: high.
 /clear
-<!-- agent:boundary:692f3319 -->
+
+### Re: slash-only `/clear` handoff — gpt-5
+
+Root cause: the core diff classifier deliberately treated bare slash commands like `/clear` as `prompt_target` so route could see and hand them to the owner pane. Preflight then reused that same broad prompt-bearing classification for direct `agent-doc <FILE>` cycles, so a diff whose only user-authored addition was `+/clear` could still open `preflight_started` and spend a normal response turn before the harness got to the built-in command.
+
+Fix: added a stricter command-only diff classifier. Slash commands remain route-visible, but when every substantive added line is a slash command outside fences/blockquotes, preflight now surfaces `slash_commands` / `builtin_commands`, suppresses `prompt_bearing_changes` / `user_intent_prompt_changes`, and skips opening a response cycle. The active `agent:queue` slash-head handoff path still works and is covered by the existing test.
+
+Changed paths:
+- `src/agent-doc/agent-doc-core/src/diff.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- `src/agent-doc/tests/test_cli.rs`
+
+Verification:
+- `cargo test -p agent-doc-core parse_slash_command_only_added_diff`
+- `cargo test --test test_cli test_preflight_exchange_slash_command_is_command_only`
+- `cargo test -p agent-doc-orchestration preflight_does_not_open_cycle_from_active_queue_slash_command`
+- `cargo test --test test_cli test_preflight_active_auto_queue_head_is_not_user_intent`
+- `make check` (4004 tests passed, 233 skipped; doctests passed; deterministic closeout sim passed)
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+
+Commits pushed:
+- `btakita/agent-doc` `7a1a999b` (`agent-doc: treat slash-only diffs as commands`)
+- parent `btakita/agent-loop` `7d3baaaa1` (`agent-doc: update slash command handoff`)
+
+CI:
+- `btakita/agent-doc` latest `CI` run for `agent-doc: treat slash-only diffs as commands` was `in_progress` at 2026-06-08T15:15:45Z when checked.
+- parent repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:f6e3e13d -->
 <!-- /agent:exchange -->
 
 ## Queue

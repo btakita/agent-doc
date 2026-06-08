@@ -111,12 +111,29 @@ pub struct SupervisorLeaseStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAttemptStatus {
+    pub receipt_id: u64,
     pub generation: u64,
     pub command_kind: String,
     pub accepted_stage: Option<String>,
     pub failed_stage: Option<String>,
     pub diagnostic_payload: Option<String>,
+    pub result_status: Option<String>,
+    pub proof_scope: Option<String>,
+    pub dispatch_start_proven: bool,
     pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DispatchAttemptInsert<'a> {
+    pub document_id: &'a str,
+    pub generation: u64,
+    pub command_kind: &'a str,
+    pub accepted_stage: Option<&'a str>,
+    pub failed_stage: Option<&'a str>,
+    pub diagnostic_payload: &'a str,
+    pub result_status: &'a str,
+    pub proof_scope: &'a str,
+    pub dispatch_start_proven: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +254,9 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
             accepted_stage TEXT,
             failed_stage TEXT,
             diagnostic_payload TEXT,
+            result_status TEXT,
+            proof_scope TEXT,
+            dispatch_start_proven INTEGER NOT NULL DEFAULT 0,
             timestamp INTEGER NOT NULL
         );
 
@@ -294,6 +314,37 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
             updated_at INTEGER NOT NULL
         );
         "#,
+    )?;
+    ensure_dispatch_attempt_receipt_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let existing: String = row.get(1)?;
+        if existing == column {
+            return Ok(());
+        }
+    }
+    conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
+    Ok(())
+}
+
+fn ensure_dispatch_attempt_receipt_columns(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "dispatch_attempts",
+        "result_status",
+        "result_status TEXT",
+    )?;
+    ensure_column(conn, "dispatch_attempts", "proof_scope", "proof_scope TEXT")?;
+    ensure_column(
+        conn,
+        "dispatch_attempts",
+        "dispatch_start_proven",
+        "dispatch_start_proven INTEGER NOT NULL DEFAULT 0",
     )?;
     Ok(())
 }
@@ -555,11 +606,15 @@ pub fn load_dispatch_attempts_from_db(
     let mut stmt = conn.prepare(
         r#"
         SELECT
+            id,
             generation,
             command_kind,
             accepted_stage,
             failed_stage,
             diagnostic_payload,
+            result_status,
+            proof_scope,
+            dispatch_start_proven,
             timestamp
         FROM dispatch_attempts
         WHERE document_id = ?1
@@ -569,15 +624,22 @@ pub fn load_dispatch_attempts_from_db(
     )?;
     let mut attempts = Vec::new();
     for row in stmt.query_map(params![document_id], |row| {
+        let receipt_id: i64 = row.get("id")?;
         let generation: i64 = row.get("generation")?;
+        let dispatch_start_proven: i64 = row.get("dispatch_start_proven")?;
         let timestamp: i64 = row.get("timestamp")?;
         Ok(DispatchAttemptStatus {
+            receipt_id: sqlite_u64(receipt_id, "dispatch receipt id")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
             generation: sqlite_u64(generation, "dispatch generation")
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
             command_kind: row.get("command_kind")?,
             accepted_stage: row.get("accepted_stage")?,
             failed_stage: row.get("failed_stage")?,
             diagnostic_payload: row.get("diagnostic_payload")?,
+            result_status: row.get("result_status")?,
+            proof_scope: row.get("proof_scope")?,
+            dispatch_start_proven: dispatch_start_proven != 0,
             timestamp: sqlite_u64(timestamp, "dispatch timestamp")
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         })
@@ -772,13 +834,8 @@ pub fn upsert_supervisor_lease_in_db(
 
 pub fn insert_dispatch_attempt_in_db(
     conn: &Connection,
-    document_id: &str,
-    generation: u64,
-    command_kind: &str,
-    accepted_stage: Option<&str>,
-    failed_stage: Option<&str>,
-    diagnostic_payload: &str,
-) -> Result<()> {
+    attempt: &DispatchAttemptInsert<'_>,
+) -> Result<u64> {
     conn.execute(
         r#"
         INSERT INTO dispatch_attempts (
@@ -788,21 +845,31 @@ pub fn insert_dispatch_attempt_in_db(
             accepted_stage,
             failed_stage,
             diagnostic_payload,
+            result_status,
+            proof_scope,
+            dispatch_start_proven,
             timestamp
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#,
         params![
-            document_id,
-            sqlite_i64(generation, "generation")?,
-            command_kind,
-            accepted_stage,
-            failed_stage,
-            diagnostic_payload,
+            attempt.document_id,
+            sqlite_i64(attempt.generation, "generation")?,
+            attempt.command_kind,
+            attempt.accepted_stage,
+            attempt.failed_stage,
+            attempt.diagnostic_payload,
+            attempt.result_status,
+            attempt.proof_scope,
+            if attempt.dispatch_start_proven {
+                1_i64
+            } else {
+                0_i64
+            },
             sqlite_i64(timestamp_secs(), "dispatch attempt timestamp")?,
         ],
     )?;
-    Ok(())
+    sqlite_u64(conn.last_insert_rowid(), "dispatch receipt id")
 }
 
 pub fn insert_projection_diagnostic(
@@ -1043,7 +1110,7 @@ pub fn insert_admin_operation_in_db(
     document_id: Option<&str>,
     status: &str,
     diagnostic_payload: Option<&str>,
-) -> Result<()> {
+) -> Result<u64> {
     conn.execute(
         r#"
         INSERT INTO admin_operations (
@@ -1063,7 +1130,7 @@ pub fn insert_admin_operation_in_db(
             sqlite_i64(timestamp_secs(), "admin operation timestamp")?
         ],
     )?;
-    Ok(())
+    sqlite_u64(conn.last_insert_rowid(), "admin operation receipt id")
 }
 
 pub fn insert_crash_recovery_marker_in_db(
@@ -1189,12 +1256,17 @@ mod tests {
         )?;
         insert_dispatch_attempt_in_db(
             &conn,
-            &record.document_id,
-            record.generation,
-            "managed_reopen",
-            Some("accepted"),
-            None,
-            "store actor count test",
+            &DispatchAttemptInsert {
+                document_id: &record.document_id,
+                generation: record.generation,
+                command_kind: "managed_reopen",
+                accepted_stage: Some("accepted"),
+                failed_stage: None,
+                diagnostic_payload: "store actor count test",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
         )?;
         upsert_queue_head_in_db(
             &conn,

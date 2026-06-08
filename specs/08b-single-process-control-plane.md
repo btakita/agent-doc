@@ -101,7 +101,11 @@ The dispatch actor exposes a small real-time API:
 Dispatch results are typed as `Rejected`, `Accepted`, `Queued`, `Running`,
 `Completed`, or `Blocked`. A pane-input acceptance is not a completed dispatch;
 proof scope must still distinguish accepted-only delivery from dispatch-start
-proof.
+proof. The current controller authorization API persists each dispatch decision
+as a `dispatch_attempts` receipt before returning: responses include
+`receipt_id`, `status`, `stage`, `accepted_stage`/`failed_stage`, `proof_scope`,
+and `dispatch_start_proven`. Rejected and blocked decisions must also commit
+their receipt before the caller sees the rejection.
 
 ## Admin API
 
@@ -120,6 +124,13 @@ without direct sidecar edits:
 - trigger projection repair or doctor checks without changing actor ownership;
 - stream controller health, projection lag, and dispatch metrics for editor
 status surfaces.
+
+The controller exposes `admin_operation` as the durable receipt target for
+admin-class commands such as `start`, `sync`, `session status`, `repair`,
+`preflight`, and `write`/`finalize` as they migrate off sidecar-first paths. The
+request records an operation kind, optional document id, typed status, and
+diagnostic payload in `admin_operations`, then returns the receipt id to the
+caller.
 
 `agent-doc controller status` must expose the controller-owned runtime shape in
 its `control_plane` JSON field. That field identifies the project-scoped

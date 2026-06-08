@@ -483,10 +483,76 @@ pub struct DispatchRequest {
     pub diagnostic_payload: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerDispatchResultStatus {
+    Rejected,
+    Accepted,
+    Queued,
+    Running,
+    Completed,
+    Blocked,
+}
+
+impl ControllerDispatchResultStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rejected => "rejected",
+            Self::Accepted => "accepted",
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerDispatchProofScope {
+    AcceptedOnly,
+    DispatchStart,
+}
+
+impl ControllerDispatchProofScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedOnly => "accepted_only",
+            Self::DispatchStart => "dispatch_start",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerDispatchReceipt {
+    pub receipt_id: u64,
+    pub command_kind: String,
+    pub status: ControllerDispatchResultStatus,
+    pub stage: String,
+    #[serde(default)]
+    pub accepted_stage: Option<String>,
+    #[serde(default)]
+    pub failed_stage: Option<String>,
+    pub proof_scope: ControllerDispatchProofScope,
+    pub dispatch_start_proven: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAuthorization {
     pub record: crate::session_actor::ActorRecord,
     pub accepted_stage: String,
+    pub receipt: ControllerDispatchReceipt,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerAdminReceipt {
+    pub receipt_id: u64,
+    pub operation_kind: String,
+    #[serde(default)]
+    pub document_id: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub diagnostic_payload: Option<String>,
 }
 
 // `ActorTransitionStatus`, `SupervisorLeaseStatus`, `DispatchAttemptStatus`,
@@ -804,25 +870,76 @@ fn upsert_supervisor_lease(
     )
 }
 
+struct ControllerDispatchReceiptInsert<'a> {
+    document_id: &'a str,
+    generation: u64,
+    command_kind: &'a str,
+    accepted_stage: Option<&'a str>,
+    failed_stage: Option<&'a str>,
+    diagnostic_payload: &'a str,
+    result_status: ControllerDispatchResultStatus,
+    proof_scope: ControllerDispatchProofScope,
+    dispatch_start_proven: bool,
+}
+
 fn insert_dispatch_attempt_record(
     project_root: &Path,
-    document_id: &str,
-    generation: u64,
-    command_kind: &str,
-    accepted_stage: Option<&str>,
-    failed_stage: Option<&str>,
-    diagnostic_payload: &str,
-) -> Result<()> {
+    attempt: ControllerDispatchReceiptInsert<'_>,
+) -> Result<ControllerDispatchReceipt> {
     let conn = open_state_db(project_root)?;
-    state_store::insert_dispatch_attempt_in_db(
+    let receipt_id = state_store::insert_dispatch_attempt_in_db(
         &conn,
+        &state_store::DispatchAttemptInsert {
+            document_id: attempt.document_id,
+            generation: attempt.generation,
+            command_kind: attempt.command_kind,
+            accepted_stage: attempt.accepted_stage,
+            failed_stage: attempt.failed_stage,
+            diagnostic_payload: attempt.diagnostic_payload,
+            result_status: attempt.result_status.as_str(),
+            proof_scope: attempt.proof_scope.as_str(),
+            dispatch_start_proven: attempt.dispatch_start_proven,
+        },
+    )?;
+    let stage = attempt
+        .accepted_stage
+        .or(attempt.failed_stage)
+        .unwrap_or_else(|| attempt.result_status.as_str())
+        .to_string();
+    Ok(ControllerDispatchReceipt {
+        receipt_id,
+        command_kind: attempt.command_kind.to_string(),
+        status: attempt.result_status,
+        stage,
+        accepted_stage: attempt.accepted_stage.map(ToOwned::to_owned),
+        failed_stage: attempt.failed_stage.map(ToOwned::to_owned),
+        proof_scope: attempt.proof_scope,
+        dispatch_start_proven: attempt.dispatch_start_proven,
+    })
+}
+
+fn insert_admin_operation_record(
+    project_root: &Path,
+    operation_kind: &str,
+    document_id: Option<&str>,
+    status: &str,
+    diagnostic_payload: Option<&str>,
+) -> Result<ControllerAdminReceipt> {
+    let conn = open_state_db(project_root)?;
+    let receipt_id = state_store::insert_admin_operation_in_db(
+        &conn,
+        operation_kind,
         document_id,
-        generation,
-        command_kind,
-        accepted_stage,
-        failed_stage,
+        status,
         diagnostic_payload,
-    )
+    )?;
+    Ok(ControllerAdminReceipt {
+        receipt_id,
+        operation_kind: operation_kind.to_string(),
+        document_id: document_id.map(ToOwned::to_owned),
+        status: status.to_string(),
+        diagnostic_payload: diagnostic_payload.map(ToOwned::to_owned),
+    })
 }
 
 pub fn load_actor_store(
@@ -2268,9 +2385,12 @@ fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
+        "admin_operation" => {
+            controller_envelope(handle_admin_operation(&bootstrap_snapshot, request))
+        }
         other => Ok(serde_json::to_string(&serde_json::json!({
-            "ok": false,
-            "error": format!("unknown controller command: {other}")
+                "ok": false,
+                "error": format!("unknown controller command: {other}")
         }))?),
     }
 }
@@ -2616,6 +2736,7 @@ fn handle_dispatch(
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
     let mut failed_stage = None;
     let mut failure = None;
+    let mut failure_status = ControllerDispatchResultStatus::Rejected;
     if record.session_id != session_id {
         failed_stage = Some("stale_session");
         failure = Some(format!(
@@ -2645,6 +2766,7 @@ fn handle_dispatch(
         crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
     ) {
         failed_stage = Some(record.state.as_str());
+        failure_status = ControllerDispatchResultStatus::Blocked;
         failure = Some(format!(
             "dispatch rejected for {}: authoritative actor generation {} is {}",
             file.display(),
@@ -2655,16 +2777,21 @@ fn handle_dispatch(
 
     if let Some(message) = failure {
         let stage = failed_stage.unwrap_or("rejected");
-        let _ = insert_dispatch_attempt_record(
+        let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
-            &document_id,
-            generation,
-            &command_kind,
-            None,
-            Some(stage),
-            &diagnostic_payload,
-        );
-        anyhow::bail!(message);
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some(stage),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: failure_status,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        anyhow::bail!("{message} receipt_id={}", receipt.receipt_id);
     }
 
     let accepted_stage = match record.state {
@@ -2676,30 +2803,47 @@ fn handle_dispatch(
             unreachable!("blocked/closed dispatch rejected above")
         }
     };
-    insert_dispatch_attempt_record(
+    let result_status = match record.state {
+        crate::session_actor::ActorState::Ready => ControllerDispatchResultStatus::Accepted,
+        crate::session_actor::ActorState::Starting
+        | crate::session_actor::ActorState::Busy
+        | crate::session_actor::ActorState::WaitingInput => ControllerDispatchResultStatus::Queued,
+        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed => {
+            unreachable!("blocked/closed dispatch rejected above")
+        }
+    };
+    let receipt = insert_dispatch_attempt_record(
         &bootstrap.project_root,
-        &document_id,
-        record.generation,
-        &command_kind,
-        Some(accepted_stage),
-        None,
-        &diagnostic_payload,
+        ControllerDispatchReceiptInsert {
+            document_id: &document_id,
+            generation: record.generation,
+            command_kind: &command_kind,
+            accepted_stage: Some(accepted_stage),
+            failed_stage: None,
+            diagnostic_payload: &diagnostic_payload,
+            result_status,
+            proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+            dispatch_start_proven: false,
+        },
     )?;
     crate::ops_log::log_op(
         &file,
         &format!(
-            "controller_dispatch_accepted session={} pane={} generation={} state={} kind={} stage={}",
+            "controller_dispatch_accepted session={} pane={} generation={} state={} kind={} stage={} receipt_id={} proof_scope={}",
             session_id,
             pane_id,
             generation,
             record.state.as_str(),
             command_kind,
-            accepted_stage
+            accepted_stage,
+            receipt.receipt_id,
+            receipt.proof_scope.as_str()
         ),
     );
     Ok(DispatchAuthorization {
         record,
         accepted_stage: accepted_stage.to_string(),
+        receipt,
     })
 }
 
@@ -2796,19 +2940,25 @@ fn handle_operator_command(
         &file.to_string_lossy(),
     );
     let Some(record) = actor_record_from_authority(bootstrap, runtime, &document_id)? else {
-        let _ = insert_dispatch_attempt_record(
+        let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
-            &document_id,
-            0,
-            &command_kind,
-            None,
-            Some("missing_actor"),
-            &diagnostic_payload,
-        );
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation: 0,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some("missing_actor"),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Rejected,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
         anyhow::bail!(
-            "operator command `{}` rejected for {}: stage=missing_actor",
+            "operator command `{}` rejected for {}: stage=missing_actor receipt_id={}",
             command_kind,
-            file.display()
+            file.display(),
+            receipt.receipt_id
         );
     };
     let clear_closed_actor = matches!(
@@ -2819,44 +2969,83 @@ fn handle_operator_command(
         || (record.state == crate::session_actor::ActorState::Closed && !clear_closed_actor)
     {
         let failed_stage = record.state.as_str();
-        let _ = insert_dispatch_attempt_record(
+        let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
-            &document_id,
-            record.generation,
-            &command_kind,
-            None,
-            Some(failed_stage),
-            &diagnostic_payload,
-        );
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation: record.generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some(failed_stage),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Blocked,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
         anyhow::bail!(
-            "operator command `{}` rejected for {}: generation {} is {}",
+            "operator command `{}` rejected for {}: generation {} is {} receipt_id={}",
             command_kind,
             file.display(),
             record.generation,
-            failed_stage
+            failed_stage,
+            receipt.receipt_id
         );
     }
     let accepted_stage = format!("operator_{}", record.state.as_str());
-    insert_dispatch_attempt_record(
+    let receipt = insert_dispatch_attempt_record(
         &bootstrap.project_root,
-        &document_id,
-        record.generation,
-        &command_kind,
-        Some(&accepted_stage),
-        None,
-        &diagnostic_payload,
+        ControllerDispatchReceiptInsert {
+            document_id: &document_id,
+            generation: record.generation,
+            command_kind: &command_kind,
+            accepted_stage: Some(&accepted_stage),
+            failed_stage: None,
+            diagnostic_payload: &diagnostic_payload,
+            result_status: ControllerDispatchResultStatus::Accepted,
+            proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+            dispatch_start_proven: false,
+        },
     )?;
     crate::ops_log::log_op(
         &file,
         &format!(
-            "controller_operator_command_accepted kind={} session={} pane={} generation={} stage={}",
-            command_kind, record.session_id, record.pane_id, record.generation, accepted_stage
+            "controller_operator_command_accepted kind={} session={} pane={} generation={} stage={} receipt_id={} proof_scope={}",
+            command_kind,
+            record.session_id,
+            record.pane_id,
+            record.generation,
+            accepted_stage,
+            receipt.receipt_id,
+            receipt.proof_scope.as_str()
         ),
     );
     Ok(DispatchAuthorization {
         record,
         accepted_stage,
+        receipt,
     })
+}
+
+fn handle_admin_operation(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerAdminReceipt> {
+    let operation_kind = request_string(&request.command_kind, "command_kind")?;
+    let status = request.state.as_deref().unwrap_or("accepted");
+    let document_id = request.file.as_ref().map(|file| {
+        crate::session_actor::canonical_document_id_in(
+            &bootstrap.project_root,
+            &file.to_string_lossy(),
+        )
+    });
+    insert_admin_operation_record(
+        &bootstrap.project_root,
+        &operation_kind,
+        document_id.as_deref(),
+        status,
+        request.diagnostic_payload.as_deref(),
+    )
 }
 
 fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
@@ -4004,7 +4193,18 @@ mod tests {
         let envelope: ControllerEnvelope<DispatchAuthorization> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
-        assert_eq!(envelope.data.unwrap().accepted_stage, "ready");
+        let authorization = envelope.data.unwrap();
+        assert_eq!(authorization.accepted_stage, "ready");
+        assert!(authorization.receipt.receipt_id > 0);
+        assert_eq!(
+            authorization.receipt.status,
+            ControllerDispatchResultStatus::Accepted
+        );
+        assert_eq!(
+            authorization.receipt.proof_scope,
+            ControllerDispatchProofScope::AcceptedOnly
+        );
+        assert!(!authorization.receipt.dispatch_start_proven);
 
         let stale = ControllerRequest {
             generation: Some(0),
@@ -4019,7 +4219,9 @@ mod tests {
         let envelope: ControllerEnvelope<DispatchAuthorization> =
             serde_json::from_str(&response).unwrap();
         assert!(!envelope.ok);
-        assert!(envelope.error.unwrap().contains("requested generation 0"));
+        let error = envelope.error.unwrap();
+        assert!(error.contains("requested generation 0"));
+        assert!(error.contains("receipt_id="));
 
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
         let accepted: i64 = conn
@@ -4036,8 +4238,24 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let typed_accepted: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE result_status = 'accepted' AND proof_scope = 'accepted_only' AND dispatch_start_proven = 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let typed_rejected: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE result_status = 'rejected' AND proof_scope = 'accepted_only' AND dispatch_start_proven = 0 AND failed_stage = 'stale_generation'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(accepted, 1);
         assert_eq!(failed, 1);
+        assert_eq!(typed_accepted, 1);
+        assert_eq!(typed_rejected, 1);
     }
 
     #[test]
@@ -4084,6 +4302,62 @@ mod tests {
         let binding = envelope.data.unwrap();
         assert_eq!(binding.status, ActorBindingStatus::NotFound);
         assert!(binding.record.is_none());
+    }
+
+    #[test]
+    fn controller_admin_operation_returns_durable_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/admin.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-admin\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let admin = ControllerRequest {
+            command: "admin_operation".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some("accepted".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("preflight".to_string()),
+            diagnostic_payload: Some("admin receipt test".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&admin).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let receipt = envelope.data.unwrap();
+        assert!(receipt.receipt_id > 0);
+        assert_eq!(receipt.operation_kind, "preflight");
+        assert_eq!(receipt.status, "accepted");
+        let document_id = doc.to_string_lossy().to_string();
+        assert_eq!(receipt.document_id.as_deref(), Some(document_id.as_str()));
+
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let stored: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM admin_operations WHERE id = ?1 AND operation_kind = 'preflight' AND status = 'accepted'",
+                params![sqlite_i64(receipt.receipt_id, "admin receipt id").unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 1);
     }
 
     #[test]
@@ -4136,7 +4410,17 @@ mod tests {
         let envelope: ControllerEnvelope<DispatchAuthorization> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
-        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_ready");
+        let authorization = envelope.data.unwrap();
+        assert_eq!(authorization.accepted_stage, "operator_ready");
+        assert!(authorization.receipt.receipt_id > 0);
+        assert_eq!(
+            authorization.receipt.status,
+            ControllerDispatchResultStatus::Accepted
+        );
+        assert_eq!(
+            authorization.receipt.proof_scope,
+            ControllerDispatchProofScope::AcceptedOnly
+        );
 
         let status = ControllerRequest {
             command: "session_status".to_string(),
@@ -4168,15 +4452,12 @@ mod tests {
             crate::session_actor::ActorState::Ready
         );
         assert_eq!(status.transitions.len(), 2);
-        assert_eq!(
-            status
-                .dispatch_attempts
-                .last()
-                .unwrap()
-                .accepted_stage
-                .as_deref(),
-            Some("operator_ready")
-        );
+        let attempt = status.dispatch_attempts.last().unwrap();
+        assert_eq!(attempt.receipt_id, authorization.receipt.receipt_id);
+        assert_eq!(attempt.accepted_stage.as_deref(), Some("operator_ready"));
+        assert_eq!(attempt.result_status.as_deref(), Some("accepted"));
+        assert_eq!(attempt.proof_scope.as_deref(), Some("accepted_only"));
+        assert!(!attempt.dispatch_start_proven);
     }
 
     #[test]

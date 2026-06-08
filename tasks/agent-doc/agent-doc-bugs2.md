@@ -203,7 +203,22 @@ Queued as **`#pcp-consolidate`** (top of backlog):
 5. **Thin the FFI listener** to a pure EDT apply+ack shim — no policy in the editor.
 
 Net: the editor process keeps only the irreducible EDT `apply + saveDocument`; the control pane owns state, merge, arbitration, and provenance.
-<!-- agent:boundary:6043cce8 -->
+
+### Re: queue hygiene — operator-pin position-lock, duplicate-id self-heal, race-map doc — opus-4-8
+
+
+Handled the three queued asks (operator pins, duplicate ids, save the race map). Code shipped in `src/agent-doc@b153458f` (pushed); doc + submodule pointer in `ea9401b97`. Follow-up already queued as `#queue-operator-pin-position-lock-dag`.
+
+**1. Save the "Process & race-condition map" → document.** Extracted the two-process model + mermaid + R1–R6 + `#pcp-consolidate` plan into [`tasks/agent-doc/process-race-condition-map.md`](process-race-condition-map.md) as a standalone reference.
+
+**2. `:pushpin:` is now position-locked (`#queue-operator-pin-position-lock`).** `queue::sort_prompts_by_priority` no longer floats operator pins to the top. An operator pin (`:pushpin:` / `__prioritized__`) is **anchored at its authored slot** — the `priority` attribute reorders only the *non*-operator-pinned prompts (agent pins, then unpinned by rank) into the remaining slots around it. So an item you place at a position and pin stays exactly there. Agent pins (`:round_pushpin:`) still float above unpinned among the movable slots. The preflight log now reads `operator pins position-locked`. Tests rewritten (`operator_pin_stays_in_place_while_unpinned_reorder`, `operator_pin_at_bottom_not_floated_to_top`, `operator_pins_hold_their_slots_unpinned_reorder_around`, +tier/shortcode tests) and `specs/pending-system.md` updated.
+
+**3. Duplicate ids self-heal (`#pending-redundant-self-id-strip`).** `pending::parse_item_line` now drops a bracketed `[#id]` token in an item's text that equals the item's own id (the `[#x] [recommended] [#x]` shape produced when `--pending-add` text already carried the id), collapsing the leftover space. Cross-references to *other* ids are preserved. It self-heals on parse — your existing `#stale-capture-captured-only-drift` backlog item already rendered clean this cycle (now `[#stale-capture-captured-only-drift] [recommended] Evaluate…`).
+
+**Scope note.** The position-lock lands in the `priority`-sort path — the live behavior you hit. The auto-DAG path (`sort_prompts_by_dag`, active only when `after=#id` edges exist) still tie-breaks pins by tier; I queued **`#queue-operator-pin-position-lock-dag`** to extend the anchor there, since it's a separate ordering algorithm and this queue has no deps.
+
+**Verification.** `make check` green — clippy clean, **4063 passed / 237 skipped**. `cargo build --release` + `cargo install --path .` done (both binaries, 0.34.0). agent-doc CI `27172673959` was in progress at push — closed out on local evidence per the test-bearing-turn rule.
+<!-- agent:boundary:248ca23c -->
 <!-- /agent:exchange -->
 
 ## Queue

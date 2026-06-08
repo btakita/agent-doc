@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -86,7 +86,50 @@ Commands used for evidence:
 - source reads for `specs/memgraphrag-direction.md`, `specs/architecture.md`, `packages/tsift-summarize/src/summarize.rs`, and `packages/tsift-memory/src/lib.rs`
 
 Verification: no new code changes in this cycle; prior cache extraction verification remains recorded in the previous response. Confidence is high. Escalation: none.
-<!-- agent:boundary:c3760195 -->
+Yes. MemGraphRAG should live in its own crate.
+
+> **Queue prompt:**
+>
+> I like tsift-llm. Should the memgraphrag live in its own crate? If yes, extract memgraphrag to its own crate.
+
+
+I extracted it into `tsift-memgraphrag`, keeping the dependency direction explicit:
+
+- `tsift-memory` now owns durable memory storage, capture/budget contracts, authored finding projection, and claude-mem import/read APIs.
+- `tsift-memgraphrag` depends on `tsift-memory`, `tsift-core`, and `tsift-sqlite`; it owns decay ranking, memory query plans, memory-event `GraphProjection` construction, `.tsift/memory.db` upsert into the shared graph store, traversal refresh memory/semantic rows, and ontology materialization.
+- `tsift-cli` composes the new crate at command/refresh boundaries.
+- The root crate re-exports it as `tsift::memgraphrag`.
+
+This keeps MemGraphRAG separate from the future `tsift-llm` layer: `tsift-llm` should own model-provider request/response/provider adapters, while `tsift-memgraphrag` owns the graph/RAG memory substrate and consumes stored memory/events/semantic rows rather than owning provider calls.
+
+Changed paths:
+
+- Added `packages/tsift-memgraphrag/` with its manifest, README, and library implementation.
+- Moved MemGraphRAG APIs out of `packages/tsift-memory/src/lib.rs`: `MemoryDecayConfig`, `ScoredMemoryEvent`, `rank_memory_events`, `MemoryQueryPlan`, `plan_memory_query`, `memory_graph_node_kinds`, and `project_memory_events`.
+- Moved CLI-owned graph-store operations into `tsift-memgraphrag`: `project_memory_into_graph`, `derive_memory_ontology_graph`, and traversal memory/semantic row projection.
+- Updated `packages/tsift-cli/src/commands/memory.rs` and `packages/tsift-cli/src/lib.rs` to call the new crate.
+- Wired the new crate into workspace manifests, release workflow/package-order tests, root re-export tests, `VERSIONS.md`, `specs/architecture.md`, and `specs/memgraphrag-direction.md`.
+
+Commits:
+
+- `src/tsift` submodule: `df1191a` (`refactor: extract tsift-memgraphrag crate`)
+- superproject submodule pointer: `3f187f332` (`chore: update tsift submodule`)
+
+Verification:
+
+- `cargo check -p tsift-memgraphrag -p tsift-memory -p tsift-cli`
+- `cargo test -p tsift-memgraphrag`
+- `cargo test -p tsift-memory`
+- `cargo test -p tsift-cli --test exit_code release_publish_gate_requires_secret_variable_and_dry_run`
+- `cargo test -p tsift-cli --test exit_code split_crate_manifests_are_publish_ready`
+- `cargo test -p tsift-cli --test exit_code cli_manifest_uses_split_crates_without_root_shim`
+- `cargo test -p tsift-cli project_memory_into_graph_persists_memory_nodes`
+- `cargo test -p tsift-cli traversal_projection_materializes_tsift_memory_rows`
+- `cargo test -p tsift --test reexports`
+- `cargo package -p tsift-memgraphrag --locked --allow-dirty --list`
+- `make check` (passed after the final edit)
+- `gh run list --workflow CI --limit 1`: latest CI was `completed success` on `main` for `refactor: extract tsift-cache crate`.
+<!-- agent:boundary:88a837a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +139,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- I like tsift-llm. Should the memgraphrag live in its own crate? If yes, extract memgraphrag to its own crate.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -261,7 +261,6 @@ Session note: preflight reported session accretion, but the auto queue is active
 Escalation: none.
 
 Confidence: high.
-
 <!-- agent:boundary:d48ec266 -->
 <!-- /agent:exchange -->
 ###

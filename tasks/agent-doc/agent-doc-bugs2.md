@@ -107,16 +107,14 @@ Shipped phase 3: the **affectedness classifier + 5-class router** — the capsto
 **The three phases together** give the full substrate: phase 1 actor-tags every op and persists it to the durable Lamport-ordered op log, phase 2 emits the TurnScope manifest at turn start, and phase 3 intersects ops against that scope to route the coarse all-drift-is-affecting assumption into the 5 classes — so independent and spoofed edits integrate and persist without disturbing the turn.
 
 **Follow-up queued** (`agent:backlog`): the remaining step is the *behavioral swap on the live gate* — wiring `op_affectedness` into the finalize-path drift gate (`git::has_non_exchange_component_drift` + the live-buffer divergence check). I deferred it to its own session deliberately: it changes the very gate this active queue-draining session depends on, so doing it mid-session would be reckless. The decision logic it needs is now shipped and tested.
-<!-- agent:boundary:7f01d262 -->
+<!-- agent:boundary:c917f0aa -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#op-scoped-drift-1]~~
-- ~~do [#op-scoped-drift-2]~~
-- ~~do [#op-scoped-drift-3]~~
-- do [#canonical-session-close-autodetect]
+- do [#nm1x]
+- ~~do [#canonical-session-close-autodetect]~~
 <!-- /agent:queue -->
 ###
 <!--

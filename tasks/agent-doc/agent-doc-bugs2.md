@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,12 +35,13 @@ complete
 Compacted content:
 - Archived 2 response topic(s): A previous monsterrodholders.md session ran the queue and the responses were missing. I'm not running the queue now b...; agent-doc on monsterrodholders.md missed the response when I added a queue item mid-turn with auto-queue off. I reque...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a236dbf3 -->
+<!-- agent:boundary:3fc1f563 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- Why is "stale sidecar content" a persistent issues with monsterrodholders.md? What is the "sidecar content"? Is there a should this be in the session actor in memory with the durable record in the sqlite db?
 <!-- /agent:queue -->
 ###
 <!--

@@ -145,7 +145,19 @@ CI:
 - parent repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:f6e3e13d -->
+
+### Re: slash-only `/clear` handoff closeout — gpt-5
+
+The bypass was from using the broad prompt-target classifier for two jobs: route visibility and preflight response-cycle startup. Bare `/clear` needed to stay route-visible, but a diff whose only added content is `/clear` should not become prompt work.
+
+I fixed that by adding a stricter slash-command-only diff classifier and using it in preflight. Now slash-only exchange or queue diffs surface as `slash_commands` / `builtin_commands`, suppress prompt-bearing/user-intent changes, and do not open `preflight_started`; mixed prose plus commands still remains normal prompt work.
+
+The code/spec/test fix is committed, installed locally, and pushed:
+- `btakita/agent-doc` `7a1a999b` (`agent-doc: treat slash-only diffs as commands`)
+- parent `btakita/agent-loop` `7d3baaaa1` (`agent-doc: update slash command handoff`)
+
+Verification passed: focused parser/preflight tests, adjacent active-queue slash tests, full `make check`, `cargo install --path . --force`, and `agent-doc --version` -> `agent-doc 0.34.0`. Latest `btakita/agent-doc` CI for this commit was still `in_progress` when checked; the parent repo has no `CI` workflow.
+<!-- agent:boundary:d319d8c0 -->
 <!-- /agent:exchange -->
 
 ## Queue

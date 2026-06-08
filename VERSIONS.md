@@ -16,7 +16,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   clears use the supervisor's gate-exempt clear submit path instead of generic
   prompt injection. Codex Stop-hook and `session-check --codex-final-gate`
   diagnostics now name these heads as queued slash commands instead of prompts to
-  answer. Tests:
+  answer. Direct preflight, plan, and run synthetic active-queue-head paths now
+  keep slash-only heads command-only as well: surrounding whitespace is trimmed
+  for slash classification, no `preflight_started` response cycle opens, no
+  prompt targets or repo actions are planned, and owner-pane self-invocation
+  diagnostics tell Codex to let the supervisor submit the command instead of
+  answering/finalizing it in `agent:exchange`. Tests:
+  `parse_slash_commands_trims_surrounding_whitespace`,
+  `preflight_does_not_open_cycle_from_active_queue_slash_command`,
+  `build_plan_treats_active_queue_slash_command_as_command_handoff`,
+  `active_queue_prompt_diff_ignores_slash_command_head`,
+  `owned_pane_queue_handoff_diagnostic_uses_supervisor_for_slash_command`,
   `queue_command::tests::*`,
   `idle_queue_drain_waits_for_turn_status_idle_even_with_visible_prompt`,
   `idle_queue_context_reset_waits_for_turn_status_idle`,

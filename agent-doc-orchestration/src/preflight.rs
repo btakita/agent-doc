@@ -2775,17 +2775,34 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // keeps `diff_result` non-None here, so this flag stays false and the
     // prompt is surfaced normally.
     let mut diff_from_queue_head_only = false;
+    let mut queue_head_slash_command_only: Option<String> = None;
     if diff_result.is_none()
         && let Some(head_prompt) = queue_state.queue_prompts.first()
     {
-        diff_result = Some(diff::synthetic_added_lines_diff(head_prompt, "queue"));
+        queue_head_slash_command_only = crate::queue_command::slash_command_text(head_prompt);
+        let prompt_source = queue_head_slash_command_only
+            .as_deref()
+            .unwrap_or(head_prompt);
+        diff_result = Some(diff::synthetic_added_lines_diff(prompt_source, "queue"));
         classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
         diff_from_queue_head_only = true;
     }
 
     let no_changes = diff_result.is_none();
     if !no_changes {
-        if options.probe {
+        if let Some(command) = queue_head_slash_command_only.as_deref() {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "preflight_queue_slash_command_handoff file={} cmd={:?}",
+                    file.display(),
+                    command
+                ),
+            );
+            eprintln!(
+                "[preflight] queue: active slash command head {command:?} is command-only; skipping preflight_started so the supervisor can submit it after the turn is idle"
+            );
+        } else if options.probe {
             // `#preflight-probe-side-effect-free`: a pure inspection probe must
             // not open a `preflight_started` cycle. The probe reports the same
             // diff/queue state below, but leaving an open cycle behind is the
@@ -2824,13 +2841,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // and response/boundary artifacts.
     let queue_active_for_prompt_extraction =
         queue_state.queue_active == Some(true) || !queue_state.queue_prompts.is_empty();
-    let prompt_diff_result = diff_result.as_ref().map(|d| {
+    let command_diff_result = diff_result.as_ref().map(|d| {
         if queue_active_for_prompt_extraction {
             d.clone()
         } else {
             diff::suppress_inactive_queue_additions(d, &diff_result_with_current.current)
         }
     });
+    let prompt_diff_result = if queue_head_slash_command_only.is_some() {
+        None
+    } else {
+        command_diff_result.clone()
+    };
     let mut prompt_bearing_changes = diff_result
         .as_ref()
         .map(|_| {
@@ -2875,7 +2897,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     );
 
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
-    let mut parsed_commands = prompt_diff_result
+    let mut parsed_commands = command_diff_result
         .as_ref()
         .map(|d| diff::parse_slash_commands_classified(d))
         .unwrap_or_else(|| diff::ParsedSlashCommands {
@@ -6478,6 +6500,47 @@ mod tests {
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
+        );
+    }
+
+    #[test]
+    fn preflight_does_not_open_cycle_from_active_queue_slash_command() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "-   /clear  \n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        if let Some(state) = crate::cycle_state::load(&doc).unwrap() {
+            assert!(
+                !state.is_open(),
+                "slash-only active queue heads must be supervisor handoffs, not response cycles: {:?}",
+                state
+            );
+        }
+        assert_eq!(
+            crate::queue_continuation::detect(&doc)
+                .unwrap()
+                .map(|continuation| continuation.head_prompt),
+            Some("  /clear  ".to_string()),
+            "the literal queue head must stay live for the supervisor"
         );
     }
 

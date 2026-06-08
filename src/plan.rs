@@ -158,11 +158,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     } else {
         None
     };
-    let queue_diff = if doc_diff.is_none() && harness_diff.is_none() {
-        active_queue_prompt_diff(&content)
+    let queue_prompt = if doc_diff.is_none() && harness_diff.is_none() {
+        active_queue_prompt(&content)
     } else {
         None
     };
+    let queue_head_slash_command = queue_prompt
+        .as_deref()
+        .and_then(agent_doc_orchestration::queue_command::slash_command_text);
+    let queue_diff = queue_prompt
+        .as_deref()
+        .map(|prompt| diff::synthetic_added_lines_diff(prompt, "queue"));
 
     let Some(diff_text) = doc_diff.or(harness_diff.clone()).or(queue_diff) else {
         return Ok(DispatchPlan {
@@ -192,10 +198,15 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
 
     let queue_active_for_prompt_extraction = queue_is_active_for_diff(&content, &diff_text);
-    let prompt_diff_text = if queue_active_for_prompt_extraction {
+    let command_diff_text = if queue_active_for_prompt_extraction {
         diff_text.clone()
     } else {
         diff::suppress_inactive_queue_additions(&diff_text, &content)
+    };
+    let prompt_diff_text = if queue_head_slash_command.is_some() {
+        String::new()
+    } else {
+        command_diff_text.clone()
     };
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
@@ -218,7 +229,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
     let orchestration_request = diff::detect_orchestration_request(&prompt_diff_text);
     let exchange_compaction_requested = diff::detect_exchange_compaction_request(&prompt_diff_text);
-    let parsed_commands = diff::parse_slash_commands_classified(&prompt_diff_text);
+    let parsed_commands = diff::parse_slash_commands_classified(&command_diff_text);
     let pending_mutations = pending_mutations_for_doc(
         file,
         &content,
@@ -346,7 +357,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     })
 }
 
-fn active_queue_prompt_diff(content: &str) -> Option<String> {
+fn active_queue_prompt(content: &str) -> Option<String> {
     let components = component::parse(content).ok()?;
     let queue_component = components
         .iter()
@@ -366,7 +377,7 @@ fn active_queue_prompt_diff(content: &str) -> Option<String> {
     }
     agent_doc_orchestration::queue::prompts(&activation.entries_after)
         .first()
-        .map(|prompt| diff::synthetic_added_lines_diff(&prompt.text, "queue"))
+        .map(|prompt| prompt.text.clone())
 }
 
 fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
@@ -1068,6 +1079,55 @@ Done.
                 .iter()
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
+            plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_treats_active_queue_slash_command_as_command_handoff() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+-   /clear
+<!-- /agent:queue -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(plan.prompt_targets.is_empty(), "{plan:?}");
+        assert!(plan.repo_actions.is_empty(), "{plan:?}");
+        assert!(plan.pending_mutations.is_empty(), "{plan:?}");
+        assert_eq!(plan.handoff, HandoffTarget::Other);
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("`/clear`")),
+            "slash command handoff should remain visible as a command requirement: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .all(|cmd| !cmd.contains("agent-doc finalize")),
+            "slash-only command handoff must not require assistant finalization: {:?}",
             plan.required_commands
         );
     }

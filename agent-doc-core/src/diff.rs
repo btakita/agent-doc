@@ -1662,8 +1662,10 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
             continue;
         }
 
+        let command_candidate = content.trim();
+
         // Skip blockquotes.
-        if content.starts_with('>') {
+        if content.trim_start().starts_with('>') {
             continue;
         }
 
@@ -1671,14 +1673,14 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
         // Grammar: `/[a-z][a-z0-9:_-]*` with no additional `/` in the token.
         // This rejects absolute paths like `/home/brian/...` and `/tmp/foo`
         // that look like slash commands but are really filesystem paths.
-        if !content.starts_with('/') {
+        if !command_candidate.starts_with('/') {
             continue;
         }
-        let token_end = content[1..]
+        let token_end = command_candidate[1..]
             .find(|c: char| c.is_whitespace())
             .map(|i| i + 1)
-            .unwrap_or(content.len());
-        let token = &content[1..token_end];
+            .unwrap_or(command_candidate.len());
+        let token = &command_candidate[1..token_end];
         if token.is_empty() {
             continue;
         }
@@ -1693,7 +1695,7 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
             continue;
         }
 
-        commands.push(content.trim_end().to_string());
+        commands.push(command_candidate.to_string());
     }
 
     commands
@@ -3331,6 +3333,13 @@ Done.\n\
     #[test]
     fn parse_slash_commands_simple() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n context\n+/clear\n";
+        let cmds = parse_slash_commands(diff);
+        assert_eq!(cmds, vec!["/clear"]);
+    }
+
+    #[test]
+    fn parse_slash_commands_trims_surrounding_whitespace() {
+        let diff = "--- snapshot\n+++ queue\n@@ -0,0 +1,1 @@\n+   /clear  \n";
         let cmds = parse_slash_commands(diff);
         assert_eq!(cmds, vec!["/clear"]);
     }

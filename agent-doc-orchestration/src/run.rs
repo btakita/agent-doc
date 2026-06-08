@@ -645,6 +645,12 @@ fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
     let ActiveQueuePromptState::Ready { prompt } = active_queue_prompt_state(file)? else {
         return Ok(None);
     };
+    if let Some(command) = crate::queue_command::slash_command_text(&prompt) {
+        eprintln!(
+            "[run] active queue head is slash command {command:?}; leaving it for the managed supervisor to submit after the owner pane is idle"
+        );
+        return Ok(None);
+    }
     Ok(Some(diff::synthetic_added_lines_diff(&prompt, "queue")))
 }
 
@@ -1237,6 +1243,16 @@ fn owned_pane_queue_handoff_diagnostic(
     detail: &str,
     continuation: &crate::queue_continuation::QueueContinuation,
 ) -> String {
+    if let Some(command) = crate::queue_command::slash_command_text(&continuation.head_prompt) {
+        return format!(
+            "owned-pane self-invocation with active auto-queue slash command: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and the ready queue head is the literal slash command {:?}. The recursive same-pane guard refuses to answer slash commands as agent-doc work. No pre-commit, snapshot, exchange, or queue mutation was made — the command stays live. Recovery: let the current turn stop; the managed owner-pane supervisor will submit {:?} at the next idle prompt and consume the queue head. Do NOT answer this queue head in the exchange, and do NOT re-run `agent-doc {}` from this same pane.",
+            file.display(),
+            detail,
+            command,
+            command,
+            file.display()
+        );
+    }
     let head_excerpt: String = continuation
         .head_prompt
         .lines()
@@ -1658,6 +1674,58 @@ mod tests {
         assert!(msg.contains("agent-doc finalize tasks/x.md"));
         assert!(msg.contains("Do NOT re-run"));
         assert!(msg.contains("No pre-commit, snapshot, or queue mutation was made"));
+    }
+
+    #[test]
+    fn owned_pane_queue_handoff_diagnostic_uses_supervisor_for_slash_command() {
+        let continuation = crate::queue_continuation::QueueContinuation {
+            head_prompt: "  /clear  ".to_string(),
+            head_id: None,
+            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
+        };
+        let msg = owned_pane_queue_handoff_diagnostic(
+            Path::new("tasks/x.md"),
+            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
+            &continuation,
+        );
+        assert!(msg.contains("slash command"));
+        assert!(msg.contains("\"/clear\""));
+        assert!(msg.contains("managed owner-pane supervisor will submit"));
+        assert!(msg.contains("No pre-commit, snapshot, exchange, or queue mutation was made"));
+        assert!(msg.contains("Do NOT answer this queue head in the exchange"));
+        assert!(
+            !msg.contains("agent-doc finalize"),
+            "slash-command handoff must not instruct an assistant closeout: {msg}"
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_diff_ignores_slash_command_head() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "-   /clear  \n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        assert_eq!(
+            active_queue_prompt_diff(&doc).unwrap(),
+            None,
+            "slash-only active queue heads are command handoffs, not child-agent prompts"
+        );
     }
 
     #[test]

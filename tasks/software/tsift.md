@@ -30,41 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260608-013249.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260608-021521.md`*
 
 Compacted content:
-- Archived 4 response topic(s): source-read envelope token efficiency; AGENTS install runbook reference; tsift init across agent-loop projects; 1 more
+- Archived 1 response topic(s): release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: release + publish — gpt-5
-
-> **Queue prompt:**
->
-> release + publish
-
-
-Released and published `tsift` `v0.1.65`.
-
-Changed paths:
-- `src/tsift`: committed release bump `f1d8aec8` (`chore: release v0.1.65`) and pushed `main` plus tag `v0.1.65`.
-- `AGENTS.md` and `src/tsift` in the superproject: committed/pushed `dac4e446c` (`chore: bump tsift to v0.1.65`) for the managed Code Navigation marker and submodule pointer.
-- This session document will be updated by this finalize write.
-
-Commands/proof:
-- `make check` passed locally: workspace clippy, workspace tests/doc-tests, OpenCode plugin tests, and `npm pack --dry-run`.
-- `cargo build --release` passed.
-- `cargo install --path . --force` installed local `tsift 0.1.65`.
-- Release packaging checks passed: dependency-ordered `cargo package -p <crate> --locked --allow-dirty --list` for all 21 crates, plus `npm run publish:check` for `opencode-tsift@0.1.65`.
-- Clean-tree `cargo publish --dry-run` passed for leaf crates before expectedly stopping at `tsift-graph` because `tsift-core@0.1.65` was not yet on crates.io; the tagged Release workflow then performed the per-crate dry-run immediately before each real publish and completed successfully.
-- GitHub CI `27111398750` completed success.
-- GitHub Release workflow `27111400888` completed success.
-- Public release: https://github.com/btakita/tsift/releases/tag/v0.1.65
-- Registry verification: all 21 `0.1.65` crates are visible on crates.io; `npm view opencode-tsift version` returns `0.1.65`.
-
-Escalation: none.
-
-Confidence: high. The remaining superproject dirty files are pre-existing/unrelated and were not staged.
-<!-- agent:boundary:b128b2ad -->
+<!-- agent:boundary:41ad69cb -->
 <!-- /agent:exchange -->
 ###
 <!--

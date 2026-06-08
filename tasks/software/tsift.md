@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -272,7 +272,49 @@ Verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:ff12e5ee -->
+
+### Re: prompt cache and MemGraphRag — gpt-5
+
+> **Queue prompt:**
+>
+> Can the prompt cache system be integrated into the MemGraphRag?
+
+
+Yes, but the integration should be telemetry/projection, not ownership transfer of the provider cache.
+
+The prompt-cache system currently lives in `session-cost` as diagnostics over model usage: cache reads, cache creation, effectiveness analytics, and invalidation symptoms. MemGraphRag is already present in tsift as a shared graph substrate path: `tsift memory project-graph` projects memory events into `.tsift/graph.db`, and `tsift memory ontology-graph` derives the ontology layer over node/edge kinds. That gives us a good integration point.
+
+The right shape is to project prompt-cache observations into the memory/code graph as first-class session telemetry:
+- `prompt_cache_observation` or `model_call` nodes linked to the owning `memory_session`, `memory_event`, agent-doc cycle, or transcript turn.
+- Properties for provider, model, prompt token totals, cached-read tokens, cache-creation tokens, read/create ratio, trend, and diagnostic kinds such as `cached_ratio_drop`, `cache_creation_spike`, and `read_create_regression`.
+- Edges from the observation to likely affected context: tool-set/version nodes, compaction boundary nodes, session/thread key lineage, and source or worker-context handles when available.
+- Ontology derivation can then expose these as queryable types and relations, so graph retrieval can answer questions like "which sessions had repeated cache rewrites after tool changes?" or "which workflows lose cache affinity after compaction?"
+
+What should not move into MemGraphRag: live cache mutation, provider `cache_control`, OpenAI `prompt_cache_key` selection, and replica-affinity routing. Those still belong to the runtime/model adapter that sends the request. MemGraphRag should store hashed or normalized cache-lineage identifiers and diagnostics, not raw cached prompt prefixes or sensitive provider cache keys.
+
+A minimal implementation path would be:
+1. Extend `tsift-memory` event capture with a prompt-cache observation payload derived from `session-cost` output.
+2. Extend `project_memory_events` so those observations become graph nodes/edges in the existing `GraphProjection` path.
+3. Refresh `memory status`/readiness so it can report whether prompt-cache telemetry is present in graph retrieval.
+4. Add graph-db related/evidence fixtures for cache invalidation queries.
+5. Keep the provider adapter boundary explicit: graph retrieval explains observed cache behavior, while the runtime remains responsible for preventing misses.
+
+Changed paths: none in this answer cycle.
+
+Commands:
+- `agent-doc preflight tasks/software/tsift.md`
+- `agent-doc plan tasks/software/tsift.md`
+- `agent-doc session-check tasks/software/tsift.md`
+- `rg -n "MemGraphRag|MemGraph|memgraph|RAG|rag" .` in `src/tsift`
+- `sed -n` source reads for `packages/tsift-cli/src/cli.rs`, `packages/tsift-cli/src/commands/memory.rs`, and `packages/tsift-sqlite/src/lib.rs`
+- `git status --short` in the parent repo
+
+Verification: no code changed for this answer cycle, so no additional build/test suite was run. The answer was checked against the existing `#memgraphrag2` projection and `#memgraphrag-ont` ontology code paths.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:4077b082 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -282,9 +324,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Please describe how cache invalidation works for our prompt cache system.~~
-- ~~do [#1zax]~~
-- Can the prompt cache system be integrated into the MemGraphRag?
 <!-- /agent:queue -->
 
 ## Backlog

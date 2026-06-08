@@ -35,12 +35,30 @@ complete
 Compacted content:
 - Archived 6 response topic(s): churn from repeated committed-cycle finalize; active continuation closeout; previous few turns issues; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f7a5123d -->
+
+### Re: Codex `Run Agent Doc` ignores exchange-only prompts on a fresh session — opus-4-8
+
+Triaged as a bug and planned (not yet fixed — this doc's `#agent-doc-bug` convention is plan + backlog, and the queue here is inactive so I did not run the attached `#spec-test-build-install-commit-push` preset).
+
+**What I found.** Two independent signals drive `route` dispatch, and only the queue one is robust on a fresh session:
+
+- **Queue write** activates via a snapshot-independent signal (`fm.queue_active` at `route.rs:2121` plus preflight queue-trigger resolution). It dispatches even before any cycle snapshot exists — which is why typing into `agent:queue` starts the turn.
+- **Exchange write** is detected through `pending_prompt_bearing_context_for_route` (`route.rs:7727`) → `first_unstarted_prompt_bearing_change` (`session_check.rs:4649`). That function has two gates that hide a fresh-session exchange prompt: it returns `None` when no snapshot exists (`session_check.rs:4652`), and it strips `agent:queue` content before diffing (`session_check.rs:4707`). On a brand-new session there is no committed cycle snapshot (or the snapshot already equals the file), so the exchange tail prompt is never seen as "unstarted" → nothing happens.
+
+So the asymmetry is real and structural: the queue path has a fresh-session activation signal, the exchange path doesn't.
+
+**Plan:** [`tasks/agent-doc/plan-codex-exchange-prompt-no-dispatch.md`](plan-codex-exchange-prompt-no-dispatch.md) — repro, root-cause trace, the snapshot-absent fallback fix, and route + session_check test coverage.
+
+**Backlog:** added `#codex-exchange-prompt-no-dispatch` at the top of the backlog.
+
+Say the word (or `do #codex-exchange-prompt-no-dispatch`) and I'll implement + test + build + commit per the preset.
+<!-- agent:boundary:20f30f8b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
 <!-- /agent:queue -->
 ###
 <!--
@@ -68,6 +86,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#codex-exchange-prompt-no-dispatch] Codex `Run Agent Doc` ignores an exchange-only prompt on a fresh session (queue writes dispatch, exchange writes do not). Root cause: `first_unstarted_prompt_bearing_change` (session_check.rs:4649) is snapshot-gated and queue-stripped, so the exchange path has no snapshot-independent activation signal like the queue path (route.rs:2121). Plan: tasks/agent-doc/plan-codex-exchange-prompt-no-dispatch.md
 <!-- /agent:backlog -->
 
 ## Review

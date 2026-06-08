@@ -255,14 +255,47 @@ Verification:
 - `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
 - `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was `completed success` for `feat: propose semantic edit patches` at 2026-06-08T18:51:02Z.
 - `tsift status` in `src/tsift`: refreshed index; fresh.
+- `gh run list --workflow CI --limit 1` in the parent repo: no workflow named `CI`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was `in_progress` for `test semantic ast edit edge cases` at 2026-06-08T19:08:05Z.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-0f5b02137e`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_apply_preserves_comments_formatting_and_generated_macro_sections -- --nocapture'`: passed, artifact `tart-1197c44489`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_replace_function_body_uses_rust_ast_body_range -- --nocapture'`: passed, artifact `tart-b762adb545`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_insert_import_preserves_rust_inner_prelude -- --nocapture'`: passed, artifact `tart-fb9c587ee3`.
+- agent-loop parent pointer: `ec40cbb1d` (`chore: update tsift submodule`), pushed to `origin/main`.
+- tsift submodule: `a64605b` (`test semantic ast edit edge cases`), already at `origin/main`.
+- `src/tsift` submodule pointer
 
 Session note: preflight reported session accretion, but the auto queue is active, so I continued draining instead of compacting.
 
 Escalation: none.
 
 Confidence: high.
+### Re: closeout repair — gpt-5
 
-<!-- agent:boundary:d48ec266 -->
+The document already contains the completed `#tsiftasttests` closeout that repaired `#tsiftastops`; this repair records the parent pointer closeout from this Codex cycle and closes the interrupted agent-doc runtime state. No new actionable follow-up item was created.
+
+Changed paths:
+- `src/tsift` submodule pointer
+
+Commits:
+- tsift submodule: `a64605b` (`test semantic ast edit edge cases`), already at `origin/main`.
+- agent-loop parent pointer: `ec40cbb1d` (`chore: update tsift submodule`), pushed to `origin/main`.
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_insert_import_preserves_rust_inner_prelude -- --nocapture'`: passed, artifact `tart-fb9c587ee3`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_replace_function_body_uses_rust_ast_body_range -- --nocapture'`: passed, artifact `tart-b762adb545`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_apply_preserves_comments_formatting_and_generated_macro_sections -- --nocapture'`: passed, artifact `tart-1197c44489`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-0f5b02137e`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was `in_progress` for `test semantic ast edit edge cases` at 2026-06-08T19:08:05Z.
+- `gh run list --workflow CI --limit 1` in the parent repo: no workflow named `CI`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:0c0ac382 -->
+<!-- agent:boundary:cea53833 -->
 <!-- /agent:exchange -->
 ###
 <!--

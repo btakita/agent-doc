@@ -35,16 +35,17 @@ complete
 Compacted content:
 - Archived 4 response topic(s): do #ipc-crdt-response-drift; false positives; model document ops so out-of-turn edits don't cause drift; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9c3fff04 -->
+<!-- agent:boundary:83fb609e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Add backlog items to complete the operations taxonomy + implementation that we previously discussed
-- do [#ipc-drift-visbuf-reconcile]
-- do [#ipc-drift-writeback-serialize]
-- do [#ipc-drift-order-stable-merge]
+- :pushpin: :round_pushpin: do [#ipc-drift-visbuf-reconcile]
+- :pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]
+- :pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]
+- :pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.
+- :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
 <!-- /agent:queue -->
 ###
 <!--

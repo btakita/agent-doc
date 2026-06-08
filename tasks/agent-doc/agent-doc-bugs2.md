@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -75,13 +75,124 @@ The guard conflated the two and failed closed on case 2 — exactly what hit you
 **Installed** as you asked: `cargo build --release` + `cargo install --path .` + `agent-doc lib-install` (binary, `.bin` release target, and the JB-plugin FFI `.so` — all 0.34.0). This very closeout runs on the fixed binary.
 
 This is the visible-buffer slice of `#ipc-crdt-response-drift` (now fixed + installed, alongside the earlier merge-layer fix `c9d276b9`). Still gated for the remaining reversed/hoisted symptom under `theirs>base` and cross-supervisor write-back serialization, which need a clean-session live repro.
-<!-- agent:boundary:4fba1a98 -->
+
+### Re: model document ops so out-of-turn edits don't cause drift — opus-4-8
+
+> **Queue prompt:**
+>
+> We need to use the AST + document model to understand where the document changes occurred and who made the changes. So if you made a change, even uncommitted, that should not cause drift. If I made a change in an area that does not effect the current turn, such as adding text into a comment, another queue item, etc, the drift should just me added to the model + sent to the durable sqlite db...but the turn should not be affected. Perhaps we should create operations, which includes what element is affected and what data within the element was affected. So if I add a queue item during a turn, the queue was affected with the item added at a position. If the queue is running on another item, adding an item should not affect the current turn. Please think of an abstract way to properly model the document, operations on the document, track what the current operation on the document is, determine if the current operation is affected by a change. Create a taxonomy of operations including #mermaid.
+
+
+> **Queue prompt:** use the AST + document model to know *where* a change occurred and *who* made it; an edit in an area that doesn't affect the current turn should just be added to the model + durable sqlite — the turn should not be affected. Model operations (which element, what data, what position), track the current operation, decide if it's affected by a change. Create a taxonomy. #mermaid
+
+This is the right frame: stop treating *any* divergence as drift. Make drift a **scoped** question — does an incoming change intersect what *this turn* is reading or writing? If not, it's an independent operation: fold it into the document model + persist it, and leave the turn alone. Design below; I wrote it up as a plan and queued implementation (I'm treating the queue's `#spec-test-build-install-commit-push` preset as the *implementation* contract carried by the backlog item — this turn is the design it asked me to think through, not a code edit to the live write path mid-session).
+
+#### 1. Document substrate — *where* (we already have most of this)
+
+`Document → Component{kind, occurrence, turn_role} → Node{node_key, item_id, span, content}`. agent-doc's `semantic_diff` already emits `changed_components` + `node_events` (insert/remove/move with `item_id` and positions). Each component carries a **turn_role**: `input` (queue, exchange-tail), `output` (exchange-append, backlog, review, status), or `inert` (icebox, done, comments).
+
+#### 2. Operation — *what data, what position, who*
+
+```
+Op = { target: Address,                       // component + occurrence + (node_key | sub-node span)
+       kind:   insert | remove | edit | move | replace,
+       actor:  agent | user | foreign_supervisor | live_buffer,   // ← the missing "who"
+       payload: ContentDelta,
+       causal: { lamport, origin_session } }
+```
+
+`node_events` are proto-operations already; what's missing is **actor** + a **causal clock**. Actor is what separates "the user edited this" from "a foreign supervisor / a lagging editor sidecar touched disk" — exactly the false-positive class fixed in `51b9ed40`.
+
+#### 3. Current operation — the *TurnScope* manifest (new)
+
+```
+TurnScope = { read_set: Set<Address>, write_set: Set<Address>, driver: Address }
+```
+
+Responding to `queue[ft-…]` ⇒ read `{that queue item, exchange.tail}`, write `{exchange.append, that item's strike, backlog, status}`, driver = the queue item. Derivable from preflight `prompt_targets` / plan `write_scope`.
+
+#### 4. Affectedness — the decision
+
+```
+affects(O, S) = conflict(O.target, S.read_set) ∨ conflict(O.target, S.write_set)
+conflict(a,b) = ∃x∈b : same node_key ∨ span overlap ∨ remove/move of a depended node
+```
+
+`¬affects(O,S)` ⇒ **Independent**: CRDT-apply into the model + write the op to durable sqlite, and *do not touch the turn*. That is your "add a queue item while a different item runs" case, verbatim.
+
+#### 5. Taxonomy of operations (effect class on the current turn)
+
+| Class | Condition | Action | Status |
+|-------|-----------|--------|--------|
+| **Independent / commutative** | target ∉ scope | integrate + persist; **no drift** | BUILD |
+| **Input-affecting** (read conflict) | target ∈ read_set | reconcile: re-read input | BUILD |
+| **Output-contended** (write conflict) | target ∈ write_set, concurrent writer | CRDT merge at write-back; never lose output | partly HAVE (`crdt::merge` c9d276b9) |
+| **Structural dependency** | remove/move of a node in scope | invalidate/adapt; don't recreate a deleted driver | BUILD (the monsterrod "deleted my queue item" churn) |
+| **Provenance-spoofed** (false drift) | non-user actor misattributed as user | classify by actor + causal ts; suppress | HAVE (live-buffer mtime, 51b9ed40) |
+
+Actor × class is what disambiguates **Output-contended** from **Provenance-spoofed** — the two that the coarse gate kept conflating.
+
+#### Diagrams
+
+Document + operation model:
+
+```mermaid
+classDiagram
+  class Document
+  class Component { kind; occurrence; turn_role }
+  class Node { node_key; item_id; span; content }
+  class Operation { target; kind; actor; payload; causal }
+  class TurnScope { read_set; write_set; driver }
+  Document "1" o-- "*" Component
+  Component "1" o-- "*" Node
+  Operation --> Node : targets
+  TurnScope --> Node : reads / writes
+```
+
+Classifier (replaces the coarse "any divergence = drift" gate):
+
+```mermaid
+flowchart TD
+  O[Incoming Op O] --> A{actor == user?}
+  A -- no --> P{foreign / live-buffer\nlags disk by causal ts?}
+  P -- yes --> I[Independent:\nintegrate + persist\nNO drift]
+  P -- no --> RW
+  A -- yes --> RW{target in scope?}
+  RW -- in read_set --> R[Input-affecting:\nreconcile turn]
+  RW -- in write_set --> M[Output-contended:\nCRDT merge at write-back]
+  RW -- remove/move of\ndepended node --> S[Structural:\ninvalidate / adapt]
+  RW -- not in scope --> I
+```
+
+Concurrent edit during a turn (your scenario):
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant D as Document model
+  participant T as Turn (current op)
+  participant Q as Durable SQLite
+  T->>D: derive TurnScope (driver = queue[A])
+  U->>D: insert queue[B]
+  D->>D: classify B: not in scope, non-driver -> Independent
+  D->>Q: persist op(insert queue[B])
+  Note over T: turn keeps processing A, unaffected
+  T->>D: append exchange + strike queue[A]
+  D->>Q: persist turn ops
+```
+
+#### What's HAVE vs BUILD
+
+- **HAVE:** `semantic_diff.{changed_components,node_events}` (op extractor); `crdt::merge` + `guard_committed_responses` (Output-contended); live-buffer mtime/actor suppression (Provenance-spoofed).
+- **BUILD:** (1) actor + causal tagging on ops + a durable **sqlite op-log** (extend `agent_doc_write: crdt`); (2) **TurnScope** manifest at turn start; (3) the **affectedness classifier** that replaces the coarse drift gate with scope intersection so Independent ops integrate + persist without affecting the turn.
+
+Plan: [`tasks/agent-doc/plan-operation-scoped-drift.md`](plan-operation-scoped-drift.md), phased `#op-scoped-drift-1/2/3` (tag+log → scope manifest → classifier), each its own spec/test/build/install/commit cycle. Queued in backlog as `#op-scoped-drift`.
+<!-- agent:boundary:962fa8eb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- We need to use the AST + document model to understand where the document changes occurred and who made the changes. So if you made a change, even uncommitted, that should not cause drift. If I made a change in an area that does not effect the current turn, such as adding text into a comment, another queue item, etc, the drift should just me added to the model + sent to the durable sqlite db...but the turn should not be affected.
 <!-- /agent:queue -->
 ###
 <!--

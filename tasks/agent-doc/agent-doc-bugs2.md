@@ -61,13 +61,32 @@ You pinned `#pcp-consolidate` to the top of the queue. It's the **capstone** of 
 The pure-Rust phases (`#pcp1`–`#pcp5`) are SimWorld/unit-testable and land first; the plugin phases (`#pcp6`, `#pcp7`) require live editor verification and land last (pairing with `#live-verify-batch`).
 
 Note on the `#spec-test-build-install-commit-push` preset: no binary code changed this turn (decomposition + plan only), so there's nothing to test/build/install yet — the spec+test+build+install verbs apply per implementation phase. The plan file is committed and pushed. `#pcp2` is the next actionable item; I can start it in the next cycle.
-<!-- agent:boundary:10243c81 -->
+
+### Re: #pcp1 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#pcp1]
+
+
+Done — added a **"Document write and watch authority"** section to `specs/08b-single-process-control-plane.md`, extending the store actor's single-writer authority from SQLite to the session `.md` disk write and its filesystem watch. It specifies: the session actor as the single disk writer with all binary and supervisor writes serialized through one in-process ordered write queue (kills the supervisor self-race / exit 75); one controller-owned filesystem watcher with the editor plugin demoted to read-only buffer reporting (kills the two-watchers File Cache Conflict); write-provenance attribution that replaces the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic; and a thin editor apply/ack shim. It also adds the matching SimWorld verification obligations and ties into the shadow→removal migration ladder.
+
+Spec-only, no behavior change. `make check` green (clippy + test + sim-medium + version-sync, exit 0). Committed + pushed: submodule `334fc639`, superproject pointer `f15e9081a`.
+
+Next in the pinned queue is `#pcp2` — the first code phase: write-provenance/generation id on disk writes, shadow-mode additive so it can't wedge the live finalize path.
+<!-- agent:boundary:c58b1bc3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#pcp-consolidate]~~
+- ~~:pushpin: [#pcp1]~~
+- :pushpin: [#pcp2]
+- :pushpin: [#pcp3]
+- :pushpin: [#pcp4]
+- :pushpin: [#pcp5]
+- :pushpin: [#pcp6]
+- :pushpin: [#pcp7]
 - :round_pushpin: [#ipc-early-ack]
 - :round_pushpin: [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: [#ipc-drift-writeprovenance]
@@ -135,7 +154,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcp1] PCP phase 1 — Spec the document write/watch authority in specs/08b-single-process-control-plane.md (single disk writer, single watcher, ordered write queue, write provenance, plugin demotion) + SimWorld obligations. Spec-only, no behavior change. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp2] PCP phase 2 — Write-provenance/generation id on disk writes (absorbs #ipc-drift-writeprovenance). Shadow-mode additive: keep the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic as fallback. Pure Rust on op_log.rs/turn_scope.rs. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp3] PCP phase 3 — In-process ordered write queue in the session actor; serialize supervisor idle/file-watch writes and agent finalize writes (kills the R6 self-race / exit 75). SimWorld coverage. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp4] PCP phase 4 — Single controller-owned filesystem watcher replacing per-process notify watchers (kills R1 two-watchers). Binary-side first. Plan: tasks/agent-doc/plan-pcp-consolidate.md

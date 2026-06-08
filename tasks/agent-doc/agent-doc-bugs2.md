@@ -156,7 +156,51 @@ Verification: preflight reported the document OK before this closeout, and the r
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:4cdedb4d -->
+
+### Re: slash-only queue handoff from active queue — gpt-5
+
+Implemented and pushed.
+
+Changed paths:
+- `src/agent-doc/agent-doc-core/src/diff.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/agent-doc-orchestration/src/run.rs`
+- `src/agent-doc/src/plan.rs`
+- `src/agent-doc/README.md`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/VERSIONS.md`
+
+Behavior now matches the requested `/clear` handoff path:
+- Slash-command parsing trims surrounding whitespace around added-line command text, so whitespace-only padding around `/clear` does not turn it into prompt prose.
+- Synthetic active queue heads that consist only of slash commands are classified as command-only, not prompt-bearing exchange work.
+- `preflight` no longer opens a response cycle for a slash-only active queue head; it records the supervisor handoff diagnostic and leaves the command live.
+- `run` no longer feeds a slash-only active queue head through the child agent. The owner-pane diagnostic now explicitly says not to pre-commit, snapshot, write exchange output, answer, or finalize; the managed supervisor should submit the slash command once the turn is idle.
+- `plan` still surfaces the slash command as command handoff state, but it produces no prompt targets, repo actions, pending mutations, or finalize requirement for the slash-only head.
+- Docs/spec/version notes now describe the command-only active-queue contract.
+
+Commits pushed:
+- `src/agent-doc`: `65e2cb90 route slash-only queue heads to supervisor handoff`
+- superproject: `24baaccf8 agent-doc: update slash-only queue handoff`
+
+Verification run:
+- `cargo test -p agent-doc-orchestration preflight_does_not_open_cycle_from_active_queue_slash_command -- --nocapture`
+- `cargo test -p agent-doc-orchestration active_queue_prompt_diff_ignores_slash_command_head -- --nocapture`
+- `cargo test -p agent-doc-orchestration owned_pane_queue_handoff_diagnostic_uses_supervisor_for_slash_command -- --nocapture`
+- `cargo test -p agent-doc-core parse_slash_commands_trims_surrounding_whitespace -- --nocapture`
+- `cargo test -p agent-doc build_plan_treats_active_queue_slash_command_as_command_handoff -- --nocapture`
+- `make check` in `src/agent-doc` passed, including clippy with `-D warnings`, 3,994 nextest tests passed with 233 skipped, doctests, and the medium SimWorld regression.
+- `cargo build` passed.
+- `git diff --check` passed.
+- `cargo install --path .` passed and installed `agent-doc 0.34.0`.
+
+CI status checked once:
+- `src/agent-doc`: latest `CI` run for `65e2cb90` was `in_progress` at check time, run id `27118401496`.
+- superproject: `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Confidence: high. The regression tests cover parser whitespace, preflight no-cycle behavior, direct-run slash suppression, owner-pane diagnostic text, and planning classification.
+
+Escalation: none. Unrelated dirty superproject files were left untouched.
+<!-- agent:boundary:dbd174f1 -->
 <!-- /agent:exchange -->
 
 ## Queue

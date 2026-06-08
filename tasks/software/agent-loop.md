@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 # agent-loop operations
@@ -60,7 +60,7 @@ Both verified live on crates.io at 0.3.0; superproject pointers bumped.
 - **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
 
 Net: no crate had an *unpublished tag* to move forward — every last-tag matched its crates.io version — so each release required a deliberate version bump, which I did only for the two with genuine feature deltas.
-<!-- agent:boundary:6bb81f62 -->
+<!-- agent:boundary:d02e21b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,7 @@ Net: no crate had an *unpublished tag* to move forward — every last-tag matche
 ## Queue
 
 <!-- agent:queue go -->
+- do #jq1r. Yes, publish new crates.
 <!-- /agent:queue -->
 
 ## Backlog

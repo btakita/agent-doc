@@ -89,7 +89,7 @@ Verification:
 - `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
 
 No escalation was needed. Confidence is high: the install now restores the runbook reference where it helps, without breaking standalone checkouts or forcing Codex/OpenCode to load a separate document before using tsift.
-<!-- agent:boundary:30e19ab6 -->
+<!-- agent:boundary:f95a2d30 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +98,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->- I notice that we stopped referencing the runbook in AGENTS.md in the install. Should we go back to the runbook approach with the latest Codex reuse data?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

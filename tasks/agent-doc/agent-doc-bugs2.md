@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -187,13 +187,31 @@ sequenceDiagram
 - **BUILD:** (1) actor + causal tagging on ops + a durable **sqlite op-log** (extend `agent_doc_write: crdt`); (2) **TurnScope** manifest at turn start; (3) the **affectedness classifier** that replaces the coarse drift gate with scope intersection so Independent ops integrate + persist without affecting the turn.
 
 Plan: [`tasks/agent-doc/plan-operation-scoped-drift.md`](plan-operation-scoped-drift.md), phased `#op-scoped-drift-1/2/3` (tag+log → scope manifest → classifier), each its own spec/test/build/install/commit cycle. Queued in backlog as `#op-scoped-drift`.
-<!-- agent:boundary:5d058847 -->
+
+### Re: add backlog items to complete #ipc-crdt-response-drift — opus-4-8
+
+> **Queue prompt:**
+>
+> Add backlog items to complete [#ipc-crdt-response-drift]
+
+
+> **Queue prompt:** Add backlog items to complete [#ipc-crdt-response-drift]
+
+Two layers already shipped (merge `c9d276b9`, visible-buffer `51b9ed40`). The remaining gated work in the review item splits cleanly into three **independent, implementable** phases — each with its own SimWorld scenario, all driven from `tasks/agent-doc/plan-ipc-crdt-response-drift.md`. Added to the backlog in priority order:
+
+1. **`#ipc-drift-order-stable-merge`** *(top of backlog)* — the root of the reported "reversed lines / `### Re:` header missing / inserted above prior response" symptom. Make overlay-as-merge-base order-stable for the append case so a concurrent foreign append (`theirs > base`, the exact `theirs=6386 > base=5797` shape this session hit) cannot reverse or hoist this turn's response. Files: `merge.rs`, `crdt.rs` (suspect `5fd64b26`). SimWorld: foreign append during generation → append order + header intact.
+2. **`#ipc-drift-writeback-serialize`** — the concurrent-supervisor seam (the monsterrodholders interleave: `d4182b0e1` committed to the same superproject mid-generation). Serialize superproject git write-back through the single control-plane owner / per-repo lock. Files: `project_controller.rs`, `session_actor.rs`. SimWorld: two supervisors → serialized, no interleaved partial commits, no `stuck_captured_cycle`.
+3. **`#ipc-drift-visbuf-reconcile`** — close the seam where `merge successful — no conflicts possible` is *immediately* followed by the visible-buffer guard failing closed and stranding the captured response outside HEAD (`stuck_captured_cycle`). Files: `write.rs`, `stream.rs`, `ipc_socket.rs`. SimWorld: clean merge must land in HEAD without tripping the guard.
+
+**Top of backlog:** `#ipc-drift-order-stable-merge`.
+
+Each carries the clean-session constraint from the plan's note — these edit the live CRDT/IPC write path, so they must be driven from a fresh quiescent session with other supervisors idle, not from a document that is itself mid-drift. The umbrella review item `#ipc-crdt-response-drift` now maps onto these three children; it stays gated until they land. I did **not** start implementation this turn — these are the backlog decomposition you asked for, and the write-path edits don't belong in this active session.
+<!-- agent:boundary:430c8ced -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Add backlog items to complete [#ipc-crdt-response-drift]
 <!-- /agent:queue -->
 ###
 <!--
@@ -221,6 +239,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#ipc-drift-visbuf-reconcile] Reconcile the visible-buffer guard with a successful CRDT merge so a clean merge cannot then fail closed and strand the captured response outside HEAD (the stuck_captured_cycle / "visible editor buffer differs" symptom). Files: agent-doc-orchestration/src/{write.rs,stream.rs,ipc_socket.rs}. SimWorld: clean CRDT merge must land the captured response in HEAD and not trip the visible-buffer guard. Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
+- [ ] [#ipc-drift-writeback-serialize] Serialize superproject git write-back through the single control-plane owner (or a per-repo lock) so two supervisors cannot interleave commits mid-generation (the monsterrodholders concurrent-supervisor interleave). Files: agent-doc-orchestration/src/{project_controller.rs,session_actor.rs}. SimWorld: two supervisors writing back to the same superproject -> serialized, no interleaved partial commits, no stuck_captured_cycle. Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
+- [ ] [#ipc-drift-order-stable-merge] Make CRDT overlay-as-merge-base order-stable for the append case so a concurrent foreign append (theirs>base) cannot reverse response lines or hoist them above the prior HEAD response. Files: agent-doc-orchestration/src/{merge.rs,crdt.rs} (suspect 5fd64b26 "Use overlay CRDT as merge base"). SimWorld: foreign append during generation -> merged Exchange keeps append order + ### Re: header intact (no reversal, no hoist). Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
 <!-- /agent:backlog -->
 
 ## Review

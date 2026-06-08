@@ -717,7 +717,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
         // call: opportunistic done-id queue marking is a document write path and
         // must use the same visible editor drift guard as active-head queue consume.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 72,
+        // +2 for the audited explicit-baseline replay guard: one guard function and
+        // one strict write call site reject stale-baseline responses after commit.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 74,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

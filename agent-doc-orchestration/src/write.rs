@@ -1019,6 +1019,35 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
     }
 }
 
+fn guard_no_explicit_baseline_replay_after_committed_cycle(
+    file: &Path,
+    commit_mode: CommitMode,
+    baseline_file: Option<&Path>,
+) -> Result<()> {
+    if commit_mode != CommitMode::Required || baseline_file.is_none() {
+        return Ok(());
+    }
+
+    let Some(cycle_id) = cycle_already_committed(file) else {
+        return Ok(());
+    };
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "explicit_baseline_replay_rejected file={} cycle_id={}",
+            file.display(),
+            cycle_id
+        ),
+    );
+    anyhow::bail!(
+        "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to apply an explicit-baseline response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry with the new baseline_file.",
+        cycle_id,
+        file.display(),
+        file.display()
+    );
+}
+
 fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
     if !raw.len().is_multiple_of(2) {
         anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
@@ -1459,6 +1488,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     };
 
     let baseline = read_explicit_baseline(file, options.baseline_file.as_deref())?;
+    guard_no_explicit_baseline_replay_after_committed_cycle(
+        file,
+        commit_mode,
+        options.baseline_file.as_deref(),
+    )?;
 
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;

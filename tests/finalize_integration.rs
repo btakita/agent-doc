@@ -923,7 +923,7 @@ fn finalize_writes_and_commits_template_response() {
 }
 
 #[test]
-fn finalize_stream_rebases_stale_exchange_baseline_to_head() {
+fn finalize_stream_rejects_explicit_baseline_replay_after_committed_cycle() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
 
@@ -968,6 +968,100 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head() {
             "<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
         )
         .assert()
+        .failure()
+        .stderr(predicates::str::contains("already `committed`"))
+        .stderr(predicates::str::contains("agent-doc preflight"));
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("### Re: first — gpt-5"),
+        "HEAD should keep the first response:\n{head}"
+    );
+    assert!(
+        !head.contains("### Re: second — gpt-5"),
+        "replayed stale-baseline finalize must not append a second response:\n{head}"
+    );
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
+    );
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("explicit_baseline_replay_rejected"),
+        "strict finalize should log the committed-cycle replay rejection:\n{ops_log}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    let stale_baseline = write_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let after_first = head_blob(tmp.path());
+    assert!(
+        after_first.contains("### Re: first — gpt-5"),
+        "first finalize should commit the first response:\n{after_first}"
+    );
+
+    let after_first_doc = fs::read_to_string(&doc).unwrap();
+    let with_follow_up = after_first_doc.replace(
+        "<!-- agent:boundary:",
+        "❯ Follow-up prompt\n<!-- agent:boundary:",
+    );
+    assert_ne!(
+        after_first_doc, with_follow_up,
+        "test fixture should contain a boundary before inserting the follow-up prompt"
+    );
+    fs::write(&doc, with_follow_up).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: Follow-up prompt — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
         .success();
 
     let head = head_blob(tmp.path());
@@ -975,11 +1069,15 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head() {
         .find("### Re: first — gpt-5")
         .expect("HEAD should keep the first response");
     let second = head
-        .find("### Re: second — gpt-5")
-        .expect("HEAD should append the second response");
+        .find("### Re: Follow-up prompt — gpt-5")
+        .expect("HEAD should append the follow-up response");
     assert!(
         first < second,
         "stale-baseline finalize must append after the prior response:\n{head}"
+    );
+    assert!(
+        head.contains("❯ Follow-up prompt"),
+        "stale-baseline rebase must preserve the live follow-up prompt:\n{head}"
     );
 
     let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();

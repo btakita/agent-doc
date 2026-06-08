@@ -87,7 +87,18 @@ Proof:
 - Verification: normal session check reported OK and queue continuation false before this force-disk closeout
 - Confidence: high
 - Escalation: none
-<!-- agent:boundary:c5b2466d -->
+
+### Re: #clearfast queue cleanup — gpt-5
+
+Closed the stale `do [#clearfast]` queue head after the backlog item had already been completed and archived. This preserves the completed code work while making the committed queue state match the resolved backlog state.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc queue sync /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- Verification: preflight recognized `do [#clearfast]` as already resolved and drained the queue
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:61f6a3c2 -->
 <!-- /agent:exchange -->
 
 ## Queue

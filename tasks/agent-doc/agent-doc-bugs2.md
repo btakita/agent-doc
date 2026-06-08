@@ -47,7 +47,8 @@ Proof:
 - Verification: plan contract required only the terminal instruction for `/clear`
 - Confidence: high
 - Escalation: none
-<!-- agent:boundary:fe75abe7 -->
+<!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:36fdc38c -->
 <!-- /agent:exchange -->
 
 ## Queue

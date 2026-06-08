@@ -27,6 +27,11 @@ interface FfiComponentList {
     count: number;
 }
 
+interface FfiJsonResult {
+    json: any;
+    error: any;
+}
+
 export interface VisualToken {
     kind: string;
     start: number;
@@ -78,6 +83,11 @@ function resetBindings(): void {
     _reposition_boundary_to_end_preserve_head_with_id = null;
     _normalize_template_structure = null;
     _apply_node_patches = null;
+    _admin_inspect_json = null;
+    _admin_queue_control_json = null;
+    _admin_reap_json = null;
+    _admin_handoff_json = null;
+    _admin_repair_projection_json = null;
     _visual_tokens_json = null;
     _is_idle = null;
     _await_idle = null;
@@ -175,6 +185,11 @@ let _reposition_boundary_to_end_preserve_head: any = null;
 let _reposition_boundary_to_end_preserve_head_with_id: any = null;
 let _normalize_template_structure: any = null;
 let _apply_node_patches: any = null;
+let _admin_inspect_json: any = null;
+let _admin_queue_control_json: any = null;
+let _admin_reap_json: any = null;
+let _admin_handoff_json: any = null;
+let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
@@ -191,6 +206,11 @@ function bindFunctions(): void {
     // Define the FfiPatchResult struct
     const FfiPatchResultType = koffi.struct('FfiPatchResult', {
         text: 'char*',
+        error: 'char*',
+    });
+
+    const FfiJsonResultType = koffi.struct('FfiJsonResult', {
+        json: 'char*',
         error: 'char*',
     });
 
@@ -221,6 +241,36 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] apply_node_patches unavailable: ${e.message}`);
         _apply_node_patches = null;
+    }
+    try {
+        _admin_inspect_json = lib.func('agent_doc_admin_inspect_json', FfiJsonResultType, ['str', 'str', 'str', 'str']);
+        _admin_queue_control_json = lib.func(
+            'agent_doc_admin_queue_control_json',
+            FfiJsonResultType,
+            ['str', 'str', 'str', 'int64', 'str', 'str'],
+        );
+        _admin_reap_json = lib.func(
+            'agent_doc_admin_reap_json',
+            FfiJsonResultType,
+            ['str', 'str', 'str', 'str', 'int64', 'str'],
+        );
+        _admin_handoff_json = lib.func(
+            'agent_doc_admin_handoff_json',
+            FfiJsonResultType,
+            ['str*', 'str', 'str', 'int64', 'str'],
+        );
+        _admin_repair_projection_json = lib.func(
+            'agent_doc_admin_repair_projection_json',
+            FfiJsonResultType,
+            ['str', 'str', 'str', 'int64', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] admin controller wrappers unavailable: ${e.message}`);
+        _admin_inspect_json = null;
+        _admin_queue_control_json = null;
+        _admin_reap_json = null;
+        _admin_handoff_json = null;
+        _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
@@ -355,6 +405,156 @@ export function canApplyNodePatches(projectRoot?: string): boolean {
     if (!ensureLoaded(projectRoot)) return false;
     bindFunctions();
     return Boolean(_apply_node_patches);
+}
+
+function optionalString(value?: string | null): string {
+    return value ?? '';
+}
+
+function observedGeneration(value?: number | null): number {
+    return value ?? -1;
+}
+
+function decodeJsonResult(result: FfiJsonResult, label: string): string | null {
+    try {
+        if (result.error) {
+            const error = koffi.decode(result.error, 'char', -1);
+            console.warn(`[agent-doc/native] ${label} error: ${error}`);
+            _free_string(result.error);
+            return null;
+        }
+        if (!result.json) return null;
+        return koffi.decode(result.json, 'char', -1);
+    } finally {
+        if (result.json) _free_string(result.json);
+    }
+}
+
+/**
+ * Controller-backed `agent-doc admin inspect --json` wrapper.
+ */
+export function adminInspectJson(options: {
+    projectRoot?: string | null;
+    documentPath?: string | null;
+    sessionId?: string | null;
+    paneId?: string | null;
+} = {}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_admin_inspect_json) return null;
+    return decodeJsonResult(
+        _admin_inspect_json(
+            optionalString(options.projectRoot),
+            optionalString(options.documentPath),
+            optionalString(options.sessionId),
+            optionalString(options.paneId),
+        ),
+        'admin_inspect',
+    );
+}
+
+/**
+ * Controller-backed `agent-doc admin queue pause|resume|drain --json` wrapper.
+ */
+export function adminQueueControlJson(options: {
+    action: string;
+    projectRoot?: string | null;
+    documentPath?: string | null;
+    observedGeneration?: number | null;
+    reason?: string | null;
+    itemId?: string | null;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_admin_queue_control_json) return null;
+    return decodeJsonResult(
+        _admin_queue_control_json(
+            optionalString(options.projectRoot),
+            optionalString(options.documentPath),
+            options.action,
+            observedGeneration(options.observedGeneration),
+            optionalString(options.reason),
+            optionalString(options.itemId),
+        ),
+        'admin_queue_control',
+    );
+}
+
+/**
+ * Controller-backed `agent-doc admin reap --json` wrapper.
+ */
+export function adminReapJson(options: {
+    observedGeneration: number;
+    reason: string;
+    projectRoot?: string | null;
+    documentPath?: string | null;
+    sessionId?: string | null;
+    paneId?: string | null;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_admin_reap_json) return null;
+    return decodeJsonResult(
+        _admin_reap_json(
+            optionalString(options.projectRoot),
+            optionalString(options.documentPath),
+            optionalString(options.sessionId),
+            optionalString(options.paneId),
+            options.observedGeneration,
+            options.reason,
+        ),
+        'admin_reap',
+    );
+}
+
+/**
+ * Controller-backed `agent-doc admin handoff --json` wrapper.
+ */
+export function adminHandoffJson(options: {
+    documentPath: string;
+    toPane: string;
+    observedGeneration: number;
+    reason: string;
+    projectRoot?: string | null;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_admin_handoff_json) return null;
+    return decodeJsonResult(
+        _admin_handoff_json(
+            optionalString(options.projectRoot),
+            options.documentPath,
+            options.toPane,
+            options.observedGeneration,
+            options.reason,
+        ),
+        'admin_handoff',
+    );
+}
+
+/**
+ * Controller-backed `agent-doc admin repair-projection --json` wrapper.
+ */
+export function adminRepairProjectionJson(options: {
+    projection?: string;
+    projectRoot?: string | null;
+    documentPath?: string | null;
+    observedGeneration?: number | null;
+    reason?: string | null;
+} = {}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_admin_repair_projection_json) return null;
+    return decodeJsonResult(
+        _admin_repair_projection_json(
+            optionalString(options.projectRoot),
+            optionalString(options.documentPath),
+            options.projection ?? 'all',
+            observedGeneration(options.observedGeneration),
+            optionalString(options.reason),
+        ),
+        'admin_repair_projection',
+    );
 }
 
 /**

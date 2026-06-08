@@ -2283,6 +2283,41 @@ pub fn inspect_actor(
     session_id: Option<&str>,
     pane_id: Option<&str>,
 ) -> Result<ControllerActorInspection> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_inspect_actor(
+            &bootstrap,
+            ControllerRequest {
+                command: "inspect_actor".to_string(),
+                file: file.map(Path::to_path_buf),
+                session_id: session_id.map(ToOwned::to_owned),
+                pane_id: pane_id.map(ToOwned::to_owned),
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -2311,6 +2346,41 @@ pub fn control_queue(
     reason: Option<&str>,
     item_id: Option<&str>,
 ) -> Result<ControllerAdminReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_queue_control(
+            &bootstrap,
+            ControllerRequest {
+                command: "queue_control".to_string(),
+                file: file.map(Path::to_path_buf),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: observed_generation,
+                state: Some(action.to_string()),
+                caller: Some("admin".to_string()),
+                reason: reason.map(ToOwned::to_owned),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some(action.to_string()),
+                diagnostic_payload: item_id.map(ToOwned::to_owned),
+            },
+        );
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -2339,6 +2409,41 @@ pub fn admin_reap(
     observed_generation: u64,
     reason: &str,
 ) -> Result<ControllerAdminReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_admin_control(
+            &bootstrap,
+            ControllerRequest {
+                command: "admin_control".to_string(),
+                file: file.map(Path::to_path_buf),
+                session_id: session_id.map(ToOwned::to_owned),
+                pane_id: pane_id.map(ToOwned::to_owned),
+                window_id: None,
+                generation: Some(observed_generation),
+                state: Some("reap".to_string()),
+                caller: Some("admin".to_string()),
+                reason: Some(reason.to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some("reap".to_string()),
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -2366,6 +2471,41 @@ pub fn admin_handoff(
     observed_generation: u64,
     reason: &str,
 ) -> Result<ControllerAdminReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_admin_control(
+            &bootstrap,
+            ControllerRequest {
+                command: "admin_control".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: Some(to_pane.to_string()),
+                window_id: None,
+                generation: Some(observed_generation),
+                state: Some("handoff".to_string()),
+                caller: Some("admin".to_string()),
+                reason: Some(reason.to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some("handoff".to_string()),
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -2393,6 +2533,41 @@ pub fn repair_projection(
     observed_generation: Option<u64>,
     reason: Option<&str>,
 ) -> Result<ControllerAdminReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_projection_repair(
+            &bootstrap,
+            ControllerRequest {
+                command: "projection_repair".to_string(),
+                file: file.map(Path::to_path_buf),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: observed_generation,
+                state: Some(projection.to_string()),
+                caller: Some("admin".to_string()),
+                reason: reason.map(ToOwned::to_owned),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some("projection_repair".to_string()),
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -2939,6 +3114,7 @@ fn is_timeout_error(err: &std::io::Error) -> bool {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(feature = "test-support", allow(dead_code))]
 fn handle_request(
     line: &str,
     bootstrap: &ControllerBootstrap,

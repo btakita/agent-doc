@@ -51,6 +51,14 @@ interface AgentDocLib : Library {
         class ByValue : FfiProjectPath(), Structure.ByValue
     }
 
+    /** JSON result returned by controller-backed admin/editor wrappers. */
+    @Structure.FieldOrder("json", "error")
+    open class FfiJsonResult : Structure() {
+        @JvmField var json: Pointer? = null
+        @JvmField var error: Pointer? = null
+        class ByValue : FfiJsonResult(), Structure.ByValue
+    }
+
     /**
      * Apply a patch to a document component.
      * Mode: "replace", "append", or "prepend".
@@ -146,6 +154,52 @@ interface AgentDocLib : Library {
      * Apply node-keyed IPC patches through the shared Rust document model.
      */
     fun agent_doc_apply_node_patches(doc: String, node_patches_json: String): FfiPatchResult.ByValue
+
+    /** Controller-backed `admin inspect --json` wrapper. */
+    fun agent_doc_admin_inspect_json(
+        project_root: String?,
+        document_path: String?,
+        session_id: String?,
+        pane_id: String?,
+    ): FfiJsonResult.ByValue
+
+    /** Controller-backed `admin queue pause|resume|drain --json` wrapper. */
+    fun agent_doc_admin_queue_control_json(
+        project_root: String?,
+        document_path: String?,
+        action: String,
+        observed_generation: Long,
+        reason: String?,
+        item_id: String?,
+    ): FfiJsonResult.ByValue
+
+    /** Controller-backed `admin reap --json` wrapper. */
+    fun agent_doc_admin_reap_json(
+        project_root: String?,
+        document_path: String?,
+        session_id: String?,
+        pane_id: String?,
+        observed_generation: Long,
+        reason: String,
+    ): FfiJsonResult.ByValue
+
+    /** Controller-backed `admin handoff --json` wrapper. */
+    fun agent_doc_admin_handoff_json(
+        project_root: String?,
+        document_path: String,
+        to_pane: String,
+        observed_generation: Long,
+        reason: String,
+    ): FfiJsonResult.ByValue
+
+    /** Controller-backed `admin repair-projection --json` wrapper. */
+    fun agent_doc_admin_repair_projection_json(
+        project_root: String?,
+        document_path: String?,
+        projection: String,
+        observed_generation: Long,
+        reason: String?,
+    ): FfiJsonResult.ByValue
 
     /**
      * Parse components from a document.
@@ -438,6 +492,149 @@ interface AgentDocLib : Library {
         }
 
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(AgentDocLib::class.java)
+    }
+}
+
+/**
+ * Safe wrappers for controller-backed admin FFI calls.
+ *
+ * These return the same JSON payloads as the CLI `agent-doc admin ... --json`
+ * commands. Editors parse/display the payload; ownership and generation checks
+ * stay inside the Rust controller.
+ */
+object NativeAdminControls {
+    private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(NativeAdminControls::class.java)
+    private const val NO_GENERATION: Long = -1
+
+    fun inspect(
+        projectRoot: String? = null,
+        documentPath: String? = null,
+        sessionId: String? = null,
+        paneId: String? = null,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_admin_inspect_json(projectRoot, documentPath, sessionId, paneId)
+        } catch (e: Throwable) {
+            LOG.warn("[native] admin_inspect unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "admin_inspect")
+    }
+
+    fun queueControl(
+        action: String,
+        projectRoot: String? = null,
+        documentPath: String? = null,
+        observedGeneration: Long? = null,
+        reason: String? = null,
+        itemId: String? = null,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_admin_queue_control_json(
+                projectRoot,
+                documentPath,
+                action,
+                observedGeneration ?: NO_GENERATION,
+                reason,
+                itemId,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("[native] admin_queue_control unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "admin_queue_control")
+    }
+
+    fun reap(
+        observedGeneration: Long,
+        reason: String,
+        projectRoot: String? = null,
+        documentPath: String? = null,
+        sessionId: String? = null,
+        paneId: String? = null,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_admin_reap_json(
+                projectRoot,
+                documentPath,
+                sessionId,
+                paneId,
+                observedGeneration,
+                reason,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("[native] admin_reap unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "admin_reap")
+    }
+
+    fun handoff(
+        documentPath: String,
+        toPane: String,
+        observedGeneration: Long,
+        reason: String,
+        projectRoot: String? = null,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_admin_handoff_json(
+                projectRoot,
+                documentPath,
+                toPane,
+                observedGeneration,
+                reason,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("[native] admin_handoff unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "admin_handoff")
+    }
+
+    fun repairProjection(
+        projection: String = "all",
+        projectRoot: String? = null,
+        documentPath: String? = null,
+        observedGeneration: Long? = null,
+        reason: String? = null,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_admin_repair_projection_json(
+                projectRoot,
+                documentPath,
+                projection,
+                observedGeneration ?: NO_GENERATION,
+                reason,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("[native] admin_repair_projection unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "admin_repair_projection")
+    }
+
+    private fun decodeJsonResult(
+        lib: AgentDocLib,
+        result: AgentDocLib.FfiJsonResult.ByValue,
+        label: String,
+    ): String? {
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] $label error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.json == null) return null
+            return result.json!!.getString(0)
+        } finally {
+            lib.agent_doc_free_string(result.json)
+        }
     }
 }
 

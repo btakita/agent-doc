@@ -1,10 +1,10 @@
 //! Live operator dashboard over the `#ipc-admin-api` read surfaces
 //! (`#actor-runtime-dashboard` / queue id `#admin-fleet-dashboard`).
 //!
-//! This is a **pure view** over `admin list` / `admin detect`: it adds no new
-//! detection or control logic. `build_dashboard_model` folds the enumerated
-//! actor rows together with the derived findings into a deterministic model
-//! (one row per actor, each tagged with the finding kinds that implicate it),
+//! This is a view over `admin list` / `admin detect` plus controller-backed
+//! `inspect` diagnostics; it adds no new control logic. `build_dashboard_model`
+//! folds the enumerated actor rows together with derived findings and optional
+//! queue/projection diagnostics into a deterministic model (one row per actor),
 //! and `render_dashboard` turns that model into a stable terminal frame. The
 //! model/view split keeps the highlight logic unit-testable without a live
 //! terminal (the split the plan calls for) while the `dashboard` command owns
@@ -16,6 +16,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -33,8 +34,28 @@ pub struct DashboardRow {
     pub actor: AdminActor,
     /// Distinct `admin detect` finding kinds naming this actor's document or pane.
     pub highlight_kinds: Vec<String>,
+    /// Effective queue control state, when the controller has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_control_state: Option<String>,
+    /// Latest typed queue pressure class, when dispatch was blocked/rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_pressure: Option<String>,
+    /// Whether projection diagnostics report non-completed repair/emit state.
+    #[serde(default)]
+    pub projection_lag: bool,
     /// Whether this row is flagged (any finding implicates it).
     pub problem: bool,
+}
+
+/// Controller diagnostics attached to a dashboard actor row.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct DashboardActorDiagnostics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_control_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_pressure: Option<String>,
+    #[serde(default)]
+    pub projection_lag: bool,
 }
 
 /// The full dashboard model: highlighted rows plus the raw findings that drove
@@ -53,8 +74,17 @@ pub struct DashboardModel {
 /// finding's `documents`, or when the finding's `pane` matches the row's pane.
 /// Rows are sorted by `document_id` for stable rendering across ticks.
 pub fn build_dashboard_model(
+    actors: Vec<AdminActor>,
+    findings: Vec<AdminFinding>,
+) -> DashboardModel {
+    build_dashboard_model_with_diagnostics(actors, findings, BTreeMap::new())
+}
+
+/// Build a dashboard model with controller queue/projection diagnostics.
+pub fn build_dashboard_model_with_diagnostics(
     mut actors: Vec<AdminActor>,
     findings: Vec<AdminFinding>,
+    diagnostics: BTreeMap<String, DashboardActorDiagnostics>,
 ) -> DashboardModel {
     actors.sort_by(|a, b| {
         a.document_id
@@ -75,10 +105,19 @@ pub fn build_dashboard_model(
                 .collect();
             highlight_kinds.sort();
             highlight_kinds.dedup();
-            let problem = !highlight_kinds.is_empty();
+            let diagnostics = diagnostics
+                .get(&actor.document_id)
+                .cloned()
+                .unwrap_or_default();
+            let problem = !highlight_kinds.is_empty()
+                || diagnostics.queue_pressure.is_some()
+                || diagnostics.projection_lag;
             DashboardRow {
                 actor,
                 highlight_kinds,
+                queue_control_state: diagnostics.queue_control_state,
+                queue_pressure: diagnostics.queue_pressure,
+                projection_lag: diagnostics.projection_lag,
                 problem,
             }
         })
@@ -122,8 +161,8 @@ pub fn render_dashboard(model: &DashboardModel, color: bool) -> String {
     }
 
     out.push_str(&format!(
-        "{dim}  {:<2} {:<32} {:<9} {:<6} {:<6} {:<13} {:<8} {}{reset}\n",
-        "", "document", "harness", "pane", "alive", "state", "pid", "flags",
+        "{dim}  {:<2} {:<28} {:<9} {:<6} {:<6} {:<13} {:<8} {:<13} {:<5} {}{reset}\n",
+        "", "document", "harness", "pane", "alive", "state", "pid", "queue", "proj", "flags",
     ));
 
     for row in &model.rows {
@@ -138,11 +177,13 @@ pub fn render_dashboard(model: &DashboardModel, color: bool) -> String {
         } else {
             "dead"
         };
-        let flags = row.highlight_kinds.join(",");
+        let flags = row_flags(row).join(",");
+        let queue = queue_summary(row);
+        let projection = if row.projection_lag { "lag" } else { "ok" };
         let line = format!(
-            "  {:<2} {:<32} {:<9} {:<6} {:<6} {:<13} {:<8} {}",
+            "  {:<2} {:<28} {:<9} {:<6} {:<6} {:<13} {:<8} {:<13} {:<5} {}",
             marker,
-            truncate(&row.actor.document_id, 32),
+            truncate(&row.actor.document_id, 28),
             truncate(&row.actor.harness, 9),
             truncate(&row.actor.pane, 6),
             alive,
@@ -151,6 +192,8 @@ pub fn render_dashboard(model: &DashboardModel, color: bool) -> String {
                 13
             ),
             truncate(&pid, 8),
+            truncate(&queue, 13),
+            projection,
             flags,
         );
         if row.problem {
@@ -182,6 +225,26 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{head}…")
 }
 
+fn queue_summary(row: &DashboardRow) -> String {
+    if let Some(pressure) = row.queue_pressure.as_deref() {
+        return format!("pressure:{pressure}");
+    }
+    row.queue_control_state
+        .clone()
+        .unwrap_or_else(|| "ok".to_string())
+}
+
+fn row_flags(row: &DashboardRow) -> Vec<String> {
+    let mut flags = row.highlight_kinds.clone();
+    if let Some(pressure) = row.queue_pressure.as_deref() {
+        flags.push(format!("queue_pressure:{pressure}"));
+    }
+    if row.projection_lag {
+        flags.push("projection_lag".to_string());
+    }
+    flags
+}
+
 /// Resolve the project root, mirroring `admin`'s resolution.
 fn resolve_root(project_root: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = project_root {
@@ -199,7 +262,44 @@ fn snapshot_model(root: &Path) -> Result<DashboardModel> {
     let tmux = Tmux::default_server();
     let rows = crate::admin::build_actor_list(&actors, &registry, |pane| tmux.pane_alive(pane));
     let findings = crate::admin::detect_findings(&actors, |pane| tmux.pane_alive(pane));
-    Ok(build_dashboard_model(rows, findings))
+    let diagnostics = snapshot_controller_diagnostics(root, &rows)?;
+    Ok(build_dashboard_model_with_diagnostics(
+        rows,
+        findings,
+        diagnostics,
+    ))
+}
+
+fn snapshot_controller_diagnostics(
+    root: &Path,
+    rows: &[AdminActor],
+) -> Result<BTreeMap<String, DashboardActorDiagnostics>> {
+    let mut diagnostics = BTreeMap::new();
+    for row in rows {
+        let document = Path::new(&row.document_id);
+        let inspection = crate::project_controller::inspect_actor(root, Some(document), None, None)
+            .with_context(|| {
+                format!(
+                    "failed to inspect controller diagnostics for {}",
+                    row.document_id
+                )
+            })?;
+        diagnostics.insert(
+            row.document_id.clone(),
+            DashboardActorDiagnostics {
+                queue_control_state: inspection
+                    .queue_control
+                    .as_ref()
+                    .map(|control| control.state.clone()),
+                queue_pressure: inspection
+                    .queue_backpressure
+                    .first()
+                    .map(|pressure| pressure.capacity_class.clone()),
+                projection_lag: inspection.projection_lag,
+            },
+        );
+    }
+    Ok(diagnostics)
 }
 
 /// `agent-doc admin dashboard` — live read-only fleet view.
@@ -374,6 +474,32 @@ mod tests {
                 .lines()
                 .any(|l| l.contains("tasks/a.md") && l.contains('!'))
         );
+    }
+
+    #[test]
+    fn queue_pressure_and_projection_lag_flag_dashboard_row() {
+        let actors = vec![actor("tasks/a.md", "%1", "ready", true)];
+        let mut diagnostics = BTreeMap::new();
+        diagnostics.insert(
+            "tasks/a.md".to_string(),
+            DashboardActorDiagnostics {
+                queue_control_state: Some("paused".to_string()),
+                queue_pressure: Some("queue_full".to_string()),
+                projection_lag: true,
+            },
+        );
+
+        let model = build_dashboard_model_with_diagnostics(actors, vec![], diagnostics);
+
+        assert_eq!(model.problem_count, 1);
+        assert_eq!(model.rows[0].queue_control_state.as_deref(), Some("paused"));
+        assert_eq!(model.rows[0].queue_pressure.as_deref(), Some("queue_full"));
+        assert!(model.rows[0].projection_lag);
+
+        let frame = render_dashboard(&model, false);
+        assert!(frame.contains("lag"));
+        assert!(frame.contains("queue_pressure:queue_full"));
+        assert!(frame.contains("projection_lag"));
     }
 
     #[test]

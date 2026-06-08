@@ -157,6 +157,22 @@ Actor inspection responses include the current queue head/control state and
 recent typed queue backpressure receipts, alongside dispatch/admin receipts and
 projection diagnostics.
 
+Editor integrations use the same controller contract through the C ABI
+`agent_doc_admin_inspect_json`, `agent_doc_admin_queue_control_json`,
+`agent_doc_admin_reap_json`, `agent_doc_admin_handoff_json`, and
+`agent_doc_admin_repair_projection_json` wrappers. Each wrapper returns an
+`FfiJsonResult` containing the same JSON inspection or typed admin receipt
+envelope as the CLI `--json` form; null or empty optional string arguments mean
+"not supplied", and optional generation guards use `-1` for "none". Editor
+plugins must not infer ownership or mutate sidecars around these wrappers.
+
+`agent-doc admin dashboard` surfaces controller inspection diagnostics in
+addition to fleet list/detect rows. Text and JSON dashboard output include the
+effective queue control state, the latest typed queue pressure class, and
+projection lag per actor. Queue pressure and projection lag flag the row so
+operators and editor status surfaces can distinguish backpressure/projection
+problems from generic busy-pane failures.
+
 The first controller-backed mutating CLI surface is:
 
 - `agent-doc admin inspect <document|--session <id>|--pane <pane>> [--json]`;

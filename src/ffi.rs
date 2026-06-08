@@ -45,6 +45,9 @@
 //!   `debounce_ms`.  For CLI tools running in a separate process from the editor plugin.
 //! - `agent_doc_await_idle_via_file(file_path, debounce_ms, timeout_ms)`: blocking variant of
 //!   `is_typing_via_file`; polls until idle or `timeout_ms` expires.
+//! - `agent_doc_admin_*_json(...)`: controller-backed admin/editor wrappers for inspect, queue
+//!   pause/resume/drain, handoff, reap, and projection repair. They return the same JSON receipt
+//!   envelopes as the CLI `--json` forms.
 //! - `agent_doc_free_string(ptr)` / `agent_doc_free_state(ptr, len)`: free memory returned by any
 //!   `agent_doc_*` function.  Must be called for every non-null pointer.
 //!
@@ -64,7 +67,10 @@
 //! - reposition_boundary_removes_stale: two boundary markers in exchange → exactly one marker at end
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
+use anyhow::Context as _;
+use serde::Serialize;
 use std::ffi::{CStr, CString, c_char};
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -83,6 +89,92 @@ pub struct FfiProjectPath {
     /// Path to the input file, relative to `project_root`. Null when `project_root`
     /// is null. Free with [`agent_doc_free_string`].
     pub relative_path: *mut c_char,
+}
+
+/// JSON result returned by controller-backed editor/admin FFI wrappers.
+#[repr(C)]
+pub struct FfiJsonResult {
+    /// JSON object on success, or null on error. Free with [`agent_doc_free_string`].
+    pub json: *mut c_char,
+    /// Error message when `json` is null. Free with [`agent_doc_free_string`].
+    pub error: *mut c_char,
+}
+
+fn ffi_json_ok<T: Serialize>(value: &T) -> FfiJsonResult {
+    match serde_json::to_string(value) {
+        Ok(json) => FfiJsonResult {
+            json: CString::new(json).unwrap_or_default().into_raw(),
+            error: ptr::null_mut(),
+        },
+        Err(err) => ffi_json_err(&format!("failed to serialize JSON result: {err}")),
+    }
+}
+
+fn ffi_json_err(message: &str) -> FfiJsonResult {
+    FfiJsonResult {
+        json: ptr::null_mut(),
+        error: CString::new(message).unwrap_or_default().into_raw(),
+    }
+}
+
+fn ffi_json_from_result<T: Serialize>(result: anyhow::Result<T>) -> FfiJsonResult {
+    match result {
+        Ok(value) => ffi_json_ok(&value),
+        Err(err) => ffi_json_err(&format!("{err:#}")),
+    }
+}
+
+unsafe fn optional_ffi_string(ptr: *const c_char, name: &str) -> anyhow::Result<Option<String>> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    let value = unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .with_context(|| format!("{name} is not valid UTF-8"))?
+        .trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value.to_string()))
+    }
+}
+
+unsafe fn required_ffi_string(ptr: *const c_char, name: &str) -> anyhow::Result<String> {
+    unsafe { optional_ffi_string(ptr, name) }?.with_context(|| format!("{name} is required"))
+}
+
+fn optional_generation(value: i64, name: &str) -> anyhow::Result<Option<u64>> {
+    if value < 0 {
+        return Ok(None);
+    }
+    u64::try_from(value)
+        .map(Some)
+        .with_context(|| format!("{name} is out of range"))
+}
+
+fn required_generation(value: i64, name: &str) -> anyhow::Result<u64> {
+    optional_generation(value, name)?.with_context(|| format!("{name} is required"))
+}
+
+fn optional_path(value: Option<String>) -> Option<PathBuf> {
+    value.map(PathBuf::from)
+}
+
+fn resolve_admin_root(
+    project_root: Option<&str>,
+    document: Option<&Path>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(root) = project_root {
+        return Ok(PathBuf::from(root));
+    }
+    if let Some(document) = document
+        && let Some(root) = agent_doc_orchestration::fs_util::find_project_root(document)
+    {
+        return Ok(root);
+    }
+    let cwd = std::env::current_dir().context("failed to read current directory")?;
+    agent_doc_orchestration::fs_util::find_project_root(&cwd)
+        .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
 }
 
 /// Record a document change event for debounce tracking.
@@ -979,6 +1071,181 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
 }
 
+/// Inspect one actor through the project controller and return the same JSON
+/// shape as `agent-doc admin inspect --json`.
+///
+/// Null or empty `project_root`, `document_path`, `session_id`, and `pane_id`
+/// values are treated as absent.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_admin_inspect_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+    session_id: *const c_char,
+    pane_id: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            optional_path(unsafe { optional_ffi_string(document_path, "document_path") }?);
+        let session_id = unsafe { optional_ffi_string(session_id, "session_id") }?;
+        let pane_id = unsafe { optional_ffi_string(pane_id, "pane_id") }?;
+        let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
+        agent_doc_orchestration::project_controller::inspect_actor(
+            &root,
+            document_path.as_deref(),
+            session_id.as_deref(),
+            pane_id.as_deref(),
+        )
+    })())
+}
+
+/// Pause, resume, or drain queue work through the project controller and return
+/// the same receipt JSON shape as `agent-doc admin queue ... --json`.
+///
+/// Pass `observed_generation = -1` when no generation guard is supplied.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_admin_queue_control_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+    action: *const c_char,
+    observed_generation: i64,
+    reason: *const c_char,
+    item_id: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            optional_path(unsafe { optional_ffi_string(document_path, "document_path") }?);
+        let action = unsafe { required_ffi_string(action, "action") }?;
+        let observed_generation = optional_generation(observed_generation, "observed_generation")?;
+        let reason = unsafe { optional_ffi_string(reason, "reason") }?;
+        let item_id = unsafe { optional_ffi_string(item_id, "item_id") }?;
+        let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
+        agent_doc_orchestration::project_controller::control_queue(
+            &root,
+            document_path.as_deref(),
+            &action,
+            observed_generation,
+            reason.as_deref(),
+            item_id.as_deref(),
+        )
+    })())
+}
+
+/// Reap a stale actor through the project controller and return the same
+/// receipt JSON shape as `agent-doc admin reap --json`.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_admin_reap_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+    session_id: *const c_char,
+    pane_id: *const c_char,
+    observed_generation: i64,
+    reason: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            optional_path(unsafe { optional_ffi_string(document_path, "document_path") }?);
+        let session_id = unsafe { optional_ffi_string(session_id, "session_id") }?;
+        let pane_id = unsafe { optional_ffi_string(pane_id, "pane_id") }?;
+        let observed_generation = required_generation(observed_generation, "observed_generation")?;
+        let reason = unsafe { required_ffi_string(reason, "reason") }?;
+        let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
+        agent_doc_orchestration::project_controller::admin_reap(
+            &root,
+            document_path.as_deref(),
+            session_id.as_deref(),
+            pane_id.as_deref(),
+            observed_generation,
+            &reason,
+        )
+    })())
+}
+
+/// Handoff a document actor through the project controller and return the same
+/// receipt JSON shape as `agent-doc admin handoff --json`.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_admin_handoff_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+    to_pane: *const c_char,
+    observed_generation: i64,
+    reason: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            PathBuf::from(unsafe { required_ffi_string(document_path, "document_path") }?);
+        let to_pane = unsafe { required_ffi_string(to_pane, "to_pane") }?;
+        let observed_generation = required_generation(observed_generation, "observed_generation")?;
+        let reason = unsafe { required_ffi_string(reason, "reason") }?;
+        let root = resolve_admin_root(project_root.as_deref(), Some(document_path.as_path()))?;
+        agent_doc_orchestration::project_controller::admin_handoff(
+            &root,
+            &document_path,
+            &to_pane,
+            observed_generation,
+            &reason,
+        )
+    })())
+}
+
+/// Repair controller compatibility projections and return the same receipt JSON
+/// shape as `agent-doc admin repair-projection --json`.
+///
+/// Pass `observed_generation = -1` when no generation guard is supplied.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_admin_repair_projection_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+    projection: *const c_char,
+    observed_generation: i64,
+    reason: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            optional_path(unsafe { optional_ffi_string(document_path, "document_path") }?);
+        let projection = unsafe { required_ffi_string(projection, "projection") }?;
+        let observed_generation = optional_generation(observed_generation, "observed_generation")?;
+        let reason = unsafe { optional_ffi_string(reason, "reason") }?;
+        let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
+        agent_doc_orchestration::project_controller::repair_projection(
+            &root,
+            document_path.as_deref(),
+            &projection,
+            observed_generation,
+            reason.as_deref(),
+        )
+    })())
+}
+
 /// Walk up from `path` to find the nearest ancestor containing `.agent-doc/`.
 /// Delegates to [`agent_doc_orchestration::fs_util::find_project_root`].
 fn find_project_root_ffi(path: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -1221,6 +1488,24 @@ mod tests {
         serde_json::from_str(&json_str).unwrap()
     }
 
+    fn ffi_json_value(result: FfiJsonResult) -> serde_json::Value {
+        if !result.error.is_null() {
+            let error = unsafe { CStr::from_ptr(result.error) }
+                .to_str()
+                .unwrap()
+                .to_string();
+            unsafe { agent_doc_free_string(result.error) };
+            panic!("unexpected FFI error: {error}");
+        }
+        assert!(!result.json.is_null(), "FFI JSON should not be null");
+        let json = unsafe { CStr::from_ptr(result.json) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        unsafe { agent_doc_free_string(result.json) };
+        serde_json::from_str(&json).unwrap()
+    }
+
     fn utf16_len(text: &str) -> usize {
         text.encode_utf16().count()
     }
@@ -1286,6 +1571,119 @@ operator note
         let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
         assert!(error.contains("unsupported node patch op"));
         unsafe { agent_doc_free_string(result.error) };
+    }
+
+    #[test]
+    fn admin_queue_control_ffi_returns_typed_receipt_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/admin-ffi.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-admin-ffi\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        agent_doc_orchestration::session_actor::record_session_start_direct(
+            &doc,
+            "session-admin-ffi",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+
+        let root = CString::new(dir.path().to_string_lossy().to_string()).unwrap();
+        let document = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let action = CString::new("pause").unwrap();
+        let reason = CString::new("ffi pause").unwrap();
+        let accepted = unsafe {
+            agent_doc_admin_queue_control_json(
+                root.as_ptr(),
+                document.as_ptr(),
+                action.as_ptr(),
+                1,
+                reason.as_ptr(),
+                std::ptr::null(),
+            )
+        };
+        let accepted = ffi_json_value(accepted);
+        assert_eq!(accepted["operation_kind"], "queue_paused");
+        assert_eq!(accepted["status"], "accepted");
+        assert!(accepted["receipt_id"].as_u64().unwrap() > 0);
+
+        let stale = unsafe {
+            agent_doc_admin_queue_control_json(
+                root.as_ptr(),
+                document.as_ptr(),
+                action.as_ptr(),
+                0,
+                reason.as_ptr(),
+                std::ptr::null(),
+            )
+        };
+        let stale = ffi_json_value(stale);
+        assert_eq!(stale["status"], "rejected");
+        assert_eq!(stale["failed_stage"], "stale_generation");
+        assert_eq!(stale["current_generation"], 1);
+    }
+
+    #[test]
+    fn admin_inspect_ffi_returns_queue_diagnostics_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/admin-inspect-ffi.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-inspect-ffi\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        agent_doc_orchestration::session_actor::record_session_start_direct(
+            &doc,
+            "session-inspect-ffi",
+            "%42",
+            "@1",
+            1,
+        )
+        .unwrap();
+
+        let root = CString::new(dir.path().to_string_lossy().to_string()).unwrap();
+        let document = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let action = CString::new("drain").unwrap();
+        let reason = CString::new("ffi drain").unwrap();
+        let item_id = CString::new("next").unwrap();
+        let receipt = unsafe {
+            agent_doc_admin_queue_control_json(
+                root.as_ptr(),
+                document.as_ptr(),
+                action.as_ptr(),
+                1,
+                reason.as_ptr(),
+                item_id.as_ptr(),
+            )
+        };
+        assert_eq!(ffi_json_value(receipt)["status"], "accepted");
+
+        let inspection = unsafe {
+            agent_doc_admin_inspect_json(
+                root.as_ptr(),
+                document.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        let inspection = ffi_json_value(inspection);
+        assert_eq!(inspection["record"]["pane_id"], "%42");
+        assert_eq!(inspection["queue_control"]["state"], "draining");
+        assert!(
+            inspection["admin_operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| operation["operation_kind"] == "queue_draining"
+                    && operation["status"] == "accepted")
+        );
     }
 
     #[test]

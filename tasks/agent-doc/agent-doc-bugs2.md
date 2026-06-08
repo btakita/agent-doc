@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -156,12 +156,13 @@ Verification: preflight reported the document OK before this closeout, and the r
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:1e42591b -->
+<!-- agent:boundary:4cdedb4d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- The last turn went through a full turn and ran `/clear` through the agent. Instead, the preset should detect there is only `/clear` from the AST (surrounding whitespace should not matter), notify supervisor, stop the turn, the supervisor sends `/clear` once the turn is done. No output into the exchange. Just `/clear` in the session.
 <!-- /agent:queue -->
 ###
 <!--

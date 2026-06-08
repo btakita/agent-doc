@@ -176,6 +176,7 @@ const TYPING_DIR: &str = ".agent-doc/typing";
 
 /// Directory for latest editor-visible buffer digests, relative to project root.
 const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
+const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
 
 /// Latest editor-visible buffer digest for a document.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -183,6 +184,30 @@ pub struct LiveBufferSnapshot {
     pub path: String,
     pub len: usize,
     pub hash: String,
+    pub timestamp_ms: u128,
+}
+
+/// Write-provenance record for agent-doc's own most-recent disk write to a
+/// document (#pcp2 / #ipc-drift-writeprovenance).
+///
+/// `atomic_write` stamps this on every document disk write (not on `.agent-doc/`
+/// sidecars). The visible-write reconcile guard reads it to *positively* attribute
+/// a foreign-looking disk change to agent-doc's own machinery instead of inferring
+/// "foreign disk write vs genuine unsaved editor edit" from the
+/// `LIVE_BUFFER_STALE_SKEW_MS` filesystem-mtime heuristic. `timestamp_ms` is
+/// agent-doc's own write time, in the same `SystemTime` clock domain as the editor
+/// plugin's `LiveBufferSnapshot.timestamp_ms`, so the two are directly comparable.
+///
+/// `actor` is a free-text provenance label that maps to `agent-doc-core`'s
+/// `OpActor` (today always `"agent"` for binary disk writes); kept as a string here
+/// to avoid coupling the debounce layer to the core op-log crate in this phase.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WriteProvenance {
+    pub path: String,
+    pub len: usize,
+    pub hash: String,
+    pub write_id: String,
+    pub actor: String,
     pub timestamp_ms: u128,
 }
 
@@ -321,6 +346,48 @@ pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
     }
 }
 
+/// Record write-provenance for agent-doc's own disk write to `file` (#pcp2).
+///
+/// Called from `atomic_write` after a successful document write. Best-effort and
+/// must never block or fail the write — callers log on error and continue.
+pub fn record_write_provenance(
+    file: &str,
+    content_len: usize,
+    content_hash: &str,
+    write_id: &str,
+    actor: &str,
+) -> std::io::Result<()> {
+    let prov_path = write_provenance_path(file);
+    if let Some(parent) = prov_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let record = WriteProvenance {
+        path: file.to_string(),
+        len: content_len,
+        hash: content_hash.to_ascii_lowercase(),
+        write_id: write_id.to_string(),
+        actor: actor.to_string(),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    };
+    let encoded = serde_json::to_string(&record)?;
+    std::fs::write(&prov_path, encoded)
+}
+
+/// Return the latest write-provenance record for a document, if one exists.
+pub fn write_provenance(file: &str) -> Option<WriteProvenance> {
+    let path = write_provenance_path(file);
+    let content = std::fs::read_to_string(path).ok()?;
+    let record: WriteProvenance = serde_json::from_str(&content).ok()?;
+    if record.path == file {
+        Some(record)
+    } else {
+        None
+    }
+}
+
 /// Clock skew tolerance (ms) when comparing the live-buffer sidecar timestamp
 /// against the on-disk file mtime. A sidecar is only treated as stale when the
 /// disk was modified at least this much later than the editor last reported, so
@@ -365,9 +432,24 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
         return None;
     }
 
-    // Stale-sidecar suppression: if disk changed after the editor last reported,
-    // the digest is lagging a disk write the editor has not seen — not a live
-    // unsaved buffer. Only suppress on a confident staleness margin so genuine
+    // #pcp2 write-provenance positive attribution: if agent-doc recorded a disk
+    // write to this document *after* the editor last reported its buffer, the
+    // editor digest lags agent-doc's own write — not a user edit — so suppress.
+    // This uses agent-doc's own recorded write time (same SystemTime clock domain
+    // as the editor's `timestamp_ms`), a definitive signal preferred over the
+    // filesystem-mtime heuristic below. A genuine unsaved edit reports *after*
+    // agent-doc's last write (`snapshot.timestamp_ms > prov.timestamp_ms`) and is
+    // still protected. Falls through to the mtime fallback when no provenance
+    // record exists (shadow-mode additive).
+    if let Some(prov) = write_provenance(file)
+        && prov.timestamp_ms > snapshot.timestamp_ms
+    {
+        return None;
+    }
+
+    // Stale-sidecar suppression (fallback): if disk changed after the editor last
+    // reported, the digest is lagging a disk write the editor has not seen — not a
+    // live unsaved buffer. Only suppress on a confident staleness margin so genuine
     // unsaved edits (editor newer than disk) are still protected.
     if let Some(disk_mtime_ms) = file_mtime_ms(file)
         && disk_mtime_ms > snapshot.timestamp_ms.saturating_add(LIVE_BUFFER_STALE_SKEW_MS)
@@ -420,6 +502,32 @@ fn live_buffer_snapshot_path(file: &str) -> PathBuf {
                 .unwrap_or(std::path::Path::new("."))
                 .to_path_buf();
             return parent.join(LIVE_BUFFER_DIR).join(format!("{:016x}", hash));
+        }
+    }
+}
+
+/// Compute the write-provenance file path for a document (#pcp2). Mirrors
+/// `live_buffer_snapshot_path` so the provenance sidecar lands in the same
+/// `.agent-doc/` directory the live-buffer digest uses.
+fn write_provenance_path(file: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut dir = PathBuf::from(file);
+    dir.pop();
+    loop {
+        if dir.join(".agent-doc").is_dir() {
+            return dir.join(WRITE_PROVENANCE_DIR).join(format!("{:016x}", hash));
+        }
+        if !dir.pop() {
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
+            return parent
+                .join(WRITE_PROVENANCE_DIR)
+                .join(format!("{:016x}", hash));
         }
     }
 }
@@ -717,6 +825,94 @@ mod tests {
         assert!(
             live_buffer_diverges_from_content(&doc_str, "saved disk content").is_some(),
             "fresh sidecar with genuine unsaved edits was wrongly suppressed"
+        );
+    }
+
+    #[test]
+    fn write_provenance_roundtrips() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-roundtrip.md");
+        std::fs::write(&doc, "body").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        assert!(write_provenance(&doc_str).is_none());
+        record_write_provenance(&doc_str, 4, &content_hash("body"), "wid-1", "agent").unwrap();
+        let prov = write_provenance(&doc_str).expect("provenance recorded");
+        assert_eq!(prov.path, doc_str);
+        assert_eq!(prov.len, 4);
+        assert_eq!(prov.hash, content_hash("body"));
+        assert_eq!(prov.write_id, "wid-1");
+        assert_eq!(prov.actor, "agent");
+    }
+
+    /// #pcp2: write-provenance positively attributes a stale editor digest to
+    /// agent-doc's own write even when the filesystem-mtime fallback would NOT
+    /// suppress it. The editor reported an old buffer; agent-doc then recorded a
+    /// disk write *after* that report. The disk file itself is not touched after
+    /// the editor report, so the mtime heuristic alone leaves the digest firing —
+    /// provenance is what makes it suppress.
+    #[test]
+    fn write_provenance_suppresses_stale_digest_beyond_mtime_heuristic() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-stale.md");
+        std::fs::write(&doc, "agent-doc wrote this").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor reports an old buffer (the disk write at creation predates this
+        // report, so the mtime fallback cannot suppress: disk is older, not newer).
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let reported = "buffer the editor still shows";
+        document_changed_with_digest(&doc_str, reported.len(), &content_hash(reported));
+
+        // Without provenance, the digest fires (mtime fallback does not suppress).
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "agent-doc wrote this").is_some(),
+            "precondition: without provenance the stale digest should fire"
+        );
+
+        // agent-doc records its own write AFTER the editor's report.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        record_write_provenance(
+            &doc_str,
+            "agent-doc wrote this".len(),
+            &content_hash("agent-doc wrote this"),
+            "wid-stale",
+            "agent",
+        )
+        .unwrap();
+
+        // Provenance positively attributes the stale digest to agent-doc's write.
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "agent-doc wrote this").is_none(),
+            "write provenance should suppress a digest that predates agent-doc's own write"
+        );
+    }
+
+    /// #pcp2 complement: provenance must NOT suppress a genuine unsaved editor
+    /// edit. When the editor reports its buffer AFTER agent-doc's last recorded
+    /// write, the digest represents real unsaved edits ahead of disk and stays
+    /// protected.
+    #[test]
+    fn write_provenance_protects_genuine_unsaved_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-fresh.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // agent-doc records its write first.
+        record_write_provenance(&doc_str, 5, &content_hash("saved"), "wid-fresh", "agent").unwrap();
+
+        // Editor reports unsaved edits AFTER agent-doc's write.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let unsaved = "saved plus a genuine unsaved edit";
+        document_changed_with_digest(&doc_str, unsaved.len(), &content_hash(unsaved));
+
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved").is_some(),
+            "genuine unsaved edit reported after agent-doc's write must stay protected"
         );
     }
 

@@ -13878,7 +13878,35 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         .with_context(|| "failed to write temp file")?;
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    record_document_write_provenance(path, content);
     Ok(())
+}
+
+/// Record write-provenance for agent-doc's own disk write to a session document
+/// (#pcp2 / #ipc-drift-writeprovenance). Skips `.agent-doc/` sidecar/snapshot
+/// writes — provenance is only meaningful for the editor-visible document. The
+/// path is canonicalized to match the lookup key used by the visible-write
+/// reconcile guard. Best-effort: never fails the write.
+fn record_document_write_provenance(path: &Path, content: &str) {
+    if path.components().any(|c| c.as_os_str() == ".agent-doc") {
+        return;
+    }
+    let canonical = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let write_id = uuid::Uuid::new_v4().to_string();
+    let hash = crate::debounce::content_hash(content);
+    if let Err(e) =
+        crate::debounce::record_write_provenance(&canonical, content.len(), &hash, &write_id, "agent")
+    {
+        eprintln!(
+            "[write] WARNING: failed to record write provenance for {}: {}",
+            path.display(),
+            e
+        );
+    }
 }
 
 #[cfg(test)]
@@ -13889,6 +13917,43 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// #pcp2: a document disk write records write-provenance, but `.agent-doc/`
+    /// sidecar/snapshot writes do not (provenance is only meaningful for the
+    /// editor-visible document).
+    #[test]
+    fn atomic_write_records_provenance_for_document_not_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+
+        let doc = tmp.path().join("prov-doc.md");
+        atomic_write(&doc, "hello document").unwrap();
+        let doc_key = doc
+            .canonicalize()
+            .unwrap_or(doc.clone())
+            .to_string_lossy()
+            .to_string();
+        let prov = crate::debounce::write_provenance(&doc_key)
+            .expect("document write should record provenance");
+        assert_eq!(prov.len, "hello document".len());
+        assert_eq!(prov.hash, crate::debounce::content_hash("hello document"));
+        assert_eq!(prov.actor, "agent");
+        assert!(!prov.write_id.is_empty());
+
+        // A write under .agent-doc/ (sidecar/snapshot) must NOT record provenance.
+        let sidecar = tmp.path().join(".agent-doc").join("snapshots").join("s.md");
+        fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        atomic_write(&sidecar, "snapshot bytes").unwrap();
+        let sidecar_key = sidecar
+            .canonicalize()
+            .unwrap_or(sidecar.clone())
+            .to_string_lossy()
+            .to_string();
+        assert!(
+            crate::debounce::write_provenance(&sidecar_key).is_none(),
+            "an .agent-doc/ sidecar write must not record document provenance"
+        );
+    }
 
     #[test]
     fn free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt() {

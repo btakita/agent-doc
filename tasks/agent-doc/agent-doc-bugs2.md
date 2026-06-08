@@ -77,7 +77,15 @@ Verification: `cargo test -p agent-doc-sqlite control_plane_store_counts_extende
 Commits: submodule `3b645117 feat: add controller-backed admin queue controls` pushed to `agent-doc/main`; parent pointer commit `9d3f64fca agent-doc: update controller admin controls` is ready to push with this closeout commit.
 
 Escalation: none. Confidence: high for the completed data and CLI phases; full local suite passed and latest CI was `completed/success`.
-<!-- agent:boundary:1a5af0c9 -->
+
+### Re: final-gate recovery after `#ctrlplane-adminbp-data` — gpt-5
+
+The `#ctrlplane-adminbp-data` queue head was already implemented and committed in the document response above; this cycle closes the follow-up preflight I opened while checking the final gate.
+
+Final repo state: submodule commits `3b645117` and `4c8dfe16` are pushed to `agent-doc/main`; parent commit `16ea33934` records the updated `src/agent-doc` pointer. The earlier verification remains valid: focused controller/storage/CLI tests, `make check`, `make build-release install`, installed `agent-doc 0.34.0`, and latest CI `completed/success`.
+
+No new actionable follow-up items were created by this final-gate recovery cycle.
+<!-- agent:boundary:45f75bdc -->
 <!-- /agent:exchange -->
 
 ## Queue

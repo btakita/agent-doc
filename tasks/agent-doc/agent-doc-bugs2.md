@@ -30,137 +30,21 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-191113.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-210740.md`*
 
 Compacted content:
-- Archived 7 response topic(s): do [#ipc-drift-visbuf-reconcile]; do [#ipc-drift-writeback-serialize]; do [#ipc-drift-order-stable-merge]; 4 more
+- Archived 5 response topic(s): do [#op-scoped-drift-1]; do [#op-scoped-drift-2]; do [#op-scoped-drift-3]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#op-scoped-drift-1] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#op-scoped-drift-1]
-
-
-Shipped phase 1 of the operation-scoped drift model: **actor + causal tagging on node events, plus a durable sqlite op log.** Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
-
-**What landed (agent-doc `a35ee064`, pushed to origin/main):**
-
-- **`agent-doc-core::op_log`** — the pure data layer:
-  - `OpActor` = `agent | user | foreign_supervisor | live_buffer`, with stable snake_case string forms.
-  - `OpSource` provenance signal + source-driven `classify_actor`. At preflight the diff is snapshot↔document, so every node op is classified `user` (the agent's committed output already lives in the snapshot).
-  - `CausalClock { lamport, origin_session }` and the durable `DocumentOp` record (+ `same_mutation` dedupe key).
-- **`agent-doc-sqlite::op_log`** — the durable writer at `.agent-doc/op-log.db`:
-  - `append_ops` assigns a **monotonic per-document Lamport tick** (the store owns clock assignment, so the log is totally ordered per document).
-  - **Idempotent** against the most recent op for a node — a repeated preflight pass over the same uncommitted diff writes no new row and does not advance the clock.
-  - `read_ops` returns rows in Lamport order for the phase-2/3 readers.
-- **Preflight wiring** — each cycle's semantic node events are persisted best-effort (a write failure logs to stderr and never blocks a cycle), tagged with `origin_session` from frontmatter.
-- **Spec** — new "Durable operation log" section in `specs/02-document-format.md` §2.
-
-**Verification:** 9 new unit tests (core/sqlite/preflight) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries. CI run `27161661385` on `a35ee064` is in progress — closing out from local evidence.
-
-This is the substrate the next phases read: `#op-scoped-drift-2` emits the TurnScope read/write set, and `#op-scoped-drift-3`'s affectedness classifier intersects incoming ops against that scope so independent edits integrate + persist without affecting the turn.
-
-### Re: do [#op-scoped-drift-2] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#op-scoped-drift-2]
-
-
-Shipped phase 2: the **TurnScope manifest**, emitted at turn start. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
-
-**What landed (agent-doc `8de34668`, pushed to origin/main):**
-
-- **`agent-doc-core::turn_scope`** — the manifest data layer:
-  - `Address { component, occurrence, node_key? }` — a `node_key` of `None` addresses a whole component occurrence; `Some(..)` narrows to one node.
-  - `TurnScope { driver, read_set, write_set }`. `TurnScope::for_driver` builds the canonical scope from the plan: **read** `{driver, exchange tail}`; **write** `{exchange append, driver strike, backlog, status, review}`. The driver appears in both sets because the turn strikes the queue item it consumes. Addresses dedupe preserving first-seen order.
-- **Preflight derivation** — `derive_turn_scope` resolves the driver queue node by matching each `prompt_target`'s id (`[#id]` or bare `#id`) against the queue item nodes, then emits `turn_scope` in `PreflightOutput`. A prompt with no matching queue node still yields an output-only scope with `driver: null`.
-- **Spec** — new "TurnScope manifest" subsection in `specs/02-document-format.md` §2.
-
-**Verification:** 8 new unit tests (core `turn_scope` + preflight `derive_turn_scope`/`extract_target_id`) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries.
-
-Next: `#op-scoped-drift-3` — the affectedness classifier + 5-class router, which intersects each incoming op (phase 1's actor-tagged op log) against this TurnScope so independent edits integrate and persist without affecting the turn, replacing the coarse drift gate.
-
-### Re: do [#op-scoped-drift-3] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#op-scoped-drift-3]
-
-
-Shipped phase 3: the **affectedness classifier + 5-class router** — the capstone of the operation-scoped drift model. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
-
-**What landed (agent-doc `859a9984`, pushed to origin/main):**
-
-- **`agent-doc-core::turn_scope`** — the decision logic:
-  - `Address::overlaps` — the `conflict` primitive: same component occurrence and (either side component-level, or same node key).
-  - `AffectednessClass` = `independent | input_affecting | output_contended | structural_dependency | provenance_spoofed`, with `affects_turn` true only for classes 2/3/4.
-  - `classify_op(actor, op_kind, address, scope)` — the scope-intersection router: `affects(O,S) = conflict(target, read_set) ∨ conflict(target, write_set)`. Out-of-scope → independent; in-scope `live_buffer` → spoofed; `remove`/`move` → structural; read-set → input-affecting; write-set-only → output-contended.
-  - `classify_cycle` aggregates a cycle's actor-tagged ops (phase 1's op model) into `turn_affected`.
-- **Preflight** emits `op_affectedness` in `PreflightOutput`: every node op routed into the taxonomy against the `turn_scope`. The motivating bug — a queue item inserted **beside** the running one — now classifies `independent` with `turn_affected: false` (the monsterrodholders queue-churn false positive), and a lagging `live_buffer` write classifies `provenance_spoofed`.
-- **Spec** — new "Affectedness classifier" subsection in `specs/02-document-format.md` §2.
-
-**Verification:** 13 new tests (core `turn_scope` classifier + preflight motivating-case integration) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries. Phase 2's `turn_scope` was confirmed live in this session's own preflight.
-
-**The three phases together** give the full substrate: phase 1 actor-tags every op and persists it to the durable Lamport-ordered op log, phase 2 emits the TurnScope manifest at turn start, and phase 3 intersects ops against that scope to route the coarse all-drift-is-affecting assumption into the 5 classes — so independent and spoofed edits integrate and persist without disturbing the turn.
-
-**Follow-up queued** (`agent:backlog`): the remaining step is the *behavioral swap on the live gate* — wiring `op_affectedness` into the finalize-path drift gate (`git::has_non_exchange_component_drift` + the live-buffer divergence check). I deferred it to its own session deliberately: it changes the very gate this active queue-draining session depends on, so doing it mid-session would be reckless. The decision logic it needs is now shipped and tested.
-
-### Re: do [#nm1x] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#nm1x]
-
-Shipped phase 4 — the **behavioral swap**: `op_affectedness` is now wired into the two live finalize-path drift gates, so an edit that doesn't touch what this turn is doing integrates and persists instead of blocking finalize. Prior phases (`#op-scoped-drift-1/2/3`) built and tested the classifier; this is the step that actually changes the gates. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
-
-**What landed (agent-doc `614aea9c`, pushed to origin/main; submodule bumped `759d1c8c3`):**
-
-- **Scope is persisted at turn start.** Preflight writes the turn's read/write manifest (`TurnScope`) to `.agent-doc/turn-scope/<hash>.json`. Finalize runs as a separate process, so it loads that sidecar to judge incoming edits against the same scope. Best-effort: a missing/stale sidecar makes the gate fall back to the old conservative behavior.
-- **Commit gate (`git.rs`).** Instead of "any non-exchange component changed → block", each changed component's item-level edits are classified against the scope. A **queue item added beside the running one** (or an icebox/done edit) is *independent* → it no longer blocks the commit; it just stays in the working tree. A change to the item being answered, a backlog/status/review write, a delete/move, or any change the differ can't fully explain still blocks. This is exactly the monsterrodholders queue-churn false positive.
-- **Live-buffer gate (`write.rs`).** The "visible editor buffer differs" block (exit 75) no longer fires when the editor's buffer **equals the current file on disk** — that means the editor has no unsaved edits ahead of disk, so the difference is the document's own independent edit (the reconcilable case), not a pending user edit. A genuine unsaved buffer ahead of disk still fails closed.
-- **Fixed a latent matching bug** the swap exposed: `Address::overlaps` keyed on an `occurrence` field that real node keys encode as the *global component index*, so `backlog`/`status`/`review`/`exchange` never matched. Overlap now keys on component name + node key; occurrence is informational. (Phase-3's `op_affectedness` was correct only on synthetic node keys until this.)
-
-**Why this was deferred until now:** it changes the very gate this active session uses to finalize. I kept it strictly *more permissive only* — it never adds a new block, so it can't be worse than before — and this turn's own finalize is the live proof: the JB-`/clear` queue item the user added beside `#nm1x` is an independent sibling insert that now sails through.
-
-**Verification:** new unit + regression tests (scope-aware drift gate independent-insert / driver-edit / backlog-contention / unexplained-change, editor-matches-disk reconcile, sidecar round-trip, `overlaps` semantics); full `make check` green (clippy `-D warnings` clean); FlowCore budget +1 audited; release + `cargo install` rebuilt both binaries. CI run `27165660753` is queued — closing from local evidence.
-
-**Still open (queued `#nm1x-livebuf-content`):** the live-buffer gate only suppresses the *editor-matches-disk* false positive. A genuine **unsaved** independent edit still blocks conservatively, because the live-buffer sidecar stores only a length/hash — no content to classify. Capturing the buffer text needs an editor-plugin change; queued as its own item.
-
-(Exchange is large but the queue is active, so I'm not stalling to compact.) Next in the queue: the JB `Run Agent Doc` / `/clear` item.
-
-### Re: JB Run Agent Doc should not pre-emptively run /clear — opus-4-8
-
-> **Queue prompt:**
->
-> On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.
-
-Fixed, and root-caused from this session's own logs rather than guessed. Shipped agent-doc `003e8a15` (submodule bump `8668b85bb`); pushed to origin/main.
-
-**What was actually happening.** I traced the `/clear` for this Claude doc through `.agent-doc/logs/*.log`: the source is `auto_trigger_clear` from the **supervisor idle-queue watch** (`start.rs`), not the route/dispatch path and not the Codex hook (the `idle_queue_watch_context_reset` log lines were all `harness=codex`, other docs). The watch interleaves `/clear` before a queue head whenever session accretion is "unhealthy" — and this session's exchange is large, so it fired **12+ times** (the churn you saw). It was gated only on *pane idle + not mid-turn*, which still (a) churns the session and (b) races a turn that starts between the check and the keystroke → `'/clear' is disabled while a task is in progress`.
-
-**The fix — pre-emptive clear is now opt-in, default off.**
-
-- New setting `agent_doc_queue_context_reset` (document frontmatter takes precedence, then `.agent-doc/config.toml`), mirroring the existing `agent_doc_auto_compact` opt-in for automatic context management.
-- The supervisor idle-queue watch consults it before signalling an accretion-driven reset; **without the opt-in it never fires a pre-emptive `/clear`**. A manual `Run Agent Doc` (or an auto-loop drain) now leaves the queue-head dispatch un-preceded by `/clear`.
-- **Deferred *operator* clears stay live** — an explicit `session clear` / `interrupt-clear` that was deferred past a busy turn is a separate path and still delivers. Only the *automatic accretion-driven* clear is gated.
-
-**Scope I deliberately did not change:** the Codex Stop-hook and `run.rs` also call the shared accretion policy. Your directive was specific to *JB Run Agent Doc* (Claude), and the logs confirmed the supervisor watch as the source, so I gated only that. Whether the no-pre-emptive-clear policy should be product-wide (Codex too) is a real but separate decision — queued as `#nm1x-codex-clear-parity [recommended]`.
-
-**Verification:** unit tests (opt-in defaults off + honors frontmatter; the accretion-reason tests stay green; the Codex fresh-context test stays green because its path is untouched); full `make check` green (clippy clean); release + `cargo install` rebuilt both binaries. The running supervisor for *this* session is the previous binary, so this change takes effect on the next supervisor start — it can't disrupt the loop currently draining this queue. CI `27166737079` queued; the prior `#nm1x` run `27165660753` went green.
-
-That drains the queue. (Exchange is large but I'm not stalling to compact mid-active-queue.)
-<!-- agent:boundary:5c0cd0ed -->
+<!-- agent:boundary:3a4f17da -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.~~
+- :round_pushpin: do [#nm1x-livebuf-content]
+- :pushpin: do [#nm1x-codex-clear-parity]. Respect the new `agent_doc_queue_context_reset` opt-in
 - On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold.
-- do [#nm1x-livebuf-content]
 - Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.
 <!-- /agent:queue -->
 ###

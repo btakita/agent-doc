@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,7 +63,7 @@ Validation completed:
 - `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
 
 Committed and pushed tsift: `a39d6e5 feat: columnize source-read envelopes`. Superproject pointer committed: `bc60866a9 chore: update tsift submodule`.
-<!-- agent:boundary:0ed23194 -->
+<!-- agent:boundary:b9fe3bee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +72,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
+- I notice that we stopped install the runbook. Should we go back to the runbook approach with the latest Codex reuse data?
 <!-- /agent:queue -->
 
 ## Backlog

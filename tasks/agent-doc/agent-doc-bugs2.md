@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -200,13 +200,33 @@ CI status checked once:
 Confidence: high. The regression tests cover parser whitespace, preflight no-cycle behavior, direct-run slash suppression, owner-pane diagnostic text, and planning classification.
 
 Escalation: none. Unrelated dirty superproject files were left untouched.
-<!-- agent:boundary:dbd174f1 -->
+
+### Re: queue closeout recovery — gpt-5
+
+> **Queue prompt:**
+>
+> The last turn went through a full turn and ran `/clear` through the agent. Instead, the preset should detect there is only `/clear` from the AST (surrounding whitespace should not matter), notify supervisor, stop the turn, the supervisor sends `/clear` once the turn is done. No output into the exchange. Just `/clear` in the session.
+
+
+The slash-only active queue head was already implemented, committed, pushed, and verified in the immediately preceding response. This recovery closeout consumes that queue head after repairing the malformed queue opener left by the failed consume attempt.
+
+No actionable follow-up backlog item is being requested or deferred by this closeout.
+
+Implementation commits remain:
+- `src/agent-doc`: `65e2cb90 route slash-only queue heads to supervisor handoff`
+- superproject: `24baaccf8 agent-doc: update slash-only queue handoff`
+
+Verification remains as recorded above: focused regression tests, `make check`, `cargo build`, `git diff --check`, `cargo install --path .`, and `agent-doc --version` all passed. CI was checked once; `src/agent-doc` CI was in progress and the superproject has no workflow named `CI`.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:4fca8927 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- The last turn went through a full turn and ran `/clear` through the agent. Instead, the preset should detect there is only `/clear` from the AST (surrounding whitespace should not matter), notify supervisor, stop the turn, the supervisor sends `/clear` once the turn is done. No output into the exchange. Just `/clear` in the session.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

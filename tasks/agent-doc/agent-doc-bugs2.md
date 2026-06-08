@@ -35,7 +35,28 @@ complete
 Compacted content:
 - Archived 4 response topic(s): `#ctrlplane-adminbp-queue`; `#ctrlplane-simworld`; active queue continuation closeout; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0bc97660 -->
+Yes. I treated this as a real queue-control path rather than just a backlog note and implemented the preparatory queue support now.
+
+What changed:
+- Added shared slash-command classification in `agent-doc-orchestration/src/queue_command.rs` so queue/exchange-like prompt text can distinguish ordinary prompts from literal harness commands.
+- Wired the idle queue drain path so a queue head like `/clear`, `/new`, `/model sonnet`, or any other non-empty slash command is submitted literally to the owner pane after the current turn reaches idle, instead of being wrapped as an agent-doc continuation prompt.
+- After a slash queue command is submitted, the queue head is consumed with the existing force-disk queue consumption path and committed, so the remaining queue can continue.
+- Kept `/clear` and `/new` as context-reset commands for the existing Codex/OpenCode hook bookkeeping, while allowing other slash commands to run as generic slash commands.
+- Updated Codex Stop-hook and `session-check --codex-final-gate` diagnostics so slash queue heads are reported as queued commands to submit, not prompts to answer.
+- Updated the orchestration command spec and release notes.
+
+I also added the requested backlog follow-up `#ckvm` for the remaining exchange-origin variant: literal slash commands typed in `agent:exchange` should use the same after-turn command submission flow rather than being answered as prose.
+
+Verification passed:
+- Focused slash-command and queue-dispatch tests.
+- Focused idle queue slash command tests, including `/clear`, generic `/model sonnet`, Stop-hook diagnostics, and consume+commit behavior.
+- `make check`.
+- `make install`.
+- `git diff --check`.
+- Latest GitHub Actions CI run on `main` was already `completed success`.
+
+Code commit: `src/agent-doc` `19b70a1f` (`Run slash queue heads as commands`), pushed to `origin/main`. Superproject pointer commit: `0ff4619c6` (`Update agent-doc slash queue support`).
+<!-- agent:boundary:1923e0c6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -69,6 +90,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#ckvm] Extend the new slash-command classifier and after-turn command submission flow to exchange-origin slash prompts, so a literal `/clear` or other `/` command typed in `agent:exchange` is submitted after the current turn instead of answered as prose.
 <!-- /agent:backlog -->
 
 ## Review

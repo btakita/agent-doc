@@ -66,7 +66,41 @@ Verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:f6409e8c -->
+
+### Re: tsiftastselect — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftastselect]
+
+
+Completed `#tsiftastselect`.
+
+Changed paths:
+- `src/tsift/packages/tsift-cli/src/semantic_edit.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/specs/ast-edits.md`
+
+What changed:
+- Added `target_handle` to semantic edit intents.
+- Added read-only target-handle resolution for concrete `span-*`, `ssym-*`, `sread-*`, and `gsym-*` handles, with `target_selection` proof in dry-run/apply plans.
+- Non-concrete `sfam-*`, `srnk-*`, and `shit-*` search preview handles fail closed with guidance to use a nested `ast.span.handle`.
+- Added CLI integration coverage for search AST span, symbol-read, and graph handles staying dry-run/no-mutation.
+- Updated the AST/CST edit spec with the target-selection contract.
+- Committed and pushed the tsift submodule change: `bad3db355` (`feat: resolve semantic edit target handles`).
+- Committed and pushed the agent-loop submodule pointer update: `243990888` (`chore: update tsift submodule`).
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_resolves -- --nocapture'`: passed, exit code 0, artifact `tart-358ef42396`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, exit code 0, artifact `tart-60eb6b6275`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, exit code 0, artifact `tart-99633b041d`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI run was `in_progress` for `feat: resolve semantic edit target handles` at 2026-06-08T18:38:38Z.
+- `gh run list --workflow CI --limit 1` in the parent repo: no workflow named `CI`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:575cca80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +111,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#tsiftasteditspec]~~
-- do [#tsiftastselect]
+- ~~do [#tsiftastselect]~~
 - do [#tsiftastpatch]
 - do [#tsiftastops]
 - do [#tsiftasttests]
@@ -86,7 +120,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsiftastselect] Prototype AST/CST edit-target selection that maps `search` / `symbol-read` / graph handles to concrete node spans without mutating files.
 - [ ] [#tsiftastpatch] Implement a patch-proposal interface for AST/CST operations that emits minimal diffs, preserves comments/formatting/trivia where supported, and refuses unsupported parser states.
 - [ ] [#tsiftastops] Add the first narrow AST/CST-backed edit operations, starting with import insertion and function-body replacement before broader rename/move operations.
 - [ ] [#tsiftasttests] Add fixtures and tests for the AST/CST edit path covering comments, formatting preservation, macros or generated sections, mixed-language blocks, syntax-error work-in-progress files, and verification failures.

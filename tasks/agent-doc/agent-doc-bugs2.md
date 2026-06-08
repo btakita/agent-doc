@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -67,12 +67,14 @@ CI: `btakita/agent-doc` CI for commit `f7d34b0e` was `in_progress` when checked 
 
 The `#ckvm` queue head is complete and the repair preflight has persisted the recovered response, reaped backlog item, done archive update, and drained queue state. No further queue prompt remains for this document.
 Closeout repair for the active Codex continuation: the `#ckvm` implementation response is already committed, and this pass persists the drained queue/done-archive maintenance state for the same completed queue head.
-<!-- agent:boundary:c3234395 -->
+/clear
+<!-- agent:boundary:024a61d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" -->
+- /clear
 <!-- /agent:queue -->
 ###
 <!--

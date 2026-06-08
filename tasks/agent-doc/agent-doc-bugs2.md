@@ -101,7 +101,28 @@ Investigated this session and the IPC/CRDT write path. The IPC drift, "too much 
 **Phase 1 shipped** (`src/agent-doc@9ecb5775`, pushed): `#ipc-degrade-false-vote` (confirmed-but-slow sidecar no longer votes; recovers via file-IPC, still the Plugin path), `#ipc-ack-timeout-align` (2 s → 6 s, above the plugin idle cap; connect-first keeps dead-listener fast-fail), `#ipc-degrade-self-heal` (`ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch on recovery — a self-healing circuit breaker). Full suite 4057 passed; both binaries rebuilt/installed; CI `27168907477` in progress at push. Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
 
 **Live meta-note:** landing this very response repeatedly hit `live_prompt_drift_after_preflight` / exit 75 plus a supervisor self-race on pane %30 (route "could not drain the active closeout"). Recovery needed `reset --from-current --preserve-session` + retiring stale captures. That is a *different* guard than the degrade latch I fixed — the visible-write reconcile failing closed on concurrent editing — and is exactly the `#ipc-drift-writeprovenance` / `#nm1x-livebuf-content` follow-up surface.
-<!-- agent:boundary:9d4883b7 -->
+
+### Re: Fix the root cause of the compounding stale-capture deadlock — opus-4-8
+
+Fixed and shipped (`src/agent-doc@ec2bf878`, pushed) — and the fix just auto-recovered *this very session's* wedge live (`[repair] retired wedged write-applied capture ... rebuilt snapshot/CRDT from current`), no manual `reset --from-current --preserve-session` needed.
+
+**Root cause.** A `finalize` advanced the cycle to `write_applied` (response written to disk), but a concurrent editor edit / CRDT intermix then removed or fragmented that response body **and** drifted the captured baseline. By the time `repair` re-runs (next route closeout drain, `commit`, or `write --commit`):
+- `response_already_applied*` is false — the body is no longer contiguously present, so it isn't recognized as already-landed, and
+- `capture::validate_replay` fails closed — the captured file/snapshot hashes no longer match.
+
+That combination wedged the document: every later `commit` / `write --commit` / route drain hit "captured response baseline no longer matches current document" and bailed. The route-side "owns pane %30 but route could not drain the active closeout" was the same wedge surfacing through `drain_open_closeout_before_routed_dispatch` → `repair` → `validate_replay`.
+
+**The fix** (`repair::retire_wedged_write_applied_capture_if_drifted`): when repair sees that exact signature — capture `WriteApplied` + `replay_baseline_drifted` + body absent — it mirrors the non-destructive `reset --from-current --preserve-session` automatically instead of failing closed:
+- marks the capture `Discarded` (body **preserved on disk** for forensics, never deleted),
+- rebuilds the snapshot **and** CRDT sidecars from the current document so the merge layer can't re-diverge,
+- closes the cycle committed and returns `RepairOutcome::StaleCaptureRetired`.
+
+The superseded turn re-runs cleanly on the rebuilt baseline (queue prompts survive in `agent:queue`). Replaying a drifted baseline is exactly the duplicate/reorder corruption `validate_replay` exists to prevent, so re-running fresh is the correct recovery, not a regression.
+
+**Scoping (why it's safe).** Gated to `WriteApplied` captures only — the write was already attempted, so it isn't a never-written pending body. A `Captured`-only orphan still takes the conservative fail-closed path (queued as `#stale-capture-captured-only-drift` to evaluate later). All three callers (route drain, `commit`, `write --commit`) benefit because they funnel through `repair`.
+
+**Verification.** `make check` green — clippy clean, **4060 passed / 237 skipped** — incl. `retires_wedged_write_applied_capture_on_baseline_drift`, `captured_only_orphan_on_drift_still_fails_closed`, `replay_baseline_drifted_tracks_file_divergence`. `cargo build --release` + `cargo install --path .` done (both binaries, 0.34.0). Spec §07-closeout-commands documents `#stale-capture-deadlock-autoretire`. CI `27170755210` in progress for this commit; closed out on local evidence per the test-bearing-turn rule. The deeper *upstream* cause (why the response fragments during concurrent editing) stays the queued `#ipc-drift-writeprovenance` / review `#ipc-crdt-response-drift` surface — this change is the recovery half.
+<!-- agent:boundary:d6bd277d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -166,7 +187,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Riskier because a never-written response is more likely genuinely pending, so gate on positive superseding-turn evidence before retiring. Lower priority than the upstream #ipc-drift-writeprovenance intermix fix.
+- [ ] [#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-degraded-prefers-file-ipc] When genuinely degraded, route writes through the file-IPC patch queue (plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures IDEA File Cache Conflicts. Disk write becomes true last resort. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-drift-writeprovenance] Tag agent-doc's own disk writes with a write-provenance/generation id so guard_visible_write_reconcile / live_buffer_diverges_from_content positively attribute a foreign disk change to the supervisor instead of inferring from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic. Builds on #op-scoped-drift-* provenance. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md

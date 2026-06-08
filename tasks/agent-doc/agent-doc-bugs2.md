@@ -97,7 +97,13 @@ No new actionable follow-up items were created by this metadata-convergence cycl
 The completed `#ctrlplane-adminbp-data` closeout has already been written and committed; this hook recovery only closes the active Codex turn metadata so the final gate can pass.
 
 No new actionable follow-up items were created by this stop-hook recovery cycle.
-<!-- agent:boundary:9552011a -->
+
+### Re: backlog-capture rubric closeout — gpt-5
+
+This cycle only corrects the closeout wording for the Codex stop-hook recovery; the `#ctrlplane-adminbp-data` work and backlog state are unchanged.
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:864aad73 -->
 <!-- /agent:exchange -->
 
 ## Queue

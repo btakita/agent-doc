@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -229,26 +229,60 @@ Notes:
 - I left unrelated working-tree drift unstaged, including the submodule `AGENTS.md` tsift marker update and existing parent-level edits.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:210b9b73 -->
+## Implemented #ctrlplane-crashrecover
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-crashrecover]
+
+
+Built the controller restart recovery sweep in `src/agent-doc`:
+
+- `ControllerRuntime::new` now detects generation restart / previous controller PID handoff and runs a bounded recovery pass before serving new requests.
+- Recovery rebuilds the in-memory actor map from committed SQLite state, reconciles supervisor leases into `crash_recovery_markers`, reconciles open dispatch receipts as retryable/blocked, preserves open closeout/document cycles without queue/backlog advancement, and re-emits compatibility projections (`session-actors.json`, `sessions.json`, layout) from SQLite authority.
+- Projection repair failures are recorded through projection diagnostics instead of falling back to JSON authority.
+- Added a regression covering corrupted/missing projections, durable actor/lease/receipt/cycle/layout state, generation-2 runtime startup, marker insertion, projection repair, and preservation of an open document cycle.
+- Updated `specs/08b-single-process-control-plane.md` with the concrete crash/restart contract.
+
+Changed paths:
+
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration project_controller::tests::controller_restart_recovery_rebuilds_memory_and_repairs_projections`
+- `cargo test -p agent-doc-orchestration project_controller::tests::`
+- `cargo test -p agent-doc-sqlite`
+- `make check`
+- `cargo install --path .`
+- GitHub Actions `CI` for `btakita/agent-doc` run `27112005871`: passed (`make check` and `make tmux-ci`)
+- Parent repo has no workflow named `CI`.
+
+Commits pushed:
+
+- `src/agent-doc`: `5f9a2d88 controller: recover state after restart`
+- parent repo: `e9dcf752a agent-doc: update crash recovery pointer`
+
+Follow-up harness update requested during closeout:
+
+- Updated root `AGENTS.md` and `runbooks/code-navigation.md` so future turns inspect the latest `gh run list --workflow CI --limit 1` result once, fix already-failing relevant tests, and do not wait on queued/in-progress CI or use `gh run watch` unless explicitly asked.
+- Pushed parent commit `9cbc85b55 agent-doc: avoid blocking on pending CI`.
+
+Notes:
+
+- Left unrelated local drift unstaged, including `src/agent-doc/AGENTS.md` tsift instruction drift and existing parent worktree changes.
+- The exchange is large, but the queue remains active, so I continued without compacting.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:8ccab957 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#ctrlplane-process]~~
-- ~~:round_pushpin: do [#ctrlplane-memoryauth]~~
-- ~~:pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?~~
-- ~~:round_pushpin: do [#ctrlplane-dispatchapi]~~
-- ~~:round_pushpin: do [#ctrlplane-sessionactor]~~
-- ~~:pushpin: stop~~
-- ~~:round_pushpin: do [#ctrlplane-projections]~~
-- :round_pushpin: do [#ctrlplane-crashrecover]
-- :round_pushpin: do [#ctrlplane-adminbp]
-- :round_pushpin: do [#ctrlplane-simworld]
-- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
-- stop
-- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
-- ~~do [#ctrlplane-storeactor]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -274,7 +308,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.
 - [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.
 - [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.
 <!-- /agent:backlog -->

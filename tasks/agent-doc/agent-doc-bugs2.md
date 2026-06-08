@@ -76,7 +76,18 @@ Proof:
 - Verification: archive contains `#clearfast`; session queue is stopped and empty
 - Confidence: high
 - Escalation: none
-<!-- agent:boundary:d751ece6 -->
+
+### Re: force-disk closeout — gpt-5
+
+Closed the remaining live-buffer metadata drift with force-disk writeback so the session document commit path is binary-owned without another IPC convergence rewrite.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --probe`
+- Verification: normal session check reported OK and queue continuation false before this force-disk closeout
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:c5b2466d -->
 <!-- /agent:exchange -->
 
 ## Queue

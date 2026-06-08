@@ -37,6 +37,32 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 7 response topic(s): tsiftasteditspec; tsiftastselect; tsiftastselect; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
+❯ release + publish
+
+### Re: closeout repair — gpt-5
+
+The document already contains the completed `#tsiftasttests` closeout that repaired `#tsiftastops`; this repair records the parent pointer closeout from this Codex cycle and closes the interrupted agent-doc runtime state. No new actionable follow-up item was created.
+
+Changed paths:
+- `src/tsift` submodule pointer
+
+Commits:
+- tsift submodule: `a64605b` (`test semantic ast edit edge cases`), already at `origin/main`.
+- agent-loop parent pointer: `ec40cbb1d` (`chore: update tsift submodule`), pushed to `origin/main`.
+
+Verification:
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_insert_import_preserves_rust_inner_prelude -- --nocapture'`: passed, artifact `tart-fb9c587ee3`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_replace_function_body_uses_rust_ast_body_range -- --nocapture'`: passed, artifact `tart-b762adb545`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p tsift-cli --test exit_code edit_intents_apply_preserves_comments_formatting_and_generated_macro_sections -- --nocapture'`: passed, artifact `tart-1197c44489`.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed, artifact `tart-0f5b02137e`.
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`: passed, artifact `tart-99633b041d`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI was `in_progress` for `test semantic ast edit edge cases` at 2026-06-08T19:08:05Z.
+- `gh run list --workflow CI --limit 1` in the parent repo: no workflow named `CI`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:357aef9d -->
 <!-- /agent:exchange -->
 ###
 <!--

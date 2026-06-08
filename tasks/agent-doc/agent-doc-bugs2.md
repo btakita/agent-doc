@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -103,7 +103,6 @@ Verification:
 - `agent-doc --version` -> `agent-doc 0.34.0`
 
 CI: latest `btakita/agent-doc` CI for commit `5847da11` was `in_progress` when checked after push. The superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. No escalated sandbox approval was requested.
-/clear
 
 ### Re: /clear — gpt-5
 
@@ -143,14 +142,26 @@ Verification:
 - `cargo install --path .` installed `agent-doc 0.34.0`
 
 CI: latest `btakita/agent-doc` CI for `ae34062e` was `in_progress` when checked; the superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. The exchange is still churn-heavy, but I kept draining the active queue instead of stopping for compaction.
-/clear
-<!-- agent:boundary:b5516947 -->
+
+### Re: /clear — gpt-5
+
+Processed `/clear` as the active queued slash command. No implementation changes were needed in this pass; this closeout consumes the queue head so the supervisor can own the actual context-clear boundary after the turn is idle.
+
+Changed paths: only the session document closeout state for `tasks/agent-doc/agent-doc-bugs2.md`.
+
+Commands: `tsift status`; `agent_doc_session_check`; `agent_doc_preflight --probe`; `agent_doc_read`; `agent_doc_plan`; `agent_doc_finalize`.
+
+Verification: preflight reported the document OK before this closeout, and the required final gate will be checked after the committed finalize.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:1e42591b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- /clear
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

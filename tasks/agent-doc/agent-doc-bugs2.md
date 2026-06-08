@@ -136,8 +136,40 @@ Commands/proof:
 Verification: not applicable; no code changes.
 
 Push: pending root document commit push after this closeout.
+Implemented `#ctrlplane-dispatchapi`.
 
-<!-- agent:boundary:1b334455 -->
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-dispatchapi]
+
+
+The project controller now returns typed durable dispatch receipts while keeping existing authorization callers compatible. `DispatchAuthorization` still exposes `accepted_stage`, but now also includes a `receipt` with `receipt_id`, typed result status, stage, proof scope, and `dispatch_start_proven`. Dispatch and operator-command rejections now persist a receipt before returning the rejection, so stale session/pane/generation and blocked/closed actor decisions are durable too.
+
+The SQLite store now records receipt metadata on `dispatch_attempts` (`result_status`, `proof_scope`, `dispatch_start_proven`) and returns the inserted row id. Existing DBs are migrated in place by `initialize_state_db`. `SessionOperatorStatus.dispatch_attempts` now reports the receipt id and proof metadata.
+
+I also added the controller `admin_operation` API as the durable receipt target for admin-class commands as they migrate toward the controller path. It records operation kind, optional document id, typed status, and diagnostic payload in `admin_operations`, then returns a typed admin receipt.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-sqlite/src/state_store.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+
+Verification:
+- `cargo test -p agent-doc-orchestration project_controller::tests::`
+- `cargo test -p agent-doc-sqlite`
+- `make check`
+- `cargo install --path .`
+
+Commits/push:
+- `src/agent-doc`: `3978a949 controller: return durable dispatch receipts`, pushed to `origin/main`.
+- `agent-loop`: `f7064b72e agent-doc(agent-doc): update dispatch receipt pointer`, pushed to `origin/main`.
+
+CI:
+- Previous `src/agent-doc` CI was green before closeout.
+- New `src/agent-doc` CI for `3978a949` is `in_progress` (`27110969213`, started 2026-06-08 01:27:01Z), so I did not wait on it.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:a75563a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -146,7 +178,7 @@ Push: pending root document commit push after this closeout.
 - ~~do [#ctrlplane-process]~~
 - ~~:round_pushpin: do [#ctrlplane-memoryauth]~~
 - ~~:pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?~~
-- :round_pushpin: do [#ctrlplane-dispatchapi]
+- ~~:round_pushpin: do [#ctrlplane-dispatchapi]~~
 - :round_pushpin: do [#ctrlplane-sessionactor]
 - :round_pushpin: do [#ctrlplane-projections]
 - :round_pushpin: do [#ctrlplane-crashrecover]
@@ -178,7 +210,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
+- [x] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
 - [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
 - [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.

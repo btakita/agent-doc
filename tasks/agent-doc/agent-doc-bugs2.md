@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,13 +35,23 @@ complete
 Compacted content:
 - Archived 1 response topic(s): Why is "stale sidecar content" a persistent issues with monsterrodholders.md? What is the "sidecar content"? Is there...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3ff02e24 -->
+
+### Re: sidecar rearchitecture backlog — gpt-5
+
+> **Queue prompt:**
+>
+> Add backlog items for the sidecar rearchitecture. I want to use a sqlitedb for the durable state. The canonical state should live in memory, ideally with lazily-rs, while the background durable state is written to the Sqlite db. Are using the unified Control Pane process?
+
+
+Assuming "Control Pane" means the existing `Single Process Control Plane` contract: yes, that should be the target, but it is not fully landed yet. Current code already uses the project controller and `.agent-doc/state.db` for actor records; the rearchitecture should finish consolidating controller, session, store, and supervisor actors into one project-scoped control-plane process, with external CLIs/editors still talking to it over IPC.
+
+I added backlog slices for the unified process, the SQLite write-through store, lazily-rs-backed in-memory authority evaluation, dispatch/session actors, projection cleanup, crash recovery, admin/backpressure, and deterministic SimWorld coverage. I kept them ordered so authority moves to the controller before obsolete sidecar writers are removed.
+<!-- agent:boundary:f20f2891 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- Add backlog items for the sidecar rearchitecture. I want to use a sqlitedb for the durable state. The canonical state should live in memory, ideally with lazily-rs, while the background durable state is written to the Sqlite db. Are we 
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -67,6 +77,15 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#ctrlplane-process] #agent-doc-bug Implement the unified project-scoped control-plane process: host the dispatch actor, store actor, per-document session actors, supervisor adapters, and projection workers in one controller-owned runtime while keeping CLI/editor IPC as the external boundary.
+- [ ] [#ctrlplane-storeactor] #agent-doc-bug Extend the `.agent-doc/state.db` store actor beyond actor records: one WAL SQLite writer owns actor state, lifecycle transitions, dispatch receipts, queue heads, closeout/cycle state, projection diagnostics, admin operations, and crash-recovery markers.
+- [ ] [#ctrlplane-memoryauth] #agent-doc-bug Make runtime actor/session state canonical in memory with SQLite as durable write-through storage; evaluate lazily-rs for the in-memory map/index layer and require accepted state-changing results to update memory plus commit one SQLite transaction before returning.
+- [ ] [#ctrlplane-dispatchapi] #agent-doc-bug Route `route`, `start`, `sync`, `session clear/restart/status`, `repair`, `preflight`, and `write/finalize` through typed controller dispatch/admin APIs that return durable receipts and distinguish accepted-only pane delivery from dispatch-start proof.
+- [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
+- [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
+- [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.
+- [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.
+- [ ] [#ctrlplane-simworld] #agent-doc-bug Add deterministic SimWorld and CLI integration coverage for the control plane: concurrent route/start/sync/clear races, stale session/pane/generation rejection, busy queue promotion, closeout plus backlog completion, crash before/after commit, projection failure, supervisor heartbeat reattach, admin handoff/reap, and Codex/Claude/OpenCode proof differences.
 <!-- /agent:backlog -->
 
 ## Review

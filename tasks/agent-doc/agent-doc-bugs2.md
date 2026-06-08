@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,13 +35,13 @@ complete
 Compacted content:
 - Archived 1 response topic(s): Why is "stale sidecar content" a persistent issues with monsterrodholders.md? What is the "sidecar content"? Is there...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b774fd9d -->
+<!-- agent:boundary:3ff02e24 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Add backlog items for the sidecar rearchitecture. I want to use a sqlitedb for the durable state. The canonical state should live in memory, ideally with lazily-rs, while the background durable state is written to the Sqlite db.
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- Add backlog items for the sidecar rearchitecture. I want to use a sqlitedb for the durable state. The canonical state should live in memory, ideally with lazily-rs, while the background durable state is written to the Sqlite db. Are we 
 <!-- /agent:queue -->
 ###
 <!--

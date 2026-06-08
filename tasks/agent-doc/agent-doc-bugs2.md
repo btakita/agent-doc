@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -34,13 +34,45 @@ complete
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5359a9a2 -->
+
+### Re: churn from repeated committed-cycle finalize — gpt-5
+
+> **Queue prompt:**
+>
+> Why was there so much churn in the previous 2 turns? There were 3 agent:boundary elements and the document went through 2 repair cycles. I did not type anything when the turn was going. Please fix.
+
+
+Root cause: this was not from new user typing. The previous auto-loop/recovery path could finalize the same already-committed cycle again with an explicit stale baseline. That second write could append another `### Re:` block and move/recreate `agent:boundary` markers; the later repair cycles were cleanup for that duplicated response/prompt/boundary state.
+
+Fix: added a strict pre-write gate in `agent-doc-orchestration/src/write.rs` that rejects explicit-baseline response writes when the latest cycle state is already `committed`. It logs `explicit_baseline_replay_rejected` and tells the caller to run `agent-doc preflight` to open a new binary-owned cycle first. A real follow-up still works: after a fresh preflight opens a new cycle, stale exchange baselines can still rebase to HEAD.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/write.rs`
+- `src/agent-doc/tests/finalize_integration.rs`
+- `src/agent-doc/tests/test_cli.rs`
+
+Commits:
+- `src/agent-doc`: `12215ab6 agent-doc: block stale finalize replay`
+- parent repo gitlink: `c8e816bbd agent-doc: update stale finalize replay fix`
+
+Verification:
+- `cargo test --test finalize_integration finalize_stream_`
+- `cargo test --test codex_hook_integration codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- latest checked GitHub Actions CI run for `CI`: completed success on `main` at 2026-06-08T05:43:33Z
+
+Pushed:
+- `btakita/agent-doc main` to `12215ab6`
+- `btakita/agent-loop main` to `c8e816bbd`
+<!-- agent:boundary:13f9d9bf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- Why was there so much churn in the previous 2 turns? There were 3 agent:boundary elements and the document went through 2 repair cycles. I did not type anything when the turn was going. Please fix.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

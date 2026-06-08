@@ -210,6 +210,13 @@ pub struct ProjectConfig {
     /// Session-accretion heuristics never compact by themselves; omit to disable.
     #[serde(default, alias = "auto_compact")]
     pub agent_doc_auto_compact: Option<usize>,
+    /// Explicit opt-in for the supervisor idle-queue watch to pre-emptively
+    /// interleave a context-clear (`/clear`) before an active queue head when
+    /// session accretion is unhealthy (`#nm1x-no-preempt-clear`). Off by default
+    /// so a manual `Run Agent Doc` / auto-loop drain never fires a pre-emptive
+    /// `/clear` that churns the session or is rejected mid-turn.
+    #[serde(default, alias = "queue_context_reset")]
+    pub agent_doc_queue_context_reset: Option<bool>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,

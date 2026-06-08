@@ -123,6 +123,25 @@ fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Opti
         .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS))
 }
 
+/// Whether the supervisor idle-queue watch is allowed to pre-emptively
+/// interleave a context-clear (`/clear`) before a queue head
+/// (`#nm1x-no-preempt-clear`). Off by default: a frontmatter
+/// `agent_doc_queue_context_reset: true` takes precedence, then the project
+/// config `.agent-doc/config.toml`. Without an explicit opt-in the watch never
+/// fires a pre-emptive `/clear`, so a manual `Run Agent Doc` or an auto-loop
+/// drain does not churn the session or hit `/clear` rejected mid-turn.
+pub fn queue_context_reset_opted_in(file: &Path) -> bool {
+    if let Ok(content) = std::fs::read_to_string(file)
+        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+        && let Some(flag) = fm.queue_context_reset
+    {
+        return flag;
+    }
+    crate::project_config_io::load_project_for_doc(file)
+        .agent_doc_queue_context_reset
+        .unwrap_or(false)
+}
+
 pub fn queue_context_reset_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
@@ -703,6 +722,21 @@ mod tests {
             "auto-compact must be off by default; should not emit imperative compact guidance without opt-in, got {:?}",
             report.guidance
         );
+    }
+
+    #[test]
+    fn queue_context_reset_opt_in_defaults_off_and_honors_frontmatter() {
+        // `#nm1x-no-preempt-clear`: the supervisor idle-queue watch consults this
+        // opt-in before signalling an accretion-driven context reset. It must
+        // default off so a manual `Run Agent Doc` / auto-loop drain never fires a
+        // pre-emptive `/clear`, and honor an explicit frontmatter opt-in.
+        let off = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir_off, doc_off) = setup_doc(off);
+        assert!(!queue_context_reset_opted_in(&doc_off), "opt-in defaults off");
+
+        let on = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir_on, doc_on) = setup_doc(on);
+        assert!(queue_context_reset_opted_in(&doc_on), "frontmatter opt-in honored");
     }
 
     #[test]

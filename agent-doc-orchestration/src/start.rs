@@ -2119,7 +2119,17 @@ fn spawn_idle_queue_watch_thread(
                     }
                 }
 
-                let context_reset_reason = if clear_cooldown_active {
+                // `#nm1x-no-preempt-clear`: the accretion-driven pre-emptive
+                // `/clear` interleave is opt-in. Without an explicit
+                // `agent_doc_queue_context_reset` opt-in (frontmatter or
+                // `.agent-doc/config.toml`), the idle-queue watch never fires a
+                // pre-emptive `/clear` before a queue head — so a manual
+                // `Run Agent Doc` or auto-loop drain does not churn the session
+                // or hit `/clear` rejected mid-turn. Deferred *operator* clears
+                // (an explicit `session clear`) are a separate path and stay live.
+                let context_reset_reason = if clear_cooldown_active
+                    || !crate::session_accretion::queue_context_reset_opted_in(&path)
+                {
                     None
                 } else {
                     match crate::session_accretion::queue_context_reset_reason(

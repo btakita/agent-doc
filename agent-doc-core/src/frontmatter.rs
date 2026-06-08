@@ -487,6 +487,15 @@ pub struct Frontmatter {
         rename = "agent_doc_auto_compact"
     )]
     pub auto_compact: Option<usize>,
+    /// Explicit opt-in for the supervisor idle-queue watch to pre-emptively
+    /// interleave a context-clear (`/clear`) before an active queue head when
+    /// session accretion is unhealthy (`#nm1x-no-preempt-clear`). Off by default.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_queue_context_reset"
+    )]
+    pub queue_context_reset: Option<bool>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -1862,6 +1871,7 @@ mod tests {
             debounce_ms: None,
             links: vec![],
             auto_compact: None,
+            queue_context_reset: None,
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,

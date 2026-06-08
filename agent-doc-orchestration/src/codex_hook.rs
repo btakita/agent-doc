@@ -680,6 +680,9 @@ fn auto_queue_continuation_response(
     let Some(prompt) = active_auto_queue_prompt(file)? else {
         return Ok(None);
     };
+    if is_context_clear_prompt(&prompt) {
+        return Ok(None);
+    }
     if input.stop_hook_active && state.last_auto_queue_head.as_deref() == Some(&prompt) {
         return Ok(Some(
             match try_recover_repeated_queue_head_response(
@@ -763,6 +766,10 @@ fn marker_fallback_continuation_response(
     else {
         return Ok(None);
     };
+
+    if is_context_clear_prompt(&continuation.head_prompt) {
+        return Ok(None);
+    }
 
     // Non-advancing-head guard: a repeated stop whose marker already requested
     // this exact head must either recover the in-pane response or fail closed
@@ -2486,7 +2493,7 @@ agent-doc {}\n",
     }
 
     #[test]
-    fn stop_blocks_clean_closeout_when_auto_queue_has_clear_command() {
+    fn stop_passes_through_clean_closeout_when_auto_queue_has_clear_command() {
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["/clear", "do #fix1"]);
         init_git_repo(dir.path(), &doc);
@@ -2501,22 +2508,50 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("queued slash command"), "{reason}");
-                assert!(reason.contains("\"/clear\""), "{reason}");
-                assert!(
-                    reason.contains("managed owner-pane supervisor can submit"),
-                    "{reason}"
-                );
-                assert!(!reason.contains("answer that prompt"), "{reason}");
-            }
-            other => panic!("expected auto-queue command continuation block, got {other:?}"),
-        }
+        assert_eq!(response, StopResponse::Continue { continue_: true });
 
         let root = project_root_for(dir.path()).unwrap();
-        let state = load_state(&root, "codex-session").unwrap().unwrap();
-        assert_eq!(state.last_auto_queue_head.as_deref(), Some("/clear"));
+        assert!(load_state(&root, "codex-session").unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_passes_through_raw_clear_queue_body_with_whitespace() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = concat!(
+            "---\n",
+            "session: sid\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue auto -->\n",
+            "\n   /clear   \n\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+
+        let root = project_root_for(dir.path()).unwrap();
+        assert!(load_state(&root, "codex-session").unwrap().is_none());
     }
 
     #[test]
@@ -2666,6 +2701,25 @@ agent-doc {}\n",
             }
             other => panic!("expected durable-marker continuation block, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stop_passes_through_context_clear_from_durable_marker_when_session_state_missing() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["/clear"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
     }
 
     #[test]

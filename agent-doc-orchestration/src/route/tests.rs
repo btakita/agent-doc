@@ -673,7 +673,7 @@ fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
     assert!(updated.contains("<!-- agent:queue auto -->"));
-    assert!(updated.contains("- /clear"), "{updated}");
+    assert!(updated.contains("\n/clear\n"), "{updated}");
     assert!(
         !updated.contains(":pushpin: /clear"),
         "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
@@ -727,7 +727,7 @@ fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
     assert!(updated.contains("<!-- agent:queue auto -->"));
-    assert!(updated.contains("- /clear"), "{updated}");
+    assert!(updated.contains("\n/clear\n"), "{updated}");
     assert_eq!(
         crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
         Some("/clear"),

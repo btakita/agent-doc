@@ -178,6 +178,15 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             continue;
         }
 
+        if crate::queue_command::is_slash_command(trimmed) {
+            entries.push(QueueEntry::Prompt(QueuePrompt {
+                text: trimmed.to_string(),
+                multiline: false,
+            }));
+            i += 1;
+            continue;
+        }
+
         // A queue item is `- <text>`. Tolerate a single stray leading backtick
         // (`` `- text ``, a common mistype where the operator's code-span tick
         // landed before the bullet) by normalizing it to `- text`, so the item
@@ -311,6 +320,9 @@ pub fn render(entries: &[QueueEntry]) -> String {
                         out.push('\n');
                     }
                     out.push_str("---\n");
+                } else if crate::queue_command::is_slash_command(&p.text) {
+                    out.push_str(p.text.trim());
+                    out.push('\n');
                 } else {
                     out.push_str("- ");
                     out.push_str(&p.text);
@@ -1873,6 +1885,28 @@ mod tests {
             QueueEntry::Dispatch("#spec-test-build-install-commit-push".to_string())
         );
         assert_eq!(prompts(&entries).len(), 1);
+        assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn parse_bare_slash_command_as_prompt() {
+        let body = "\n  /clear  \n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(&entries[0], QueueEntry::Prompt(p) if p.text == "/clear"));
+        assert_eq!(first_prompt(&entries).unwrap().text, "/clear");
+        assert_eq!(render(&entries), "/clear\n");
+    }
+
+    #[test]
+    fn parse_bare_non_slash_line_remains_freeform() {
+        let body = "clear the context\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            entries,
+            vec![QueueEntry::Freeform("clear the context".to_string())]
+        );
+        assert!(first_prompt(&entries).is_none());
         assert_eq!(render(&entries), body);
     }
 

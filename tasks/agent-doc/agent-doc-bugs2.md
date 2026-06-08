@@ -65,7 +65,18 @@ Proof:
 - Verification: queue body empty; `#clearfast` reaped from active backlog
 - Confidence: high
 - Escalation: none
-<!-- agent:boundary:7ebccb79 -->
+
+### Re: session closeout cleanup — gpt-5
+
+Committed the `#clearfast` done-archive append separately, then closed the remaining session-document metadata cleanup through this finalize path.
+
+Proof:
+- Changed paths: `tasks/agent-doc-bugs2.done.md`, `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `git add tasks/agent-doc-bugs2.done.md`, `git commit -m "agent-doc: archive clearfast completion"`
+- Verification: archive contains `#clearfast`; session queue is stopped and empty
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:d751ece6 -->
 <!-- /agent:exchange -->
 
 ## Queue

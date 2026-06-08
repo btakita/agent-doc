@@ -52,13 +52,44 @@ So the asymmetry is real and structural: the queue path has a fresh-session acti
 **Backlog:** added `#codex-exchange-prompt-no-dispatch` at the top of the backlog.
 
 Say the word (or `do #codex-exchange-prompt-no-dispatch`) and I'll implement + test + build + commit per the preset.
-<!-- agent:boundary:1a99946c -->
+
+### Re: do #codex-exchange-prompt-no-dispatch — opus-4-8
+
+Fixed, tested, built, installed, committed, and pushed.
+
+**Root cause.** `first_unstarted_prompt_bearing_change` (`session_check.rs:4649`) returned `None` whenever no cycle snapshot existed. On a fresh session that's exactly the state: a freshly typed exchange tail prompt has no snapshot to diff against, so the exchange path saw nothing and `Run Agent Doc` did nothing. The queue path activates snapshot-independently (route queue activation re-saves the snapshot), so the same text in `agent:queue` started a turn — the asymmetry you hit.
+
+**Fix.** When no snapshot exists, the detector now falls back to the committed `HEAD` blob (`git::show_head`), then to an empty baseline for untracked docs. A freshly typed exchange tail prompt is therefore detected and routed. The fallback stays exchange-scoped — queue components are still stripped from this diff and keep their own activation path.
+
+**Verification.**
+- `cargo test -p agent-doc-orchestration first_unstarted_prompt_bearing_change` — 9 passed, including two new tests: `..._detects_fresh_exchange_prompt_without_snapshot` (HEAD fallback) and `..._ignores_fresh_queue_only_write_without_snapshot` (regression guard that the fallback stays exchange-scoped).
+- `make check` — clippy `-D warnings` clean, full suite green.
+- `cargo build --release` + `cargo install --path .` — both binaries refreshed (`.bin/agent-doc` → release, tmux → `~/.cargo/bin`), still `0.34.0`.
+
+**Shipped.**
+- `src/agent-doc` `agent-doc-orchestration/src/session_check.rs` (fix + tests) and `SPEC.md` (new rule) — committed `4f963e53`, pushed to `btakita/agent-doc` `main`.
+- Superproject: pointer bump + plan file committed locally; pushing now.
+
+**Live-verify note.** Logic is covered by deterministic tests, but the end-to-end JB **Run Agent Doc** → fresh Codex pane path can't be exercised from this Claude session. Worth a one-off live confirmation next time you start a fresh Codex session: type into `agent:exchange`, hit Run Agent Doc, and confirm the turn now starts.
+<!-- agent:boundary:28c2a0d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do #codex-exchange-prompt-no-dispatch
+---
+The agent-doc monsterrodholders.md has drift issues. We recently refactored to a control pane process. Please fix. Add Claude Code Simworld tests.
+```
+● The IPC/CRDT drift garbled my response (reversed lines, missing header) — the known drift situation. Let me
+  reconstruct the Exchange cleanly, then reset sidecars from the corrected file. First, the exact current bytes:
+
+  Read 1 file (ctrl+o to expand)
+
+● The corruption is clear — lines 37–43 are my response fragments inserted reversed above the old HEAD response. Let me
+  reconstruct cleanly with two edits.
+```
+---
 <!-- /agent:queue -->
 ###
 <!--
@@ -86,7 +117,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#codex-exchange-prompt-no-dispatch] Codex `Run Agent Doc` ignores an exchange-only prompt on a fresh session (queue writes dispatch, exchange writes do not). Root cause: `first_unstarted_prompt_bearing_change` (session_check.rs:4649) is snapshot-gated and queue-stripped, so the exchange path has no snapshot-independent activation signal like the queue path (route.rs:2121). Plan: tasks/agent-doc/plan-codex-exchange-prompt-no-dispatch.md
 <!-- /agent:backlog -->
 
 ## Review

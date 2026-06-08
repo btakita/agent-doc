@@ -40,6 +40,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> :pushpin: Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.
+
+
+> **Queue prompt:**
+>
 > :pushpin: do [#nm1x-codex-clear-parity]. Respect the new `agent_doc_queue_context_reset` opt-in
 
 
@@ -49,21 +54,27 @@ Done and shipped. `#nm1x-no-preempt-clear` had scoped the off-by-default `agent_
 - New `session_accretion::queue_context_reset_reason_if_opted_in(file, last_context_clear_at)` — combines the opt-in check with the accretion reason. Returns `None` without an explicit `agent_doc_queue_context_reset` opt-in (frontmatter precedence, then `.agent-doc/config.toml`), mirroring the `start.rs` idle-queue watch gate.
 - All five accretion-driven call sites now route through the gated helper: the four Codex Stop-hook continuation paths in `codex_hook.rs` (tracked/marker repeated recovery, auto-queue continuation, marker fallback) and the `run.rs` fresh-agent-session decision. Without the opt-in none of them interleaves a pre-emptive `/clear`. Deferred *operator* clears (`session clear`/`interrupt-clear`) stay a separate live path.
 - Spec §6 (`specs/06-config.md`) now documents the product-wide scope. Unit test `queue_context_reset_reason_if_opted_in_gates_codex_and_run_paths` covers default-off + opt-in; the affected `codex_hook` compaction test and `run_integration` fresh-session fixture now opt in explicitly.
+- `#ipc-degrade-self-heal` — `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch the moment the plugin socket accepts connections again: a self-healing circuit breaker instead of a one-way ratchet.
+- `#ipc-ack-timeout-align` — sender ack timeout 2 s → 6 s (`IPC_ACK_TIMEOUT_SECS`), above the plugin's idle cap; `send_message` connects first so a dead listener still fails fast. Matcher made duration-agnostic.
+- `#ipc-degrade-false-vote` — a confirmed-but-slow sidecar no longer votes toward the degrade threshold; it recovers via the file-IPC patch queue (still the Plugin path), never a raw disk write.
+2. The sender's ack budget was **2 s**, below the plugin's **5 s** `agent_doc_await_idle` typing-debounce cap, so a busy/typing plugin tripped a false timeout.
+1. A **confirmed** socket delivery (`Ok(Some(ack))`) whose *content sidecar* was merely slow — the plugin writes that sidecar only after `saveDocument`, which lags past the 200 ms poll budget while the EDT is busy or you're typing — was counted as an ack timeout.
 
 **Verification:** `make check` green (clippy + full suite, 4055 tests). `cargo build --release` + `cargo install --path .` done — both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` refreshed. Latest CI run (`27167663064`) is pending from this push; closed out on local evidence per the test-bearing-turn rule.
 
 One note on the new queue item you added mid-run (`/agent-doc` + `/clear` accumulating): this fix directly removes the *pre-emptive `/clear`* source of that churn product-wide. The remaining "multiple `/agent-doc` invocations scheduled" concern is a separate idle-queue/loop dispatch dedupe issue — it stays queued and will get its own turn.
-<!-- agent:boundary:6b323569 -->
+<!-- agent:boundary:145bd4a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: do [#nm1x-codex-clear-parity]. Respect the new `agent_doc_queue_context_reset` opt-in~~
+- ~~:pushpin: Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.~~
 - :round_pushpin: do [#nm1x-livebuf-content]
+- The responses are bei
+- The agent-doc queue should not stop if I'm editing content not related to the current turn.
+- On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold. There should be a way to set the opt-in threshold in the agent doc, and a default opt-in threshold in the project config.
 - `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` inputs are accumulating as the queue runs. Please ensure the console is idle before sending those messages. Send only 1 command at a time. Do not schedule multiple of the same command. So if there is already a `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` scheduled, to not schedule another `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`. Same with `/clear`.
-- On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold.
-- Please investigate monsterrodholders.md session and this session. Look for agent-doc churn and fix the issues. For example "One housekeeping note: the session document hit the known IDEA IPC drift". We need this IPC drift to be fixed. We also need less IPC and more Plugin insertions. Too many `File Cache Conflict` messages. The Plugin insertion should be reliable. The IPC fallback should be extremely rare.
 <!-- /agent:queue -->
 ###
 <!--
@@ -91,6 +102,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
+- [ ] [#ipc-degraded-prefers-file-ipc] When genuinely degraded, route writes through the file-IPC patch queue (plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures IDEA File Cache Conflicts. Disk write becomes true last resort. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
+- [ ] [#ipc-drift-writeprovenance] Tag agent-doc's own disk writes with a write-provenance/generation id so guard_visible_write_reconcile / live_buffer_diverges_from_content positively attribute a foreign disk change to the supervisor instead of inferring from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic. Builds on #op-scoped-drift-* provenance. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 <!-- /agent:backlog -->
 

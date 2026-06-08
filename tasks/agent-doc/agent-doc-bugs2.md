@@ -91,7 +91,28 @@ This is shadow-mode-additive: it can only suppress *more* false-positive diverge
 Tests: provenance roundtrip, positive suppression beyond the mtime heuristic, genuine-unsaved-edit protection, and the document-vs-sidecar recording gate. `make check` green (clippy + test + sim-medium + version-sync). Built + installed both binaries. Committed + pushed: submodule `9777622d`, pointer `e3b94e2f1`. CI is in progress for that commit (continuing on the green local suite per the test-bearing-turn rule).
 
 Next pinned item is `#pcp3` — the in-process ordered write queue in the session actor (kills the supervisor self-race / exit 75).
-<!-- agent:boundary:25eead02 -->
+
+### Re: #pcp3 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#pcp3]
+
+
+Investigated `#pcp3` against the *current* implementation and hit a real sequencing dependency, so I re-scoped it rather than fake an implementation that couldn't work.
+
+**Finding:** the supervisor and the agent finalize run in **separate processes** today. The supervisor is a child process from `agent-doc start`; finalize runs in the `agent-doc` CLI process. The only thing serializing their `.md` writes is the per-operation advisory `flock` plus SQLite compare-and-swap on actor rows. `session_actor.rs` is a data struct with CAS guards persisted to SQLite — **not** a message-passing actor that owns a write queue. So an *in-process* ordered write queue (the `#pcp3` premise) cannot serialize the two racing writers until the supervisor becomes an in-process adapter inside the controller process — i.e. it depends on the single-process control-plane consolidation (08b), which isn't landed yet. The same prerequisite applies to `#pcp4` (single *controller-owned* watcher) and `#pcp7` (plugin demotion).
+
+I also corrected the R6 mechanism: "could not drain the active closeout / exit 75" comes from `route.rs::drain_open_closeout_before_routed_dispatch`. The drain reads the cycle-state + capture baseline, then a concurrent finalize in the *other* process writes the document mid-drain, so the baseline "no longer matches current document" → `Blocked` → exit 75. It self-resolves once the finalize completes (the ~20s you observed).
+
+**Re-scoped (plan updated, committed `66ea2f2b1`):**
+- `#pcp3a` (queued, achievable now, no consolidation) — harden `drain_open_closeout_before_routed_dispatch` to fail *soft* on a concurrent-finalize baseline drift: detect the transient in-flight write and retry/back off (or return a clean "transiently busy, queued" outcome) instead of a hard `Blocked`/exit-75. Cross-process safe with the existing `flock`/cycle-state primitives, SimWorld-testable. This is the near-term win for the symptom you actually hit.
+- `#pcp3b` (gated) — the in-process write queue, blocked on a supervisor-in-process consolidation phase.
+
+**Operator fork — your call:** (A) invest in the supervisor-in-process consolidation now (large, multi-day) to unblock `#pcp3b`/`#pcp4`/`#pcp7`; or (B) ship the unblocked wins first — `#pcp3a` (R6 hardening) plus `#pcp5` (early-ack IPC) and `#pcp6` (buffer content), which don't need the consolidation. I recommend **B**: it directly fixes the exit-75 and File-Cache-Conflict symptoms with bounded risk, and the consolidation can follow as its own focused effort.
+
+I'm pausing the auto-loop here rather than draining into `#pcp4` (also consolidation-gated) — this fork is a real architectural decision. Tell me A or B (or just "do #pcp3a") and I'll proceed.
+<!-- agent:boundary:2d4c52bf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,7 +120,7 @@ Next pinned item is `#pcp3` — the in-process ordered write queue in the sessio
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#pcp1]~~
 - ~~:pushpin: [#pcp2]~~
-- :pushpin: [#pcp3]
+- ~~:pushpin: [#pcp3]~~
 - :pushpin: [#pcp4]
 - :pushpin: [#pcp5]
 - :pushpin: [#pcp6]

@@ -257,6 +257,12 @@ pub struct PreflightOutput {
     /// Structured semantic navigation for the same diff.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub semantic_diff: Option<SemanticDiffSummary>,
+    /// Operation manifest for the current turn (`#op-scoped-drift-2`): the
+    /// driver node plus the read/write addresses the turn touches. Derived from
+    /// `prompt_targets` at turn start; the substrate the phase-3 affectedness
+    /// classifier reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_scope: Option<agent_doc_core::turn_scope::TurnScope>,
     /// Skill slash commands found in user-added diff lines (non-built-ins, e.g. `["/agent-doc foo.md", "/caveman"]`).
     /// Guards applied: code fences, blockquotes, non-added lines.
     /// Built-in Claude Code commands are excluded here — see `builtin_commands`.
@@ -550,6 +556,78 @@ fn op_log_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default()
+}
+
+/// Derive the TurnScope manifest for the current turn (`#op-scoped-drift-2`).
+/// Resolves the driver queue node from `prompt_targets`, then builds the
+/// canonical read/write sets. Returns `None` when the turn answers no prompt.
+fn derive_turn_scope(
+    content: &str,
+    prompt_targets: &[String],
+) -> Option<agent_doc_core::turn_scope::TurnScope> {
+    if prompt_targets.is_empty() {
+        return None;
+    }
+    let driver = resolve_driver_address(content, prompt_targets);
+    Some(agent_doc_core::turn_scope::TurnScope::for_driver(driver))
+}
+
+/// Find the queue item node a prompt target refers to and address it.
+fn resolve_driver_address(
+    content: &str,
+    prompt_targets: &[String],
+) -> Option<agent_doc_core::turn_scope::Address> {
+    let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
+    for target in prompt_targets {
+        let Some(id) = extract_target_id(target) else {
+            continue;
+        };
+        if let Some(node) = nodes
+            .iter()
+            .find(|node| node.component == "queue" && node.item.id == id)
+        {
+            let occurrence = component_occurrence_from_node_key(&node.node_key);
+            return Some(agent_doc_core::turn_scope::Address::node(
+                "queue",
+                occurrence,
+                &node.node_key,
+            ));
+        }
+    }
+    None
+}
+
+/// Extract a backlog/queue id (`[#id]` or bare `#id`) from a prompt target.
+fn extract_target_id(target: &str) -> Option<String> {
+    if let Some(start) = target.find("[#") {
+        let rest = &target[start + 2..];
+        if let Some(close) = rest.find(']') {
+            let id = &rest[..close];
+            if agent_doc_core::pending::is_valid_pending_id(id) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    if let Some(start) = target.find('#') {
+        let rest = &target[start + 1..];
+        let id: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !id.is_empty() && agent_doc_core::pending::is_valid_pending_id(&id) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// Component occurrence index encoded in a node key (`component:index:id:dup`).
+fn component_occurrence_from_node_key(node_key: &str) -> usize {
+    node_key
+        .split(':')
+        .nth(1)
+        .and_then(|field| field.parse().ok())
+        .unwrap_or(0)
 }
 
 fn semantic_component_changes(previous: &str, current: &str) -> Vec<SemanticComponentChange> {
@@ -2968,6 +3046,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         persist_op_log(file, &rc, initial_frontmatter.session.as_deref(), summary);
     }
 
+    // #op-scoped-drift-2: emit the TurnScope manifest (read/write set + driver)
+    // for the prompts this turn is answering.
+    let turn_scope = derive_turn_scope(&diff_result_with_current.current, &prompt_targets);
+
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let mut parsed_commands = command_diff_result
         .as_ref()
@@ -3313,6 +3395,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
         semantic_diff,
+        turn_scope,
         user_intent_prompt_changes: if diff_from_queue_head_only {
             // Synthetic auto-queue continuation only — no user intent this cycle.
             Vec::new()
@@ -12454,6 +12537,51 @@ mod tests {
     #[test]
     fn semantic_diff_summary_omits_empty_summary() {
         assert!(semantic_diff_summary("same\n", "same\n", &[]).is_none());
+    }
+
+    #[test]
+    fn derive_turn_scope_resolves_queue_driver_and_sets() {
+        let content = "<!-- agent:queue -->\n- do [#op-scoped-drift-2]\n- do [#later]\n<!-- /agent:queue -->\n";
+        let targets = vec!["do [#op-scoped-drift-2]".to_string()];
+        let scope = derive_turn_scope(content, &targets).expect("scope derived");
+        let driver = scope.driver.as_ref().expect("driver resolved");
+        assert_eq!(driver.component, "queue");
+        assert_eq!(driver.node_key.as_deref(), Some("queue:0:op-scoped-drift-2:0"));
+        // driver is read (input) and written (the strike).
+        assert!(scope.read_set.contains(driver));
+        assert!(scope.write_set.contains(driver));
+        assert!(
+            scope
+                .write_set
+                .contains(&agent_doc_core::turn_scope::Address::component("backlog", 0))
+        );
+    }
+
+    #[test]
+    fn derive_turn_scope_none_without_prompt_targets() {
+        let content = "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        assert!(derive_turn_scope(content, &[]).is_none());
+    }
+
+    #[test]
+    fn derive_turn_scope_without_matching_queue_node_has_no_driver() {
+        // A prompt target whose id is not present in the queue still yields a
+        // scope (output components) but no driver.
+        let content = "<!-- agent:queue -->\n- do [#present]\n<!-- /agent:queue -->\n";
+        let targets = vec!["do [#absent]".to_string()];
+        let scope = derive_turn_scope(content, &targets).expect("scope derived");
+        assert!(scope.driver.is_none());
+        assert!(scope.write_set.iter().all(|a| a.component != "queue"));
+    }
+
+    #[test]
+    fn extract_target_id_handles_bracket_and_bare_forms() {
+        assert_eq!(
+            extract_target_id("do [#op-scoped-drift-2]").as_deref(),
+            Some("op-scoped-drift-2")
+        );
+        assert_eq!(extract_target_id("do #fix1").as_deref(), Some("fix1"));
+        assert_eq!(extract_target_id("no id here"), None);
     }
 
     #[test]

@@ -27,6 +27,7 @@ pub mod replay_guard;
 pub mod syntax;
 pub mod template;
 pub mod topic;
+pub mod turn_scope;
 
 pub use component::Component;
 pub use crdt::CrdtDoc;

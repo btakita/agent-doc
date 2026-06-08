@@ -9394,9 +9394,25 @@ fn ipc_dewedge_marker_for_current_session(
 }
 
 fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Result<bool> {
-    Ok(ipc_dewedge_marker_for_current_session(project_root, file)?
+    let degraded = ipc_dewedge_marker_for_current_session(project_root, file)?
         .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
-        .unwrap_or(false))
+        .unwrap_or(false);
+    if !degraded {
+        return Ok(false);
+    }
+    // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not a
+    // permanent session verdict. Once marked degraded the write path skips the
+    // socket, so it would otherwise never observe a recovered listener and would
+    // stay disk-only until the session restarts. Re-probe listener liveness: if
+    // the plugin's socket is accepting connections again, clear the latch and
+    // resume the reliable plugin (IPC) path immediately. The probe only runs
+    // while degraded (rare after the false-vote fixes), so it adds no cost to the
+    // healthy path.
+    if crate::ipc_socket::is_listener_active(project_root) {
+        remove_ipc_dewedge_marker(project_root, file, "listener_recovered")?;
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
@@ -9456,20 +9472,13 @@ fn record_ipc_socket_ack_timeout(
 }
 
 fn is_socket_ack_timeout_error(err: &anyhow::Error) -> bool {
-    err.to_string().contains("IPC ack timeout (2s)")
+    // Duration-agnostic: the sender's ack timeout budget is configurable
+    // (`IPC_ACK_TIMEOUT_SECS` in ipc_socket.rs), so match the stable prefix
+    // rather than a hard-coded "(2s)".
+    err.to_string().contains("IPC ack timeout")
 }
 
-fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
-    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
-        return Ok(());
-    };
-    if value
-        .get("degraded")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return Ok(());
-    }
+fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
     let marker = ipc_dewedge_marker_path(project_root, file)?;
     if marker.exists() {
         std::fs::remove_file(&marker).with_context(|| {
@@ -9485,6 +9494,26 @@ fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str)
         );
     }
     Ok(())
+}
+
+fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
+        return Ok(());
+    };
+    // A routine successful write clears accrued timeout votes, but it must NOT
+    // clear a *degraded* latch on its own — degraded means the write path is
+    // already on the disk/file-IPC fallback, so a "success" here is not proof
+    // the socket listener recovered. The degraded latch is cleared only by a
+    // proven-live listener re-probe (`#ipc-degrade-self-heal`, see
+    // `ipc_direct_disk_degraded`).
+    if value
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    remove_ipc_dewedge_marker(project_root, file, reason)
 }
 
 /// Poll for the ack-content sidecar with timeout.
@@ -11527,32 +11556,30 @@ pub fn try_ipc(
                         skipped_committed_cycle: false,
                     });
                 }
-                // Sidecar timed out — plugin likely applied the patch but the
-                // ack write was slow. Fall through to disk write for a reliable
-                // snapshot unless repeated timeouts have de-wedged this
-                // document/session away from IPC.
+                // `#ipc-degrade-false-vote`: the socket already returned a
+                // delivery ack (`Ok(Some(_ack))`), so the plugin received the
+                // patch and is applying it through the Document API — only the
+                // *content sidecar* was slow. The plugin writes that sidecar
+                // after `saveDocument`, which can lag well past the poll budget
+                // while the EDT is busy or the user is typing. A slow sidecar is
+                // NOT a listener timeout: it must not vote toward the de-wedge
+                // degrade threshold and must not latch this session to disk-only.
+                // Recover the snapshot through the file-IPC patch queue below
+                // (still the plugin path) so a confirmed-but-slow delivery never
+                // manufactures a raw foreign disk write — the source of IDEA
+                // "File Cache Conflict". Genuine transport failures still vote in
+                // the `Err(timeout)` arm.
                 eprintln!(
-                    "[write] sidecar ack timed out — socket delivery unconfirmed, falling back to disk write"
+                    "[write] socket delivered but content sidecar was slow — recovering snapshot via file-IPC fallback (no degrade vote)"
                 );
-                let degraded = record_ipc_socket_ack_timeout(
-                    &project_root,
+                crate::ops_log::log_op(
                     file,
-                    Some(&patch_id),
-                    "socket_ack_content_sidecar",
-                )?;
-                if degraded {
-                    eprintln!(
-                        "[write] IPC listener degraded for {} after repeated socket ack timeouts — skipping file IPC fallback",
-                        file.display()
-                    );
-                    cleanup_fallback_patch_files(file);
-                    log_ipc_dewedge_direct_disk_skip(file, "socket_ack_content_sidecar");
-                    return Ok(IpcResult {
-                        success: false,
-                        patch_id,
-                        skipped_committed_cycle: false,
-                    });
-                }
+                    &format!(
+                        "ipc_socket_sidecar_slow_no_degrade file={} patch_id={}",
+                        file.display(),
+                        patch_id
+                    ),
+                );
                 if fallback_patch_file.is_some() {
                     eprintln!("[write] fallback patch file left for file watcher recovery");
                 }
@@ -15782,6 +15809,67 @@ scratch
             !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
             "a new session id must not inherit the old session's degraded marker"
         );
+    }
+
+    #[test]
+    fn is_socket_ack_timeout_error_is_duration_agnostic() {
+        // `#ipc-ack-timeout-align`: the sender's ack budget is configurable, so
+        // the degrade-vote classifier must match the stable prefix, not a
+        // hard-coded "(2s)".
+        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack timeout (2s)"
+        )));
+        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack timeout (6s)"
+        )));
+        assert!(!is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack status error: something else"
+        )));
+    }
+
+    #[test]
+    fn degraded_latch_self_heals_when_listener_recovers() {
+        // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not
+        // a permanent session verdict. Once a recovered plugin socket is
+        // accepting connections again, `ipc_direct_disk_degraded` must clear the
+        // marker and resume the reliable IPC path instead of staying disk-only
+        // until session restart.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: heal-session\n---\n\ncontent").unwrap();
+
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "two timeouts with no live listener should stay degraded"
+        );
+
+        // Bring a live socket listener up (the recovered plugin).
+        let root_clone = dir.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&root_clone, |_msg| {
+                Some(r#"{"type":"ack","id":"x"}"#.to_string())
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a recovered live listener must self-heal the degrade latch"
+        );
+        let marker = dir
+            .path()
+            .join(".agent-doc/ipc-degraded")
+            .join(format!("{}.json", snapshot::doc_hash(&doc).unwrap()));
+        assert!(
+            !marker.exists(),
+            "self-heal must remove the degraded marker"
+        );
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        drop(server);
     }
 
     #[test]

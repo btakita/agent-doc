@@ -36,6 +36,19 @@ use std::time::Duration;
 /// Socket filename within `.agent-doc/` directory.
 const SOCKET_FILENAME: &str = "ipc.sock";
 
+/// How long the sender waits for the plugin's delivery ack before treating the
+/// socket as timed out (`#ipc-ack-timeout-align`).
+///
+/// `send_message` connects first, so a dead listener fails fast at
+/// `try_connect`; this budget only applies to a *connected but slow* plugin.
+/// The JB plugin blocks the socket handler on `agent_doc_await_idle(... , 5_000)`
+/// — a typing-debounce wait capped at 5s — before applying the patch and acking.
+/// A 2s budget was below that legitimate apply window, so a plugin that was
+/// merely busy/typing tripped a false "ack timeout" that voted toward the
+/// de-wedge degrade latch. Align the sender to just above the plugin's idle cap
+/// so only a genuinely wedged listener times out.
+const IPC_ACK_TIMEOUT_SECS: u64 = 6;
+
 /// Get the socket path for a project.
 pub fn socket_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(SOCKET_FILENAME)
@@ -92,7 +105,7 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
         let _ = tx.send((result, ack_line));
     });
 
-    match rx.recv_timeout(Duration::from_secs(2)) {
+    match rx.recv_timeout(Duration::from_secs(IPC_ACK_TIMEOUT_SECS)) {
         Ok((Ok(0), _)) => Err(anyhow::anyhow!(
             "IPC ack: plugin closed connection without responding"
         )),
@@ -107,9 +120,9 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
             }
         }
         Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err(anyhow::anyhow!("IPC ack timeout (2s)"))
-        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
+            "IPC ack timeout ({IPC_ACK_TIMEOUT_SECS}s)"
+        )),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             Err(anyhow::anyhow!("IPC reader thread disconnected"))
         }

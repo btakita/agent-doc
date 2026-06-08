@@ -30,12 +30,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-164616.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260608-164619.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Codex `Run Agent Doc` ignores exchange-only prompts on a fresh session; do #codex-exchange-prompt-no-dispatch; monsterrodholders.md IPC/CRDT drift + Claude Code SimWorld tests; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:09db98d6 -->
+<!-- agent:boundary:ed57cbfb -->
 <!-- /agent:exchange -->
 
 ## Queue

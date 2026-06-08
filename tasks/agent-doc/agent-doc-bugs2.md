@@ -82,6 +82,11 @@ Investigated this session and the IPC/CRDT write path. The IPC drift, "too much 
 - `#ipc-degrade-false-vote` — a confirmed-but-slow sidecar no longer votes toward degradation; recovers via the file-IPC patch queue (still the Plugin path), never a raw disk write.
 - `#ipc-ack-timeout-align` — sender ack timeout 2 s → 6 s (above the plugin's idle cap); `send_message` connects first so a dead listener still fails fast.
 - `#ipc-degrade-self-heal` — `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch the moment the plugin socket recovers: a self-healing circuit breaker instead of a one-way ratchet to session-restart.
+- closes the cycle committed and returns `RepairOutcome::StaleCaptureRetired`.
+- rebuilds the snapshot **and** CRDT sidecars from the current document so the merge layer can't re-diverge,
+- marks the capture `Discarded` (the body is **preserved on disk** for forensics, never deleted),
+- `capture::validate_replay` fails closed — the captured file/snapshot hashes no longer match.
+- `response_already_applied*` is false — the body is no longer contiguously present, so it can't be recognized as already-landed, and
 
 Net: Plugin (Document API) insertion stays primary; the disk fallback only fires on a genuinely wedged listener and recovers automatically — the "fallback should be extremely rare" behavior, removing the dominant File-Cache-Conflict source. Full suite 4057 passed; both binaries rebuilt/installed; agent-doc CI `27168907477` was in progress at push (closed out on local evidence). Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
 
@@ -96,17 +101,17 @@ Investigated this session and the IPC/CRDT write path. The IPC drift, "too much 
 **Phase 1 shipped** (`src/agent-doc@9ecb5775`, pushed): `#ipc-degrade-false-vote` (confirmed-but-slow sidecar no longer votes; recovers via file-IPC, still the Plugin path), `#ipc-ack-timeout-align` (2 s → 6 s, above the plugin idle cap; connect-first keeps dead-listener fast-fail), `#ipc-degrade-self-heal` (`ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch on recovery — a self-healing circuit breaker). Full suite 4057 passed; both binaries rebuilt/installed; CI `27168907477` in progress at push. Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
 
 **Live meta-note:** landing this very response repeatedly hit `live_prompt_drift_after_preflight` / exit 75 plus a supervisor self-race on pane %30 (route "could not drain the active closeout"). Recovery needed `reset --from-current --preserve-session` + retiring stale captures. That is a *different* guard than the degrade latch I fixed — the visible-write reconcile failing closed on concurrent editing — and is exactly the `#ipc-drift-writeprovenance` / `#nm1x-livebuf-content` follow-up surface.
-<!-- agent:boundary:4ace3923 -->
+<!-- agent:boundary:9d4883b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#nm1x-livebuf-content]~~
 - :round_pushpin: [#ipc-early-ack]
 - :round_pushpin: [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: [#ipc-drift-writeprovenance]
 - The responses are being intermixed with older responses in the document. We are also losing part of the response.
+- What part of the stack runs in the Project Control Pane process? What are separate processes? Does the Plugin IPC live in the editor process or can it be moved into the Project Control Pane process? Draw a #mermaid.
 ---
 After "I did not auto-loop: you're actively editing, which takes precedence over the queue drain.", I ran JB `Run Agent Doc` and got an error.
 ```
@@ -115,6 +120,21 @@ After "I did not auto-loop: you're actively editing, which takes precedence over
 Error: authoritative actor generation 246 for tasks/agent-doc/agent-doc-bugs2.md owns pane %30 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 ```
 The queue then started auto-draining about 20s later.
+---
+Fix the root cause of the compounding stale-capture deadlock
+```
+● The deadlock now also shows a supervisor/route race: "authoritative actor generation 246 owns pane %30 but route could
+  not drain the active closeout" — a route-owned supervisor is racing the closeout (a known self-race pattern),
+  compounding the stale-capture deadlock. Let me run the binary-recommended reset --from-current --preserve-session to
+● Bash(cd /home/brian/work/btakita/agent-loop
+      agent-doc reset --from-current --preserve-session tasks/agent-doc/agent-doc-bugs2.md 2>&1 | tail -3…)
+  ⎿  Reset sidecars for tasks/agent-doc/agent-doc-bugs2.md from current file while preserving session state
+     === cycle phase after reset ===
+     phase: preflight_started capture_id: None
+
+● The reset cleared the deadlock — cycle is now clean preflight_started, capture_id: None. Document is quiescent. Let me
+  get a fresh baseline and finalize my response in one go:
+```
 ---
 - The agent-doc queue should not stop if I'm editing content not related to the current turn.
 - On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold. There should be a way to set the opt-in threshold in the agent doc, and a default opt-in threshold in the project config.
@@ -146,6 +166,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Riskier because a never-written response is more likely genuinely pending, so gate on positive superseding-turn evidence before retiring. Lower priority than the upstream #ipc-drift-writeprovenance intermix fix.
 - [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-degraded-prefers-file-ipc] When genuinely degraded, route writes through the file-IPC patch queue (plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures IDEA File Cache Conflicts. Disk write becomes true last resort. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-drift-writeprovenance] Tag agent-doc's own disk writes with a write-provenance/generation id so guard_visible_write_reconcile / live_buffer_diverges_from_content positively attribute a foreign disk change to the supervisor instead of inferring from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic. Builds on #op-scoped-drift-* provenance. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md

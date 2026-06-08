@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,7 +35,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): column-based JSONL token efficiency
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:828a1b5f -->
+
+### Re: source-read envelope token efficiency — gpt-5
+
+> **Queue prompt:**
+>
+> Please evaluate the output format of the tsift --envelope source-read. I see much repetition with the keys in metrics. Please look at real-world examples, such as with the agent-doc-bugs2.md session history. Make the output more token efficient. Is JSON the best format? Should we use a column-based strategy for these sort of lists?
+
+
+I evaluated `source-read` against the existing envelope contracts and a real session-review example from `tasks/agent-doc/agent-doc-bugs2.md`. JSON is still the right primary machine format for agent-facing output, but repeated homogeneous lists should use the existing schema-then-values form instead of repeating object keys. That keeps the output parseable as ordinary JSON while making dense lists like `summary.metrics`, `report.preview`, `report.symbols`, and markdown outlines materially smaller.
+
+Implemented in `src/tsift`:
+
+- `tsift --envelope source-read ...` now defaults to the existing `_c`/`_r` column layout.
+- Non-envelope `source-read --json` remains expanded object JSON unless callers explicitly pass `--schema`.
+- The semantic-edit verification path now accepts either expanded arrays or `_c`/`_r` tables when reading nested source-read envelopes.
+- Regression tests and `specs/output-formats.md` document the default and decode both shapes.
+
+A manual sample confirmed `summary.metrics` now emits as a column table, e.g. `_c: ["label", "value"]` with `_r` rows. This is the right compromise: do not replace JSON with a separate text/table protocol, but do use column encoding inside JSON where repeated list keys dominate token cost.
+
+Validation completed:
+
+- `cargo test -p tsift-cli --test exit_code source_read_json -- --nocapture`
+- targeted semantic-edit verification regressions
+- `make check`
+- `cargo install --path .`
+- `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully
+
+Committed and pushed tsift: `a39d6e5 feat: columnize source-read envelopes`. Superproject pointer committed: `bc60866a9 chore: update tsift submodule`.
+<!-- agent:boundary:0ed23194 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,8 +72,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" go -->
-- Please evaluate the output format of the tsift --envelope source-read. I see much repetition with the keys in metrics. Please look at real-world examples, such as with the agent-doc-bugs2.md session history. Make the output more token efficient. Is JSON the best format? Should we use a column-based strategy for these sort of lists?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1,6 +1,6 @@
 //! Slash-command classification for prompt-bearing queue/exchange items.
 //!
-//! Queue commands are literal harness commands: a head like `/clear` or
+//! Queue/exchange commands are literal harness commands: text like `/clear` or
 //! `/model sonnet` must be submitted to the owner pane after the current turn
 //! reaches an idle prompt, not answered as ordinary agent-doc work.
 

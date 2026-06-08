@@ -319,6 +319,7 @@ fn starting_timeout_blocked_actor_can_recover(
 struct PendingPromptBearingRouteContext {
     marker: String,
     prompt_text: String,
+    slash_command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1896,6 +1897,9 @@ fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
 }
 
 fn operator_prioritize_route_prompt(prompt_text: String) -> String {
+    if crate::queue_command::is_slash_command(&prompt_text) {
+        return prompt_text;
+    }
     if crate::queue::is_prioritized(&prompt_text) {
         prompt_text
     } else {
@@ -2075,6 +2079,31 @@ fn enqueue_route_dispatch_prompt(
         component_created,
         activated,
     })
+}
+
+fn enqueue_exchange_slash_command_for_idle_drain(
+    file: &Path,
+    context: &PendingPromptBearingRouteContext,
+    source: &str,
+) -> Result<Option<RouteQueueEnqueueOutcome>> {
+    let Some(command) = context.slash_command.as_deref() else {
+        return Ok(None);
+    };
+    let queued = enqueue_route_dispatch_prompt(file, command, source, true)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_exchange_slash_command_queued file={} source={} command={:?} appended={} already_present={} superseded={} activated={}",
+            file.display(),
+            source,
+            command,
+            queued.appended,
+            queued.already_present,
+            queued.superseded,
+            queued.activated
+        ),
+    );
+    Ok(Some(queued))
 }
 
 fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
@@ -4072,12 +4101,19 @@ fn route_via_authoritative_actor(
         RouteCloseoutDrainOutcome::Blocked(reason) => {
             if let Some(context) = prompt_context {
                 // #jb-run-preempt-autoloop-priority: manual reroute prompt preempts.
-                let queued = enqueue_route_dispatch_prompt(
+                let queued = match enqueue_exchange_slash_command_for_idle_drain(
                     file,
-                    &context.prompt_text,
+                    context,
                     "open_closeout_blocked",
-                    true,
-                )?;
+                )? {
+                    Some(queued) => queued,
+                    None => enqueue_route_dispatch_prompt(
+                        file,
+                        &context.prompt_text,
+                        "open_closeout_blocked",
+                        true,
+                    )?,
+                };
                 eprintln!(
                     "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={})",
                     file.display(),
@@ -4096,6 +4132,20 @@ fn route_via_authoritative_actor(
                 reason
             );
         }
+    }
+    if let Some(context) = prompt_context
+        && let Some(queued) =
+            enqueue_exchange_slash_command_for_idle_drain(file, context, "exchange_slash_command")?
+    {
+        eprintln!(
+            "[route] unresolved exchange slash command for {} was queued as {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) for managed after-turn submission",
+            file.display(),
+            queued.prompt_text,
+            queued.appended,
+            queued.already_present,
+            queued.superseded
+        );
+        return Ok(dispatch_pane);
     }
     if actor_state == crate::session_actor::ActorState::Starting
         && let Some(refreshed) =
@@ -7704,9 +7754,11 @@ fn pending_prompt_bearing_context_for_route(
         .trim();
     let prompt_text = queue_prompt_text_for_route_change(&change.text)
         .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
+    let slash_command = crate::queue_command::slash_command_text(&prompt_text);
     Ok(Some(PendingPromptBearingRouteContext {
         marker: format!("{marker}: {preview}"),
         prompt_text,
+        slash_command,
     }))
 }
 

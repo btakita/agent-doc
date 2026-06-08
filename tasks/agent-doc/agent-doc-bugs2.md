@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,25 +71,43 @@ Fixed, tested, built, installed, committed, and pushed.
 - Superproject: pointer bump + plan file committed locally; pushing now.
 
 **Live-verify note.** Logic is covered by deterministic tests, but the end-to-end JB **Run Agent Doc** → fresh Codex pane path can't be exercised from this Claude session. Worth a one-off live confirmation next time you start a fresh Codex session: type into `agent:exchange`, hit Run Agent Doc, and confirm the turn now starts.
-<!-- agent:boundary:28c2a0d8 -->
+
+### Re: monsterrodholders.md IPC/CRDT drift + Claude Code SimWorld tests — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The agent-doc monsterrodholders.md has drift issues. We recently refactored to a control pane process. Please fix. Add Claude Code Simworld tests.
+> ```
+> ● The IPC/CRDT drift garbled my response (reversed lines, missing header) — the known drift situation. Let me
+>   reconstruct the Exchange cleanly, then reset sidecars from the corrected file. First, the exact current bytes:
+>
+>   Read 1 file (ctrl+o to expand)
+>
+> ● The corruption is clear — lines 37–43 are my response fragments inserted reversed above the old HEAD response. Let me
+>   reconstruct cleanly with two edits.
+> ```
+
+
+Triaged and planned — but deliberately **not** attempting the write-path fix inside this document, and I want to be straight about why.
+
+**I reproduced your exact symptom this turn.** Closing out the previous fix, `finalize` hit it head-on:
+- `[write] File was modified during response generation. CRDT merging... base_len=5797 ours_len=7895 theirs_len=6386` — the on-disk file grew *during* generation.
+- A second supervisor (a `monsterrodholders` agent-doc session) committed to this same superproject concurrently (`d4182b0e1 ... (submodule pointer)`), interleaved with this session's commits.
+- CRDT said `merge successful — no conflicts possible`, yet the visible-buffer guard then fired and my response did **not** land on the first try; preflight reported a `stuck_captured_cycle` (response committed but absent from HEAD). I recovered it via `write --commit`.
+
+That matches "reversed lines / missing header / fragments above the old response" precisely: a concurrent foreign write changes `theirs` mid-generation, overlay-CRDT-as-merge-base mis-orders the appended response, and the commit/visible-buffer boundary then disagrees.
+
+**Suspected area** — the recent single-process control-plane refactor: `5fd64b26 Use overlay CRDT as merge base` (ordering), `a45121b0 Apply IPC node patches in editors`, `b76a3099 de-wedge slow ipc listener`, `ac213a76 controller: make actor state memory authoritative`, `84b2d690 single-process control plane`. The "single process owns actor state" intent is in place, but **git write-back is still multi-writer** — I watched two supervisors interleave commits on the same repo. That seam is the likely root cause.
+
+**Plan:** [`tasks/agent-doc/plan-ipc-crdt-response-drift.md`](plan-ipc-crdt-response-drift.md) — deterministic SimWorld repro (foreign append mid-generation), merge-base ordering fix, control-plane-owned write-back serialization, visible-buffer/CRDT reconciliation, and the three Claude Code SimWorld scenarios you asked for.
+
+**Why plan instead of fix-now:** editing the CRDT/IPC write path *inside a document that is actively drifting* (this one, right now, with another supervisor racing it) risks compounding the corruption — the fix and its verification need a quiescent session with other supervisors idle. Added to the backlog as `#ipc-crdt-response-drift`. `do #ipc-crdt-response-drift` from a fresh session and I'll implement it end-to-end with the SimWorld tests.
+<!-- agent:boundary:da032db9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do #codex-exchange-prompt-no-dispatch
----
-The agent-doc monsterrodholders.md has drift issues. We recently refactored to a control pane process. Please fix. Add Claude Code Simworld tests.
-```
-● The IPC/CRDT drift garbled my response (reversed lines, missing header) — the known drift situation. Let me
-  reconstruct the Exchange cleanly, then reset sidecars from the corrected file. First, the exact current bytes:
-
-  Read 1 file (ctrl+o to expand)
-
-● The corruption is clear — lines 37–43 are my response fragments inserted reversed above the old HEAD response. Let me
-  reconstruct cleanly with two edits.
-```
----
 <!-- /agent:queue -->
 ###
 <!--
@@ -117,6 +135,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#ipc-crdt-response-drift] agent-doc IPC/CRDT response drift after the single-process control-plane refactor: response lines land reversed, ### Re: header missing, fragments hoisted above prior HEAD response when the file is mutated by a concurrent supervisor during generation. Reproduced firsthand this turn (theirs>base mid-generation, concurrent monsterrodholders commit, visible-buffer-differs, stuck_captured_cycle). Add Claude Code SimWorld coverage. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
 <!-- /agent:backlog -->
 
 ## Review

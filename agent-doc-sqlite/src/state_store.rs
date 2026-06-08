@@ -140,7 +140,20 @@ pub struct DispatchAttemptInsert<'a> {
 pub struct ProjectionDiagnosticStatus {
     pub projection: String,
     pub message: String,
+    pub source_generation: Option<u64>,
+    pub intended_hash: Option<String>,
+    pub retry_status: Option<String>,
     pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectionDiagnosticInsert<'a> {
+    pub projection: &'a str,
+    pub document_id: &'a str,
+    pub message: &'a str,
+    pub source_generation: Option<u64>,
+    pub intended_hash: Option<&'a str>,
+    pub retry_status: &'a str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,6 +362,7 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
         "#,
     )?;
     ensure_dispatch_attempt_receipt_columns(conn)?;
+    ensure_projection_diagnostic_columns(conn)?;
     Ok(())
 }
 
@@ -378,6 +392,28 @@ fn ensure_dispatch_attempt_receipt_columns(conn: &Connection) -> Result<()> {
         "dispatch_attempts",
         "dispatch_start_proven",
         "dispatch_start_proven INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
+fn ensure_projection_diagnostic_columns(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "projection_diagnostics",
+        "source_generation",
+        "source_generation INTEGER",
+    )?;
+    ensure_column(
+        conn,
+        "projection_diagnostics",
+        "intended_hash",
+        "intended_hash TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "projection_diagnostics",
+        "retry_status",
+        "retry_status TEXT",
     )?;
     Ok(())
 }
@@ -694,7 +730,7 @@ pub fn load_projection_diagnostics_from_db(
 ) -> Result<Vec<ProjectionDiagnosticStatus>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT projection, message, timestamp
+        SELECT projection, message, source_generation, intended_hash, retry_status, timestamp
         FROM projection_diagnostics
         WHERE document_id = ?1
         ORDER BY id DESC
@@ -704,9 +740,16 @@ pub fn load_projection_diagnostics_from_db(
     let mut diagnostics = Vec::new();
     for row in stmt.query_map(params![document_id], |row| {
         let timestamp: i64 = row.get("timestamp")?;
+        let source_generation: Option<i64> = row.get("source_generation")?;
         Ok(ProjectionDiagnosticStatus {
             projection: row.get("projection")?,
             message: row.get("message")?,
+            source_generation: source_generation
+                .map(|generation| sqlite_u64(generation, "projection source generation"))
+                .transpose()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            intended_hash: row.get("intended_hash")?,
+            retry_status: row.get("retry_status")?,
             timestamp: sqlite_u64(timestamp, "projection diagnostic timestamp")
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         })
@@ -916,15 +959,46 @@ pub fn insert_projection_diagnostic(
     document_id: &str,
     message: &str,
 ) -> Result<()> {
-    conn.execute(
-        r#"
-        INSERT INTO projection_diagnostics (projection, document_id, message, timestamp)
-        VALUES (?1, ?2, ?3, ?4)
-        "#,
-        params![
+    insert_projection_diagnostic_with_metadata(
+        conn,
+        &ProjectionDiagnosticInsert {
             projection,
             document_id,
             message,
+            source_generation: None,
+            intended_hash: None,
+            retry_status: "retry_pending",
+        },
+    )
+}
+
+pub fn insert_projection_diagnostic_with_metadata(
+    conn: &Connection,
+    diagnostic: &ProjectionDiagnosticInsert<'_>,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO projection_diagnostics (
+            projection,
+            document_id,
+            message,
+            source_generation,
+            intended_hash,
+            retry_status,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![
+            diagnostic.projection,
+            diagnostic.document_id,
+            diagnostic.message,
+            diagnostic
+                .source_generation
+                .map(|generation| sqlite_i64(generation, "projection source generation"))
+                .transpose()?,
+            diagnostic.intended_hash,
+            diagnostic.retry_status,
             sqlite_i64(timestamp_secs(), "projection diagnostic timestamp")?
         ],
     )?;

@@ -24,8 +24,9 @@ pub use state_store::{
     SessionOperatorStatus, SupervisorLeaseStatus, state_db_path,
 };
 use state_store::{
-    Connection, insert_projection_diagnostic, load_actor_record_from_db, load_actor_store_from_db,
-    load_control_plane_store_counts, load_layout_state_from_db,
+    Connection, ProjectionDiagnosticInsert, insert_projection_diagnostic,
+    insert_projection_diagnostic_with_metadata, load_actor_record_from_db,
+    load_actor_store_from_db, load_control_plane_store_counts, load_layout_state_from_db,
     load_session_operator_status_from_db, load_supervisor_lease_from_db, open_state_db,
     store_layout_state_in_db, timestamp_secs,
 };
@@ -54,6 +55,17 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(test, feature = "test-support"))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
+
+#[derive(Clone, Debug)]
+pub struct SessionsProjectionHint {
+    pub session_id: String,
+    pub pane_id: String,
+    pub file: String,
+    pub pid: u32,
+    pub window_id: String,
+    pub cwd: String,
+    pub supervisor_instance_id: String,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1059,11 +1071,15 @@ pub fn store_actor_record(
         controller_epoch,
     )?;
 
+    let actor_projection_hash = actor_projection_intended_hash(project_root).ok();
     if let Err(err) = emit_actor_projection(project_root) {
-        record_projection_diagnostic(
+        record_projection_diagnostic_with_metadata(
             project_root,
             "session-actors.json",
             &record.document_id,
+            Some(record.generation),
+            actor_projection_hash.as_deref(),
+            "retry_pending",
             &format!("failed to emit actor projection after sqlite commit: {err}"),
         );
     }
@@ -1257,6 +1273,13 @@ fn emit_actor_projection(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn actor_projection_intended_hash(project_root: &Path) -> Result<String> {
+    let store = load_actor_store(project_root)?;
+    Ok(crate::ops_log::content_hash(&serde_json::to_string_pretty(
+        &store,
+    )?))
+}
+
 fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> Result<()> {
     if state_store::layout_scope_exists(conn, DEFAULT_LAYOUT_SCOPE)? {
         return Ok(());
@@ -1309,11 +1332,17 @@ pub fn load_layout_state(project_root: &Path) -> Result<Vec<String>> {
 pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()> {
     let conn = open_state_db(project_root)?;
     store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, columns)?;
+    let intended_hash = serde_json::to_string(columns)
+        .ok()
+        .map(|content| crate::ops_log::content_hash(&content));
     if let Err(err) = emit_layout_projection(project_root) {
-        record_projection_diagnostic(
+        record_projection_diagnostic_with_metadata(
             project_root,
             LAYOUT_PROJECTION_FILE,
             "__layout__",
+            None,
+            intended_hash.as_deref(),
+            "retry_pending",
             &format!("failed to emit layout projection after sqlite commit: {err}"),
         );
     }
@@ -1321,53 +1350,78 @@ pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()>
 }
 
 pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &str) -> Result<()> {
+    project_sessions_projection_for_actor_with_hint(project_root, document_id, None)
+}
+
+pub fn project_sessions_projection_for_actor_with_hint(
+    project_root: &Path,
+    document_id: &str,
+    hint: Option<&SessionsProjectionHint>,
+) -> Result<()> {
     let Some(record) = load_actor_record(project_root, document_id)? else {
         return Ok(());
     };
+    emit_sessions_projection(project_root, &record, hint)
+}
+
+fn emit_sessions_projection(
+    project_root: &Path,
+    focused_record: &crate::session_actor::ActorRecord,
+    hint: Option<&SessionsProjectionHint>,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    let store = load_actor_store_from_db(&conn)?;
     let mut registry = match crate::sessions::load_in(project_root) {
         Ok(registry) => registry,
         Err(err) => {
-            record_projection_diagnostic(
+            record_projection_diagnostic_with_metadata(
                 project_root,
                 "sessions.json",
-                document_id,
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                None,
+                "retry_pending",
                 &format!("failed to load projection: {err}"),
             );
-            return Ok(());
+            crate::sessions::SessionRegistry::new()
         }
     };
-    if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
-        if registry.remove(document_id).is_none() {
-            return Ok(());
+    let live_actor_panes: BTreeSet<String> = store
+        .values()
+        .filter(|record| {
+            record.state != crate::session_actor::ActorState::Closed && !record.pane_id.is_empty()
+        })
+        .map(|record| record.pane_id.clone())
+        .collect();
+    registry
+        .retain(|key, entry| store.contains_key(key) || !live_actor_panes.contains(&entry.pane));
+
+    for record in store.values() {
+        if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
+            registry.remove(&record.document_id);
+            continue;
         }
-        if let Err(err) = crate::sessions::save_in(project_root, &registry) {
-            record_projection_diagnostic(
-                project_root,
-                "sessions.json",
-                document_id,
-                &format!("failed to remove closed actor projection: {err}"),
-            );
-            return Ok(());
-        }
-        return Ok(());
+        let projected_hint = hint.filter(|hint| {
+            crate::sessions::canonical_registry_key_in(project_root, &hint.file)
+                == record.document_id
+        });
+        let prior = registry.get(&record.document_id);
+        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+        let entry = sessions_projection_entry(project_root, record, prior, projected_hint, lease);
+        registry.insert(record.document_id.clone(), entry);
     }
-    let Some(entry) = registry.get_mut(document_id) else {
-        record_projection_diagnostic(
-            project_root,
-            "sessions.json",
-            document_id,
-            "sessions projection has no registry entry for controller actor",
-        );
-        return Ok(());
-    };
-    entry.session_id = record.session_id.clone();
-    entry.pane = record.pane_id.clone();
-    entry.window = record.window_id.clone();
+
+    let intended_hash = serde_json::to_string_pretty(&registry)
+        .ok()
+        .map(|content| crate::ops_log::content_hash(&content));
     if let Err(err) = crate::sessions::save_in(project_root, &registry) {
-        record_projection_diagnostic(
+        record_projection_diagnostic_with_metadata(
             project_root,
             "sessions.json",
-            document_id,
+            &focused_record.document_id,
+            Some(focused_record.generation),
+            intended_hash.as_deref(),
+            "retry_pending",
             &format!("failed to write projection: {err}"),
         );
         return Ok(());
@@ -1375,34 +1429,135 @@ pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &
     let projected = match crate::sessions::load_in(project_root) {
         Ok(registry) => registry,
         Err(err) => {
-            record_projection_diagnostic(
+            record_projection_diagnostic_with_metadata(
                 project_root,
                 "sessions.json",
-                document_id,
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                intended_hash.as_deref(),
+                "retry_pending",
                 &format!("failed to reload projection: {err}"),
             );
             return Ok(());
         }
     };
-    if projected.get(document_id).is_none_or(|entry| {
-        entry.session_id != record.session_id
-            || entry.pane != record.pane_id
-            || entry.window != record.window_id
-    }) {
-        record_projection_diagnostic(
+    if focused_record.state == crate::session_actor::ActorState::Closed
+        || focused_record.pane_id.is_empty()
+    {
+        if projected.contains_key(&focused_record.document_id) {
+            record_projection_diagnostic_with_metadata(
+                project_root,
+                "sessions.json",
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                intended_hash.as_deref(),
+                "retry_pending",
+                "sessions projection kept a closed controller actor binding",
+            );
+        }
+    } else if projected
+        .get(&focused_record.document_id)
+        .is_none_or(|entry| {
+            entry.session_id != focused_record.session_id
+                || entry.pane != focused_record.pane_id
+                || entry.window != focused_record.window_id
+        })
+    {
+        record_projection_diagnostic_with_metadata(
             project_root,
             "sessions.json",
-            document_id,
+            &focused_record.document_id,
+            Some(focused_record.generation),
+            intended_hash.as_deref(),
+            "retry_pending",
             "sessions projection drifted from controller actor state",
         );
     }
     Ok(())
 }
 
+fn sessions_projection_entry(
+    project_root: &Path,
+    record: &crate::session_actor::ActorRecord,
+    prior: Option<&crate::sessions::SessionEntry>,
+    hint: Option<&SessionsProjectionHint>,
+    lease: Option<SupervisorLeaseStatus>,
+) -> crate::sessions::SessionEntry {
+    let pid = prior
+        .map(|entry| entry.pid)
+        .filter(|pid| *pid != 0)
+        .or_else(|| hint.map(|hint| hint.pid).filter(|pid| *pid != 0))
+        .or_else(|| lease.and_then(|lease| lease.supervisor_pid))
+        .unwrap_or(0);
+    let cwd = prior
+        .map(|entry| entry.cwd.clone())
+        .filter(|cwd| !cwd.is_empty())
+        .or_else(|| {
+            hint.map(|hint| hint.cwd.clone())
+                .filter(|cwd| !cwd.is_empty())
+        })
+        .unwrap_or_else(|| project_root.to_string_lossy().to_string());
+    let started = prior
+        .map(|entry| entry.started.as_str())
+        .filter(|started| !started.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| timestamp_secs().to_string());
+    let file = prior
+        .map(|entry| entry.file.as_str())
+        .filter(|file| !file.is_empty())
+        .or_else(|| {
+            hint.map(|hint| hint.file.as_str())
+                .filter(|file| !file.is_empty())
+        })
+        .unwrap_or(record.document_id.as_str())
+        .to_string();
+    let supervisor_instance_id = prior
+        .map(|entry| entry.supervisor_instance_id.as_str())
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            hint.map(|hint| hint.supervisor_instance_id.as_str())
+                .filter(|id| !id.is_empty())
+        })
+        .unwrap_or("")
+        .to_string();
+
+    crate::sessions::SessionEntry {
+        pane: record.pane_id.clone(),
+        pid,
+        cwd,
+        started,
+        session_id: record.session_id.clone(),
+        file,
+        window: record.window_id.clone(),
+        supervisor_instance_id,
+    }
+}
+
+#[cfg(test)]
 fn record_projection_diagnostic(
     project_root: &Path,
     projection: &str,
     document_id: &str,
+    message: &str,
+) {
+    record_projection_diagnostic_with_metadata(
+        project_root,
+        projection,
+        document_id,
+        None,
+        None,
+        "retry_pending",
+        message,
+    );
+}
+
+fn record_projection_diagnostic_with_metadata(
+    project_root: &Path,
+    projection: &str,
+    document_id: &str,
+    source_generation: Option<u64>,
+    intended_hash: Option<&str>,
+    retry_status: &str,
     message: &str,
 ) {
     eprintln!(
@@ -1410,13 +1565,30 @@ fn record_projection_diagnostic(
         projection, document_id, message
     );
     if let Ok(conn) = open_state_db(project_root) {
-        let _ = insert_projection_diagnostic(&conn, projection, document_id, message);
+        let _ = insert_projection_diagnostic_with_metadata(
+            &conn,
+            &ProjectionDiagnosticInsert {
+                projection,
+                document_id,
+                message,
+                source_generation,
+                intended_hash,
+                retry_status,
+            },
+        );
     }
     crate::ops_log::log_op(
         Path::new(document_id),
         &format!(
-            "projection_drift projection={} document={} message={}",
-            projection, document_id, message
+            "projection_drift projection={} document={} source_generation={} intended_hash={} retry_status={} message={}",
+            projection,
+            document_id,
+            source_generation
+                .map(|generation| generation.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            intended_hash.unwrap_or("unknown"),
+            retry_status,
+            message
         ),
     );
 }
@@ -3357,7 +3529,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_sessions_projection_records_drift_diagnostic() {
+    fn sessions_projection_creates_missing_registry_entry_from_controller_state() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/test.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -3367,15 +3539,57 @@ mod tests {
 
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
+        let projected = crate::sessions::load_in(dir.path()).unwrap();
+        let entry = projected.get(&document_id).unwrap();
+        assert_eq!(entry.pane, "%61");
+        assert_eq!(entry.window, "@3");
+        assert_eq!(entry.session_id, "session-1");
+        assert_eq!(entry.file, document_id);
+        assert_eq!(entry.cwd, dir.path().to_string_lossy());
+
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
-        let message: String = conn
+        let diagnostics: i64 = conn
             .query_row(
-                "SELECT message FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(message.contains("no registry entry"));
+        assert_eq!(diagnostics, 0);
+    }
+
+    #[test]
+    fn sessions_projection_failure_records_generation_hash_retry_metadata() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/test.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/sessions.json")).unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let record = actor_record(&document_id, "%61", "@3");
+
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let (source_generation, intended_hash, retry_status, message): (
+            i64,
+            String,
+            String,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT source_generation, intended_hash, retry_status, message \
+                 FROM projection_diagnostics \
+                 WHERE projection = 'sessions.json' \
+                 ORDER BY id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(source_generation, 1);
+        assert!(!intended_hash.is_empty());
+        assert_eq!(retry_status, "retry_pending");
+        assert!(message.contains("failed to write projection"));
     }
 
     #[test]

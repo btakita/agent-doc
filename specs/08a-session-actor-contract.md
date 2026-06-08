@@ -213,10 +213,12 @@ Later phases may refine caller values without changing the field names.
   `session clear` through the actor-backed command path, and preserve
   stage-specific dispatch failures in a durable diagnostics surface.
 - `sessions.json` remains a projection/binding helper during migration, not the
-  final actor store. Controller-backed actor writes reconcile existing registry
-  entries to the actor binding; if either `session-actors.json` or
-  `sessions.json` cannot be emitted or drifts from SQLite, the actor state stays
-  authoritative and the controller records projection diagnostics.
+  final actor store. Controller-backed actor writes emit registry entries from
+  the SQLite actor rows, preserving legacy PID/cwd/supervisor metadata when a
+  prior entry exists and synthesizing compatibility fields when it does not. If
+  either `session-actors.json` or `sessions.json` cannot be emitted or drifts
+  from SQLite, the actor state stays authoritative and the controller records
+  projection diagnostics with generation/hash/retry metadata.
 - Session logs and `ops.log` are transition provenance outputs. The controller
   persists actor state first, then emits projection/log diagnostics from that
   committed state.

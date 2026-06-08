@@ -63,6 +63,11 @@ projections, and tmux transcript inference.
 - JSON projection failures are recorded as projection diagnostics with source
   generation, intended projection hash, error, and retry status. They must not
   roll back or weaken the authoritative actor state.
+- `sessions.json` projection emission is controller-backed once an actor row
+  exists: the projection worker derives the binding from SQLite, preserves
+  existing compatibility metadata when available, can recreate a missing
+  registry entry from the actor row, and removes stale same-pane legacy entries
+  that conflict with a live controller actor.
 - Session actor closeout persists the selected queue head, response/cycle
   terminal state, and tracked pending mutations as one controller transaction
   after strict closeout checks pass. Failed closeout must leave those controller

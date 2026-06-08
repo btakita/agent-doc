@@ -2727,8 +2727,14 @@ fn print_status_summary(ctx: &SessionContext) {
         println!("controller_projection_diagnostics:");
         for diagnostic in &ctx.operator_status.projection_diagnostics {
             println!(
-                "- projection={} at={} message={}",
+                "- projection={} generation={} hash={} retry_status={} at={} message={}",
                 diagnostic.projection,
+                diagnostic
+                    .source_generation
+                    .map(|generation| generation.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                diagnostic.intended_hash.as_deref().unwrap_or("unknown"),
+                diagnostic.retry_status.as_deref().unwrap_or("unknown"),
                 agent_doc_orchestration::startup_miss::format_timestamp(diagnostic.timestamp),
                 diagnostic.message
             );

@@ -857,6 +857,7 @@ fn register_full_internal(
         registry.remove(key);
     }
 
+    let mut controller_row_exists = false;
     if let Some(previous) = registry.get(&registry_key).cloned() {
         if transition_caller != "start" {
             let generations = crate::session_actor::project_binding_in(
@@ -878,6 +879,7 @@ fn register_full_internal(
                 transition_reason,
                 generations,
             );
+            controller_row_exists = true;
         }
     } else if transition_caller != "start" {
         let _ = crate::session_actor::project_binding_in(
@@ -889,6 +891,27 @@ fn register_full_internal(
             transition_caller,
             transition_reason,
         )?;
+        controller_row_exists = true;
+    } else if crate::project_controller::load_actor_record(base_dir, &registry_key)?.is_some() {
+        controller_row_exists = true;
+    }
+
+    if controller_row_exists {
+        let hint = crate::project_controller::SessionsProjectionHint {
+            session_id: session_id.to_string(),
+            pane_id: pane_id.to_string(),
+            file: file.to_string(),
+            pid,
+            window_id: window.to_string(),
+            cwd: cwd.to_string(),
+            supervisor_instance_id: supervisor_instance_id.clone(),
+        };
+        crate::project_controller::project_sessions_projection_for_actor_with_hint(
+            base_dir,
+            &registry_key,
+            Some(&hint),
+        )?;
+        return Ok(());
     }
 
     registry.insert(

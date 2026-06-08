@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,13 +35,30 @@ complete
 Compacted content:
 - Archived 2 response topic(s): /clear; session bookkeeping
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:98b3c63d -->
+
+### Re: `/clear` fast path — gpt-5
+
+> **Queue prompt:**
+>
+> I cancelled the last turn. The last turn should have just immediately stopped, run `/clear`, that's it. 0 tokens should have been spent. It should have been quick.
+
+
+Agreed. The previous turn took the wrong path: an AST-only `/clear` queue head should be handled by the supervisor as a control action, not by spending a normal agent-doc response cycle or writing explanatory text into `agent:exchange`.
+
+I captured the follow-up as a backlog item so the fix is explicit: detect a queue body that normalizes to only `/clear`, stop the owner turn immediately, and let the supervisor send `/clear` after the pane is idle. Surrounding whitespace should not affect that detection.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+- Commands: `tsift status`, `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- Verification: prompt response plus backlog capture only; no code or tests changed
+- Confidence: high
+- Escalation: none
+<!-- agent:boundary:04f98662 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- I cancelled the last turn. The last turn should have just immediately stopped, run `/clear`, that's it. 0 tokens should have been spent. It should have been quick.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -71,6 +88,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#clearfast] #agent-doc-bug Fix the AST-only `/clear` queue fast path: if the active queue body reduces to only `/clear` after whitespace/comment normalization, the preset/supervisor should stop the owner turn immediately, emit no exchange response, and send `/clear` only after the turn is idle; add regression coverage for surrounding whitespace.
 <!-- /agent:backlog -->
 
 ## Review

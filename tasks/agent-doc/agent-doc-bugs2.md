@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -143,12 +143,14 @@ Verification:
 - `cargo install --path .` installed `agent-doc 0.34.0`
 
 CI: latest `btakita/agent-doc` CI for `ae34062e` was `in_progress` when checked; the superproject has no workflow named `CI`. Unrelated dirty superproject files were left untouched. The exchange is still churn-heavy, but I kept draining the active queue instead of stopping for compaction.
-<!-- agent:boundary:1169ccb8 -->
+/clear
+<!-- agent:boundary:b5516947 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- /clear
 <!-- /agent:queue -->
 ###
 <!--

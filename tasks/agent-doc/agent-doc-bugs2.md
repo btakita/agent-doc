@@ -169,7 +169,21 @@ CI:
 - New `src/agent-doc` CI for `3978a949` is `in_progress` (`27110969213`, started 2026-06-08 01:27:01Z), so I did not wait on it.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:09f77b28 -->
+Implemented `#ctrlplane-sessionactor`.
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ctrlplane-sessionactor]
+
+
+The closeout path now persists the selected queue head, terminal document cycle state, and tracked pending mutation outcomes through the controller SQLite store in one session-actor closeout transaction after strict closeout checks pass. I added the `pending_mutations` table/counts, surfaced it in control-plane status, reused the existing queue directive parser for queue-head ids, and updated the single-process control-plane spec.
+
+Committed and pushed:
+- `src/agent-doc` `767832e8` (`controller: persist session actor closeout`)
+- parent pointer `7d16b19b9` (`agent-doc: update session closeout controller pointer`)
+
+Verification passed: `cargo test -p agent-doc-sqlite`, `cargo test -p agent-doc-orchestration project_controller::tests::`, `make check`, `cargo install --path .`. Latest `CI` run was green (`27110969213`).
+<!-- agent:boundary:f14997f6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -179,11 +193,15 @@ Confidence: high. Escalation: none.
 - ~~:round_pushpin: do [#ctrlplane-memoryauth]~~
 - ~~:pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?~~
 - ~~:round_pushpin: do [#ctrlplane-dispatchapi]~~
-- :round_pushpin: do [#ctrlplane-sessionactor]
+- ~~:round_pushpin: do [#ctrlplane-sessionactor]~~
+- :pushpin: stop
 - :round_pushpin: do [#ctrlplane-projections]
 - :round_pushpin: do [#ctrlplane-crashrecover]
 - :round_pushpin: do [#ctrlplane-adminbp]
 - :round_pushpin: do [#ctrlplane-simworld]
+- re queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog. This is similar to Claude Code's queue using `/loop`.
+- stop
+- When I start a new agent-doc Codex session, I write into `agent:exchange`, I run JB `Run Agent Doc`, then nothing happens. If I write into `agent:queue`, I run JB `Run Agent Doc`, then the turn starts.
 - ~~do [#ctrlplane-storeactor]~~
 <!-- /agent:queue -->
 ###
@@ -210,7 +228,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
+- [x] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
 - [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.
 - [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.

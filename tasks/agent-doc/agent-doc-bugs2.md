@@ -50,12 +50,12 @@ The plan ties this work to the existing `#ipc-admin-api`, Project Controller MVP
 I closed `#ctrlplane-adminbp` as the planning item and added three follow-up implementation phases to the backlog, all pointing at the plan file: controller data/receipts, CLI/admin operations, and queue/projection/FFI integration. `#ctrlplane-simworld` should stay after those primitives, since it depends on them for deterministic race coverage.
 
 Verification: `git diff --check -- tasks/agent-doc/plan-controller-admin-backpressure.md` passed. I did not run the Rust suite because this cycle only added a plan document and backlog mutations.
-<!-- agent:boundary:ed7ab030 -->
+<!-- agent:boundary:21f989d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

@@ -272,8 +272,7 @@ Verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:2621ffb1 -->
-<!-- agent:boundary:11f11e2b -->
+<!-- agent:boundary:ff12e5ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,7 +290,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [x] [#1zax] [recommended] Add prompt-cache invalidation diagnostics that classify likely prefix/key/replica churn from analytics timeline drops, creation-token spikes, and read/create regressions.
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -56,13 +56,12 @@ Verification passed:
 - Latest GitHub Actions CI run on `main` was already `completed success`.
 
 Code commit: `src/agent-doc` `19b70a1f` (`Run slash queue heads as commands`), pushed to `origin/main`. Superproject pointer commit: `0ff4619c6` (`Update agent-doc slash queue support`).
-<!-- agent:boundary:1923e0c6 -->
+<!-- agent:boundary:242b15a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
-- re "queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog." This is similar to Claude Code's queue using `/loop`. Extract the stop turn + `/clear` functionality in preparation to support a literal `/clear` prompt or any other `/` command in the exchange or queue, which will run the `/` command after the turn is complete.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 <!-- /agent:queue -->
 ###
 <!--

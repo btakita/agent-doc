@@ -107,13 +107,37 @@ Shipped phase 3: the **affectedness classifier + 5-class router** — the capsto
 **The three phases together** give the full substrate: phase 1 actor-tags every op and persists it to the durable Lamport-ordered op log, phase 2 emits the TurnScope manifest at turn start, and phase 3 intersects ops against that scope to route the coarse all-drift-is-affecting assumption into the 5 classes — so independent and spoofed edits integrate and persist without disturbing the turn.
 
 **Follow-up queued** (`agent:backlog`): the remaining step is the *behavioral swap on the live gate* — wiring `op_affectedness` into the finalize-path drift gate (`git::has_non_exchange_component_drift` + the live-buffer divergence check). I deferred it to its own session deliberately: it changes the very gate this active queue-draining session depends on, so doing it mid-session would be reckless. The decision logic it needs is now shipped and tested.
-<!-- agent:boundary:c917f0aa -->
+
+### Re: do [#nm1x] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#nm1x]
+
+Shipped phase 4 — the **behavioral swap**: `op_affectedness` is now wired into the two live finalize-path drift gates, so an edit that doesn't touch what this turn is doing integrates and persists instead of blocking finalize. Prior phases (`#op-scoped-drift-1/2/3`) built and tested the classifier; this is the step that actually changes the gates. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
+
+**What landed (agent-doc `614aea9c`, pushed to origin/main; submodule bumped `759d1c8c3`):**
+
+- **Scope is persisted at turn start.** Preflight writes the turn's read/write manifest (`TurnScope`) to `.agent-doc/turn-scope/<hash>.json`. Finalize runs as a separate process, so it loads that sidecar to judge incoming edits against the same scope. Best-effort: a missing/stale sidecar makes the gate fall back to the old conservative behavior.
+- **Commit gate (`git.rs`).** Instead of "any non-exchange component changed → block", each changed component's item-level edits are classified against the scope. A **queue item added beside the running one** (or an icebox/done edit) is *independent* → it no longer blocks the commit; it just stays in the working tree. A change to the item being answered, a backlog/status/review write, a delete/move, or any change the differ can't fully explain still blocks. This is exactly the monsterrodholders queue-churn false positive.
+- **Live-buffer gate (`write.rs`).** The "visible editor buffer differs" block (exit 75) no longer fires when the editor's buffer **equals the current file on disk** — that means the editor has no unsaved edits ahead of disk, so the difference is the document's own independent edit (the reconcilable case), not a pending user edit. A genuine unsaved buffer ahead of disk still fails closed.
+- **Fixed a latent matching bug** the swap exposed: `Address::overlaps` keyed on an `occurrence` field that real node keys encode as the *global component index*, so `backlog`/`status`/`review`/`exchange` never matched. Overlap now keys on component name + node key; occurrence is informational. (Phase-3's `op_affectedness` was correct only on synthetic node keys until this.)
+
+**Why this was deferred until now:** it changes the very gate this active session uses to finalize. I kept it strictly *more permissive only* — it never adds a new block, so it can't be worse than before — and this turn's own finalize is the live proof: the JB-`/clear` queue item the user added beside `#nm1x` is an independent sibling insert that now sails through.
+
+**Verification:** new unit + regression tests (scope-aware drift gate independent-insert / driver-edit / backlog-contention / unexplained-change, editor-matches-disk reconcile, sidecar round-trip, `overlaps` semantics); full `make check` green (clippy `-D warnings` clean); FlowCore budget +1 audited; release + `cargo install` rebuilt both binaries. CI run `27165660753` is queued — closing from local evidence.
+
+**Still open (queued `#nm1x-livebuf-content`):** the live-buffer gate only suppresses the *editor-matches-disk* false positive. A genuine **unsaved** independent edit still blocks conservatively, because the live-buffer sidecar stores only a length/hash — no content to classify. Capturing the buffer text needs an editor-plugin change; queued as its own item.
+
+(Exchange is large but the queue is active, so I'm not stalling to compact.) Next in the queue: the JB `Run Agent Doc` / `/clear` item.
+<!-- agent:boundary:9f829e27 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#nm1x]
+- ~~do [#nm1x]~~
+- On JB `Run Agent Doc`, we should not pre-emptively run `/clear`.
 - ~~do [#canonical-session-close-autodetect]~~
 <!-- /agent:queue -->
 ###
@@ -142,7 +166,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#nm1x] Wire op_affectedness into the live finalize-path drift gate: replace git::has_non_exchange_component_drift + the live-buffer divergence check with TurnScope scope-intersection so independent/provenance-spoofed ops integrate+persist instead of blocking finalize. The classifier substrate (op-scoped-drift-1/2/3) is shipped; this is the behavioral swap on the live gate, deferred to its own session because it changes the gate the active session depends on. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,12 +35,12 @@ complete
 Compacted content:
 - Archived 4 response topic(s): `#ctrlplane-adminbp-queue`; `#ctrlplane-simworld`; active queue continuation closeout; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f4b50d24 -->
+<!-- agent:boundary:0bc97660 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
 - re "queue `/clear`, agent-doc manage stopping the turn, run `/clear`, then restart the queue? If yes, add to the backlog." This is similar to Claude Code's queue using `/loop`. Extract the stop turn + `/clear` functionality in preparation to support a literal `/clear` prompt or any other `/` command in the exchange or queue, which will run the `/` command after the turn is complete.
 <!-- /agent:queue -->
 ###

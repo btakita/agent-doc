@@ -63,14 +63,40 @@ Wired through a new `reconcile_visible_write` loop helper (bounded to `VISIBLE_W
 Files: `agent-doc-orchestration/src/write.rs` (guard split + reconcile helper + loops), `tests/test_cli.rs` (budget), `specs/07-closeout-commands.md`, `VERSIONS.md`.
 
 Next in queue: `#ipc-drift-writeback-serialize` (serialize superproject write-back across concurrent supervisors — the other half of this drift class).
-<!-- agent:boundary:dadbc05a -->
+
+### Re: do [#ipc-drift-writeback-serialize] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]
+
+
+Done — serialization verified and locked in with deterministic coverage.
+
+**Finding.** The git-dir-scoped `CommitLock` already serializes the staging/commit critical section per resolved git dir (it was added in the control-plane refactor, `cc6be806`). Because the lock is keyed on the resolved *absolute git dir*, every write-back into one superproject contends on the same lock:
+- a submodule document's parent-gitlink (`submodule pointer`) commit, and
+- a sibling superproject-root document's closeout
+
+...both acquire `CommitLock(super_root)`, so two supervisor processes writing back to the same superproject cannot interleave partial commits or strand a captured response outside HEAD. A submodule doc also holds its own submodule-scoped lock for the inner commit, so the inner submodule commit and the superproject pointer update are each serialized at their own repo scope.
+
+The monsterrodholders interleave from the report (`d4182b0e1 ... (submodule pointer)` landing amid another session's commits) is exactly this path — and it's the case the existing test (`commit_serializes_closeout_per_git_root`, sibling docs in one root) did *not* cover.
+
+**What this cycle added.**
+- `superproject_writeback_serializes_pointer_update_and_root_commit`: builds a real superproject + submodule, externally holds the shared super-root lock, spawns a submodule-doc commit and a superproject-root commit concurrently, asserts *neither* completes while the lock is held, then on release asserts both land cleanly — superproject HEAD carries both the `(submodule pointer)` commit and the root-doc closeout, and each repo's HEAD carries its captured response (no `stuck_captured_cycle`).
+- Closeout-spec invariant (`specs/07-closeout-commands.md`) documenting the concurrent-supervisor superproject serialization.
+- VERSIONS entry.
+
+**Verification.** `make check`: 4016 passed, 0 failed, clippy clean. Built release + `cargo install --path .`. Committed + pushed to `agent-doc` main (`37783c89`). Prior cycle's CI run (visbuf-reconcile) is now green; this push's CI is in progress, closing on local evidence per the test-bearing-turn rule.
+
+Next in queue: `#ipc-drift-order-stable-merge` (order-stable CRDT overlay-as-merge-base for the append case — the suspected `5fd64b26` reversal/hoist).
+<!-- agent:boundary:7ae4f8af -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#ipc-drift-visbuf-reconcile]~~
-- :pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]
+- ~~:pushpin: :round_pushpin: do [#ipc-drift-writeback-serialize]~~
 - :pushpin: :round_pushpin: do [#ipc-drift-order-stable-merge]
 - :pushpin: If I start a new tmux session that becomes the canonical tmux session and another session exists, the other session should be closed and removed from the model.
 - :pushpin: Add backlog items to complete the operations taxonomy + implementation that we previously discussed. The initial goal is to distinguish between 
@@ -101,7 +127,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#ipc-drift-writeback-serialize] Serialize superproject git write-back through the single control-plane owner (or a per-repo lock) so two supervisors cannot interleave commits mid-generation (the monsterrodholders concurrent-supervisor interleave). Files: agent-doc-orchestration/src/{project_controller.rs,session_actor.rs}. SimWorld: two supervisors writing back to the same superproject -> serialized, no interleaved partial commits, no stuck_captured_cycle. Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
 - [ ] [#ipc-drift-order-stable-merge] Make CRDT overlay-as-merge-base order-stable for the append case so a concurrent foreign append (theirs>base) cannot reverse response lines or hoist them above the prior HEAD response. Files: agent-doc-orchestration/src/{merge.rs,crdt.rs} (suspect 5fd64b26 "Use overlay CRDT as merge base"). SimWorld: foreign append during generation -> merged Exchange keeps append order + ### Re: header intact (no reversal, no hoist). Clean-session repro per plan. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
 <!-- /agent:backlog -->
 

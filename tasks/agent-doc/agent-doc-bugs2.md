@@ -82,7 +82,32 @@ Shipped phase 2: the **TurnScope manifest**, emitted at turn start. Plan: `tasks
 **Verification:** 8 new unit tests (core `turn_scope` + preflight `derive_turn_scope`/`extract_target_id`) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries.
 
 Next: `#op-scoped-drift-3` — the affectedness classifier + 5-class router, which intersects each incoming op (phase 1's actor-tagged op log) against this TurnScope so independent edits integrate and persist without affecting the turn, replacing the coarse drift gate.
-<!-- agent:boundary:aa295cf2 -->
+
+### Re: do [#op-scoped-drift-3] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#op-scoped-drift-3]
+
+
+Shipped phase 3: the **affectedness classifier + 5-class router** — the capstone of the operation-scoped drift model. Plan: `tasks/agent-doc/plan-operation-scoped-drift.md`.
+
+**What landed (agent-doc `859a9984`, pushed to origin/main):**
+
+- **`agent-doc-core::turn_scope`** — the decision logic:
+  - `Address::overlaps` — the `conflict` primitive: same component occurrence and (either side component-level, or same node key).
+  - `AffectednessClass` = `independent | input_affecting | output_contended | structural_dependency | provenance_spoofed`, with `affects_turn` true only for classes 2/3/4.
+  - `classify_op(actor, op_kind, address, scope)` — the scope-intersection router: `affects(O,S) = conflict(target, read_set) ∨ conflict(target, write_set)`. Out-of-scope → independent; in-scope `live_buffer` → spoofed; `remove`/`move` → structural; read-set → input-affecting; write-set-only → output-contended.
+  - `classify_cycle` aggregates a cycle's actor-tagged ops (phase 1's op model) into `turn_affected`.
+- **Preflight** emits `op_affectedness` in `PreflightOutput`: every node op routed into the taxonomy against the `turn_scope`. The motivating bug — a queue item inserted **beside** the running one — now classifies `independent` with `turn_affected: false` (the monsterrodholders queue-churn false positive), and a lagging `live_buffer` write classifies `provenance_spoofed`.
+- **Spec** — new "Affectedness classifier" subsection in `specs/02-document-format.md` §2.
+
+**Verification:** 13 new tests (core `turn_scope` classifier + preflight motivating-case integration) green; full `make check` green (clippy `-D warnings` clean); release + `cargo install` rebuilt both binaries. Phase 2's `turn_scope` was confirmed live in this session's own preflight.
+
+**The three phases together** give the full substrate: phase 1 actor-tags every op and persists it to the durable Lamport-ordered op log, phase 2 emits the TurnScope manifest at turn start, and phase 3 intersects ops against that scope to route the coarse all-drift-is-affecting assumption into the 5 classes — so independent and spoofed edits integrate and persist without disturbing the turn.
+
+**Follow-up queued** (`agent:backlog`): the remaining step is the *behavioral swap on the live gate* — wiring `op_affectedness` into the finalize-path drift gate (`git::has_non_exchange_component_drift` + the live-buffer divergence check). I deferred it to its own session deliberately: it changes the very gate this active queue-draining session depends on, so doing it mid-session would be reckless. The decision logic it needs is now shipped and tested.
+<!-- agent:boundary:1385c3b1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -90,7 +115,7 @@ Next: `#op-scoped-drift-3` — the affectedness classifier + 5-class router, whi
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#op-scoped-drift-1]~~
 - ~~do [#op-scoped-drift-2]~~
-- do [#op-scoped-drift-3]
+- ~~do [#op-scoped-drift-3]~~
 - do [#canonical-session-close-autodetect]
 <!-- /agent:queue -->
 ###
@@ -119,7 +144,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#op-scoped-drift-3] :round_pushpin: Affectedness classifier + 5-class router; replace the coarse drift gate with TurnScope scope-intersection so independent ops integrate+persist without affecting the turn. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#nm1x] Wire op_affectedness into the live finalize-path drift gate: replace git::has_non_exchange_component_drift + the live-buffer divergence check with TurnScope scope-intersection so independent/provenance-spoofed ops integrate+persist instead of blocking finalize. The classifier substrate (op-scoped-drift-1/2/3) is shipped; this is the behavioral swap on the live gate, deferred to its own session because it changes the gate the active session depends on. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 - [ ] [#canonical-session-close-autodetect] :round_pushpin: [recommended] Extend superseded-session close to the auto-resync drift path (registered panes span multiple tmux sessions with no configured canonical). Needs a canonical-determination rule decision: newest session vs the session holding the active agent-doc window vs the current pane. Reuse resync::close_superseded_session once canonical is resolved.
 <!-- /agent:backlog -->
 

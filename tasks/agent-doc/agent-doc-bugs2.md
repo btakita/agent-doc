@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -69,12 +69,13 @@ The `#ckvm` queue head is complete and the repair preflight has persisted the re
 Closeout repair for the active Codex continuation: the `#ckvm` implementation response is already committed, and this pass persists the drained queue/done-archive maintenance state for the same completed queue head.
 /clear
 Processed `/clear` as a literal queue slash command and consumed the active queue head.
-<!-- agent:boundary:31a76a87 -->
+<!-- agent:boundary:ce5e70fc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" go -->
+- I ran `/clear`, but the session was not cleared. You have to wait for the turn to stop, then use the supervisor to send `/clear` after the turn. Ideally this can be done fast with minimal processing. This is not supposed to be a full turn. But if there is other prompts, that would need to be processed as well.
 <!-- /agent:queue -->
 ###
 <!--

@@ -183,7 +183,14 @@ Committed and pushed:
 - parent pointer `7d16b19b9` (`agent-doc: update session closeout controller pointer`)
 
 Verification passed: `cargo test -p agent-doc-sqlite`, `cargo test -p agent-doc-orchestration project_controller::tests::`, `make check`, `cargo install --path .`. Latest `CI` run was green (`27110969213`).
-<!-- agent:boundary:f14997f6 -->
+Stopping queue progression here as requested. I left the remaining queued items in place for the next owner-pane continuation instead of starting `#ctrlplane-projections` in this turn.
+
+> **Queue prompt:**
+>
+> :pushpin: stop
+
+
+<!-- agent:boundary:31be6340 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -194,7 +201,7 @@ Verification passed: `cargo test -p agent-doc-sqlite`, `cargo test -p agent-doc-
 - ~~:pushpin: Codex sessions are getting `'/clear' is disabled while a task is in progress.` in between queue items. Do we need to stop the turn, run `/clear`, then restart the queue?~~
 - ~~:round_pushpin: do [#ctrlplane-dispatchapi]~~
 - ~~:round_pushpin: do [#ctrlplane-sessionactor]~~
-- :pushpin: stop
+- ~~:pushpin: stop~~
 - :round_pushpin: do [#ctrlplane-projections]
 - :round_pushpin: do [#ctrlplane-crashrecover]
 - :round_pushpin: do [#ctrlplane-adminbp]
@@ -228,7 +235,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [x] [#ctrlplane-sessionactor] #agent-doc-bug Move per-document queue-head selection, response cycle state, pending mutations, and `do #id` backlog completion into the session actor so response closeout and tracked backlog mutation commit in the same controller transaction.
 - [ ] [#ctrlplane-projections] #agent-doc-bug Convert `session-actors.json`, `sessions.json`, layout JSON, session logs, and ops projections into compatibility outputs only; record projection lag/failure diagnostics in SQLite and remove normal-path write authority from sidecar files once controller rows exist.
 - [ ] [#ctrlplane-crashrecover] #agent-doc-bug Implement control-plane crash/restart recovery: rebuild the in-memory actor map from SQLite, reconcile open dispatch receipts by side-effect proof, reattach fresh supervisor leases, emit missing projections, and leave queue/backlog unadvanced when closeout did not commit.
 - [ ] [#ctrlplane-adminbp] #agent-doc-bug Add controller-backed admin and backpressure controls for actor inspection, queue pause/resume/drain, stale actor reap, manual handoff with observed generation, projection repair, and typed full-queue rejections.

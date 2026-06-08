@@ -538,6 +538,15 @@ last persisted bootstrap state from `.agent-doc/controller-state.json` without
 launching a process. With `--ensure`, the command runs the lazy
 connect-or-launch path before printing status.
 
+Status JSON includes a `control_plane` object that makes the single-process
+runtime boundary explicit. It reports `process_model =
+project_scoped_single_process`, `external_boundary = controller_ipc`,
+`.agent-doc/state.db` as state authority, compatibility projections as
+non-authoritative output, and role snapshots for the dispatch actor, store
+actor, per-document session actors, supervisor adapters, and projection
+workers. Active controllers report the live runtime shape; inactive status
+reports the durable offline shape from SQLite without launching a process.
+
 The controller owns project-level bootstrap identity and the live actor
 authority used by route/start/sync:
 

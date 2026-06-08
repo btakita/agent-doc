@@ -126,6 +126,29 @@ pub struct ControllerStatus {
     pub previous_controller_pid: Option<u32>,
     #[serde(default)]
     pub stale_duplicate_pids: Vec<u32>,
+    #[serde(default = "default_control_plane_status")]
+    pub control_plane: ControlPlaneStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlPlaneStatus {
+    pub process_model: String,
+    pub external_boundary: String,
+    pub state_authority: String,
+    pub projection_authority: String,
+    pub dispatch_actor: ControlPlaneActorStatus,
+    pub store_actor: ControlPlaneActorStatus,
+    pub session_actors: ControlPlaneActorStatus,
+    pub supervisor_adapters: ControlPlaneActorStatus,
+    pub projection_workers: ControlPlaneActorStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlPlaneActorStatus {
+    pub role: String,
+    pub authority: String,
+    pub state: String,
+    pub owned_items: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +164,164 @@ pub enum ControllerHandoffState {
 
 fn default_controller_generation() -> u64 {
     1
+}
+
+fn default_control_plane_status() -> ControlPlaneStatus {
+    ControlPlaneStatus {
+        process_model: "project_scoped_single_process".to_string(),
+        external_boundary: "controller_ipc".to_string(),
+        state_authority: ".agent-doc/state.db".to_string(),
+        projection_authority: "compatibility_output".to_string(),
+        dispatch_actor: ControlPlaneActorStatus {
+            role: "dispatch_actor".to_string(),
+            authority: "mutating_command_admission".to_string(),
+            state: "unknown".to_string(),
+            owned_items: 0,
+        },
+        store_actor: ControlPlaneActorStatus {
+            role: "store_actor".to_string(),
+            authority: "sqlite_write_serialization".to_string(),
+            state: "unknown".to_string(),
+            owned_items: 0,
+        },
+        session_actors: ControlPlaneActorStatus {
+            role: "session_actor".to_string(),
+            authority: "per_document_generation".to_string(),
+            state: "unknown".to_string(),
+            owned_items: 0,
+        },
+        supervisor_adapters: ControlPlaneActorStatus {
+            role: "supervisor_adapter".to_string(),
+            authority: "managed_harness_child".to_string(),
+            state: "unknown".to_string(),
+            owned_items: 0,
+        },
+        projection_workers: ControlPlaneActorStatus {
+            role: "projection_worker".to_string(),
+            authority: "compatibility_projection".to_string(),
+            state: "unknown".to_string(),
+            owned_items: 0,
+        },
+    }
+}
+
+fn sqlite_count(conn: &Connection, sql: &str, label: &str) -> Result<usize> {
+    let count: i64 = conn
+        .query_row(sql, [], |row| row.get(0))
+        .with_context(|| format!("failed to count {label} in controller state"))?;
+    usize::try_from(count).with_context(|| format!("{label} count is negative"))
+}
+
+fn control_plane_status(project_root: &Path, active: bool) -> Result<ControlPlaneStatus> {
+    let conn = open_state_db(project_root)?;
+    let document_rows = sqlite_count(&conn, "SELECT COUNT(*) FROM documents", "actor documents")?;
+    let live_documents = sqlite_count(
+        &conn,
+        "SELECT COUNT(*) FROM documents WHERE actor_state != 'closed'",
+        "live actor documents",
+    )?;
+    let supervisor_leases = sqlite_count(
+        &conn,
+        "SELECT COUNT(*) FROM supervisor_leases",
+        "supervisor leases",
+    )?;
+    let dispatch_receipts = sqlite_count(
+        &conn,
+        "SELECT COUNT(*) FROM dispatch_attempts",
+        "dispatch attempts",
+    )?;
+    let projection_diagnostics = sqlite_count(
+        &conn,
+        "SELECT COUNT(*) FROM projection_diagnostics",
+        "projection diagnostics",
+    )?;
+    let layout_rows = sqlite_count(&conn, "SELECT COUNT(*) FROM layout_states", "layout states")?;
+    let actor_state = if active { "ready" } else { "offline" };
+    let store_state = if active { "ready" } else { "durable_offline" };
+
+    Ok(ControlPlaneStatus {
+        dispatch_actor: ControlPlaneActorStatus {
+            state: actor_state.to_string(),
+            owned_items: dispatch_receipts,
+            ..default_control_plane_status().dispatch_actor
+        },
+        store_actor: ControlPlaneActorStatus {
+            state: store_state.to_string(),
+            owned_items: document_rows
+                + supervisor_leases
+                + dispatch_receipts
+                + projection_diagnostics
+                + layout_rows,
+            ..default_control_plane_status().store_actor
+        },
+        session_actors: ControlPlaneActorStatus {
+            state: actor_state.to_string(),
+            owned_items: live_documents,
+            ..default_control_plane_status().session_actors
+        },
+        supervisor_adapters: ControlPlaneActorStatus {
+            state: actor_state.to_string(),
+            owned_items: supervisor_leases,
+            ..default_control_plane_status().supervisor_adapters
+        },
+        projection_workers: ControlPlaneActorStatus {
+            state: actor_state.to_string(),
+            owned_items: projection_diagnostics,
+            ..default_control_plane_status().projection_workers
+        },
+        ..default_control_plane_status()
+    })
+}
+
+fn controller_status_from_bootstrap(
+    bootstrap: &ControllerBootstrap,
+    active: bool,
+) -> Result<ControllerStatus> {
+    Ok(ControllerStatus {
+        active,
+        project_root: bootstrap.project_root.clone(),
+        socket_path: bootstrap.socket_path.clone(),
+        launch_mode: Some(bootstrap.launch_mode),
+        bootstrap_epoch: Some(bootstrap.bootstrap_epoch),
+        pid: Some(bootstrap.pid),
+        controller_binary: bootstrap.controller_binary.clone(),
+        controller_generation: Some(bootstrap.controller_generation),
+        handoff_state: Some(bootstrap.handoff_state),
+        handoff_started_at: bootstrap.handoff_started_at,
+        previous_controller_pid: bootstrap.previous_controller_pid,
+        stale_duplicate_pids: discover_stale_duplicate_pids(
+            &bootstrap.project_root,
+            Some(bootstrap.pid),
+        ),
+        control_plane: control_plane_status(&bootstrap.project_root, active)?,
+    })
+}
+
+fn inactive_controller_status(
+    project_root: &Path,
+    bootstrap: Option<ControllerBootstrap>,
+) -> Result<ControllerStatus> {
+    Ok(ControllerStatus {
+        active: false,
+        project_root: project_root.to_path_buf(),
+        socket_path: socket_path(project_root),
+        launch_mode: bootstrap.as_ref().map(|state| state.launch_mode),
+        bootstrap_epoch: bootstrap.as_ref().map(|state| state.bootstrap_epoch),
+        pid: bootstrap.as_ref().map(|state| state.pid),
+        controller_binary: bootstrap
+            .as_ref()
+            .and_then(|state| state.controller_binary.clone()),
+        controller_generation: bootstrap.as_ref().map(|state| state.controller_generation),
+        handoff_state: bootstrap.as_ref().map(|state| state.handoff_state),
+        handoff_started_at: bootstrap
+            .as_ref()
+            .and_then(|state| state.handoff_started_at),
+        previous_controller_pid: bootstrap
+            .as_ref()
+            .and_then(|state| state.previous_controller_pid),
+        stale_duplicate_pids: discover_stale_duplicate_pids(project_root, None),
+        control_plane: control_plane_status(project_root, false)?,
+    })
 }
 
 fn parse_handoff_state(raw: &str) -> Result<ControllerHandoffState> {
@@ -1460,26 +1641,7 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
         }
         Err(_) => {
             let bootstrap = read_bootstrap(project_root)?;
-            Ok(ControllerStatus {
-                active: false,
-                project_root: project_root.to_path_buf(),
-                socket_path: socket_path(project_root),
-                launch_mode: bootstrap.as_ref().map(|state| state.launch_mode),
-                bootstrap_epoch: bootstrap.as_ref().map(|state| state.bootstrap_epoch),
-                pid: bootstrap.as_ref().map(|state| state.pid),
-                controller_binary: bootstrap
-                    .as_ref()
-                    .and_then(|state| state.controller_binary.clone()),
-                controller_generation: bootstrap.as_ref().map(|state| state.controller_generation),
-                handoff_state: bootstrap.as_ref().map(|state| state.handoff_state),
-                handoff_started_at: bootstrap
-                    .as_ref()
-                    .and_then(|state| state.handoff_started_at),
-                previous_controller_pid: bootstrap
-                    .as_ref()
-                    .and_then(|state| state.previous_controller_pid),
-                stale_duplicate_pids: discover_stale_duplicate_pids(project_root, None),
-            })
+            inactive_controller_status(project_root, bootstrap)
         }
     }
 }
@@ -1928,23 +2090,10 @@ fn handle_request_locked(
         .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?
         .clone();
     match request.command.as_str() {
-        "status" => Ok(serde_json::to_string(&ControllerStatus {
-            active: true,
-            project_root: bootstrap_snapshot.project_root.clone(),
-            socket_path: bootstrap_snapshot.socket_path.clone(),
-            launch_mode: Some(bootstrap_snapshot.launch_mode),
-            bootstrap_epoch: Some(bootstrap_snapshot.bootstrap_epoch),
-            pid: Some(bootstrap_snapshot.pid),
-            controller_binary: bootstrap_snapshot.controller_binary.clone(),
-            controller_generation: Some(bootstrap_snapshot.controller_generation),
-            handoff_state: Some(bootstrap_snapshot.handoff_state),
-            handoff_started_at: bootstrap_snapshot.handoff_started_at,
-            previous_controller_pid: bootstrap_snapshot.previous_controller_pid,
-            stale_duplicate_pids: discover_stale_duplicate_pids(
-                &bootstrap_snapshot.project_root,
-                Some(bootstrap_snapshot.pid),
-            ),
-        })?),
+        "status" => Ok(serde_json::to_string(&controller_status_from_bootstrap(
+            &bootstrap_snapshot,
+            true,
+        )?)?),
         "prepare_handoff" => {
             let mut state = bootstrap
                 .lock()
@@ -3006,6 +3155,7 @@ mod tests {
             handoff_started_at: None,
             previous_controller_pid: None,
             stale_duplicate_pids: Vec::new(),
+            control_plane: default_control_plane_status(),
         };
         assert!(!controller_status_matches_current_binary(&missing).unwrap());
 
@@ -3802,6 +3952,143 @@ mod tests {
                 .as_deref(),
             Some("operator_ready")
         );
+    }
+
+    #[test]
+    fn controller_status_reports_single_process_control_plane_runtime() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/control-plane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-control-plane\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: Some("@7".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let register = ControllerRequest {
+            command: "register_supervisor".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("starting".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(4242),
+            supervisor_socket: Some("supervisor.sock".to_string()),
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&register).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("control-plane status test".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        record_projection_diagnostic(
+            dir.path(),
+            "session-actors.json",
+            &doc.to_string_lossy(),
+            "test projection lag",
+        );
+
+        let status = ControllerRequest {
+            command: "status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        assert!(status.active);
+        assert_eq!(
+            status.control_plane.process_model,
+            "project_scoped_single_process"
+        );
+        assert_eq!(status.control_plane.external_boundary, "controller_ipc");
+        assert_eq!(status.control_plane.state_authority, ".agent-doc/state.db");
+        assert_eq!(
+            status.control_plane.projection_authority,
+            "compatibility_output"
+        );
+        assert_eq!(status.control_plane.dispatch_actor.owned_items, 1);
+        assert_eq!(status.control_plane.session_actors.owned_items, 1);
+        assert_eq!(status.control_plane.supervisor_adapters.owned_items, 1);
+        assert!(status.control_plane.projection_workers.owned_items >= 1);
+        assert!(status.control_plane.store_actor.owned_items >= 4);
     }
 
     #[test]

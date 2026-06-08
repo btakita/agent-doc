@@ -86,7 +86,17 @@ Investigated this session and the IPC/CRDT write path. The IPC drift, "too much 
 Net: Plugin (Document API) insertion stays primary; the disk fallback only fires on a genuinely wedged listener and recovers automatically — the "fallback should be extremely rare" behavior, removing the dominant File-Cache-Conflict source. Full suite 4057 passed; both binaries rebuilt/installed; agent-doc CI `27168907477` was in progress at push (closed out on local evidence). Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
 
 **Live meta-note:** this very turn hit the drift bug — your concurrent edits drove `live_prompt_drift_after_preflight`, the response capture went stale, and recovery needed `reset --from-current --preserve-session` + moving a stale capture aside. That's the `#nm1x-livebuf-content` / `#ipc-drift-writeprovenance` surface (a *different* guard than the degrade latch I fixed): the visible-write reconcile still fails closed on genuine concurrent editing. The provenance follow-up is the real fix; until then, editing the doc mid-finalize will still churn.
-<!-- agent:boundary:2dff2e48 -->
+
+### Re: investigate agent-doc churn / IPC drift / File Cache Conflict — root-cause map + keystone fix — opus-4-8
+
+Investigated this session and the IPC/CRDT write path. The IPC drift, "too much IPC / not enough reliable Plugin insertion", and "too many File Cache Conflict" are **one defect with three surfaces**, centered on the IPC **degrade state machine** (`write.rs`) + the sender ack timeout (`ipc_socket.rs`).
+
+**Root cause.** A session latched to "degraded" after 2 ack timeouts, then wrote every change to disk with **no in-session recovery**. Two of those "timeouts" were false positives: (1) a *confirmed* socket delivery whose content sidecar was merely slow (plugin writes it after `saveDocument`, lagging past the 200 ms poll budget while the EDT is busy/typing); (2) the sender's 2 s ack budget was below the plugin's 5 s `agent_doc_await_idle` typing cap. Once degraded → raw disk writes → IntelliJ raises "File Cache Conflict" on the open buffer, so it is *downstream* of the degrade latch.
+
+**Phase 1 shipped** (`src/agent-doc@9ecb5775`, pushed): `#ipc-degrade-false-vote` (confirmed-but-slow sidecar no longer votes; recovers via file-IPC, still the Plugin path), `#ipc-ack-timeout-align` (2 s → 6 s, above the plugin idle cap; connect-first keeps dead-listener fast-fail), `#ipc-degrade-self-heal` (`ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the latch on recovery — a self-healing circuit breaker). Full suite 4057 passed; both binaries rebuilt/installed; CI `27168907477` in progress at push. Follow-ups queued: `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc`, `#ipc-drift-writeprovenance` (plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`).
+
+**Live meta-note:** landing this very response repeatedly hit `live_prompt_drift_after_preflight` / exit 75 plus a supervisor self-race on pane %30 (route "could not drain the active closeout"). Recovery needed `reset --from-current --preserve-session` + retiring stale captures. That is a *different* guard than the degrade latch I fixed — the visible-write reconcile failing closed on concurrent editing — and is exactly the `#ipc-drift-writeprovenance` / `#nm1x-livebuf-content` follow-up surface.
+<!-- agent:boundary:4ace3923 -->
 <!-- /agent:exchange -->
 
 ## Queue

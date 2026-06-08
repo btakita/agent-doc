@@ -4110,6 +4110,9 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
     {
         return Ok(None);
     }
+    if prompt_marker.is_none() && promptless_comment_only_drift(&snapshot, &current) {
+        return Ok(None);
+    }
     if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
         return Ok(None);
     }
@@ -4237,6 +4240,14 @@ fn active_session_drift_is_only_exchange_or_backlog_metadata(
     };
     crate::git::normalize_transient_agent_doc_markers(&snapshot_masked)
         == crate::git::normalize_transient_agent_doc_markers(&current_masked)
+}
+
+fn promptless_comment_only_drift(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return true;
+    }
+    crate::git::normalize_transient_agent_doc_markers(&crate::diff::strip_comments(snapshot))
+        == crate::git::normalize_transient_agent_doc_markers(&crate::diff::strip_comments(current))
 }
 
 fn mask_exchange_component_content(doc: &str) -> Option<String> {
@@ -6441,6 +6452,71 @@ Body\n\
                 assert!(message.contains("agent-doc"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_ignores_active_session_post_commit_comment_only_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "scratch note with prompt-looking text:\n",
+            "do #later. spec-test-build-install-commit-push\n",
+            "-->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+        track_active_codex_session(
+            root,
+            &doc,
+            &format!(
+                "agent-doc {}\nDo #closeout-bypass. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"), "unexpected ok: {message}");
+            }
+            other => panic!("expected ok status, got {other:?}"),
         }
     }
 

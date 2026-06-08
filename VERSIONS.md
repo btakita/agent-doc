@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Route-owned queued reruns no longer write `agent:queue auto`.** Busy
+  dispatch-only reroutes now create or update a plain `agent:queue`, strip a
+  legacy `auto` attribute from any touched queue tag, and use `queue_active:
+  true` / start fences for activation. Editor diagnostics accept both the new
+  `active agent:queue` wording and older `agent:queue auto` output. Active
+  session drift checks now ignore ordinary post-exchange scratch/comment edits
+  after commit while still interrupting on real component edits. Tests:
+  `route_enqueue_dispatch_prompt_creates_visible_plain_queue_and_snapshot`,
+  `route_activates_existing_inactive_auto_queue_head_as_plain_queue_for_busy_deferral`,
+  `route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt`,
+  `session_check_ignores_active_session_post_commit_comment_only_drift`, and
+  JetBrains `TerminalUtilTest`.
+
 - **Queue slash commands now run as commands after the current turn.** Active
   queue heads such as `/clear` or `/model sonnet` are classified in the managed
   idle-queue drain path, submitted literally to the owner pane at the next idle

@@ -1147,7 +1147,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     private fun isRunAgentDocRouteQueued(output: String): Boolean {
         val lower = output.lowercase()
         return lower.contains("queued pending dispatch") &&
-            lower.contains("agent:queue auto")
+            (lower.contains("active agent:queue") || lower.contains("agent:queue auto"))
     }
 
     internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {

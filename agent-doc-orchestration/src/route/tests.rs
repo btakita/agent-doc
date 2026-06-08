@@ -585,7 +585,7 @@ fn route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh
 }
 
 #[test]
-fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
+fn route_enqueue_dispatch_prompt_creates_visible_plain_queue_and_snapshot() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
     let doc = dir.path().join("session.md");
@@ -621,9 +621,10 @@ fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
     );
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
-    let queue_pos = updated.find("<!-- agent:queue auto -->").unwrap();
+    let queue_pos = updated.find("<!-- agent:queue -->").unwrap();
     let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
     assert!(
         queue_pos < backlog_pos,
@@ -632,7 +633,7 @@ fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
     let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
     assert_eq!(
         snapshot, updated,
-        "route queueing must sync the snapshot so auto-queue continuation is not treated as a modified head prompt"
+        "route queueing must sync the snapshot so queue continuation is not treated as a modified head prompt"
     );
 }
 
@@ -672,7 +673,8 @@ fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
 
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(updated.contains("\n/clear\n"), "{updated}");
     assert!(
         !updated.contains(":pushpin: /clear"),
@@ -726,7 +728,8 @@ fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
 
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(updated.contains("\n/clear\n"), "{updated}");
     assert_eq!(
         crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
@@ -829,7 +832,8 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
     assert!(outcome.activated);
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert_eq!(
         updated
             .matches("- do [#qipc]. #spec-test-build-install-commit-push")
@@ -840,7 +844,7 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
 }
 
 #[test]
-fn route_activates_existing_inactive_auto_queue_head_for_busy_deferral() {
+fn route_activates_existing_inactive_auto_queue_head_as_plain_queue_for_busy_deferral() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
     let doc = dir.path().join("session.md");
@@ -868,7 +872,7 @@ fn route_activates_existing_inactive_auto_queue_head_for_busy_deferral() {
 
     let outcome = activate_existing_route_queue_head(&doc, "busy actor")
         .unwrap()
-        .expect("startable inactive auto queue head should activate");
+        .expect("legacy inactive auto queue head should activate");
 
     assert_eq!(
         outcome.prompt_text,
@@ -882,7 +886,8 @@ fn route_activates_existing_inactive_auto_queue_head_for_busy_deferral() {
 
     let updated = std::fs::read_to_string(&doc).unwrap();
     assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert_eq!(
         updated
             .matches("- do [#shipstationaudit]. #spec-test-commit-push")
@@ -1146,7 +1151,8 @@ fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
     assert!(!outcome.component_created);
     assert!(outcome.activated);
     let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(
         !updated.contains("- Run Agent Doc queued the first prompt."),
         "stale route-owned queue prompt should be replaced:\n{updated}"
@@ -1163,7 +1169,7 @@ fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
 }
 
 #[test]
-fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
+fn route_enqueue_dispatch_prompt_appends_to_legacy_auto_queue_as_plain_queue() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
     let doc = dir.path().join("session.md");
@@ -1186,7 +1192,7 @@ fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
 
     let outcome =
         enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
-            .expect("route should append to user-style multi-prompt auto queues");
+            .expect("route should append to legacy multi-prompt queues");
 
     assert!(outcome.appended);
     assert!(!outcome.already_present);
@@ -1194,13 +1200,15 @@ fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
     assert!(!outcome.component_created);
     assert!(outcome.activated);
     let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(
         updated.contains("- first queued prompt\n- second queued prompt\n- third queued prompt")
     );
 }
 
 #[test]
-fn route_enqueue_priority_dispatch_preempts_multi_prompt_auto_queue() {
+fn route_enqueue_priority_dispatch_preempts_legacy_auto_queue_as_plain_queue() {
     // #jb-run-preempt-autoloop-priority: a manual operator Run Agent Doc into a
     // busy pane must jump AHEAD of pending auto-loop items, not land at the tail.
     let dir = tempfile::TempDir::new().unwrap();
@@ -1225,12 +1233,14 @@ fn route_enqueue_priority_dispatch_preempts_multi_prompt_auto_queue() {
 
     let outcome =
         enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
-            .expect("priority route dispatch should preempt the pending auto queue");
+            .expect("priority route dispatch should preempt the pending queue");
 
     assert!(outcome.appended);
     assert!(!outcome.already_present);
     assert!(!outcome.superseded);
     let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(
         updated.contains(
             "- :pushpin: manual preempt prompt\n- first queued prompt\n- second queued prompt"
@@ -1242,7 +1252,7 @@ fn route_enqueue_priority_dispatch_preempts_multi_prompt_auto_queue() {
 }
 
 #[test]
-fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_auto_prompt() {
+fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_legacy_auto_prompt() {
     // #jb-run-preempt-autoloop-priority: a priority dispatch must NOT supersede a
     // lone auto prompt — replacing it would silently drop the pending auto-loop
     // item the manual run is preempting. Both prompts survive, manual first.
@@ -1272,6 +1282,8 @@ fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_auto_prompt() {
     assert!(outcome.appended);
     assert!(!outcome.superseded, "priority dispatch must not supersede");
     let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     assert!(
         updated.contains("- :pushpin: manual preempt prompt\n- pending auto-loop item"),
         "priority dispatch must preserve the pending item and run ahead of it with operator pin:\n{updated}"
@@ -1306,6 +1318,8 @@ fn route_enqueue_priority_dispatch_preserves_leading_queue_directives() {
         .expect("priority route dispatch should insert after leading directives");
 
     let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
     let preset_pos = updated
         .find("preset #spec")
         .expect("preset directive preserved");

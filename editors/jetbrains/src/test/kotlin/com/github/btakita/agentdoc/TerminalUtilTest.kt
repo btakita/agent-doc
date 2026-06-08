@@ -262,7 +262,7 @@ class TerminalUtilTest {
     fun `queued route success is reported as queued not silent success`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
         val output = """
-            [route] authoritative actor generation 199 for $relativePath is busy on pane %6; queued pending dispatch "JB `Run Agent Doc` does not complete the agent-doc <file-name> run." in agent:queue auto (appended=true, already_present=false) instead of injecting a duplicate trigger
+            [route] authoritative actor generation 199 for $relativePath is busy on pane %6; queued pending dispatch "JB `Run Agent Doc` does not complete the agent-doc <file-name> run." in active agent:queue (appended=true, already_present=false) instead of injecting a duplicate trigger
         """.trimIndent()
         val message = TerminalUtil.buildRunAgentDocQueuedMessage(relativePath)
 
@@ -285,7 +285,7 @@ class TerminalUtilTest {
         val relativePath = "tasks/software/tsift.md"
         val output = """
             resync: stash pane %32 is registered in its own project root — skipping kill
-            [route] authoritative actor generation 233 for $relativePath is busy on pane %19; queued pending dispatch "What are #next-steps?" in agent:queue auto (appended=true, already_present=false) instead of injecting a duplicate trigger
+            [route] authoritative actor generation 233 for $relativePath is busy on pane %19; queued pending dispatch "What are #next-steps?" in active agent:queue (appended=true, already_present=false) instead of injecting a duplicate trigger
         """.trimIndent()
 
         assertEquals(

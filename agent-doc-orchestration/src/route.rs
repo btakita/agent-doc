@@ -1915,7 +1915,7 @@ fn operator_prioritize_route_prompt(prompt_text: String) -> String {
 ///
 /// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
 /// busy/blocked pane: it must PREEMPT pending auto-loop items, so the prompt is
-/// inserted ahead of the first queued prompt and never supersedes a lone auto
+/// inserted ahead of the first queued prompt and never supersedes a lone
 /// prompt (#jb-run-preempt-autoloop-priority). Non-priority callers keep the
 /// legacy tail-append (+ lone stale-prompt supersede) behavior.
 fn enqueue_route_dispatch_prompt(
@@ -1959,8 +1959,8 @@ fn enqueue_route_dispatch_prompt(
                         .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
                         .count();
                     // #jb-run-preempt-autoloop-priority: a priority dispatch must
-                    // preempt, so it never supersedes a lone auto prompt — replacing
-                    // would silently drop the pending auto-loop item the manual run
+                    // preempt, so it never supersedes a lone prompt — replacing
+                    // would silently drop the pending queue item the manual run
                     // is jumping ahead of. Non-priority keeps the stale-prompt update.
                     let replace_single_auto_prompt = !priority
                         && crate::queue::has_auto_attr(&queue_component.attrs)
@@ -2039,11 +2039,11 @@ fn enqueue_route_dispatch_prompt(
                 }
             }
         }
-        content = ensure_queue_component_auto_attr(&content)?;
+        content = strip_queue_component_auto_attr(&content)?;
     } else {
         component_created = true;
         appended = true;
-        content = insert_auto_queue_component(&content, &prompt_text)?;
+        content = insert_queue_component(&content, &prompt_text)?;
     }
 
     let activated = content != original;
@@ -2169,7 +2169,7 @@ fn activate_existing_route_queue_head(
         return Ok(None);
     };
     let mut content = frontmatter::merge_queue_state(&original, true)?;
-    content = ensure_queue_component_auto_attr(&content)?;
+    content = strip_queue_component_auto_attr(&content)?;
     let activated = content != original;
     if activated {
         crate::write::atomic_write_pub(file, &content)
@@ -2231,7 +2231,7 @@ fn acquire_route_queue_lock(file: &Path) -> Result<File> {
     Ok(lock)
 }
 
-fn ensure_queue_component_auto_attr(content: &str) -> Result<String> {
+fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
     let components = crate::component::parse(content)?;
     let Some(queue_component) = components
         .iter()
@@ -2239,32 +2239,26 @@ fn ensure_queue_component_auto_attr(content: &str) -> Result<String> {
     else {
         return Ok(content.to_string());
     };
-    if crate::queue::has_auto_attr(&queue_component.attrs) {
+    if !crate::queue::has_auto_attr(&queue_component.attrs) {
         return Ok(content.to_string());
     }
     let open_tag = &content[queue_component.open_start..queue_component.open_end];
-    let newline = if open_tag.ends_with('\n') { "\n" } else { "" };
-    let trimmed = open_tag.trim_end_matches('\n');
-    let new_tag = trimmed.replacen("<!-- agent:queue", "<!-- agent:queue auto", 1);
-    let mut result = String::with_capacity(content.len() + " auto".len());
+    let new_tag = crate::queue::strip_auto_from_tag(open_tag);
+    let mut result = String::with_capacity(content.len());
     result.push_str(&content[..queue_component.open_start]);
     result.push_str(&new_tag);
-    result.push_str(newline);
     result.push_str(&content[queue_component.open_end..]);
     Ok(result)
 }
 
-fn insert_auto_queue_component(content: &str, prompt_text: &str) -> Result<String> {
+fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
     let body = crate::queue::render(&[crate::queue::QueueEntry::Prompt(
         crate::queue::QueuePrompt {
             multiline: prompt_text.contains('\n'),
             text: prompt_text.to_string(),
         },
     )]);
-    let block = format!(
-        "<!-- agent:queue auto -->\n{}<!-- /agent:queue -->\n\n",
-        body
-    );
+    let block = format!("<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n", body);
     let components = crate::component::parse(content)?;
     let insert_at = components
         .iter()
@@ -2673,7 +2667,7 @@ fn dispatch_only_send_reopen(
             // active turn preempts pending auto items (head-insert).
             let queued = enqueue_route_dispatch_prompt(file, prompt_text, source, true)?;
             eprintln!(
-                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
+                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
                 harness.binary,
                 file.display(),
                 reason,
@@ -3234,7 +3228,7 @@ fn dispatch_active_turn_queue_source(
         ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
         // `#jb-run-agent-doc-busy-wait-deadlock`: a busy Claude pane (a session
         // not running `/loop`) is an active turn just like Codex/OpenCode. The
-        // dispatch-only reopen path must queue the prompt to `agent:queue auto`
+        // dispatch-only reopen path must queue the prompt to an active `agent:queue`
         // for the idle-queue watch to drain, not bail/refuse, so JB `Run Agent
         // Doc` on a mid-turn Claude actor enqueues instead of erroring.
         ("claude", "active claude turn") => Some("dispatch_only_claude_active_turn"),
@@ -4115,7 +4109,7 @@ fn route_via_authoritative_actor(
                     )?,
                 };
                 eprintln!(
-                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={})",
+                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={})",
                     file.display(),
                     queued.prompt_text,
                     queued.appended,
@@ -4138,7 +4132,7 @@ fn route_via_authoritative_actor(
             enqueue_exchange_slash_command_for_idle_drain(file, context, "exchange_slash_command")?
     {
         eprintln!(
-            "[route] unresolved exchange slash command for {} was queued as {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) for managed after-turn submission",
+            "[route] unresolved exchange slash command for {} was queued as {:?} in active agent:queue (appended={}, already_present={}, superseded={}) for managed after-turn submission",
             file.display(),
             queued.prompt_text,
             queued.appended,
@@ -4382,7 +4376,7 @@ fn route_via_authoritative_actor(
     // was projected Busy, but the live pane proves a dispatch-ready prompt in the
     // current generation — it is not actually mid-turn. Promote it to Ready so a
     // dispatch-only route dispatches to the proven-ready pane instead of queuing
-    // the prompt into `agent:queue auto`. A Busy projection without a proven
+    // the prompt into an active `agent:queue`. A Busy projection without a proven
     // ready prompt is left as-is and still fails closed (queues), per the
     // direct-evidence rule: idle direct evidence repairs stale busy; busy direct
     // evidence stays fail-closed.
@@ -4466,7 +4460,7 @@ fn route_via_authoritative_actor(
     // to Ready so the dispatch proceeds instead of queuing behind a stale
     // projection. This is the #opencode-jb-stall root cause: JB Run Agent Doc
     // sends a prompt, the wait is skipped, and the stale Busy projection queues
-    // the prompt into agent:queue auto, which never drains because the
+    // the prompt into agent:queue, which never drains because the
     // auto-loop requires the actor to become ready.
     if dispatch_only
         && actor_dispatch_state(actor_state) == ActorDispatchState::Busy
@@ -4561,7 +4555,7 @@ fn route_via_authoritative_actor(
                         ),
                     );
                     eprintln!(
-                        "[route] authoritative actor generation {} for {} is busy on pane {}; activated existing agent:queue auto head {:?} (already_present={}, activated={}) for idle drain instead of injecting a duplicate trigger",
+                        "[route] authoritative actor generation {} for {} is busy on pane {}; activated existing agent:queue head {:?} (already_present={}, activated={}) for idle drain instead of injecting a duplicate trigger",
                         actor.record.generation,
                         file.display(),
                         dispatch_pane,
@@ -4573,7 +4567,7 @@ fn route_via_authoritative_actor(
                 }
                 // #jb-busy-reopen-auto-drain-when-idle: there is no INACTIVE queue
                 // head to activate, but the document may already have an ACTIVE
-                // auto-loop continuation (`queue: start` + `agent:queue auto`). When
+                // queue continuation (`queue: start` + ready `agent:queue`). When
                 // it does, the running loop will continue this document on its own —
                 // a bare dispatch-only reopen (IDE `Run Agent Doc`) has nothing to
                 // add. Failing closed with the busy-not-ready error mis-reports a
@@ -4597,7 +4591,7 @@ fn route_via_authoritative_actor(
                         ),
                     );
                     eprintln!(
-                        "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue auto loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                        "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
                         actor.record.generation,
                         file.display(),
                         dispatch_pane,
@@ -4676,7 +4670,7 @@ fn route_via_authoritative_actor(
                 let queued =
                     enqueue_route_dispatch_prompt(file, &context.prompt_text, reason, true)?;
                 eprintln!(
-                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
+                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
                     actor.record.generation,
                     file.display(),
                     dispatch_pane,
@@ -4689,7 +4683,7 @@ fn route_via_authoritative_actor(
             } else if let Some(continuation) = crate::queue_continuation::detect(file)? {
                 // #jb-busy-reopen-auto-drain-when-idle: a bare reopen (no prompt to
                 // queue) against a busy actor whose document already has an active
-                // auto-loop continuation defers to that loop instead of erroring.
+                // queue continuation defers to that loop instead of erroring.
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -4703,7 +4697,7 @@ fn route_via_authoritative_actor(
                     ),
                 );
                 eprintln!(
-                    "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue auto loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                    "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
                     actor.record.generation,
                     file.display(),
                     dispatch_pane,

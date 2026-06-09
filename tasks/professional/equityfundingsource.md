@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,32 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 4 response topic(s): Contact form error; deploy; support email → btak.dev@gmail.com; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:5cbe4522 -->
+
+### Re: A loan application should not be approvable without the full application — opus-4-8
+
+> **Queue prompt:**
+>
+> A loan application should not be able to be Approved without the full application. See https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a
+
+
+Fixed. A loan application can no longer reach **Approved** (`accepted` + TMO writeback) unless the borrower's full application is actually submitted and complete. Committed + pushed to EFS `main` (`b136519`); **not deployed** (preset was `#spec-test-commit-push`).
+
+**Two holes were letting it through:**
+1. `POST /api/admin/full-applications/:id/status` accepted `accepted` directly — it set Approved with *no* completeness check, only a non-draft SQL guard. So the API could Approve a near-empty application.
+2. The `/approve` (writeback) path checked only 4 minimal fields (name, email, loan amount, e-signature) — not the rest of the application.
+
+**The gate now:**
+- `/status` only handles `in_review` | `declined`. `accepted` is rejected there — approval *must* go through `/approve`.
+- `/approve` fails closed via `application_approval_blockers_()` unless the application is **submitted AND complete**: borrower name + email, a complete current residence address, loan amount, a complete subject-property address, declarations answered, and a recorded e-signature. The error returns the precise missing list, e.g. *"Cannot approve: the full application is incomplete (missing: subject property address, declarations)"*.
+
+The borrower submit gate only enforces an e-signature, so the remaining completeness is enforced at approval time on the admin side — which is exactly where the `cda67748…` application slipped through.
+
+**Verification:** `bun run check` green — 382 tests pass (added behavioral coverage of `application_approval_blockers_` for the complete case, draft/never-submitted, and each missing part, plus source assertions that `/status` can't accept). EFS repo has no CI workflow, so local check is the record.
+
+**Spec:** apply4 build-plan P6 now documents the `#approve-requires-full-app` gate.
+
+The live workers.dev site still has the old behavior until deploy — queued that as a backlog item; re-queue with `#spec-test-commit-push-deploy` or say "deploy" to ship it.
+<!-- agent:boundary:d2908b88 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +70,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- A loan application should not be able to be Approved without the full application. See https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a
 <!-- /agent:queue -->
 
 ## Backlog

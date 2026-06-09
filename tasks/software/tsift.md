@@ -63,7 +63,34 @@ Compacted content:
 Added prompt-caching follow-up backlog items in priority order. Top backlog item: `#pcache-replaygate`.
 
 No code/test run was needed because this cycle only mutates the session backlog.
-<!-- agent:boundary:decdc4c0 -->
+
+### Re: pcache-missrank — gpt-5
+
+> **Queue prompt:**
+>
+> do [#pcache-missrank]
+
+
+Implemented `#pcache-missrank`.
+
+- Added prompt-cache session-cost samples plus ranked miss causes for stable-prefix fingerprint, adapter state, routing affinity, cached-input loss, and creation-token spikes.
+- Added a compact `render_cache_miss_ranking` output so operators see `fingerprint`, `adapter_state`, `routing_affinity`, token deltas, and `miss_rank` without reading raw JSON.
+- Wired direct-run dry-run prompt-cache diagnostics to print the session-cost line with `baseline_required` until the later history task feeds previous samples.
+- Documented the session-cost ranking invariant in `SPEC.md`.
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration prompt_cache --lib`
+- `cargo test -p agent-doc-orchestration build_prompt --lib`
+- `make check`
+- `make install`
+- `gh run list --workflow CI --limit 1` showed the latest CI run completed successfully.
+
+Commits:
+
+- `src/agent-doc`: `02a1317a` (`prompt-cache: rank session cost misses`), pushed to `origin/main`.
+- superproject: `356c21565` (`agent-doc: update prompt cache miss ranking`), ready to push with the session closeout commit.
+<!-- agent:boundary:e5439dd9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +101,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#pcache-replaygate]~~
-- do [#pcache-missrank]
+- ~~do [#pcache-missrank]~~
 - do [#pcache-boundary-contract]
 - do [#pcache-ci-history]
 <!-- /agent:queue -->
@@ -82,7 +109,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-missrank] Prompt caching: add cache-miss ranking to session-cost output by fingerprint, adapter state, routing affinity, cached-input delta, and creation-token spike so the highest-impact invalidation cause is visible without JSON analysis.
 - [ ] [#pcache-boundary-contract] Prompt caching: document and test the cache-boundary contract for agent-doc prompt assembly: which blocks may live above the boundary, which must stay in the volatile suffix, and provider-specific breakpoint/key requirements.
 - [ ] [#pcache-ci-history] Prompt caching: persist prompt-cache effectiveness history and trend checks in the token/performance gate so regressions across real Codex/OpenAI and Claude/Anthropic transcripts fail with actionable deltas.
 <!-- /agent:backlog -->

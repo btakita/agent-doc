@@ -51,7 +51,7 @@ Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@eq
 
 **Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
 
-**Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
+**Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued a backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
 <!-- agent:boundary:47f06c4d -->
 <!-- /agent:exchange -->
 ###

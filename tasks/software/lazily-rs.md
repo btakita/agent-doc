@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -38,7 +38,7 @@ queue: stop
 Compacted content:
 - Archived 2 response topic(s): cross-language lazily compatibility; FFI channel for lazily-rs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:3c87b1e0 -->
+<!-- agent:boundary:146e2a0a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,6 +47,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

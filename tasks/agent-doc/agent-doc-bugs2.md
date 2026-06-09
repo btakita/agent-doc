@@ -104,7 +104,24 @@ Fixed the source-level counterpart to last turn's auto-recovery gate. Shipped: a
 **Why two fixes.** `#exch-intermix-falsedrop` (last turn) made the auto-*recovery* gate tolerant of a false dropped-prompt record via snapshot containment; this fixes the *record itself* at the source, so the false `session-check` interruption — which the recovery gate didn't cover — stops firing too.
 
 **Coverage.** Regression test `dropped_queue_prompt_lines_after_content_ours_excludes_consumed_struck_item` (consumed item not recorded; active/genuine-drop cases still pass). Full `make check` green (4176 tests via nextest); `make install` + `cargo build --release` refreshed both binaries + cdylib. `specs/07-closeout-commands.md` §`#exchange-prompt-dropped-on-merge` and `VERSIONS.md` updated. CI for the prior fix `60803ebd` passed; this commit's CI is in progress, continuing from green local evidence.
-<!-- agent:boundary:3217b94e -->
+
+### Re: do [#pcpc5live] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#pcpc5live]
+
+
+Checked the logs — and you've already got `AGENT_DOC_WRITE_AUTHORITY=shadow` set in this session, so step (1) is exercised live right now.
+
+**Step (1) shadow — PROVEN.** `ops.log` has **28** `write_authority gate=shadow action=would-route` events, every one `would-route` (the shadow rung evaluates the route target and logs what it *would* do without changing the actual write). That's exactly the confirmation the item asks for: the write-authority routing is wired and identifies its targets, with the live write path unchanged. No `dual-write` events yet (the only "dual-write" string in the log is this item's own text echoed in a `queue_diff` line).
+
+**What stays open (operator-gated, not a gate I'm filing):**
+- **Step (2) dual-write** — needs you to re-run a session with `AGENT_DOC_WRITE_AUTHORITY=dual-write`; then I grep `write_authority gate=dual-write action=routed` to confirm the routed path. I deliberately did **not** flip the env to dual-write myself: spec 08b (131-133) forbids landing an authority change in the same cycle that persists a live session response through the write path being changed, and the env is yours to drive.
+- **Step (3) pcpc5d/e** — deleting the out-of-process supervisor direct-disk writers and demoting the editor WatchService to read-only require live IntelliJ/Codex editor-boundary proof; those stay operator-driven per spec.
+
+I updated the `#pcpc5live` backlog item to record shadow as proven and narrow it to just steps (2) and (3) — kept it as an actionable backlog item, not a review gate. Whenever you flip the env to `dual-write` and run a cycle, I'll verify the routed-path logs.
+<!-- agent:boundary:ea76a608 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -112,7 +129,7 @@ Fixed the source-level counterpart to last turn's auto-recovery gate. Shipped: a
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#opsproof-falsepos]~~
 - ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
-- :pushpin: do [#pcpc5live]
+- ~~:pushpin: do [#pcpc5live]~~
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :round_pushpin: do [#lvbatch]
@@ -155,7 +172,7 @@ What are #next-steps to fix bugs?
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [ ] [#tmux-switch-lag] #agent-doc-bug Slow tmux pane switch when switching between agent docs in the editor: the target doc pane is briefly visible in the stash window before it swaps into 0:agent-doc, so the operator sees a flash of the stash layout mid-switch. Likely the passive editor-sync fast-handoff path (sync.rs sync --no-autostart) selects/raises the hidden actor pane before moving it out of stash. Actionable, fresh session: make the stash->agent-doc pane move atomic (move first, then select) so no intermediate stash frame is shown; add SimWorld coverage for the switch ordering. Files: sync.rs passive fast-handoff path.
 - [ ] [#lvbatch] OPERATOR live-verification batch, replaces gated review #lvb-run. No new JB install needed: plugin 0.2.158 unchanged, binary+cdylib refreshed to HEAD this cycle. Drive one mid-active-turn Codex/IntelliJ pane through the batch; agent checks logs. Markers: #4wxr claim cross-session-reject in claim.rs + ClaimAction.kt; #9adk run/clear coalesced in route.rs and sync.rs; #f5d2/#pcp6 ops.log live_buffer_classify + write.rs visible_write_live_buffer_matches_disk and visible_write_deferred_current_changed; #saev early-ack pending emitted before apply only AFTER #saevon flips EARLY_ACK_ENABLED. Reproduces #ipc-crdt-response-drift on closeout.
-- [ ] [#pcpc5live] REMAINING operator-run, replaces gated review #pcpc5cut: advance the 08b cutover. Authority rungs pcpc5a/b/c already landed behind the default-off AGENT_DOC_WRITE_AUTHORITY env gate; binary+cdylib rebuilt to HEAD this cycle so live runs current code. Operator advances: (1) AGENT_DOC_WRITE_AUTHORITY=shadow, grep ops.log for write_authority gate=shadow action=would-route to confirm route targets; (2) =dual-write, grep write_authority gate=dual-write action=routed for the routed path. The pcpc5d/e removal rungs (delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only) still need live IntelliJ/Codex editor-boundary proof per spec 08b. Agent checks logs. Plan: tasks/agent-doc/plan-supervisor-in-process.md.
+- [ ] [#pcpc5live] OPERATOR-RUN 08b cutover, replaces gated review #pcpc5cut. pcpc5a/b/c shipped at 600797b3 behind AGENT_DOC_WRITE_AUTHORITY. STEP (1) SHADOW PROVEN 2026-06-09: AGENT_DOC_WRITE_AUTHORITY=shadow active this session, ops.log shows 28 write_authority gate=shadow action=would-route events (shadow evaluates route targets without changing the write) and zero dual-write events — step 1 confirmed. REMAINING operator steps: (2) re-run a session with AGENT_DOC_WRITE_AUTHORITY=dual-write, agent greps write_authority gate=dual-write action=routed; (3) pcpc5d/e (delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only) need live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. Agent checks logs. Plan: tasks/agent-doc/plan-supervisor-in-process.md.
 <!-- /agent:backlog -->
 
 ## Review

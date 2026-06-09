@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -99,7 +99,7 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 | `#webrtc-data` | WebRTC data channel transport for peer-to-peer IPC (beyond signaling) | Medium |
 | `#cross-lang-tests` | Shared conformance test suite against the spec repo — run in CI for each binding | Medium |
 | `#ipc-docs` | Standalone protocol docs page (not inside SPEC.md) with examples per transport | Low |
-<!-- agent:boundary:6cfad543 -->
+<!-- agent:boundary:807ab72b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,6 +108,13 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#n994]
+- [#w30b]
+- [#pz3k]
+- [#kavj]
+- [#jpf1]
+- [#ms7x]
+- [#9qce]
 <!-- /agent:queue -->
 
 ## Backlog

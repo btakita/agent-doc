@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -43,7 +43,7 @@ Compacted content:
 Added prompt-caching follow-up backlog items in priority order. Top backlog item: `#pcache-replaygate`.
 
 No code/test run was needed because this cycle only mutates the session backlog.
-<!-- agent:boundary:1b94c845 -->
+<!-- agent:boundary:6bcd3799 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +52,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#pcache-replaygate]
 - do [#pcache-missrank]
 - do [#pcache-boundary-contract]

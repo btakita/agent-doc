@@ -771,7 +771,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // diagnostic (#ipc-degraded-prefers-file-ipc): a latched-degraded socket
         // routes the write through the file-IPC patch queue (plugin applies via
         // Document API) instead of a raw disk write; disk write is last resort.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 30,
+        // +1 (#finalize-stale-baseline-reopen-friction): the
+        // `explicit_baseline_replay_rejected ... reason={reason}` diagnostic now
+        // names WHY the committed-cycle gate fired (`response_already_in_head`,
+        // `empty_response`, `no_head_baseline`) so a true replay is distinguished
+        // from the genuinely-new-response path that auto-reopens from HEAD instead
+        // of bailing. Routed through the same explicit-baseline replay gate.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 31,
         _ => 0,
     }
 }

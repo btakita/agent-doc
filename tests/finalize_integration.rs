@@ -923,7 +923,10 @@ fn finalize_writes_and_commits_template_response() {
 }
 
 #[test]
-fn finalize_stream_rejects_explicit_baseline_replay_after_committed_cycle() {
+fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
+    // #finalize-stale-baseline-reopen-friction: a genuinely new response supplied
+    // after a committed cycle (even with the stale baseline file) must auto-reopen
+    // a fresh cycle from HEAD and commit, instead of forcing a manual preflight.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
 
@@ -953,6 +956,8 @@ fn finalize_stream_rejects_explicit_baseline_replay_after_committed_cycle() {
         "first finalize should commit the first response:\n{after_first}"
     );
 
+    // Second finalize reuses the STALE baseline (pre-"first"). The new response is
+    // not yet in HEAD, so the gate auto-reopens from HEAD and commits it.
     agent_doc()
         .current_dir(tmp.path())
         .args([
@@ -968,18 +973,16 @@ fn finalize_stream_rejects_explicit_baseline_replay_after_committed_cycle() {
             "<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("already `committed`"))
-        .stderr(predicates::str::contains("agent-doc preflight"));
+        .success();
 
     let head = head_blob(tmp.path());
     assert!(
         head.contains("### Re: first — gpt-5"),
-        "HEAD should keep the first response:\n{head}"
+        "HEAD should keep the first response after auto-reopen:\n{head}"
     );
     assert!(
-        !head.contains("### Re: second — gpt-5"),
-        "replayed stale-baseline finalize must not append a second response:\n{head}"
+        head.contains("### Re: second — gpt-5"),
+        "auto-reopened finalize should commit the genuinely new response:\n{head}"
     );
     assert_eq!(
         read_cycle_phase(tmp.path(), &doc).as_deref(),
@@ -988,8 +991,76 @@ fn finalize_stream_rejects_explicit_baseline_replay_after_committed_cycle() {
 
     let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("explicit_baseline_replay_rejected"),
-        "strict finalize should log the committed-cycle replay rejection:\n{ops_log}"
+        ops_log.contains("explicit_baseline_replay_auto_reopened"),
+        "strict finalize should log the committed-cycle auto-reopen:\n{ops_log}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
+    // The auto-reopen does NOT weaken duplicate protection: a true replay (the
+    // incoming response is already materialized in HEAD) must still fail closed so
+    // the committed response is not re-applied as a duplicate block.
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    let stale_baseline = write_baseline(tmp.path(), &original);
+
+    let first_response =
+        "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n";
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(first_response)
+        .assert()
+        .success();
+
+    // Replay the SAME response after commit — already in HEAD, must be rejected.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(first_response)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("already `committed`"))
+        .stderr(predicates::str::contains("agent-doc preflight"));
+
+    let head = head_blob(tmp.path());
+    assert_eq!(
+        head.matches("### Re: first — gpt-5").count(),
+        1,
+        "a true duplicate replay must not append a second copy of the response:\n{head}"
+    );
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("explicit_baseline_replay_rejected")
+            && ops_log.contains("reason=response_already_in_head"),
+        "true replay should log the in-HEAD rejection reason:\n{ops_log}"
     );
 
     agent_doc()

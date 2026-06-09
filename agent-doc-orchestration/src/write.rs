@@ -1019,33 +1019,101 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
     }
 }
 
+/// Pre-write gate for an explicit-baseline finalize against an already-`committed`
+/// cycle (`#finalize-stale-baseline-reopen-friction`).
+///
+/// The cycle phase is `Committed` whenever the prior finalize already closed and
+/// no fresh `preflight` reopened the cycle (for example an exit-75 IPC-timeout
+/// retry, or a second response in the same turn). Historically this always failed
+/// closed with "run `agent-doc preflight` and retry", forcing a manual reopen even
+/// for a legitimately new response.
+///
+/// Returns:
+/// - `Ok(None)` — no gate applies (open cycle, non-finalize mode, or no baseline);
+///   the caller reads the explicit baseline normally.
+/// - `Ok(Some(fresh_baseline))` — a genuinely new response was supplied after the
+///   commit, so the cycle is auto-reopened from `HEAD` and the caller must diff the
+///   new response against this `HEAD` baseline (the stale explicit baseline is
+///   discarded). This is exactly what a manual `preflight` reopen would do.
+/// - `Err(..)` — fail closed. A true replay (the incoming response is already
+///   materialized in `HEAD`) must not be re-applied (duplicate-block risk); an
+///   empty/repair response or a non-git document cannot be safely auto-reopened.
 fn guard_no_explicit_baseline_replay_after_committed_cycle(
     file: &Path,
     commit_mode: CommitMode,
     baseline_file: Option<&Path>,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if commit_mode != CommitMode::Required || baseline_file.is_none() {
-        return Ok(());
+        return Ok(None);
     }
 
     let Some(cycle_id) = cycle_already_committed(file) else {
-        return Ok(());
+        return Ok(None);
     };
 
+    // Read the incoming response now and re-stash it so the downstream write path
+    // (which calls `read_response_input` once for the resolved mode) still sees it.
+    let response = read_response_input()?;
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.borrow_mut().replace(response.clone());
+    });
+
+    let head = crate::git::show_head(file).ok().flatten();
+
+    let reject = |reason: &str| -> anyhow::Error {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "explicit_baseline_replay_rejected file={} cycle_id={} reason={reason}",
+                file.display(),
+                cycle_id
+            ),
+        );
+        anyhow::anyhow!(
+            "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to apply an explicit-baseline response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry with the new baseline_file.",
+            cycle_id,
+            file.display(),
+            file.display()
+        )
+    };
+
+    // True replay: the incoming response is already committed in HEAD. Re-applying
+    // it risks a duplicate block, and the work is already durable — fail closed.
+    if let Some(head) = head.as_deref()
+        && response_materialized_in_content(&response, head)
+    {
+        return Err(reject("response_already_in_head"));
+    }
+
+    // Empty/repair response (pending-only closeout) — keep failing closed; the
+    // auto-reopen path is for genuinely new assistant responses only.
+    if response.trim().is_empty() {
+        return Err(reject("empty_response"));
+    }
+
+    // No HEAD (non-git or empty repo) — cannot mint a safe HEAD baseline.
+    let Some(head) = head else {
+        return Err(reject("no_head_baseline"));
+    };
+
+    // Genuinely new response after a committed cycle: auto-reopen a fresh
+    // `preflight_started` cycle from HEAD instead of forcing a manual preflight,
+    // and hand the caller the HEAD baseline so the new response diffs against the
+    // actual committed state (the stale explicit baseline is discarded).
+    crate::cycle_state::start_preflight(file, Some(&head), Some(&head))?;
     crate::ops_log::log_op(
         file,
         &format!(
-            "explicit_baseline_replay_rejected file={} cycle_id={}",
+            "explicit_baseline_replay_auto_reopened file={} cycle_id={}",
             file.display(),
             cycle_id
         ),
     );
-    anyhow::bail!(
-        "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to apply an explicit-baseline response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry with the new baseline_file.",
-        cycle_id,
-        file.display(),
-        file.display()
+    eprintln!(
+        "[finalize] cycle `{}` was already committed; auto-reopened a fresh cycle for the new response (baseline refreshed to HEAD) instead of requiring a manual preflight.",
+        cycle_id
     );
+    Ok(Some(head))
 }
 
 fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
@@ -1487,12 +1555,16 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
     };
 
-    let baseline = read_explicit_baseline(file, options.baseline_file.as_deref())?;
-    guard_no_explicit_baseline_replay_after_committed_cycle(
+    let baseline = match guard_no_explicit_baseline_replay_after_committed_cycle(
         file,
         commit_mode,
         options.baseline_file.as_deref(),
-    )?;
+    )? {
+        // Auto-reopened a committed cycle for a genuinely new response: diff against
+        // the fresh HEAD baseline, not the stale explicit baseline file.
+        Some(fresh_head_baseline) => Some(fresh_head_baseline),
+        None => read_explicit_baseline(file, options.baseline_file.as_deref())?,
+    };
 
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;

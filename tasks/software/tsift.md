@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -128,7 +128,38 @@ Verification:
 - `cargo test -p agent-doc-orchestration`
 - `make check`
 - Latest CI run `27218407978` (`agent-doc: add prompt cache boundary`) was in progress when checked.
-<!-- agent:boundary:f32d3577 -->
+Implemented `#pcache-adapters`.
+
+> **Queue prompt:**
+>
+> [#pcache-adapters]
+
+
+What changed:
+- `session-cost` now derives provider adapter states from observed prompt-cache metadata instead of emitting static guidance.
+- Anthropic calls classify `cache_control` as `cache_control`, `partial_cache_control`, or `missing_cache_control`.
+- OpenAI calls classify `prompt_cache_key` as `prompt_cache_key`, `partial_prompt_cache_key`, `missing_prompt_cache_key`, or `prompt_cache_key_churn`.
+- Replica-local routing classifies `routing_affinity`, missing/partial affinity, and affinity churn.
+- Prompt-cache plans now add concrete remediation actions for missing Anthropic cache control, missing/churned OpenAI prompt cache keys, and missing/churned replica routing affinity.
+- The `session-cost --fixture ... --fail-under` gate now fails closed when a Codex/OpenAI fixture lacks `prompt_cache_key`, a Claude/Anthropic fixture lacks `cache_control`, or either source lacks stable `routing_affinity`.
+- Updated `VERSIONS.md` and `specs/output-formats.md` to document the adapter evidence contract.
+
+Commits pushed:
+- `src/tsift`: `5ef30b4 tsift: enforce prompt cache adapters`
+- parent `agent-loop`: `256d7d91a tsift: enforce prompt cache adapters`
+
+Verification:
+- `cargo test -p tsift-agent-doc prompt_cache`
+- `cargo test -p tsift-cli session_cost_prompt_cache`
+- `cargo test -p tsift-cli session_cost_`
+- `cargo test -p tsift-agent-doc`
+- `cargo test -p tsift-cli`
+- `git diff --check`
+- `make check`
+- `src/tsift` GitHub Actions `CI` run `27219473470`: passed.
+
+Parent `agent-loop` workflow note: the only parent workflow is `Agent Doc`; run `27219501463` did not execute jobs because GitHub reported billing/spending-limit account blockage, not a code/test failure.
+<!-- agent:boundary:8db1926f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,16 +169,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#pcache-measure]~~
-- ~~[#pcache-fingerprint]~~
-- ~~[#pcache-boundary]~~
-- [#pcache-adapters]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-adapters] Prompt caching: enforce provider-specific adapter behavior for Anthropic cache_control, OpenAI prompt_cache_key, and replica-local routing affinity.
 <!-- /agent:backlog -->
 
 ## Review

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: start
 ---
 
 ## Session History
@@ -93,7 +93,7 @@ queue_active: false
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:f8f42cb0 -->
+<!-- agent:boundary:3c565889 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +103,8 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.
 <!-- /agent:queue -->
 
 ## Backlog

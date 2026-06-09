@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -321,7 +321,40 @@ Notes:
 - Parent repo unrelated dirty files were left untouched.
 
 Confidence: high.
-<!-- agent:boundary:aee30ecc -->
+
+### Re: next-steps prompt caching - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: What are #next-steps to improve prompt caching?
+
+
+The best next step is not another broad compression pass. `session-cost` already has the useful first layer: prompt-cache analytics, ratio-drop diagnostics, creation-spike diagnostics, read/create regression warnings, and provider-specific action hints. The next work should make cache misses attributable, then make the prompt assembly honor those findings.
+
+Recommended order:
+1. Add real-session prompt-cache fixtures and a gate. Capture representative Claude/Codex/agent-doc sessions and fail closed on bad cached-input ratio, negative net cached tokens, or read/create regressions. This turns prompt caching from a recommendation into a measurable contract.
+2. Emit a stable-prefix fingerprint per model call. Record hashes for the stable system/developer/tool prefix, cache key, provider, breakpoint placement, compaction boundary, and routing/affinity hint. That gives `session-cost` enough evidence to say exactly why a cache miss happened.
+3. Split agent-doc prompt assembly into cached prefix and volatile suffix. Stable repo instructions, tool shape, and long-lived session state should stay byte-identical; queue heads, timestamps, pane state, compaction nudges, and one-off directives should land after the cache boundary.
+4. Enforce provider adapters. Anthropic needs explicit `cache_control` breakpoints; OpenAI needs stable `prompt_cache_key` derivation; self-hosted/edge paths need same-replica routing when cache locality is replica-bound.
+5. Add compact operator output. Keep the existing `prompt-cache-diagnostic` and `prompt-cache-action` lines, but add a one-line fingerprint delta summary so the operator can see whether churn came from prefix bytes, tools, key, boundary, or routing.
+
+I added those as backlog recommendations so they can be picked up as implementation tasks.
+
+Changed paths: `tasks/software/tsift.md` only.
+
+Commands/evidence:
+- `agent-doc preflight tasks/software/tsift.md`
+- `tsift status`
+- `rg -n "prompt cache|prompt-cache|prompt caching|cache_control|cache-control|ephemeral|context pack|context-pack" .`
+- `tsift --envelope search "prompt cache analytics actions" --budget normal`
+- `tsift --envelope source-read packages/tsift-agent-doc/src/session_cost.rs --style window --start 600 --lines 280 --budget normal`
+- `tsift --envelope source-read packages/tsift-agent-doc/src/session_cost.rs --style window --start 786 --lines 94 --budget normal`
+
+Verification: no code changes or tests were needed for this planning response.
+Push: none for this question.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:c3a076f5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -331,18 +364,15 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kx6s]~~
-- ~~do [#qszc]~~
-- ~~:pushpin: :round_pushpin: do [#zkft]~~
-- ~~:pushpin: :round_pushpin: do [#58p8]~~
-- ~~:pushpin: :round_pushpin: do [#kn0d]~~
-- ~~do [#qs5v]~~
-- :pushpin: What are #next-steps to improve prompt caching?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pcache-measure] Prompt caching: add real-session cache effectiveness fixtures and a fail-closed gate for cached-input ratio, net cached tokens, and read/create regressions.
+- [ ] [#pcache-fingerprint] Prompt caching: emit per-call stable-prefix fingerprints plus provider/cache-key/breakpoint metadata so cache misses are attributable.
+- [ ] [#pcache-boundary] Prompt caching: refactor agent-doc prompt assembly into stable cached prefix blocks and volatile suffix blocks, keeping queue/status/compaction churn after the cache boundary.
+- [ ] [#pcache-adapters] Prompt caching: enforce provider-specific adapter behavior for Anthropic cache_control, OpenAI prompt_cache_key, and replica-local routing affinity.
 <!-- /agent:backlog -->
 
 ## Review

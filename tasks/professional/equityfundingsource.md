@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -71,14 +71,14 @@ The original error from your report is resolved: the public contact form accepts
 Done in config. `CONTACT_NOTIFICATION_TO` is now `btak.dev@gmail.com` (EFS commit `af4935d`, pushed to `main`); updated the test assertion to match (`#spec-test-commit-push`), suite green.
 
 **Not live yet** — it's a worker env var, so production keeps routing contact notifications to `brian.takita@gmail.com` until a redeploy. Say **"deploy"** to ship it (just `deploy:worker`, no migration this time). I left the Status block unchanged because it still describes the currently-deployed state.
-<!-- agent:boundary:cea49e8e -->
+<!-- agent:boundary:5aad7605 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 - I don't see an email in btak.dev@gmail.com
 <!-- /agent:queue -->
 

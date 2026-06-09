@@ -38,7 +38,24 @@ queue: start
 Compacted content:
 - Archived 7 response topic(s): Release + publish; Next Steps; #pz3k; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:73f520d9 -->
+
+### Re: GitHub org naming — opus
+
+> **Queue prompt:**
+>
+> lazily-reactive is a bit long and difficult to remember. lazily-org is better. Is there an ever better name? lazily-root? lazily-super? lazily-hub? 
+
+
+Best candidates, ranked:
+
+1. **`lazily`** — shortest, most memorable, directly matches the project/crate identity. If available, this is the clear winner.
+2. **`lazily-rs`** — follows Rust ecosystem convention (`tokio-rs`, `serde-rs`, `tauri-apps`). Natural fallback if `lazily` is taken.
+3. **`lazily-hub`** — decent but adds an unnecessary qualifier; GitHub already shows it's an org.
+
+The others are weaker: `lazily-org` is redundant (GitHub already denotes orgs), `lazily-root` and `lazily-super` don't convey clear meaning.
+
+**Recommendation:** try `lazily` first, fall back to `lazily-rs`. Updated review item #w30b to reflect this.
+<!-- agent:boundary:bab25a33 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +64,9 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- lazily-reactive is a bit long and difficult to remember. lazily-org is better. Is there an ever better name? lazily-root? lazily-super? lazily-hub? 
+- ~~lazily-reactive is a bit long and difficult to remember. lazily-org is better. Is there an ever better name? lazily-root? lazily-super? lazily-hub? ~~
+- do [#kavj]
+- do [#ms7x]
 <!-- /agent:queue -->
 
 ## Backlog

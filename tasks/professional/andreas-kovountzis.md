@@ -37,7 +37,27 @@ The first attempt was running on **CPU**, which is why it was slow: the installe
 - **Diarization caveat:** speaker labels are imperfect/swapped in spots — e.g. Andreas's "I'm the CTO of Redium" self-intro is mis-tagged as Brian. Read by content, not label.
 
 Note: the `.bin/corky` symlink now points at the CUDA-enabled release build, so future `corky transcribe` runs will use the GPU automatically. The `mail` repo changes (new contact + transcript) are left uncommitted — say the word if you want them committed there.
-<!-- agent:boundary:9d17c829 -->
+❯ I have an interview with andreas-kovountzis in 15 minutes. Please let me know what is going to be in this inverview. Will there be a coding exercise?
+### Re: What's in the interview + coding exercise? — sonnet-4-6
+
+Per what Andreas laid out on your 2026-06-02 intro call, this next round is the **system-design interview** — **not** a coding exercise. His exact process:
+
+1. ✅ Intro call (done)
+2. **→ System design (this one):** loyalty-related. He'll have you **build/design a feature that already exists in Redium's app**. Format is **Excalidraw / draw.io**, **collaborative and explicitly non-adversarial** — you two work through the problem and solutions together. No code.
+3. *Later:* a light **coding** round — "similar to an RPI but a lot less rigid," nothing data-structures/algorithms, nothing tricky; just diligence that you can code.
+4. *Final:* two culture-fit chats with **CEO Sarah** and **president Regan** (company vision, your questions).
+
+**So: no coding today — it's a whiteboard/diagram design session.** Treat it as a working session, not a grilling.
+
+**Fast prep (Redium's domain, from the call):**
+- Their model: traditional purchase-based loyalty **plus** social/non-purchase **challenges** (e.g. "post a sunset photo" → earn loyalty **tokens/points**), sitting on a **customer-insights engine** (individual-level demographic + purchase data). A likely prompt: design something like a challenge → points-ledger → reward-redemption flow, a leaderboard, or a loyalty-tier system.
+- **Open by clarifying the problem and requirements before drawing** — ask scope/scale/constraint questions; he values that.
+- **Narrate tradeoffs out loud.** He's API-driven (decoupling from Shopify → headless → fully API), pragmatic XP/TDD/CI-CD, "1% better" incrementalist — not dogmatic.
+- **Name the scaling realities they live with:** spiky onboarding (a single new customer = 500K loyalty members at once, e.g. Farity), and their current **observability gap** (no good handle on queue depth / back-pressure / runtime). Designing for idempotency, async (they use SQS + Lambda), and instrumentation will resonate.
+- Stack context if useful: TS + MongoDB (Mongoose) on DigitalOcean, rest on AWS, monorepo/"repo of repos," migrating to ECS + Terraform/OpenTofu.
+
+Be collaborative, think aloud, ask questions. Good luck — you've got this.
+<!-- agent:boundary:d3769d7c -->
 <!-- /agent:exchange -->
 
 ## Queue

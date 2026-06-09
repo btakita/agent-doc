@@ -84,6 +84,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#vd8s] [recommended] Investor Pipeline phase 2: per-investor activity timeline on the card/detail, drag-to-confirm-wire from the Committed lane, stalled-stage outreach highlighting (signed up > N days, no accreditation; ties into #q2x2 drip), and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md (Future phases).
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

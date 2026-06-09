@@ -217,17 +217,22 @@ Stopping here by your call ("Stop & restart for `#lvbatch`"). The queue can't au
 Halted the queue to make your "Stop & restart" stick. The auto-loop kept re-firing `#saevon` because go-mode stayed active (frontmatter `queue: start` + `go` marker) and the session wasn't restarted — so each `/agent-doc` re-synced the same blocked head. I set the queue marker to `stop`; preflight canonicalized it (`queue: stop` in frontmatter, activation token stripped), and `queue_active` is now `false`. The Claude-Code auto-loop's `queue_active == false` skip condition now terminates it, so re-invoking won't nag the blocked items anymore.
 
 Nothing else changed — all this turn's real work is on `main` (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, the `#exch-intermix` auto-recovery evidence, the `#tmux-switch-lag` culprit at `sync.rs:700`). When you're ready, restart (clears the `#postcommit-ipc-worktree-corruption` churn) and re-enable go-mode (`go` on the queue marker, or run with `queue: start`) in the clean session to drive `#lvbatch`. I'll check the logs and close the live-gated items there.
-<!-- agent:boundary:0f1c69db -->
+
+### Re: queue tidy — opus-4-8
+
+Bookkeeping only — no new prompt, nothing to build. You removed three struck items (`#opsproof-falsepos`, the "don't use memory to recover" note, the struck `#pcpc5live`) and fixed the `k-` typo on the `#lvbatch` line. `queue: stop` is still set, so the auto-loop stays off and I'm not re-firing the blocked head.
+
+Worktree-vs-HEAD this cycle is just those 7 lines (2 insert / 5 delete) — no `#postcommit-ipc-worktree-corruption` splice this time, so the queue edit landed cleanly.
+
+State is unchanged from the halt: `#lvbatch`, `#saevon`, `#s760wire` verify, `#pcpc5live` step 3, `#bkx9perid`, `#exch-intermix-verify`, `#tmux-switch-lag` are all live-verification / clean-session work — none completable in this degraded session, and not gated. The single unblock is still the restart: a fresh session clears the corruption churn, then drive `#lvbatch` under real typing load and I'll check logs and close each item. Everything committed (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, the `sync.rs:700` `#tmux-switch-lag` culprit, the `live_prompt_drift_auto_recovered` evidence) is correct on `main`.
+<!-- agent:boundary:0e19dde4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:pushpin: do [#opsproof-falsepos]~~
-- ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
-- ~~:pushpin: do [#pcpc5live]~~
 - ~~:pushpin: :round_pushpin: do [#s760wire]~~
-k- :round_pushpin: do [#lvbatch]
+- :round_pushpin: do [#lvbatch]
 - :pushpin: :round_pushpin: do [#saevon]
 - :round_pushpin: do [#bkx9perid]
 - :round_pushpin: do [#tmux-switch-lag]

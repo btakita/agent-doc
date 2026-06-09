@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -204,7 +204,42 @@ Commits pushed:
 - `btakita/tagpath@3f894a1` (`feat: exercise project session via mcp`) to `origin/main`.
 
 Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
-<!-- agent:boundary:c0e88286 -->
+Rejected lazily-rs for the default tagpath runtime for now; the `project-session` prototype stays feature-gated as an internal experiment.
+
+> **Queue prompt:**
+>
+> [#tglazydecide]
+
+
+Decision basis:
+- Default sidecar and no-op index paths do not regress because the prototype is opt-in and the default index/watch/MCP path remains unchanged.
+- The ProjectSession path has clearer single-thread ownership and explicit request-boundary invalidation, but that does not outweigh the measured read cost.
+- On the 1000-file fixture, opt-in ProjectSession MCP reads are slower than the existing index-backed reads: `indexed_project_query` is 348 ms vs 98 ms median, and `family_by_path` is 284 ms vs 60 ms median.
+- The save-burst ProjectSession read remains under its 500 ms budget at 389 ms median, but it is not a default-runtime win because it still pays project-scan cost and is not an apples-to-apples replacement for the watch debounce path.
+
+Changed paths in `src/tagpath`:
+- `SPEC.md`: records the adopt/reject decision and the criteria for reopening the decision later.
+- `README.md`: summarizes that default tagpath remains index-backed and the lazily-rs path remains behind `project-session`.
+- `tests/test_performance_benchmark.rs`: adds a regression test that keeps the decision documented in both SPEC and README.
+
+Verification:
+- `cargo test --test test_performance_benchmark` passed after tightening the doc assertion.
+- `cargo test --workspace` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets --features project-session -- -D warnings` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed via `tsift rewrite`.
+- `cargo build --workspace` passed via `tsift rewrite`.
+- `cargo install --path . --force` succeeded.
+- `bash scripts/benchmark-current-performance.sh --plan --project-session` printed the expected opt-in matrix.
+- Top-level `make check` passed.
+- Tagpath GitHub Actions `CI` is green for the pushed decision commit: run `27236139015`, completed success for `docs: record project session adoption decision`.
+- `agent-loop` still has no workflow named `CI`.
+
+Commits pushed:
+- `btakita/tagpath@05003cb` (`docs: record project session adoption decision`).
+- `btakita/agent-loop@58ad10e78` (`chore: record tagpath project session decision`).
+
+Escalation: none. Residual working tree note: the unrelated unstaged instruction-refresh diffs and other pane changes remain outside this task and were not staged or committed.
+<!-- agent:boundary:5cdf75e1 -->
 <!-- /agent:exchange -->
 
 ###
@@ -212,16 +247,11 @@ Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift ins
 -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#tglazymeasure]~~
-- ~~[#tglazyproto]~~
-- ~~[#tglazywatch]~~
-- [#tglazydecide]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tglazydecide] Adopt or reject lazily-rs for tagpath based on measured results: require no regression in sidecar/no-op index paths, clearer invalidation code, bounded single-thread ownership, and documented SPEC/README guidance.
 <!-- /agent:backlog -->
 
 ## Review

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -31,141 +31,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-172720.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-192046.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Individual application-lead route + messaging sync question; deploy; Individual-item admin routes; 1 more
+- Archived 7 response topic(s): URL reflects selected filters without a refresh; #pzj5; #f632; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: URL reflects selected filters without a refresh — opus-4-8
-
-> **Queue prompt:**
->
-> The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.
-
-
-Done across the admin portal. Committed + pushed to `equityfundingsource-dev` main (`7d9c235`).
-
-**Root cause:** the filtered admin lists *read* their filters from the URL on load but never *wrote* them back, so changing a filter (e.g. the users `status` dropdown) left the URL stale.
-
-**Fix:** added a shared `sync_url_query_` helper (`shared/url.ts`) that updates the query string via `history.replaceState` (no reload, no back-button spam, drops empty values), and called it from every filtered admin list as filters change:
-- **Users** (`?q&role&status`) — the reported example
-- Application Leads, Contact Messages, Funding Commits, Lender Management (`?status`)
-- Documents (`?kind` tab + `?window`/`?status`)
-- Loans (`?borrower&application_status&order`)
-- The full pages view gains **Open About ↗ / Open Contact ↗** deep-link buttons above each editor.
-- The route opens a **focused single-key editor** (just About or just Contact) with a "Back to public contents" link and a "View" link to the live page — reusing the existing `public-contents` section (the client reads `:key` from the path, so no new section/nav wiring needed).
-
-Read/write stay symmetric — each page only syncs the params it already reads on load, so a refresh restores the same view. Pages that already synced (pipeline, payments modal, tmo-loans, messages) were left as-is.
-
-**Verification:** unit-tested the pure URL builder + asserted every filtered list uses the helper; full suite **421 pass / 0 fail**, worker bundle clean. (This rebased on top of a remote pagination refactor that touched the same files — conflicts resolved keeping both the new pagination and the URL sync.)
-
-Continuing the queue: `#pzj5` (Public Contents detail) and `#f632` (Documents detail) next.
-
-### Re: #pzj5 — Public Contents detail route — opus-4-8
-
-> **Queue prompt:**
->
-> [#pzj5]
-
-
-Done. Committed + pushed to `equityfundingsource-dev` main (`b0cd34f`).
-
-Public Contents is a key-based singleton editor (not a discrete-row list), so the addressable "items" are the content keys. Added `/portal-admin/public-contents/:key` (`key` ∈ `about` | `contact`):
-- The route opens a **focused single-key editor** (just About or just Contact) with a "Back to public contents" link and a "View" link to the live page — reusing the existing `public-contents` section (the client reads `:key` from the path, so no new section/nav wiring needed).
-- The full pages view gains **Open About ↗ / Open Contact ↗** deep-link buttons above each editor.
-
-**Decision on the nested-items question:** About *sections* and *team members* stay inline array fields edited within the About editor — they're not given their own routes. Key-level (about/contact) deep-linking is the right granularity; per-array-item routes would be over-engineering for content blocks saved as one document.
-
-**Verification:** full suite **422 pass / 0 fail**, browser + worker bundles clean; added a test locking in the route + focused-editor logic.
-
-Last queue item next: `#f632` (Documents detail routes).
-
-### Re: #f632 — Documents detail routes — opus-4-8
-
-> **Queue prompt:**
->
-> [#f632]
-
-
-Done. Committed + pushed to `equityfundingsource-dev` main (`e6de69c`).
-
-**Decision on the sub-list question:** Documents has two distinct sub-lists, so each item type gets its **own** detail route + by-id API (rather than one shared route):
-- **Uploads** → `/portal-admin/documents/uploads/:id` (`GET /api/admin/uploads/:id`) — file metadata, borrower, loan, download link.
-- **Document Requests** → `/portal-admin/documents/requests/:id` (`GET /api/admin/investor-document-requests/:id`) — request, status, investor, description/admin notes.
-
-Each list row links to its detail page (eye action), and both detail sections highlight the Documents nav item. Added an `investor_document_request_admin_R_` single-read repo helper (re-exported via `admin/shared`).
-
-**Verification:** full suite **423 pass / 0 fail**, browser + worker bundles clean; added a test locking in both routes, sections, APIs, and row links.
-
-Queue drained — all admin list types now have individual-item routes.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed to production. Version `e390c01c-90d8-49a3-bea0-4e4c6549cbba` at https://equityfundingsource.brian-takita.workers.dev.
-
-Before deploying I synced EFS to latest `main` (it was behind by 2 — a remote refactor of the documents/uploads view to a grouped `/api/admin/documents` table). The merge was clean: my `#f632` upload/request detail links survived, build is clean, full suite **423 pass / 0 fail**.
-
-**Smoke test (all live):** home `200`; the session's new routes all return `303` (auth redirect), same as existing detail routes:
-- `/portal-admin/public-contents/{about,contact}` (#pzj5)
-- `/portal-admin/documents/{uploads,requests}/:id` (#f632)
-- `/portal-admin/users?status=active` (URL filter sync)
-
-This ships everything from this queue: the four admin detail routes, the per-key Public Contents editor, the Documents detail routes, and the URL-filter-sync across the admin lists. Queue drained.
-
-### Re: full-applications "Failed to load applications" — opus-4-8
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications has a "Failed to load applications" error.
-
-
-Fixed. Root cause was a **schema/code mismatch in production**, not a code bug.
-
-**What happened:** the deploy I shipped earlier this session pulled in a remote refactor that added migrations **0055** (`application_broker_info` table + `full_applications.broker_user_id`) and **0056** (shared `documents` pool + `loan_documents`/`investor_documents` columns). `wrangler deploy` does **not** run D1 migrations, so production D1 was missing both.
-
-**Exact failure path:** `GET /api/admin/full-applications` → `application_admin_list_` → per-row `application_sections_R_` → `application_broker_info_R_` runs `SELECT … FROM application_broker_info`. That table didn't exist on prod → the query threw → the `Promise.all` rejected → the endpoint 500'd → the client rendered "Failed to load applications".
-
-**Fix:** applied the two pending migrations to the production D1 (`equityfundingsource`, `280e1539…`). Both are additive only (CREATE TABLE/INDEX, ADD COLUMN, INSERT OR IGNORE) — no destructive statements. Verified afterward: zero pending migrations; `application_broker_info` and `documents` tables exist; `full_applications.broker_user_id` is present.
-
-Please re-load `/portal-admin/full-applications` (behind your admin auth) to confirm — the schema it needs is now in place. Queued a process fix so deploys apply migrations (or fail closed) and this class of outage can't recur.
-
-### Re: deployment script + migrations + runbooks — opus-4-8
-
-> **Queue prompt:**
->
-> Make the deployment script include migrations. Add runbooks for deployments. Link runbooks to AGENTS.md
-
-
-All three done. Committed + pushed to `equityfundingsource-dev` main (`9da578e`).
-
-**1. Deploy script applies migrations.** `deploy:worker` (what `make deploy` runs) is now `build:worker → cf:d1:migrate:remote → cf-deploy`. Migrations apply *before* the Worker goes live — EFS migrations are additive, so the old code keeps working against the superset schema and the new code finds what it expects on activation. Added `deploy:worker:no-migrate` as an escape hatch for review-gated migrations.
-
-**2. Deployment runbook.** New `runbooks/deployment.md`: TL;DR one-liner, why migrations run first (with the "Failed to load applications" incident as the cautionary example), pre-deploy checklist (sync, `make check`, review pending migrations for anything destructive), the deploy command, post-deploy verification (no pending migrations + curl smoke test + auth'd page check), rollback (code + schema), and migration authoring. Defers one-time env/secret setup to `docs/deploy.md`.
-
-**3. Linked from AGENTS.md.** New `## Runbooks` section points to `runbooks/deployment.md` and notes that `wrangler deploy` alone doesn't migrate, so always deploy via `make deploy`.
-
-**Verification:** package.json is valid; full suite **423 pass / 0 fail**. This closes the loop on the migration-gap outage — the next deploy will apply pending migrations automatically.
-
-### Re: do #my09 — already shipped — opus-4-8
-
-> **Queue prompt:**
->
-> do [#my09]
-
-
-`#my09` was completed last cycle in `9da578e` — nothing to redo, marking it done. Verified the deliverables are live on `main`:
-
-- **`deploy:worker`** = `build:worker → cf:d1:migrate:remote → cf-deploy` (the migration step is in place; `make deploy` applies pending migrations before activating the Worker).
-- **`runbooks/deployment.md`** exists (3.6K) and is linked from **AGENTS.md** under the `## Runbooks` section.
-
-`#my09` was the `[recommended]` backlog note I filed when fixing the "Failed to load applications" outage; the follow-up "make the deployment script include migrations + add runbooks" task then implemented it directly. Closing the loop — no further action needed.
-<!-- agent:boundary:24092f78 -->
+<!-- agent:boundary:b45c1a09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,6 +44,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.
+- We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

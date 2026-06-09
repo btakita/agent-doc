@@ -76,14 +76,35 @@ Done — `#pcpc1` (PCP-consol phase 1) is implemented and shipped in both binari
 - `..._registry_funnels_one_document_to_one_mailbox` — same doc id → one shared actor (`Arc::ptr_eq`), distinct docs → distinct actors, ordered ops via either handle.
 
 **Verification:** `make check` green (clippy `-D warnings` + full test suite); `cargo build --release` + `cargo install --path .` both refreshed; latest agent-doc CI run green pre-push.
-<!-- agent:boundary:5b65157e -->
+
+### Re: do [#pcpc2] — In-process supervisor adapter — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#pcpc2]
+
+
+Done — `#pcpc2` (PCP-consol phase 2) is implemented and shipped in both binaries.
+
+**What landed** (`agent-doc-orchestration/src/supervisor/in_process.rs`, new module): the in-process supervisor adapter — the harness child PTY/stdin/restart/heartbeat as a *controller-managed task* instead of a separate OS process (per `08b` §"In-process actors").
+
+- `InProcessSupervisor` — owns one live child, drives lifecycle via a single controller-step `tick_at(now)` that advances the heartbeat and, on child exit, applies the existing `state::CrashPolicy` (restart / prompt / halt). Exposes `restart`/`inject`/`stop`/`state`/`pid`/`generation` mirroring the `IpcMethod` boundary.
+- `SupervisedChild` trait decouples the adapter from any specific child: `PtySupervisedChild` is the production wrapper over `supervisor::pty`; SimWorld tests use a deterministic fake child (no real PTY / wall-clock).
+- **Heartbeat loss + reattach** — `heartbeat_lost(prev, cur, min_advance)` lets the controller detect a wedged task; `reattach()` rebinds to a still-alive child **without** a restart (a stale heartbeat is never proof the child died). `generation()` distinguishes reattach (unchanged) from restart (incremented).
+
+**Scope (mirrors `#pcpc1`):** the adapter + SimWorld coverage land behind the seam; the live `agent-doc start` socket cutover (wiring the Unix-socket handler + controller task to this adapter) is gated in `#pcpc5`'s 08b ladder. So the out-of-process supervisor running *this* session is untouched — `cargo install` was safe. The Unix-socket external boundary for CLI/editor callers is preserved by design (callers still hit the controller, which forwards to these methods).
+
+**SimWorld determinism (7 new tests, all green):** heartbeat advances per tick; reattach of a live child performs no restart; transient exit → restart (fresh generation, Healthy); flap storm → Halted + Stopped; clean exit → PromptOperator; `inject` reaches child stdin; explicit `restart` resets policy and `stop` refuses further ticks.
+
+**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:11); latest agent-doc CI green.
+<!-- agent:boundary:d3df69fc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#pcpc1]~~
-- do [#pcpc2]
+- ~~do [#pcpc2]~~
 - do [#pcpc3]
 - do [#pcpc4]
 - do [#pcpc5]
@@ -114,7 +135,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcpc2] PCP-consol phase 2 — In-process supervisor adapter: host the harness child PTY/stdin/restart/heartbeat as a controller-managed task instead of a separate OS process; preserve the Unix-socket external boundary for CLI/editor callers. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc3] PCP-consol phase 3 — In-process ordered write queue (realizes #pcp3b): route all write/stream/finalize/repair + supervisor idle/file-watch writes through the session actor queue; flock becomes cross-process backstop only. Kills R6/exit-75 at the root. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc4] PCP-consol phase 4 — Single controller-owned filesystem watcher (realizes #pcp4) + demote plugin WatchService to read-only (realizes #pcp7; needs live verification). Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc5] PCP-consol phase 5 — Migration cutover via the 08b gate ladder (shadow -> dual-write -> read-switch -> authority -> removal), each with a rollback flag; remove the out-of-process supervisor + direct-disk writers only after SimWorld/CLI/live-tmux proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md

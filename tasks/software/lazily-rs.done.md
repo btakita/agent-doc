@@ -120,3 +120,6 @@
 - 2026-06-07 [#ipc1] Design lazily-serde feature gate (trait bounds vs type-erased closures)
 - 2026-06-07 [#39c5] Implement RemoteOp enum + per-peer permission allowlist
 - 2026-06-07 [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
+- 2026-06-09 [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
+- 2026-06-09 [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
+- 2026-06-09 [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)

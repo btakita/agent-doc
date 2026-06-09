@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -151,7 +151,7 @@ All three done. Committed + pushed to `equityfundingsource-dev` main (`9da578e`)
 **3. Linked from AGENTS.md.** New `## Runbooks` section points to `runbooks/deployment.md` and notes that `wrangler deploy` alone doesn't migrate, so always deploy via `make deploy`.
 
 **Verification:** package.json is valid; full suite **423 pass / 0 fail**. This closes the loop on the migration-gap outage — the next deploy will apply pending migrations automatically.
-<!-- agent:boundary:6a879f67 -->
+<!-- agent:boundary:5f554baa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,6 +159,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#my09]
 <!-- /agent:queue -->
 
 ## Backlog

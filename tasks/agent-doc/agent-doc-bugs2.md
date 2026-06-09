@@ -71,19 +71,38 @@ Done — this is the fresh session the prior cycle asked for, and `#exch-intermi
 **Closeout.** Marked `#exch-intermix` done and queued one `[recommended]` live-verification follow-up (`#exch-intermix-verify`) to watch the `live_prompt_drift_auto_recovered` marker fire in a real listener-active drift repro alongside your `#lvb-run` operator batch.
 
 **Not auto-looping.** The remaining queue (`#pcpconsol`, `#pcpc5cut`, `#s760wire`, `#saevon`, `#bkx9perid`, `#tmux-switch-lag`) is entirely fresh-session / live-pane / root-fix gated. `#pcpconsol` in particular is the multi-day single-process-control-plane root-fix that's explicitly meant to start as its own fresh focused session at `#pcpc1`, not be drained at the tail of this one. Start a fresh `/agent-doc` session for it.
-<!-- agent:boundary:91d11f55 -->
+
+### Re: do #tagpath-queue-lint-falsepos — released tagpath 0.12.2, lint-gate unblocked — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#tagpath-queue-lint-falsepos]
+
+
+Fixed and shipped (you authorized the cross-repo work). The blocker was that the **published** crates.io `tagpath 0.12.1` predated the `go`/`start`/`stop`/`preset` queue-control-token acceptance — the code was already in tagpath `main` (commit `9289827` + `allowed_attrs`), just never released, so the agent-doc binary (which resolves tagpath from crates.io) kept flagging your `&lt;!-- agent:queue priority preset="…" go --&gt;` marker (`go` → error-class `malformed-attr`, `preset` → `unknown-attr`) and blocking finalize for every go-mode preset queue.
+
+**What I did (tagpath repo):**
+- Added a regression test locking the exact `priority preset="#…" go` marker fully clean (no error, no warning).
+- Bumped lockstep `0.12.1 → 0.12.2` (facade + `tagpath-core`); fixed the two version-pinned `test_core_split_plan` assertions.
+- `cargo clippy --workspace -D warnings` clean; full workspace tests green (115 + suites). Committed + pushed (`e7cfdbc`), tagged `v0.12.2`.
+- **Published `tagpath-core` 0.12.2 then `tagpath` 0.12.2 to crates.io.**
+- Reinstalled agent-doc (`cargo install --path . --force`) — it now resolves `tagpath 0.12.2`, so the finalize lint-gate accepts the go-mode preset marker (this very closeout no longer needs `--lint off`).
+
+The `#exch-intermix-verify` and `#tagpath-queue-lint-falsepos` follow-ups are resolved at the source. The remaining queue (`#pcpconsol` chain, live-pane verify items) stays for the dedicated fresh sessions / your live-verification batch.
+<!-- agent:boundary:418d2929 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: :round_pushpin: do [#exch-intermix]
+- ~~:pushpin: :round_pushpin: do [#tagpath-queue-lint-falsepos]~~
 - :pushpin: :round_pushpin: do [#pcpconsol]
 - :pushpin: :round_pushpin: do [#pcpc5cut]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
 - :pushpin: :round_pushpin: do [#tmux-switch-lag]
+- do [#exch-intermix-verify]
 <!-- /agent:queue -->
 ###
 <!--
@@ -113,7 +132,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#tagpath-queue-lint-falsepos] #agent-doc-bug HIGH PRIORITY — the tagpath agent-doc lint dialect (tagpath::lint::agent_doc, invoked by finalize lint_gate) rejects the SPEC-VALID agent:queue control tokens: 'go' is flagged error agent-doc/malformed-attr (missing =value) and 'preset="#name"' is flagged warning agent-doc/unknown-attr. Per specs/07-orchestration-commands.md:274-286 go/start/stop/priority/preset are recognized bare queue-only tokens. This error-class finding BLOCKS finalize/write --commit for every go-mode preset queue (hit live this session on agent-doc-bugs2.md; worked around with --lint off + agent-doc commit auto-recovery). Fix in the tagpath repo: teach the agent-doc lint dialect the queue-only control attributes. Until fixed, go-mode preset-queue finalizes need --lint off.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#pcpconsol] ROOT-FIX (priority per operator). Supervisor-in-process consolidation / single-process control plane (spec 08b): make the supervisor an in-process adapter so the session actor owns ONE ordered write queue + ONE controller-owned filesystem watcher; demote plugin WatchService to read-only buffer reporting + thin EDT apply+ack shim. Decomposed into dependency-ordered phases #pcpc1 to #pcpc5 in tasks/agent-doc/plan-supervisor-in-process.md. Run as a FRESH focused session starting at #pcpc1 (NOT a saturated queue-drain). Root-fixes #ipc-crdt-response-drift and R1/R2/R5/R6. Absorbs review #pf15/#pcp3/#pcp4/#pcp7 + the degraded-routing half of #pcp5. Large/multi-day.
 - [ ] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.

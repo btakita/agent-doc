@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -37,7 +37,7 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): A loan application should not be approvable without the full application
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:c6342057 -->
+<!-- agent:boundary:47bd7eca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a has an error "TMO writeback not sent: draft applications cannot be sent to TMO" in green when I clicked "Accept and send to TMO". This should be disabled if the application is incomplete.
 <!-- /agent:queue -->
 
 ## Backlog

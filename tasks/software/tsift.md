@@ -43,7 +43,7 @@ Compacted content:
 Added prompt-caching follow-up backlog items in priority order. Top backlog item: `#pcache-replaygate`.
 
 No code/test run was needed because this cycle only mutates the session backlog.
-<!-- agent:boundary:daf064ff -->
+<!-- agent:boundary:1b94c845 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +53,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- do [#pcache-replaygate]
+- do [#pcache-missrank]
+- do [#pcache-boundary-contract]
+- do [#pcache-ci-history]
 <!-- /agent:queue -->
 
 ## Backlog

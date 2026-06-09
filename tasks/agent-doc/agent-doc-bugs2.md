@@ -120,7 +120,7 @@ Done — `#pcpc3` (PCP-consol phase 3, realizes `#pcp3b`) is implemented and shi
 **SimWorld determinism (4 new tests, all green):** 50 concurrent read-modify-write cycles lose no increment (final == initial + N); a racing supervisor-write + agent-finalize never lets finalize observe a half-applied write (always a complete document); `serialized_atomic_write` persists; the three typed writer classes share one submission order.
 
 **Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:22); latest agent-doc CI run still in progress for the `#pcpc2` push (recorded pending, continuing from local evidence).
-<!-- agent:boundary:5f733258 -->
+<!-- agent:boundary:35e52122 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -158,7 +158,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [x] [#pcpc3] PCP-consol phase 3 — In-process ordered write queue (realizes #pcp3b): route all write/stream/finalize/repair + supervisor idle/file-watch writes through the session actor queue; flock becomes cross-process backstop only. Kills R6/exit-75 at the root. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc4] PCP-consol phase 4 — Single controller-owned filesystem watcher (realizes #pcp4) + demote plugin WatchService to read-only (realizes #pcp7; needs live verification). Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc5] PCP-consol phase 5 — Migration cutover via the 08b gate ladder (shadow -> dual-write -> read-switch -> authority -> removal), each with a rollback flag; remove the out-of-process supervisor + direct-disk writers only after SimWorld/CLI/live-tmux proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.

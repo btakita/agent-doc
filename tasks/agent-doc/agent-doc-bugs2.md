@@ -132,7 +132,7 @@ Fixed and shipped (submodule `5e7b6f14`) — `make check` green (4117/4117, clip
 **Why it's safe in this drift-prone session:** the auto-reopen path only fires for a response that is *not* already committed, and it refreshes the baseline to `HEAD`, so it cannot duplicate. My own finalize this turn is unaffected — its cycle is `preflight_started`, never `Committed`, so the gate doesn't fire at all. Two deterministic tests: new-response-commits and true-duplicate-replay-still-rejected (single copy in `HEAD`).
 
 **CI:** cycle 1's run (`#compact-reap-no-response-record`) went **green** (`27188969343`); this push kicked `27189714279` (pending). Closed from local evidence per the test-bearing-turn rule.
-<!-- agent:boundary:513f2ff8 -->
+<!-- agent:boundary:cd2db2ab -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -176,7 +176,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [x] [#finalize-stale-baseline-reopen-friction] finalize refuses with "pre-write gate: cycle already committed; refusing explicit-baseline response" and requires a manual preflight re-run to mint a fresh baseline, even when the response is legitimately new. Hit repeatedly 2026-06-09. Consider finalize auto-reopening the committed cycle or resolving the current baseline itself instead of failing closed.
 - [ ] [#exit75-crdt-drift-closeout-dup-lines] exit-75 CRDT-merge closeout still appends reversed duplicate user-prefixed lines of the just-written response into the exchange tail, needing manual cleanup + reset --from-current --preserve-session. Recurred 2026-06-09 on the #ipc-degraded-prefers-file-ipc cycle. Same family as #ipc-crdt-response-drift; needs the clean-session producer pin.
 - [ ] [#queue-contamination-guard-false-positive] session-check #jb-run-agent-doc-response-queue-contamination false-positives on a legit user queue prompt that mentions slash commands (/agent-doc, /clear) because it resembles response prose; the heuristic must not flag genuine user prompts as contamination.
 - [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.

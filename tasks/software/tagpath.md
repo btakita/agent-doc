@@ -140,7 +140,67 @@ Commits pushed:
 - `btakita/agent-loop@cae1db80b` (`chore: update tagpath project session prototype`) to `origin/main`, updating the `src/tagpath` submodule pointer.
 
 Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
-<!-- agent:boundary:f43efe52 -->
+Implemented and pushed the first runtime exercise for the lazily-rs `ProjectSession` prototype through opt-in request-scoped MCP reads.
+
+> **Queue prompt:**
+>
+> [#tglazywatch]
+
+
+Changed paths in `src/tagpath`:
+- `src/mcp/mod.rs`: added per-process MCP runtime state keyed by project root, refreshed ProjectSession instances at opt-in request boundaries, and routed `indexed_project_query` / `family_by_path` through `runtime: "project_session"` when the `project-session` feature is enabled.
+- `src/mcp/tools.rs`: documents the new optional `runtime` argument for those MCP tools.
+- `scripts/benchmark-current-performance.sh`: keeps the default baseline unchanged and adds `--project-session` rows for opt-in MCP query/read and a five-save burst followed by a ProjectSession MCP read.
+- `tests/test_mcp.rs`: covers same-process invalidation after editing a source file between MCP requests, handle preservation, and sidecar metadata exposure.
+- `tests/test_performance_benchmark.rs`: keeps the opt-in benchmark plan synchronized with SPEC.
+- `SPEC.md` / `README.md`: document the runtime boundary, benchmark command, and measured comparison.
+
+Runtime behavior:
+- Default MCP behavior still uses the persistent `.naming/index.json` path.
+- The prototype path is explicit: callers pass `runtime: "project_session"` and must build with `--features project-session`.
+- The MCP server caches ProjectSession values per project root and calls `refresh()` before each opt-in request, so same-path file edits invalidate derived family/search state inside one MCP process.
+- ProjectSession MCP output preserves normal `fam:` / `mem:` handles by using the public index handle helpers, and includes sidecar metadata for comparison without moving index writes into ProjectSession.
+
+Final opt-in benchmark run, 1000-file fixture, 5 iterations, debug binary:
+
+```csv
+case,budget_ms,runs,min_ms,median_ms,max_ms,status
+noop_sidecar_update,10,5,6,7,8,pass
+one_changed_file_update,125,5,110,111,112,pass
+full_reindex,450,5,360,361,372,pass
+watch_save_burst,500,5,371,372,372,pass
+mcp_indexed_project_query,150,5,98,98,99,pass
+mcp_family_by_path_read,150,5,59,60,61,pass
+project_session_mcp_indexed_project_query,400,5,341,348,354,pass
+project_session_mcp_family_by_path_read,350,5,277,284,295,pass
+project_session_save_burst_mcp_read,500,5,383,389,398,pass
+```
+
+Comparison notes:
+- Sidecar no-op latency remains under the <= 10 ms baseline because ProjectSession is opt-in and does not participate in `index --update`.
+- ProjectSession MCP reads are slower than the index-backed MCP rows on this fixture: `indexed_project_query` is 348 ms vs 98 ms median, and `family_by_path` is 284 ms vs 60 ms median.
+- The save-burst ProjectSession read stays under the watch budget at 389 ms median, but it avoids watcher debounce and still pays for request-scoped project scanning.
+
+Verification:
+- `cargo test --features project-session --test test_mcp project_session -- --nocapture` passed.
+- `cargo test --test test_performance_benchmark` passed.
+- `cargo test --workspace` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets --features project-session -- -D warnings` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed via `tsift rewrite`.
+- `cargo build --workspace` passed via `tsift rewrite`.
+- `cargo install --path . --force` succeeded.
+- `bash scripts/benchmark-current-performance.sh` passed under default features.
+- `bash scripts/benchmark-current-performance.sh --project-session` passed with all median rows under budget.
+- Top-level `make check` passed.
+- Tagpath GitHub Actions `CI` for the pushed commit is in progress, not waited on per closeout policy: run `27235864881`, `feat: exercise project session via mcp`, started `2026-06-09T21:06:38Z`.
+- `agent-loop` still has no workflow named `CI` (`gh run list --workflow CI --limit 1` returned that no such workflow exists).
+
+Commits pushed:
+- `btakita/tagpath@3f894a1` (`feat: exercise project session via mcp`) to `origin/main`.
+- `btakita/agent-loop@c57ae00f` (`chore: update tagpath project session mcp exercise`) to `origin/main`, updating the `src/tagpath` submodule pointer.
+
+Escalation: none. Residual working tree notes: the unstaged `src/tagpath/AGENTS.md` and root `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed. `cargo fmt --check` reports pre-existing rustfmt diffs in unrelated tagpath files; those were not staged for this scoped runtime exercise.
+<!-- agent:boundary:4dea1485 -->
 <!-- /agent:exchange -->
 
 ###
@@ -150,14 +210,13 @@ Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift ins
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#tglazymeasure]~~
 - ~~[#tglazyproto]~~
-- [#tglazywatch]
+- ~~[#tglazywatch]~~
 - [#tglazydecide]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tglazywatch] Exercise the ProjectSession prototype in one narrow runtime path, preferably tagpath watch or request-scoped MCP reads, and compare invalidation behavior, debounce/save-burst cost, and sidecar no-op latency against the baseline.
 - [ ] [#tglazydecide] Adopt or reject lazily-rs for tagpath based on measured results: require no regression in sidecar/no-op index paths, clearer invalidation code, bounded single-thread ownership, and documented SPEC/README guidance.
 <!-- /agent:backlog -->
 

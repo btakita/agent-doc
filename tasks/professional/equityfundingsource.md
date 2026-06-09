@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -134,7 +134,24 @@ Fixed. Root cause was a **schema/code mismatch in production**, not a code bug.
 **Fix:** applied the two pending migrations to the production D1 (`equityfundingsource`, `280e1539…`). Both are additive only (CREATE TABLE/INDEX, ADD COLUMN, INSERT OR IGNORE) — no destructive statements. Verified afterward: zero pending migrations; `application_broker_info` and `documents` tables exist; `full_applications.broker_user_id` is present.
 
 Please re-load `/portal-admin/full-applications` (behind your admin auth) to confirm — the schema it needs is now in place. Queued a process fix so deploys apply migrations (or fail closed) and this class of outage can't recur.
-<!-- agent:boundary:9516d334 -->
+
+### Re: deployment script + migrations + runbooks — opus-4-8
+
+> **Queue prompt:**
+>
+> Make the deployment script include migrations. Add runbooks for deployments. Link runbooks to AGENTS.md
+
+
+All three done. Committed + pushed to `equityfundingsource-dev` main (`9da578e`).
+
+**1. Deploy script applies migrations.** `deploy:worker` (what `make deploy` runs) is now `build:worker → cf:d1:migrate:remote → cf-deploy`. Migrations apply *before* the Worker goes live — EFS migrations are additive, so the old code keeps working against the superset schema and the new code finds what it expects on activation. Added `deploy:worker:no-migrate` as an escape hatch for review-gated migrations.
+
+**2. Deployment runbook.** New `runbooks/deployment.md`: TL;DR one-liner, why migrations run first (with the "Failed to load applications" incident as the cautionary example), pre-deploy checklist (sync, `make check`, review pending migrations for anything destructive), the deploy command, post-deploy verification (no pending migrations + curl smoke test + auth'd page check), rollback (code + schema), and migration authoring. Defers one-time env/secret setup to `docs/deploy.md`.
+
+**3. Linked from AGENTS.md.** New `## Runbooks` section points to `runbooks/deployment.md` and notes that `wrangler deploy` alone doesn't migrate, so always deploy via `make deploy`.
+
+**Verification:** package.json is valid; full suite **423 pass / 0 fail**. This closes the loop on the migration-gap outage — the next deploy will apply pending migrations automatically.
+<!-- agent:boundary:6a879f67 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,7 +159,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Make the deployment script include migrations. Add runbooks for deployments. Link runbooks to AGENTS.md
 <!-- /agent:queue -->
 
 ## Backlog

@@ -865,7 +865,9 @@ pub fn sort_prompts_by_dag(
         return None;
     }
 
-    let key = |idx: usize| -> (u8, u8, usize) {
+    // Movable (agent-pin/unpinned) priority key: agent pins (tier 1) before
+    // unpinned (tier 2), then backlog-priority rank, then document order.
+    let movable_key = |idx: usize| -> (u8, u8, usize) {
         let e = &prompts[idx];
         let tier = entry_priority_tier(e);
         let r = if tier < 2 {
@@ -877,34 +879,120 @@ pub fn sort_prompts_by_dag(
         };
         (tier, r, idx)
     };
+    let is_operator_pin = |idx: usize| entry_priority_tier(&prompts[idx]) == 0;
 
-    let mut done = vec![false; n];
-    let mut order: Vec<usize> = Vec::with_capacity(n);
-    for _ in 0..n {
-        let mut best: Option<usize> = None;
-        for idx in 0..n {
-            if done[idx] || prereq[idx].iter().any(|&j| !done[j]) {
-                continue;
+    // Plain priority-weighted topological order over ALL prompts (Kahn). Used for
+    // the no-operator-pin path and as the blocker-outranks-pin fallback. A
+    // dependency cycle emits the remaining prompts in priority order (never
+    // dropped).
+    let plain_order = || -> Vec<usize> {
+        let mut done = vec![false; n];
+        let mut order: Vec<usize> = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut best: Option<usize> = None;
+            for idx in 0..n {
+                if done[idx] || prereq[idx].iter().any(|&j| !done[j]) {
+                    continue;
+                }
+                if best.is_none_or(|b| movable_key(idx) < movable_key(b)) {
+                    best = Some(idx);
+                }
             }
-            if best.is_none_or(|b| key(idx) < key(b)) {
-                best = Some(idx);
+            match best {
+                Some(pick) => {
+                    done[pick] = true;
+                    order.push(pick);
+                }
+                None => {
+                    let mut leftover: Vec<usize> = (0..n).filter(|&i| !done[i]).collect();
+                    leftover.sort_by_key(|&i| movable_key(i));
+                    order.extend(leftover);
+                    break;
+                }
             }
         }
-        match best {
-            Some(pick) => {
-                done[pick] = true;
-                order.push(pick);
+        order
+    };
+
+    // `#queue-operator-pin-position-lock-dag`: operator pins are position-locked
+    // in the DAG order exactly as in `sort_prompts_by_priority` — they keep their
+    // document slot while only the movable (agent-pin/unpinned) prompts reorder
+    // around them. The earlier DAG tie-break treated an operator pin as tier 0 in
+    // the ready set, floating it ahead of earlier prompts whenever `after=#id`
+    // edges existed. Anchor operator pins to their slots and fill the remaining
+    // slots with the movable prompts in dependency-respecting priority order. If
+    // anchoring would violate a dependency edge, the blocker outranks the pin and
+    // we fall back to the plain dependency topo so a dependency is never broken.
+    let order: Vec<usize> = if !(0..n).any(is_operator_pin) {
+        plain_order()
+    } else {
+        let movable: Vec<usize> = (0..n).filter(|&i| !is_operator_pin(i)).collect();
+        let movable_set: std::collections::HashSet<usize> = movable.iter().copied().collect();
+        // Topological order over the movable prompts only; operator-pin
+        // prerequisites are placed separately at their anchor slots, so treat
+        // them as already satisfied here.
+        let mut done_m: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut movable_seq: Vec<usize> = Vec::with_capacity(movable.len());
+        for _ in 0..movable.len() {
+            let mut best: Option<usize> = None;
+            for &idx in &movable {
+                if done_m.contains(&idx) {
+                    continue;
+                }
+                if prereq[idx]
+                    .iter()
+                    .any(|&j| movable_set.contains(&j) && !done_m.contains(&j))
+                {
+                    continue;
+                }
+                if best.is_none_or(|b| movable_key(idx) < movable_key(b)) {
+                    best = Some(idx);
+                }
             }
-            None => {
-                // Dependency cycle: emit the remaining prompts in priority order,
-                // stable, so nothing is dropped.
-                let mut leftover: Vec<usize> = (0..n).filter(|&i| !done[i]).collect();
-                leftover.sort_by_key(|&i| key(i));
-                order.extend(leftover);
-                break;
+            match best {
+                Some(pick) => {
+                    done_m.insert(pick);
+                    movable_seq.push(pick);
+                }
+                None => {
+                    let mut leftover: Vec<usize> = movable
+                        .iter()
+                        .copied()
+                        .filter(|i| !done_m.contains(i))
+                        .collect();
+                    leftover.sort_by_key(|&i| movable_key(i));
+                    movable_seq.extend(leftover);
+                    break;
+                }
             }
         }
-    }
+        // Fill: operator pins keep their document slot; movable prompts fill the
+        // rest in `movable_seq` order.
+        let mut anchored: Vec<usize> = Vec::with_capacity(n);
+        let mut mv = movable_seq.into_iter();
+        for slot in 0..n {
+            if is_operator_pin(slot) {
+                anchored.push(slot);
+            } else {
+                anchored.push(
+                    mv.next()
+                        .expect("movable prompts fill every non-operator-pin slot"),
+                );
+            }
+        }
+        // Validate every dependency edge against the anchored order; if any is
+        // violated, the blocker outranks the pin → use the plain dependency topo.
+        let mut pos = vec![0usize; n];
+        for (p, &i) in anchored.iter().enumerate() {
+            pos[i] = p;
+        }
+        let deps_ok = (0..n).all(|i| prereq[i].iter().all(|&j| pos[j] < pos[i]));
+        if deps_ok {
+            anchored
+        } else {
+            plain_order()
+        }
+    };
 
     if order.iter().enumerate().all(|(slot, &i)| slot == i) {
         return None;
@@ -1654,6 +1742,37 @@ mod tests {
         deps.insert("b".to_string(), vec!["a".to_string()]); // pinned b after a
         let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("blocker wins");
         assert_eq!(render(&sorted), "- do [#a]\n- :pushpin: do [#b]\n");
+    }
+
+    #[test]
+    fn dag_operator_pin_position_locked_with_movable_edges() {
+        // #queue-operator-pin-position-lock-dag: with `after=#id` edges among the
+        // movable prompts, the operator pin must stay anchored at its document
+        // slot — not float to the front by tier — while the movable prompts
+        // reorder around it to satisfy the dependency.
+        let entries = parse("- do [#y] after=#x\n- :pushpin: do [#p]\n- do [#x]\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        let sorted =
+            sort_prompts_by_dag(&entries, &rank, &deps).expect("movable edge reorders around pin");
+        assert_eq!(
+            render(&sorted),
+            "- do [#x]\n- :pushpin: do [#p]\n- do [#y] after=#x\n"
+        );
+    }
+
+    #[test]
+    fn dag_operator_pin_no_spurious_reorder_with_edges() {
+        // The pin is already at its anchored slot and the movable order already
+        // satisfies the edge → the DAG sort must not spuriously float the pin
+        // forward (the pre-fix bug returned `#p, #x, #y`). It returns None.
+        let entries = parse("- do [#x]\n- :pushpin: do [#p]\n- do [#y] after=#x\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        assert!(
+            sort_prompts_by_dag(&entries, &rank, &deps).is_none(),
+            "operator pin at its slot with a satisfied edge must not be reordered"
+        );
     }
 
     #[test]

@@ -87,21 +87,22 @@ Understood, and you're right — last turn I leaned on a recovery memory to hand
 **Follow-up filed.** Added `#dropqueue-consumed-falsecount` to the backlog: my fix corrected the auto-recovery *gate*, but the underlying dropped-prompt *counting* still tags a consumed/struck item as "dropped," which is what produced the false `#queue-user-edit-overwrite` session-check INTERRUPTED last turn. That's the sibling bug to fix at the source.
 
 **Memory.** Per your directive, I rewrote the recovery-memory addendum I added last turn — it now points at this product fix instead of teaching the manual `cp snapshot` workaround. Going forward I'll route agent-doc closeout misbehavior to a backlog bug or a product fix, not a recovery memory.
-<!-- agent:boundary:a9fd83fa -->
+<!-- agent:boundary:87f61cea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#opsproof-falsepos]~~
-- :pushpin: do [#lvbatch]
 - :pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.
 - :pushpin: do [#pcpc5live]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
-- :pushpin: :round_pushpin: do [#bkx9perid]
-- :pushpin: :round_pushpin: do [#tmux-switch-lag]
-- :pushpin: do [#exch-intermix-verify]
+- :round_pushpin: do [#lvbatch]
+- :round_pushpin: do [#bkx9perid]
+- :round_pushpin: do [#tmux-switch-lag]
+- do [#exch-intermix-verify]
+- do [#dropqueue-consumed-falsecount]
 <!-- /agent:queue -->
 ###
 <!--

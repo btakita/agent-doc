@@ -2919,7 +2919,8 @@ mod tests {
         std::fs::write(&doc, v1).unwrap();
         snapshot::save(&doc, v1).unwrap();
 
-        let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost.\n<!-- /patch:exchange -->";
+        let lost =
+            "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost.\n<!-- /patch:exchange -->";
         crate::capture::capture_response(&doc, lost).unwrap();
         // NOTE: no mark_write_applied — capture stays `Captured`.
 

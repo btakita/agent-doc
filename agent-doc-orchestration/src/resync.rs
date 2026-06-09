@@ -4724,7 +4724,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let closed = close_superseded_session(&iso, "oldcanon2").unwrap();
-        assert!(!closed, "session with an unmanaged window must be preserved");
+        assert!(
+            !closed,
+            "session with an unmanaged window must be preserved"
+        );
         assert!(
             iso.session_alive("oldcanon2"),
             "session with a user window must stay alive"

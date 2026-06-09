@@ -11012,8 +11012,7 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("doc.md");
-        let user_prompt =
-            "JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded";
+        let user_prompt = "JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded";
         let content = format!(
             concat!(
                 "---\nagent_doc_session: test\n---\n\n",

@@ -1277,7 +1277,9 @@ First answer here. Already committed to HEAD.
         // order-stability guarantee — whether it uses the overlay or falls back.
         let base = crdt_merge_base_state(&doc, &base_markdown).unwrap();
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state).unwrap().to_text(),
+            crate::crdt::CrdtDoc::decode_state(&base.state)
+                .unwrap()
+                .to_text(),
             base_markdown,
             "overlay merge base is not byte-stable against the baseline (source={})",
             base.source.as_str()
@@ -1306,14 +1308,22 @@ Second answer line three.
             merged.contains("### Re: second question — opus-4-8"),
             "new response heading dropped under overlay base:\n{merged}"
         );
-        let l1 = merged.find("Second answer line one.").expect("line one missing");
-        let l2 = merged.find("Second answer line two.").expect("line two missing");
-        let l3 = merged.find("Second answer line three.").expect("line three missing");
+        let l1 = merged
+            .find("Second answer line one.")
+            .expect("line one missing");
+        let l2 = merged
+            .find("Second answer line two.")
+            .expect("line two missing");
+        let l3 = merged
+            .find("Second answer line three.")
+            .expect("line three missing");
         assert!(
             l1 < l2 && l2 < l3,
             "response lines reversed under overlay base (l1={l1} l2={l2} l3={l3}):\n{merged}"
         );
-        let prior = merged.find("### Re: first question").expect("prior response missing");
+        let prior = merged
+            .find("### Re: first question")
+            .expect("prior response missing");
         let current = merged.find("### Re: second question").unwrap();
         assert!(
             prior < current,

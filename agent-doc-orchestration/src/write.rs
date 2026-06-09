@@ -7876,8 +7876,11 @@ pub fn run_template(
         )?;
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-            final_content =
-                normalize_template_structure_or_fail_preserving(&cleaned, file, Some(content_current))?;
+            final_content = normalize_template_structure_or_fail_preserving(
+                &cleaned,
+                file,
+                Some(content_current),
+            )?;
         }
         Ok((final_content, cleaned_applied))
     };
@@ -8750,8 +8753,11 @@ pub fn run_stream(
         )?;
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-            final_content =
-                normalize_template_structure_or_fail_preserving(&cleaned, file, Some(content_current))?;
+            final_content = normalize_template_structure_or_fail_preserving(
+                &cleaned,
+                file,
+                Some(content_current),
+            )?;
             crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
         }
         Ok((final_content, crdt_state, cleaned_applied))
@@ -14015,9 +14021,13 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
         .to_string();
     let write_id = uuid::Uuid::new_v4().to_string();
     let hash = crate::debounce::content_hash(content);
-    if let Err(e) =
-        crate::debounce::record_write_provenance(&canonical, content.len(), &hash, &write_id, "agent")
-    {
+    if let Err(e) = crate::debounce::record_write_provenance(
+        &canonical,
+        content.len(),
+        &hash,
+        &write_id,
+        "agent",
+    ) {
         eprintln!(
             "[write] WARNING: failed to record write provenance for {}: {}",
             path.display(),
@@ -15220,7 +15230,8 @@ scratch
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
-        let expected = "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        let expected =
+            "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
         fs::write(&doc, expected).unwrap();
 
         let outcome = guard_visible_write_reconcile(&doc, "test_clean", expected).unwrap();
@@ -15232,7 +15243,8 @@ scratch
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
-        let expected = "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        let expected =
+            "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
         // Disk grew under us with a foreign agent-doc append (no live editor buffer
         // sidecar = no pending user edit), so the guard must report it as a
         // reconcilable drift rather than failing closed (#ipc-drift-visbuf-reconcile).

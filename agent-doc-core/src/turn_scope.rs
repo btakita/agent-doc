@@ -218,7 +218,11 @@ impl AffectednessClass {
 /// `exchange` component is canonically in both the read set (tail) and the write
 /// set (append), so a tail op is in both. Without a floor, or for non-`exchange`
 /// components, fall back to whole-component / node-key overlap.
-fn scope_membership(op_address: &Address, op_index: Option<usize>, scope: &TurnScope) -> (bool, bool) {
+fn scope_membership(
+    op_address: &Address,
+    op_index: Option<usize>,
+    scope: &TurnScope,
+) -> (bool, bool) {
     if op_address.component == "exchange"
         && let Some(floor) = scope.exchange_tail_floor
     {
@@ -367,19 +371,12 @@ mod tests {
             Address::component("backlog", 0),
             exchange.clone(),
         ]);
-        assert_eq!(
-            deduped,
-            vec![exchange, Address::component("backlog", 0)]
-        );
+        assert_eq!(deduped, vec![exchange, Address::component("backlog", 0)]);
     }
 
     #[test]
     fn turn_scope_serde_round_trips() {
-        let scope = TurnScope::for_driver(Some(Address::node(
-            "queue",
-            0,
-            "queue:0:alpha:0",
-        )));
+        let scope = TurnScope::for_driver(Some(Address::node("queue", 0, "queue:0:alpha:0")));
         let json = serde_json::to_string(&scope).unwrap();
         let parsed: TurnScope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, scope);
@@ -454,7 +451,13 @@ mod tests {
         // backlog is in the write set but not the read set.
         let backlog = Address::node("backlog", 0, "backlog:0:item:0");
         assert_eq!(
-            classify_op(OpActor::ForeignSupervisor, "replace", &backlog, None, &scope),
+            classify_op(
+                OpActor::ForeignSupervisor,
+                "replace",
+                &backlog,
+                None,
+                &scope
+            ),
             AffectednessClass::OutputContended
         );
     }

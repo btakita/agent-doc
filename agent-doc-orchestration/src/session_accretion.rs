@@ -786,11 +786,17 @@ mod tests {
         // pre-emptive `/clear`, and honor an explicit frontmatter opt-in.
         let off = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_off, doc_off) = setup_doc(off);
-        assert!(!queue_context_reset_opted_in(&doc_off), "opt-in defaults off");
+        assert!(
+            !queue_context_reset_opted_in(&doc_off),
+            "opt-in defaults off"
+        );
 
         let on = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_on, doc_on) = setup_doc(on);
-        assert!(queue_context_reset_opted_in(&doc_on), "frontmatter opt-in honored");
+        assert!(
+            queue_context_reset_opted_in(&doc_on),
+            "frontmatter opt-in honored"
+        );
     }
 
     #[test]
@@ -816,7 +822,11 @@ mod tests {
         // An out-of-range value is clamped to 100.
         let fm_over = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 150\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_o, doc_o) = setup_doc(fm_over);
-        assert_eq!(clear_threshold_for_doc(&doc_o), 100, "threshold clamps to 100");
+        assert_eq!(
+            clear_threshold_for_doc(&doc_o),
+            100,
+            "threshold clamps to 100"
+        );
     }
 
     #[test]
@@ -826,7 +836,10 @@ mod tests {
         let fm = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 65\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir, doc) = setup_doc(fm);
         let report = inspect(&doc).unwrap();
-        assert_eq!(report.clear_threshold, 65, "report carries the resolved threshold");
+        assert_eq!(
+            report.clear_threshold, 65,
+            "report carries the resolved threshold"
+        );
     }
 
     #[test]
@@ -866,7 +879,11 @@ mod tests {
         );
         let (_dir_off, doc_off) = setup_doc(&off);
         // The raw reason still flags the unhealthy exchange...
-        assert!(queue_context_reset_reason(&doc_off, None).unwrap().is_some());
+        assert!(
+            queue_context_reset_reason(&doc_off, None)
+                .unwrap()
+                .is_some()
+        );
         // ...but the gated helper suppresses it without the opt-in.
         assert!(
             queue_context_reset_reason_if_opted_in(&doc_off, None)

@@ -323,7 +323,10 @@ mod tests {
             a.iter().map(|o| o.clock.lamport).collect::<Vec<_>>(),
             vec![1, 2]
         );
-        assert_eq!(b.iter().map(|o| o.clock.lamport).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            b.iter().map(|o| o.clock.lamport).collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]

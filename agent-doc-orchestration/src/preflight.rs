@@ -1553,7 +1553,10 @@ fn close_superseded_drift_sessions(file: &std::path::Path) {
     let registry = match sessions::load() {
         Ok(registry) => registry,
         Err(e) => {
-            eprintln!("[preflight] session-drift close: registry load failed: {}", e);
+            eprintln!(
+                "[preflight] session-drift close: registry load failed: {}",
+                e
+            );
             return;
         }
     };
@@ -12761,7 +12764,10 @@ mod tests {
         );
 
         // Old-block edit: change the FIRST (index 0) exchange bullet.
-        let old_edit = base.replace("- old context bullet one", "- old context bullet one EDITED");
+        let old_edit = base.replace(
+            "- old context bullet one",
+            "- old context bullet one EDITED",
+        );
         let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
         let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
         let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
@@ -12793,14 +12799,19 @@ mod tests {
         let scope = derive_turn_scope(content, &targets).expect("scope derived");
         let driver = scope.driver.as_ref().expect("driver resolved");
         assert_eq!(driver.component, "queue");
-        assert_eq!(driver.node_key.as_deref(), Some("queue:0:op-scoped-drift-2:0"));
+        assert_eq!(
+            driver.node_key.as_deref(),
+            Some("queue:0:op-scoped-drift-2:0")
+        );
         // driver is read (input) and written (the strike).
         assert!(scope.read_set.contains(driver));
         assert!(scope.write_set.contains(driver));
         assert!(
             scope
                 .write_set
-                .contains(&agent_doc_core::turn_scope::Address::component("backlog", 0))
+                .contains(&agent_doc_core::turn_scope::Address::component(
+                    "backlog", 0
+                ))
         );
     }
 
@@ -12852,7 +12863,8 @@ mod tests {
         // affectedness verdict.
         let changes = vec![user_prompt_change("do [#next]")];
         assert!(
-            compute_user_intent_prompt_changes(&changes, true, Some(&affectedness(true))).is_empty()
+            compute_user_intent_prompt_changes(&changes, true, Some(&affectedness(true)))
+                .is_empty()
         );
     }
 
@@ -12862,7 +12874,10 @@ mod tests {
         // classifier scoped as independent of the turn must NOT halt the drain.
         let changes = vec![user_prompt_change("a stray note in the parking lot")];
         let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(false)));
-        assert!(out.is_empty(), "independent edit should not preempt: {out:?}");
+        assert!(
+            out.is_empty(),
+            "independent edit should not preempt: {out:?}"
+        );
     }
 
     #[test]
@@ -12883,7 +12898,10 @@ mod tests {
             text: "- [ ] [#newitem] track a follow-up".to_string(),
         }];
         let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
-        assert!(out.is_empty(), "managed-state edit must not preempt: {out:?}");
+        assert!(
+            out.is_empty(),
+            "managed-state edit must not preempt: {out:?}"
+        );
     }
 
     #[test]

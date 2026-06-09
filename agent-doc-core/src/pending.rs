@@ -2394,8 +2394,7 @@ mod tests {
     #[test]
     fn strips_redundant_self_id_tag_from_text() {
         // #pending-redundant-self-id-strip: a self-id repeated after a tag is dropped.
-        let body =
-            "- [ ] [#stale-x] [recommended] [#stale-x] Evaluate the retire path.\n";
+        let body = "- [ ] [#stale-x] [recommended] [#stale-x] Evaluate the retire path.\n";
         let (_, items, _) = parse_items(body);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "stale-x");

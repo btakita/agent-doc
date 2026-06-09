@@ -5196,14 +5196,32 @@ Existing answer.
         let repaired =
             repair_queue_struck_items_escaped_below_marker(doc).expect("displaced items removed");
         // Displaced struck items gone.
-        assert!(!repaired.contains("[#gamma]"), "gamma displaced struck removed");
-        assert!(!repaired.contains("[#delta]"), "delta displaced struck removed");
+        assert!(
+            !repaired.contains("[#gamma]"),
+            "gamma displaced struck removed"
+        );
+        assert!(
+            !repaired.contains("[#delta]"),
+            "delta displaced struck removed"
+        );
         // Live queue content preserved (inside the component span).
-        assert!(repaired.contains("- ~~:round_pushpin: do [#alpha]~~"), "in-queue struck kept");
-        assert!(repaired.contains("- :round_pushpin: do [#beta]"), "in-queue active kept");
+        assert!(
+            repaired.contains("- ~~:round_pushpin: do [#alpha]~~"),
+            "in-queue struck kept"
+        );
+        assert!(
+            repaired.contains("- :round_pushpin: do [#beta]"),
+            "in-queue active kept"
+        );
         // Ordinary scratch text and the backlog component preserved.
-        assert!(repaired.contains("a real scratch note line"), "scratch text kept");
-        assert!(repaired.contains("[#keep] real backlog item"), "backlog content kept");
+        assert!(
+            repaired.contains("a real scratch note line"),
+            "scratch text kept"
+        );
+        assert!(
+            repaired.contains("[#keep] real backlog item"),
+            "backlog content kept"
+        );
     }
 
     #[test]

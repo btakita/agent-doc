@@ -317,12 +317,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     // that foreign deletion and strip the committed response from the result
     // ("### Re: header missing" / prior response hoisted away). Foreign writers
     // must not delete committed exchange history.
-    let merged = guard_committed_responses(
-        merged,
-        &committed_response_headings,
-        ours_text,
-        theirs_text,
-    );
+    let merged =
+        guard_committed_responses(merged, &committed_response_headings, ours_text, theirs_text);
 
     // Post-merge dedup: remove identical adjacent blocks (#15)
     Ok(dedup_adjacent_blocks(&merged))
@@ -343,7 +339,12 @@ fn response_headings(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| l.starts_with("### Re:"))
-        .map(|l| l.strip_suffix(" (HEAD)").unwrap_or(l).trim_end().to_string())
+        .map(|l| {
+            l.strip_suffix(" (HEAD)")
+                .unwrap_or(l)
+                .trim_end()
+                .to_string()
+        })
         .collect()
 }
 
@@ -1409,8 +1410,12 @@ Second answer line three.
             merged
         );
         // 2. Lines in author order (not reversed).
-        let l1 = merged.find("Second answer line one.").expect("line one missing");
-        let l2 = merged.find("Second answer line two.").expect("line two missing");
+        let l1 = merged
+            .find("Second answer line one.")
+            .expect("line one missing");
+        let l2 = merged
+            .find("Second answer line two.")
+            .expect("line two missing");
         let l3 = merged
             .find("Second answer line three.")
             .expect("line three missing");
@@ -1451,8 +1456,7 @@ Second answer line three.
 
         // Theirs: stale buffer that dropped the committed first Q&A entirely
         // (only the boundary id differs from ours — a transient marker).
-        let theirs =
-            format!("{header}❯ second question\n<!-- agent:boundary:base-id -->\n{foot}");
+        let theirs = format!("{header}❯ second question\n<!-- agent:boundary:base-id -->\n{foot}");
 
         let base_state = CrdtDoc::from_text(&base).encode_state();
         let merged = merge(Some(&base_state), &ours, &theirs).unwrap();

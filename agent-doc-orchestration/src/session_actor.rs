@@ -672,8 +672,9 @@ impl DocumentActor {
                 }
             }),
         };
-        tx.send(envelope)
-            .map_err(|_| anyhow::anyhow!("session actor for {} is no longer running", self.doc_id))?;
+        tx.send(envelope).map_err(|_| {
+            anyhow::anyhow!("session actor for {} is no longer running", self.doc_id)
+        })?;
         Ok(reply_rx)
     }
 
@@ -686,9 +687,9 @@ impl DocumentActor {
         F: FnOnce(&mut ActorContext) -> R + Send + 'static,
     {
         let reply_rx = self.enqueue(kind, job)?;
-        reply_rx
-            .recv()
-            .map_err(|_| anyhow::anyhow!("session actor for {} dropped before replying", self.doc_id))
+        reply_rx.recv().map_err(|_| {
+            anyhow::anyhow!("session actor for {} dropped before replying", self.doc_id)
+        })
     }
 }
 
@@ -1192,8 +1193,8 @@ mod tests {
     // ===================================================================
 
     // `Arc`/`Mutex` come in via `use super::*`; only the extras are new here.
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Barrier;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
     fn session_actor_runtime_serializes_single_producer_in_fifo_order() {
@@ -1248,7 +1249,10 @@ mod tests {
         // holds regardless of OS scheduling (the deterministic part), while the
         // SQLite CAS remains the cross-process backstop.
         let tmp = tempfile::TempDir::new().unwrap();
-        let actor = Arc::new(DocumentActor::spawn("doc-concurrent", tmp.path().to_path_buf()));
+        let actor = Arc::new(DocumentActor::spawn(
+            "doc-concurrent",
+            tmp.path().to_path_buf(),
+        ));
 
         let in_critical = Arc::new(AtomicBool::new(false));
         let overlap_detected = Arc::new(AtomicBool::new(false));
@@ -1320,11 +1324,15 @@ mod tests {
         let order: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let o1 = order.clone();
         let r1 = a1
-            .enqueue(SessionOpKind::QueueHead, move |_| o1.lock().unwrap().push(1))
+            .enqueue(SessionOpKind::QueueHead, move |_| {
+                o1.lock().unwrap().push(1)
+            })
             .unwrap();
         let o2 = order.clone();
         let r2 = a2
-            .enqueue(SessionOpKind::QueueHead, move |_| o2.lock().unwrap().push(2))
+            .enqueue(SessionOpKind::QueueHead, move |_| {
+                o2.lock().unwrap().push(2)
+            })
             .unwrap();
         r1.recv().unwrap();
         r2.recv().unwrap();

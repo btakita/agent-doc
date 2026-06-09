@@ -1013,8 +1013,7 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
     let original = fs::read_to_string(&doc).unwrap();
     let stale_baseline = write_baseline(tmp.path(), &original);
 
-    let first_response =
-        "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n";
+    let first_response = "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n";
 
     agent_doc()
         .current_dir(tmp.path())

@@ -1404,7 +1404,14 @@ fn non_exchange_change_is_turn_independent(
     events.iter().all(|event| {
         let address = Address::from_component_node_key(&event.component, &event.node_key);
         let node_index = event.after_index.or(event.before_index);
-        !classify_op(OpActor::User, event.kind.as_str(), &address, node_index, scope).affects_turn()
+        !classify_op(
+            OpActor::User,
+            event.kind.as_str(),
+            &address,
+            node_index,
+            scope,
+        )
+        .affects_turn()
     })
 }
 
@@ -8733,7 +8740,11 @@ Done.
         use std::time::Duration;
 
         fn git(cwd: &Path, args: &[&str]) {
-            let out = Command::new("git").current_dir(cwd).args(args).output().unwrap();
+            let out = Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .output()
+                .unwrap();
             assert!(
                 out.status.success(),
                 "git {args:?} failed: {}",
@@ -8787,7 +8798,10 @@ Done.
         fs::write(&sub_doc, initial).unwrap();
         fs::write(&root_doc, initial).unwrap();
         git(&submodule_path, &["add", "session.md"]);
-        git(&submodule_path, &["commit", "-m", "add sub doc", "--no-verify"]);
+        git(
+            &submodule_path,
+            &["commit", "-m", "add sub doc", "--no-verify"],
+        );
         git(outer, &["add", "root-doc.md"]);
         git(outer, &["commit", "-m", "add root doc", "--no-verify"]);
 
@@ -8843,8 +8857,8 @@ Done.
             handle.join().unwrap();
         }
         for (doc, result) in results {
-            let did_commit =
-                result.unwrap_or_else(|e| panic!("commit should succeed for {}: {e}", doc.display()));
+            let did_commit = result
+                .unwrap_or_else(|e| panic!("commit should succeed for {}: {e}", doc.display()));
             assert!(did_commit, "{} should create a git commit", doc.display());
         }
 

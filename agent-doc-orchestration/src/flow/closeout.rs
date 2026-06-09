@@ -116,9 +116,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
             rc.invalidate_head_content();
             timer.mark("closeout_reap");
         }
-        Err(e) => eprintln!(
-            "[commit] closeout pending-reap maintenance failed (non-fatal): {e}"
-        ),
+        Err(e) => eprintln!("[commit] closeout pending-reap maintenance failed (non-fatal): {e}"),
     }
 
     if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
@@ -1116,8 +1114,7 @@ mod tests {
         // Committed response cycle (capture present), with the `[x]` already on
         // disk + in HEAD — exactly the exit-75 residual shape.
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let response =
-            "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
+        let response = "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
         crate::capture::capture_response(&doc, response).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
 

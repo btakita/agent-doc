@@ -40,7 +40,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::session_actor::{document_actor_in, SessionOpKind};
+use crate::session_actor::{SessionOpKind, document_actor_in};
 
 /// Run a document write critical section on the document's session-actor owner
 /// thread. Every caller for the same canonical document funnels through one
@@ -269,7 +269,8 @@ mod tests {
             Arc::new(std::sync::Mutex::new(Vec::new()));
 
         let o = order.clone();
-        q.agent_write(move || o.lock().unwrap().push("agent")).unwrap();
+        q.agent_write(move || o.lock().unwrap().push("agent"))
+            .unwrap();
         let o = order.clone();
         q.supervisor_write(move || o.lock().unwrap().push("sup"))
             .unwrap();

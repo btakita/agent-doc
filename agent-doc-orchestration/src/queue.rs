@@ -987,11 +987,7 @@ pub fn sort_prompts_by_dag(
             pos[i] = p;
         }
         let deps_ok = (0..n).all(|i| prereq[i].iter().all(|&j| pos[j] < pos[i]));
-        if deps_ok {
-            anchored
-        } else {
-            plain_order()
-        }
+        if deps_ok { anchored } else { plain_order() }
     };
 
     if order.iter().enumerate().all(|(slot, &i)| slot == i) {

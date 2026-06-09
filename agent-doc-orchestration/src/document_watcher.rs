@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use crate::session_actor::{document_actor_in, SessionOpKind};
+use crate::session_actor::{SessionOpKind, document_actor_in};
 
 /// Minimal classification of a raw filesystem event, mirroring the
 /// `notify::EventKind` subset `watch.rs` reacts to.
@@ -157,10 +157,7 @@ impl WatcherRegistry {
     /// newly created (`true` only on the first registration). `file` is the
     /// provenance-lookup path key.
     pub fn register(&self, doc_id: &str, file: &str) -> (Arc<Mutex<DocumentWatchGate>>, bool) {
-        let mut gates = self
-            .gates
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut gates = self.gates.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(gate) = gates.get(doc_id) {
             return (Arc::clone(gate), false);
         }
@@ -344,24 +341,45 @@ mod tests {
         let reconciles = Arc::new(AtomicU64::new(0));
 
         let r = reconciles.clone();
-        let d1 = route_event(dir.path(), &doc_id, &file_str, &raw, "change one", move || {
-            r.fetch_add(1, Ordering::SeqCst);
-        })
+        let d1 = route_event(
+            dir.path(),
+            &doc_id,
+            &file_str,
+            &raw,
+            "change one",
+            move || {
+                r.fetch_add(1, Ordering::SeqCst);
+            },
+        )
         .unwrap();
         assert_eq!(d1, WatchDelivery::Change { generation: 1 });
 
         // A coalesced burst event does NOT route to the actor.
         let r = reconciles.clone();
-        let d2 = route_event(dir.path(), &doc_id, &file_str, &raw, "change one", move || {
-            r.fetch_add(1, Ordering::SeqCst);
-        })
+        let d2 = route_event(
+            dir.path(),
+            &doc_id,
+            &file_str,
+            &raw,
+            "change one",
+            move || {
+                r.fetch_add(1, Ordering::SeqCst);
+            },
+        )
         .unwrap();
         assert_eq!(d2, WatchDelivery::Coalesced);
 
         let r = reconciles.clone();
-        let d3 = route_event(dir.path(), &doc_id, &file_str, &raw, "change two", move || {
-            r.fetch_add(1, Ordering::SeqCst);
-        })
+        let d3 = route_event(
+            dir.path(),
+            &doc_id,
+            &file_str,
+            &raw,
+            "change two",
+            move || {
+                r.fetch_add(1, Ordering::SeqCst);
+            },
+        )
         .unwrap();
         assert_eq!(d3, WatchDelivery::Change { generation: 2 });
 

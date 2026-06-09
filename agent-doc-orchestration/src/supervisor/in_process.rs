@@ -37,8 +37,8 @@
 //! - `in_process_supervisor_inject_reaches_child_stdin`
 //! - `in_process_supervisor_explicit_restart_resets_policy`
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anyhow::Result;

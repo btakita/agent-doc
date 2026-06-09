@@ -118,6 +118,23 @@ pub enum CrossSessionDecision {
     Reject,
 }
 
+/// Stable marker prefix emitted on stderr before the human-readable bail when a
+/// cross-session claim is rejected. Plugins (JetBrains "Claim for Tmux Pane",
+/// VS Code claim command) branch on this line to render a choice dialog
+/// (Force claim / Switch project session / Cancel) instead of surfacing the raw
+/// exit-1 bail text. The human bail message is preserved for terminal use.
+pub const CROSS_SESSION_REJECT_MARKER: &str = "[claim] cross-session-reject";
+
+/// Format the machine-readable cross-session-reject marker line. Field order is
+/// stable so plugins can key/value parse it: `pane_id`, `pane_session`,
+/// `configured`. Separated from the side-effecting `eprintln!` so it can be
+/// asserted in a unit test.
+pub fn cross_session_reject_marker(pane_id: &str, pane_session: &str, configured: &str) -> String {
+    format!(
+        "{CROSS_SESSION_REJECT_MARKER} pane_id={pane_id} pane_session={pane_session} configured={configured}"
+    )
+}
+
 pub fn cross_session_decision(
     pane_session: &str,
     configured: &str,
@@ -158,12 +175,21 @@ fn enforce_cross_session_claim(
             );
             Ok(())
         }
-        CrossSessionDecision::Reject => anyhow::bail!(
-            "pane {} is in tmux session '{}' but project session is '{}'; switch to the configured session or pass --force",
-            pane_id,
-            pane_tmux_session,
-            configured
-        ),
+        CrossSessionDecision::Reject => {
+            // Structured signal first so plugins can branch on the reject and
+            // offer Force claim / Switch project session / Cancel instead of
+            // rendering the raw exit-1 bail text. Human message preserved below.
+            eprintln!(
+                "{}",
+                cross_session_reject_marker(pane_id, pane_tmux_session, configured)
+            );
+            anyhow::bail!(
+                "pane {} is in tmux session '{}' but project session is '{}'; switch to the configured session or pass --force",
+                pane_id,
+                pane_tmux_session,
+                configured
+            )
+        }
     }
 }
 
@@ -893,5 +919,17 @@ mod tests {
             err.to_string(),
             "pane %12 is in tmux session 'claude' but project session is '0'; switch to the configured session or pass --force"
         );
+    }
+
+    #[test]
+    fn cross_session_reject_marker_carries_stable_fields() {
+        // Plugins key/value parse this line to render the choice dialog, so the
+        // prefix and field order must stay stable.
+        let line = cross_session_reject_marker("%43", "5", "0");
+        assert_eq!(
+            line,
+            "[claim] cross-session-reject pane_id=%43 pane_session=5 configured=0"
+        );
+        assert!(line.starts_with(CROSS_SESSION_REJECT_MARKER));
     }
 }

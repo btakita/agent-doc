@@ -6,6 +6,30 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Agent prompts now expose a stable prompt-cache prefix
+  (`#pcache-boundary`).** Direct `run` prompts and Codex owner-pane queue
+  continuations now render through a shared prompt-cache boundary helper: stable
+  response contracts come before the boundary, while volatile diff, document,
+  queue-head, status, and compaction/accretion context stays after it. Tests
+  assert that queue heads, file paths, prompt-target sections, and accretion
+  diagnostics remain below the boundary so prompt-cache fingerprints do not churn
+  on ordinary session state changes.
+
+- **`claim` emits a structured cross-session-reject marker for editor plugins
+  (`#jb-claim-cross-session`).** On a cross-session **Reject** (target pane lives
+  in a tmux session other than the configured project session, configured session
+  alive, no `--force`), `claim` now prints a stable machine-readable line to
+  stderr before the human bail: `[claim] cross-session-reject pane_id=<id>
+  pane_session=<session> configured=<session>` (`CROSS_SESSION_REJECT_MARKER` +
+  `cross_session_reject_marker` with stable field order). Editor plugins
+  (JetBrains "Claim for Tmux Pane", VS Code claim command) can branch on this
+  marker to render a Force claim / Switch project session / Cancel dialog instead
+  of surfacing the raw exit-1 message. The human bail text is preserved unchanged
+  for terminal use. Unit coverage in `claim.rs`
+  (`cross_session_reject_marker_carries_stable_fields`); contract in
+  `specs/07-session-tmux-commands.md`. The plugin choice dialog itself remains
+  gated on live-IntelliJ/VS Code verification (backlog `#4wxr`).
+
 - **A newly-canonical tmux session closes the superseded session
   (`#canonical-session-close`).** `agent-doc session set <name>` now closes the
   old session and prunes it from the model after the new session becomes

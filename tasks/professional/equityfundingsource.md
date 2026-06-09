@@ -148,8 +148,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- [#ty2v]. Add a setting for the admin to set the wire values. Use a placeholder for now.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

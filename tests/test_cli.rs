@@ -642,7 +642,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("src/orchestrate.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
         // skipped opening a `preflight_started` cycle (#preflight-probe-side-effect-free).
-        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 3,
+        // +1 (`reason=struck_items_below_close_marker`): queue-escape repair logs
+        // when it removed struck queue items displaced below the closing marker
+        // (#queue-completed-items-escape-below-component).
+        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 4,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,

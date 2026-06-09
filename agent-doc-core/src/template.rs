@@ -969,6 +969,12 @@ fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<String> {
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
     let mut normalized = crate::component::strip_backlog_patch_attr(doc);
+    // #queue-completed-items-escape-below-component: scrub struck queue items
+    // that drifted below `<!-- /agent:queue -->` into the parking-lot comment so
+    // the visible buffer never accumulates orphaned struck-queue residue.
+    if let Some(repaired) = repair_queue_struck_items_escaped_below_marker(&normalized) {
+        normalized = repaired;
+    }
     while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
         normalized = merged;
     }
@@ -1013,6 +1019,81 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
         }
         Err(err) => Err(err).context("template structure guard failed"),
     }
+}
+
+/// True when a line is a displaced struck queue item — a `- ~~…~~`
+/// strikethrough whose body carries a queue-item marker (`:round_pushpin:` /
+/// `:pushpin:`) or a `do`/`re` directive (`#queue-completed-items-escape-below-component`).
+/// Generic user strikethrough scratch (no pushpin, no directive) is deliberately
+/// NOT matched, so an ordinary `- ~~note~~` in the parking lot stays untouched.
+fn is_displaced_struck_queue_item(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix("- ") else {
+        return false;
+    };
+    let rest = rest.trim();
+    let Some(inner) = rest.strip_prefix("~~").and_then(|s| s.strip_suffix("~~")) else {
+        return false;
+    };
+    let inner = inner.trim();
+    inner.contains(":round_pushpin:")
+        || inner.contains(":pushpin:")
+        || inner.starts_with("do [#")
+        || inner.starts_with("do #")
+        || inner.starts_with("re [#")
+        || inner.starts_with("re #")
+}
+
+/// Remove struck queue items (`- ~~…~~`) that drifted BELOW the `agent:queue`
+/// closing marker into the inter-component parking lot
+/// (`#queue-completed-items-escape-below-component`).
+///
+/// Struck queue items are completed: their canonical record is `agent:done` and
+/// the live strike must stay inside the queue component span. A post-commit
+/// CRDT/boundary merge can displace them past `<!-- /agent:queue -->` into the
+/// neighbouring HTML comment (the "parking lot"), where they render invisibly
+/// and accumulate as orphaned residue. This repair drops any displaced
+/// struck-queue line that sits OUTSIDE every agent component span, leaving all
+/// real component content (including legitimately struck items still inside the
+/// queue) and ordinary scratch comments intact. Returns the repaired document
+/// when it removed at least one displaced line.
+pub fn repair_queue_struck_items_escaped_below_marker(doc: &str) -> Option<String> {
+    let components = component::parse(doc).ok()?;
+    let queue = components.iter().find(|c| c.name == "queue")?;
+    let scan_start = queue.close_end;
+    // Never edit content inside any agent component span.
+    let protected: Vec<(usize, usize)> = components
+        .iter()
+        .map(|c| (c.open_start, c.close_end))
+        .collect();
+
+    let mut remove_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut offset = scan_start;
+    for line in doc[scan_start..].split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = offset + line.len();
+        offset = line_end;
+        let inside_component = protected
+            .iter()
+            .any(|(start, end)| line_start >= *start && line_end <= *end);
+        if inside_component {
+            continue;
+        }
+        if is_displaced_struck_queue_item(line) {
+            remove_ranges.push((line_start, line_end));
+        }
+    }
+    if remove_ranges.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(doc.len());
+    let mut cursor = 0usize;
+    for (start, end) in &remove_ranges {
+        out.push_str(&doc[cursor..*start]);
+        cursor = *end;
+    }
+    out.push_str(&doc[cursor..]);
+    Some(out)
 }
 
 /// Remove ordinary HTML comments after `agent:exchange` when their body is a
@@ -5089,6 +5170,80 @@ Existing answer.
         assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
         assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
         guard_no_conversation_tail_outside_exchange(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_queue_escape_removes_struck_items_below_marker_in_parking_lot() {
+        // #queue-completed-items-escape-below-component: struck queue items that
+        // drifted into the parking-lot comment beneath `<!-- /agent:queue -->`
+        // must be removed, while live struck items inside the queue, real
+        // component content, and ordinary scratch comment text are preserved.
+        let doc = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~:round_pushpin: do [#alpha]~~\n",
+            "- :round_pushpin: do [#beta]\n",
+            "<!-- /agent:queue -->\n",
+            "###\n",
+            "<!--\n",
+            "a real scratch note line\n",
+            "- ~~:round_pushpin: do [#gamma]~~\n",
+            "- ~~:pushpin: do [#delta]~~\n",
+            "-->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] real backlog item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let repaired =
+            repair_queue_struck_items_escaped_below_marker(doc).expect("displaced items removed");
+        // Displaced struck items gone.
+        assert!(!repaired.contains("[#gamma]"), "gamma displaced struck removed");
+        assert!(!repaired.contains("[#delta]"), "delta displaced struck removed");
+        // Live queue content preserved (inside the component span).
+        assert!(repaired.contains("- ~~:round_pushpin: do [#alpha]~~"), "in-queue struck kept");
+        assert!(repaired.contains("- :round_pushpin: do [#beta]"), "in-queue active kept");
+        // Ordinary scratch text and the backlog component preserved.
+        assert!(repaired.contains("a real scratch note line"), "scratch text kept");
+        assert!(repaired.contains("[#keep] real backlog item"), "backlog content kept");
+    }
+
+    #[test]
+    fn repair_queue_escape_noop_when_no_displaced_items() {
+        // A clean document with no escaped struck queue items is unchanged.
+        let doc = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~:round_pushpin: do [#alpha]~~\n",
+            "- :round_pushpin: do [#beta]\n",
+            "<!-- /agent:queue -->\n",
+            "###\n",
+            "<!--\n",
+            "- ~~an ordinary user strikethrough note~~\n",
+            "-->\n",
+        );
+        // The ordinary `- ~~note~~` has no pushpin/directive, so it is not a
+        // displaced queue item and the repair is a no-op.
+        assert!(repair_queue_struck_items_escaped_below_marker(doc).is_none());
+    }
+
+    #[test]
+    fn repair_queue_escape_handles_bare_lines_after_marker() {
+        // Displaced struck items can also sit bare between the marker and the
+        // next component (not inside a comment).
+        let doc = concat!(
+            "<!-- agent:queue go -->\n",
+            "- :round_pushpin: do [#beta]\n",
+            "<!-- /agent:queue -->\n",
+            "- ~~:round_pushpin: do [#gamma]~~\n",
+            "- ~~do [#delta]~~\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let repaired =
+            repair_queue_struck_items_escaped_below_marker(doc).expect("bare displaced removed");
+        assert!(!repaired.contains("[#gamma]"));
+        assert!(!repaired.contains("[#delta]"));
+        assert!(repaired.contains("- :round_pushpin: do [#beta]"));
+        assert!(repaired.contains("[#keep] item"));
     }
 
     #[test]

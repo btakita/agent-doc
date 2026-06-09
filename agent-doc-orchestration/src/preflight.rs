@@ -4672,6 +4672,28 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // text. This keeps intentional repeated `do [#id]` prompts executable while
     // preserving a structural cleanup point for true duplicate node-key replay
     // residue from IPC/snapshot drift.
+    // #queue-completed-items-escape-below-component: a post-commit CRDT/boundary
+    // merge can displace struck queue items past `<!-- /agent:queue -->` into the
+    // neighbouring parking-lot comment, where they render invisibly and
+    // accumulate as orphaned residue. Drop any such displaced struck-queue line
+    // (outside every agent component span) before the rest of queue maintenance.
+    if let Some(repaired) =
+        crate::template::repair_queue_struck_items_escaped_below_marker(&current_content)
+    {
+        current_content = repaired;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: removed displaced struck queue item(s) below the closing marker"
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_escape_repair file={} reason=struck_items_below_close_marker",
+                file.display()
+            ),
+        );
+    }
+
     if let Some((deduped_content, dropped)) = dedup_queue_nodes_by_key(&current_content)? {
         current_content = deduped_content;
         let comps = crate::component::parse(&current_content)?;

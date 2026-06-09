@@ -18,6 +18,7 @@
 
 pub mod cwd;
 pub mod env;
+pub mod in_process;
 pub mod ipc;
 pub mod pty;
 pub mod resize;

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -99,7 +99,15 @@ Each is backed by a new by-id D1 API (`GET /api/admin/{contact-messages,funds,pa
 **Verification:** full suite **412 pass / 0 fail**, browser + worker bundles build clean. Added a test locking in the four new routes/sections/APIs. The rebase from remote main also surfaced a pre-existing red test (`#form-error-standard`) — unrelated to this work: broker `submit_deal` was refactored to reuse `FullApplication`, which keeps its own top red error banner but not the shared helper; I updated that stale test to match (`dae5d5f`).
 
 Not deployed — that's the next queued item.
-<!-- agent:boundary:efa2d35f -->
+
+### Re: deploy (admin detail routes) — opus-4-8
+
+Deployed to production. Version `f33df1f6-08f9-47b7-8163-655c9b1bf4b9` at https://equityfundingsource.brian-takita.workers.dev (built fresh from the pushed `dae5d5f`).
+
+**Smoke test:** home `200`; all four new individual-item detail routes — `/portal-admin/{contact-messages,funding,payments,lenders}/:id` — return `303` (auth redirect), identical to the existing `deals/:id` and `loans/:id` detail routes, confirming they're registered and auth-gated in production.
+
+Queue drained.
+<!-- agent:boundary:31ea5518 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,20 +115,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-~~~done
-Create admin routes for individual items the other types of list items including. Add links to the individual item route where appropriate:
-- Loan Applications
-- Contact Messages
-- Investor Deals
-- Funding Commits
-- Payments
-- Documents
-- Public Contents
-- Messages
-- Lender Management
-- User Management
-~~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

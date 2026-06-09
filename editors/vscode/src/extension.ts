@@ -1465,11 +1465,14 @@ class PatchWatcher implements vscode.Disposable {
                 const fsPath = e.document.uri.fsPath;
                 this.lastTypingTime.set(fsPath, Date.now());
                 const text = e.document.getText();
-                // Also record in FFI debounce tracker (shared with JB plugin)
-                native.documentChangedDigest(
+                // Also record in FFI debounce tracker (shared with JB plugin).
+                // #pcp6: send the FULL editor buffer content (not just len/hash) so
+                // the CLI visible-write reconcile guard can positively confirm the
+                // editor buffer equals on-disk content instead of inferring from a
+                // digest. Mirrors TypingTracker.documentChanged in the JB plugin.
+                native.documentChangedDigestContent(
                     fsPath,
-                    Buffer.byteLength(text, 'utf8'),
-                    crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+                    text,
                     this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined,
                 );
             }

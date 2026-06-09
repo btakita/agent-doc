@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **VS Code reports full editor-buffer content to the live-buffer sidecar
+  (`#f5d2` / review `#pcp6`).** The VS Code typing listener now calls
+  `agent_doc_document_changed_digest_content` (full buffer text) instead of the
+  len/hash-only `agent_doc_document_changed_digest`, matching the JetBrains
+  `TypingTracker`. This completes the editor side of `#pcp6`: the binary FFI
+  (`agent_doc_document_changed_digest_content`), content sidecar
+  (`record_live_buffer_digest_content`), and `live_buffer_diverges_from_content`
+  classifier already shipped, and the JB plugin already sent content — VS Code
+  was the remaining digest-only reporter. With both editors sending content, a
+  genuine unsaved editor edit (buffer ahead of disk) can be positively
+  scope-classified by the reconcile guard instead of failing closed on the
+  mtime heuristic. New `native.documentChangedDigestContent` binding + function.
+  VS Code `0.2.25`. End-to-end live-editor verification of the classify-vs-
+  fail-closed behavior remains gated on `#xkpf`.
+
 - **Pre-emptive `/clear` decision predicate (groundwork) (`#s760` / review
   `#clear-opt-in-threshold`, phase 2).** Added the pure, unit-tested
   `ContextResetDecision.shouldClearBeforeDispatch(contextUsagePct, clearThreshold,

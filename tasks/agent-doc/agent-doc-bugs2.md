@@ -30,61 +30,17 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-173636.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-182549.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Add actionable backlog for the gated items; make the plan unblocked; 100% actionable, ordered by dependency; do #dj14 (pcpc4-single-watcher); 4 more
+- Archived 1 response topic(s): clear all gates → actionable backlog, + two new bugs triaged
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- **#f5d2/#pcp6 buffer classify** (`debounce.rs`) — the three suppression branches returned `None` silently, so a "didn't detect my unsaved edit" bug couldn't tell content-match from provenance from mtime-stale. Now each decision lands in `.agent-doc/logs/ops.log` as `live_buffer_classify decision={diverges,suppressed} reason=...`.
-- **#saev early-ack** (`ipc_socket.rs`) — a *successful* `pending` emit was silent (only failures logged). Now logs `[ipc-socket] early-ack pending emitted before apply` on the success path, so a live `EARLY_ACK_ENABLED` run has grep-able proof the early ack went out before the blocking apply.
-6. **#bkx9perid** — enable per-id response-loss detection at closeout. Absorbs #bkx9/#compact-reap-no-response-record.
-5. **#saevon** — flip EARLY_ACK_ENABLED + verify. Absorbs #ipc-early-ack + early-ack half of #pcp5.
-4. **#s760wire** — wire ContextResetDecision + live context-% read + clear trigger. Absorbs #s760/#clear-opt-in-threshold.
-3. **#pcpc5cut** — 08b cutover (depends on #pcpconsol). Absorbs #21w2/#pcpc5.
-2. **#pcpconsol** — supervisor-in-process consolidation (08b root-fix, priority). Absorbs #pf15/#pcp3/#pcp4/#pcp7 + degraded-routing half of #pcp5. Fresh session, phases #pcpc1→#pcpc5.
-1. **#lvb-run** — the operator live-verification session. No agent-side gate: all five fixes are code-complete + installed; you run one live pane, file bugs, I read logs.
-
-### Re: clear all gates → actionable backlog, + two new bugs triaged — opus-4-8
-
-> **Queue prompt:**
->
-> The tmux pane switch is slow when switching between agent docs in the editor. I often see the switch to the tmux pane in the stash window but the tmux pane must quickly switch to the agent-doc window.
-
-
-> **Queue prompt:**
->
-> The responses are being intermixed with the previous responses in the agent:exchange.
-
-
-> **Queue prompt:**
->
-> Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
-
-
-**Restructure done — the plan has zero gates.** The 17 gated `[/]` review items are reaped (archived to the done file as superseded) and review is empty. They collapsed into 6 dependency-ordered actionable backlog items: **#lvb-run** (operator live-verification, no agent gate), **#pcpconsol** (08b root-fix, priority), **#pcpc5cut** (cutover, depends on #pcpconsol), **#s760wire** (pre-emptive /clear wiring), **#saevon** (flip EARLY_ACK_ENABLED), **#bkx9perid** (per-id response-loss detection). `do #xkpf` is reaped.
-
-**Prove/disprove logging added (Rust-only, both shipped + installed):**
-- #saev early-ack (`ipc_socket.rs`): successful emit now logs `[ipc-socket] early-ack pending emitted before apply` (was silent).
-- #f5d2/#pcp6 (`debounce.rs`): each classifier branch now logs `live_buffer_classify decision={diverges,suppressed} reason=...` to `.agent-doc/logs/ops.log`.
-- Already provable: #4wxr `[claim] cross-session-reject ...`, #9adk `[run]/[clear] coalesced duplicate`. Full marker map is in the #lvb-run backlog item.
-
-`make check` green (4139 tests, clippy clean), specs updated, `cargo install` + `agent-doc lib-install` done.
-
-**JB plugin install — not needed.** Rust-only changes (binary + FFI cdylib hot-reloaded by mtime). Plugin **0.2.158 unchanged**. Next reinstall is when #s760wire adds its `SubmitAction.kt` log; #saevon is a Rust flag flip (`lib-install`, no reinstall).
-
-**Two new bugs you filed — triaged into actionable backlog (not fixed here, by design):**
-
-1. **"responses intermixed in exchange" → #exch-intermix.** This is exactly what bit this session: when you re-invoked `/agent-doc` mid-finalize, the IPC stream hit `live_prompt_drift_after_preflight`, the pending edits landed but the `### Re:` body was lost, and the next commit wedged on snapshot drift. I recovered with `reset --from-current --preserve-session` → re-finalize `--force-disk` (which is how you're reading this). It is `#ipc-crdt-response-drift`; root-fix is **#pcpconsol** (one ordered write queue kills the supervisor/finalize self-race). The near-term win captured in #exch-intermix: make finalize auto-recover from this drift instead of losing the response.
-
-2. **"slow tmux pane switch / stash flash" → #tmux-switch-lag.** The target doc's pane is briefly shown in the stash window before swapping into `0:agent-doc`. Captured as a passive-sync fast-handoff ordering bug (move-before-select) in `sync.rs`.
-
-Both are `#agent-doc-bug` items that need their own **fresh, non-degraded** sessions — #exch-intermix especially, since fixing the CRDT closeout path inside a session that's actively exhibiting the drift is the documented anti-pattern. I'm not auto-looping past this; these are yours to schedule.
-<!-- agent:boundary:ff32cea9 -->
+<!-- agent:boundary:ce21dda3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -113,7 +69,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority --> 
+<!-- agent:backlog priority queue --> 
 - [ ] [#lvb-run] OPERATOR live-verification session (no agent gate; user runs, files bugs, agent checks logs). All five fixes are code-complete + installed (binary 0.34.0, cdylib lib-installed, JB plugin 0.2.158 unchanged). Install signed JB plugin 0.2.158 + binary, drive ONE mid-active-turn Codex/IntelliJ pane through the batch, capture logs. Grep markers: #4wxr claim stderr "[claim] cross-session-reject pane_id=.. pane_session=.. configured=.."; #9adk idea.log "[run]/[clear] coalesced duplicate"; #f5d2/#pcp6 ops.log "live_buffer_classify decision=.. reason=.." + write.rs "visible_write_live_buffer_matches_disk"/"visible_write_deferred_current_changed"; #saev (after #saevon flips the flag) session-log "[ipc-socket] early-ack pending emitted before apply". Reproduces #ipc-crdt-response-drift on closeout (watch for emptied backlog / orphaned ids / duplicated review / split boundary). Supersedes review #xkpf + #live-verify-batch + the live legs of #f5d2/#pcp6.
 - [ ] [#exch-intermix] #agent-doc-bug RESPONSE INTERMIXING / LOSS in agent:exchange — live repro captured THIS session 2026-06-09: a finalize --stream hit "IPC proof insufficient ... invariant=live_prompt_drift_after_preflight" when the operator re-invoked /agent-doc mid-finalize; the pending mutations (backlog/review) landed but the ### Re: response body was LOST (never reached exchange), and the snapshot/visible-file drifted (snapshot 10587b vs file 9437b) so the next commit was refused as "manual cleanup". This is #ipc-crdt-response-drift on the IPC/CRDT closeout path. ROOT-FIX is #pcpconsol (single ordered write queue removes the supervisor/finalize self-race). NEAR-TERM actionable in a FRESH session: when finalize detects live_prompt_drift_after_preflight, auto-recover (reset --from-current --preserve-session -> re-finalize --force-disk) instead of leaving the response lost + commit wedged. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#pcpconsol] ROOT-FIX (priority per operator). Supervisor-in-process consolidation / single-process control plane (spec 08b): make the supervisor an in-process adapter so the session actor owns ONE ordered write queue + ONE controller-owned filesystem watcher; demote plugin WatchService to read-only buffer reporting + thin EDT apply+ack shim. Decomposed into dependency-ordered phases #pcpc1 to #pcpc5 in tasks/agent-doc/plan-supervisor-in-process.md. Run as a FRESH focused session starting at #pcpc1 (NOT a saturated queue-drain). Root-fixes #ipc-crdt-response-drift and R1/R2/R5/R6. Absorbs review #pf15/#pcp3/#pcp4/#pcp7 + the degraded-routing half of #pcp5. Large/multi-day.

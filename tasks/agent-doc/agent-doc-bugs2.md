@@ -309,7 +309,7 @@ Fixed and shipped (submodule `2531b622`) — `make check` green (4125/4125, clip
 **Tests:** `complete_required_closeout_reaps_lingering_completed_item` (new — reaps a lingering `[x]` + session-check OK) and the unchanged `finalize_reaps_completed_pending_items_in_same_closeout_commit` (proves no direct-path regression). Spec updated.
 
 **CI:** cycles 1–8 are all **green**; this push kicked `27193638256` (pending). If the fix is live, this closeout reaps `#exit75-done-reap-not-atomic` atomically and session-check passes with no recovery preflight.
-<!-- agent:boundary:e7558597 -->
+<!-- agent:boundary:751f0441 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -356,7 +356,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#partial-staging-guard-cross-doc-noise] [recommended] In a multi-session dogfooding superproject many unrelated task docs stay perpetually dirty; check_partial_staging_closeout_guard then WARNs on nearly every closeout because its overlapping-changed-string-literal heuristic matches incidental shared vocabulary (e.g. "make check", "agent-doc", "id not found in backlog") between the committed session doc and unrelated dirty companions. Surfaced by #cross-session-agent-doc-issue-survey: 154 partial_staging_closeout_guard_fired entries across tsift/lazily-rs/monsterrodholders/equityfundingsource ops logs 2026-06-09. Tighten the overlap signal (require a more specific shared token, same-component path, or scope to the intended path set) so unrelated superproject churn does not trip the WARN. WARN-only, low severity.
-- [x] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
 <!-- /agent:backlog -->
 
 ## Review

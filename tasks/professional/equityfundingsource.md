@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -53,7 +53,16 @@ Done and deployed (Worker `2319bce6-b3ae-4efe-b1b5-423b31900437`).
 **Your question — can we sync messaging + emails with the borrower portal?** Partly, and here's the boundary: an application lead is *pre-account* (no borrower user yet), so the borrower portal's secure messaging (`chat_sessions`) only kicks in once the lead accepts the invite and converts to a borrower. At the lead stage the channel is email — the staff notification + the borrower-invite email. The two-way email↔borrower-chat round-trip (inbound email appends to the chat; admin replies email the borrower) is already tracked as **#xcvg**, and it's gated on the Resend EFS sending domain (**#f4rq**) and Google Workspace SMTP (**#m6ch/#p40t**). So the lead detail page is the right home for that once those land; nothing new to build there until the email infra is in place.
 
 **Verification:** `bun run check` green — 408 tests pass. Smoke tests: leads detail route `303`, `GET /api/admin/application-leads/:id` `401` (gated), and the deployed bundle contains the detail code. **Spec:** `docs/current_progress.md` → Admin Portal → Application Leads.
-<!-- agent:boundary:35405fc2 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Already deployed this cycle — the lead-detail work shipped in Worker version **`2319bce6-b3ae-4efe-b1b5-423b31900437`** (EFS `ef3b76e` = `origin/main`, no unpushed commits). The served bundle already contains the detail-page code, so there's nothing new to push; draining the queue.
+<!-- agent:boundary:e36f7962 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,8 +70,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~In the admin area: Create a route for individual application leads. Format nicely. Can we sync our messaging + emails with the borrower portal? Create links to the individual application leads where appropriate, such as in the admin pipeline.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

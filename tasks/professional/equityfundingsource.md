@@ -31,85 +31,12 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-214850.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-225500.md`*
 
 Compacted content:
-- Archived 9 response topic(s): Add an Investor Pipeline page; [#vd8s] Investor Pipeline phase 2; [#vtx8] In-page pipeline card detail modals; 6 more
+- Archived 3 response topic(s): Move Deal Pipeline above Loan Applications; deploy; Plan a move to Hetzner US-East (Docker + nginx)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Move Deal Pipeline above Loan Applications — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> Move Deal Pipeline above Loan Applications in the Admin menu.
-
-Reordered the admin sidebar: **Deal Pipeline** now sits directly under Dashboard, above **Loan Applications**.
-
-**What shipped (committed + pushed, EFS `6dac30d`; superproject pointer `edc2c09e7`):**
-- `layout.tsx` `NAV_ITEMS`: swapped the `pipeline` and `full-applications` entries so the order is Dashboard → Deal Pipeline → Loan Applications → Application Leads → …
-- Test in `tests/admin-pipeline.test.ts` asserts Deal Pipeline is ordered before Loan Applications.
-
-**Full suite 491 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the final queued item — the queue is now empty.
-
-### Re: deploy — opus-4-8
-
-Deployed EFS to production. `deploy:worker` ran build → remote D1 migrate → worker deploy in one chain.
-
-**What shipped (Version ID `85aa0222-f02d-4ab1-9d72-0f39a434e028`):**
-- **Remote D1 migration `0059_wire_instruction_links.sql`** applied (✅) — the #wir3 secure wiring-instructions link tables. It was the only pending remote migration.
-- **Worker deployed** to `https://equityfundingsource.brian-takita.workers.dev` (828 KiB / 193 KiB gzip, 19ms startup). All bindings intact: D1, three R2 buckets, BorrowerChatRoom DO, rate limiter, Cloudflare Access env vars.
-- Ships everything committed-but-undeployed at EFS HEAD `6dac30d`: apply4 wizard (#zr5z), Deal Pipeline reorder + search/Kanban + lead modal, admin-editable wiring instructions (#ty2v), secure wire-link delivery (#wir3).
-
-**Smoke test (prod, all 200):** `/`, `/funded-deals`, `/apply` (apply4 wizard), `/login`.
-
-Closed **#zr5z** — the apply4 re-deploy was held pending explicit deploy authorization; that gate is now satisfied (migrate + deploy:worker + prod smoke-test all green). Queue drained.
-
-Note: cf-whoami flagged wrangler 4.87.0 → 4.99.0 update available (non-blocking).
-
-### Re: Plan a move to Hetzner US-East (Docker + nginx) — opus-4-8
-
-Before sizing a VPS, one premise needs correcting, because it changes the whole plan:
-
-**EFS has no Docker container.** It is a Cloudflare **Workers** app — `wrangler.toml` shows D1 (serverless SQLite), three R2 buckets, a `BorrowerChatRoom` Durable Object, Workers AI, Cloudflare Access auth, an `UPLOAD_RATE_LIMITER`, and an hourly cron trigger. There is no `Dockerfile`, `docker-compose`, or nginx config in the repo. So "move our Docker container to Hetzner" isn't a relocation — it's a **replatform off Cloudflare's serverless primitives**. (The Docker + nginx app in your stack is **monsterrodholders**, not EFS. If that's the one you meant, say so and I'll re-plan against it — it's a much simpler lift since it's already containerized.)
-
-Assuming you do want EFS itself on Hetzner, here's the honest shape.
-
-### What a Hetzner replatform actually requires
-Each Cloudflare primitive needs a replacement — this is the real cost, not the VPS:
-
-| Today (Cloudflare) | On Hetzner |
-|---|---|
-| D1 (edge SQLite) | Postgres (or SQLite) you self-host/back up |
-| R2 ×3 (documents/assets/cache) | Keep R2 (S3-compatible, works from anywhere) **or** MinIO on a Volume |
-| `BorrowerChatRoom` Durable Object (websocket chat) | Stateful service — Redis pub/sub or a dedicated process. **Biggest lift.** |
-| Cloudflare Access (admin auth/SSO) | Your own OIDC/SSO + nginx auth |
-| Workers AI | External AI API (Anthropic/OpenAI/Workers AI over HTTP) |
-| Rate limiter binding | nginx `limit_req` or app-level |
-| Cron `0 * * * *` | systemd timer / cron |
-| Global edge + built-in DR | **Single region, single box** unless you add standby + backups |
-
-### Hetzner US-East + VPS sizing
-- **Location:** Hetzner Cloud US-East = **Ashburn, VA (`ash`)**. (US-West is Hillsboro, OR.) Note the cheap ARM (CAX) line has historically been EU-only — for Ashburn plan on the **AMD CPX** (shared) or **CCX** (dedicated) lines; verify CAX availability if ARM pricing matters.
-- **Start (MVP, everything on one box):** **CPX31** — 4 vCPU / 8 GB / 160 GB. Runs the Bun app + nginx + Postgres + Redis for low-moderate B2B traffic.
-- **Production-leaning:** **CCX23** (4 *dedicated* vCPU / 16 GB) — a financial app wants predictable latency; dedicated vCPU avoids noisy-neighbor jitter. Or **CPX41** (8 vCPU / 16 GB) if you stay shared.
-- **TLS:** put nginx + Let's Encrypt on the box, or (recommended) keep **Cloudflare in front as CDN/WAF/DNS** with the Hetzner box as origin — you keep edge caching and DDoS protection while moving compute.
-
-### Scale path (build for this from day one)
-1. **Vertical first** — Hetzner resizes CPU/RAM in place (disk only grows). Fastest headroom.
-2. **Split the DB out** — move Postgres to its own VPS + Hetzner **Volume**, Redis to its own, connect over a **private network**. Single biggest scalability unlock.
-3. **Go horizontal** — multiple stateless app containers behind **nginx or a Hetzner Load Balancer**, sharing Postgres + Redis + object store.
-4. **Durability** — Hetzner Snapshots/Backups + a warm standby in Hillsboro for DR (replaces what Workers gave you for free).
-
-### Recommendation
-Unless there's a concrete driver — cost, US data-residency, or a need for long-running processes Workers can't do — **staying on Workers is lower-ops** and you'd be trading away edge latency, managed DR, and the D1/R2/DO/Access stack. If a driver does exist, the lowest-risk path is **hybrid**: keep Cloudflare as CDN/WAF/DNS + keep R2 for documents (it's S3-compatible from anywhere), and containerize only the app tier on a **CPX31 in Ashburn**, splitting Postgres/Redis out as load grows.
-
-Tracked as **#hetz1**. Tell me the actual driver (and confirm EFS vs monsterrodholders) and I'll turn this into a concrete migration runbook with the container/nginx/compose files.
-<!-- agent:boundary:0a591c10 -->
+<!-- agent:boundary:6c38f07e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,13 +44,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- Please plan a move to Hetzner us east, https://docs.hetzner.com/cloud/general/locations/ https://www.hetzner.com/. Tell me how we can use our Docker container, using nginx, and what size VPS we should use. Make sure we can expand as usage grows.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#hetz1] [recommended] Hetzner US-East (Ashburn) migration evaluation for EFS: EFS is a Cloudflare Workers app (D1, R2 x3, Durable Objects, Workers AI, CF Access, cron) with NO Dockerfile — a move to Hetzner Docker+nginx is a full replatform off CF primitives, not a container relocation. Decide the actual driver (cost / data residency / long-running processes) before scoping. Recommended default: keep Cloudflare as CDN/WAF/DNS front + R2 for documents, only containerize the app tier on Hetzner if a concrete driver exists. Start CPX31 (4 vCPU/8GB), split Postgres + Redis out as usage grows, app tier stateless behind nginx/Hetzner LB. Open question: confirm whether 'our Docker container' means EFS or monsterrodholders (the actual Docker/nginx app).
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `3068bd9d-0618-4bb7-9559-80f3791c989f` as of 2026-06-08 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=brian.takita@gmail.com` from the Cloudflare-Email verified `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender; a live POST smoke test persisted a submission with staff_notification_status=sent (test row deleted). Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `f64bfedb-c8c6-471f-903d-550363c9746b` as of 2026-06-09 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from the `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent with no error (test row deleted). NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -32,61 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-031025.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-040854.md`*
 
 Compacted content:
-- Archived 2 response topic(s): [#67v2a] Admin loan pipeline Kanban; [#zwws-phase6-dashboard] Workflow-priority investor dashboard
+- Archived 4 response topic(s): Contact form error; deploy; support email → btak.dev@gmail.com; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Contact form error — persist submissions + route to support email — opus-4-8
-
-Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@equityfundingsource.com`, which isn't the Resend-verified sender (only `EFS_EMAIL_FROM` = `info@briantakita.me` is verified in testing mode), so every send failed — and the handler then discarded the submission and showed "not available right now." Application leads work because they use the verified sender and persist to D1; contact did neither.
-
-**What changed (EFS commit `79ac942`, pushed to `main`):**
-
-- **Submissions are now stored first.** New `contact_messages` D1 table (migration `0054`) + repo. Every valid inquiry is persisted before any email, so it's never lost even when email is degraded.
-- **Email routes to the configured support recipient via the verified sender.** Switched to `email_send_direct_` (uses `EFS_EMAIL_FROM`) and a new `CONTACT_NOTIFICATION_TO` setting (falls back to `APPLICATION_LEAD_NOTIFICATION_TO`, then the site contact email). Wired into `wrangler.toml`, `worker.ts`, and `.env.example`.
-- **Admin access.** New **Contact Messages** section at `/portal-admin/contact-messages` — filter by status, see notification-delivery state, and move messages through new/read/responded/archived (mirrors Application Leads).
-- **The form only fails closed** when an inquiry can be *neither* stored *nor* emailed.
-
-**Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
-
-### Re: deploy — contact form is live on workers.dev — opus-4-8
-
-> **Queue prompt:**
->
-> deploy [#0jds]
-
-Deployed and verified end-to-end.
-
-- **Remote D1 migration** — `0054_contact_messages` applied to production (`equityfundingsource` DB).
-- **Worker deployed** — version `3068bd9d-0618-4bb7-9559-80f3791c989f`, with `CONTACT_NOTIFICATION_TO=brian.takita@gmail.com` bound.
-- **Live smoke test** — `POST /contact` now returns **303 (success)** instead of the old 503 "not available" error. The submission persisted to D1 with `staff_notification_status=sent` — so on production the staff email **actually delivered** (Cloudflare Email from the verified `info@briantakita.me` sender), and the record is reviewable at `/portal-admin/contact-messages`. The labeled smoke-test row was deleted afterward to keep the admin clean.
-
-The original error from your report is resolved: the public contact form accepts submissions, stores them for admin review, and notifies the support recipient.
-❯ Make the "support" email btak.dev@gmail.com for now.
-
-### Re: support email → btak.dev@gmail.com — opus-4-8
-
-Done in config. `CONTACT_NOTIFICATION_TO` is now `btak.dev@gmail.com` (EFS commit `af4935d`, pushed to `main`); updated the test assertion to match (`#spec-test-commit-push`), suite green.
-
-**Not live yet** — it's a worker env var, so production keeps routing contact notifications to `brian.takita@gmail.com` until a redeploy. Say **"deploy"** to ship it (just `deploy:worker`, no migration this time). I left the Status block unchanged because it still describes the currently-deployed state.
-
-### Re: no email at btak.dev — it wasn't deployed; now shipped — opus-4-8
-
-> **Queue prompt:**
->
-> I don't see an email in btak.dev@gmail.com
-
-
-The cause was simple: the `btak.dev@gmail.com` change was committed but **not deployed**, so production was still routing contact notifications to `brian.takita@gmail.com`. btak.dev was never going to get anything until a redeploy.
-
-**Now deployed** — Worker version `f64bfedb-c8c6-471f-903d-550363c9746b`, with `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` live. I sent a fresh delivery test through the live form: it returned 303, persisted, and recorded `staff_notification_status=sent` with **no error** — i.e. the Cloudflare Email Sending API (via the `CLOUDFLARE_API_TOKEN` secret) accepted it for `btak.dev@gmail.com`. Please check **btak.dev@gmail.com (including spam)** for subject `[EFS contact] borrower - Delivery Test agentdoc`.
-
-**Honest caveat:** `sent` means Cloudflare's API returned 2xx, not a guaranteed inbox landing. If it's still not there, the problem is email *deliverability* — `info@briantakita.me` SPF/DKIM/DMARC alignment or Cloudflare Email Sending's external-delivery limits — not the app. Tell me if it didn't arrive and I'll dig into the DNS/sender setup.
-
-Either way your submissions are never lost — your earlier real submission (`contact2`) is captured in `/portal-admin/contact-messages`.
-<!-- agent:boundary:028b3899 -->
+<!-- agent:boundary:5a194d51 -->
 <!-- /agent:exchange -->
 ###
 <!--

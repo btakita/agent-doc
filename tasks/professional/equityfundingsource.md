@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 2 response topic(s): Management links should show item counts + deploy; deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:ac72ead5 -->
+<!-- agent:boundary:17be62bf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +44,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In the admin area: Create a route for individual application leads. Format nicely. Can we sync our messaging + emails with the borrower portal? Create links to the individual application leads where appropriate, such as in the admin pipeline.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

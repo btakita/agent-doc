@@ -186,7 +186,22 @@ I captured the real formats from your live panes to see what a parser would face
 `#s760wire` now reads: *add a harness-aware, transcript-token-based context-% reader to `route.rs`, gate dispatch through `shouldClearBeforeDispatch`, emit the `[s760] clear-decision …` line, send `/clear` when true.* CLI-side, so no JB install from you.
 
 I'm not auto-looping the rest of the queue in this session — it reproduces the IPC working-tree corruption on every commit (restored from HEAD again this cycle), and `#s760wire` + `#pcpc5live` step 3 both want a clean pane to verify against. The dual-write proof and this design finding are the real wins here; a fresh session is where the route.rs reader + supervisor migration get built and verified.
-<!-- agent:boundary:05ec673f -->
+
+### Re: do [#saevon] — opus-4-8
+
+Not flipping `EARLY_ACK_ENABLED` this cycle — and the reason is the const's own documented contract, not effort-avoidance. `ipc_socket.rs:62-67`:
+
+> Kept `false` (dormant) until the two-phase flow is verified end-to-end in a **live IntelliJ/Codex session under real typing load** (`#xkpf`)… Flipping this to `true` (plus that live verification) activates the decoupling of the sender liveness probe from plugin apply latency.
+
+So the flip is *defined* to require the live batch first, not a SimWorld test — the whole point is the apply-latency decoupling under real plugin load, which a deterministic test can't exercise. Two extra reasons it's wrong to do here specifically:
+
+1. **This session is the worst possible place to activate it.** It's reproducing `#postcommit-ipc-worktree-corruption` on every commit (I've restored the working tree from HEAD on each of the last cycles). Early-ack's failure mode is exactly a *false-success* ack — flipping it inside a session whose IPC is already misbehaving would mask the very write failures the live batch is meant to rule out.
+2. **It needs both binary and cdylib refreshed.** The sender (CLI) tags `early_ack`; the listener (cdylib in the JB plugin) emits the pending ack. Activating cleanly means `cargo build --release` + `agent-doc lib-install`, which hot-reloads into the live plugin — i.e. into this corrupting session.
+
+**Honest status of the whole remaining queue.** `#saevon`, `#s760wire`'s verify step, `#pcpc5live` step 3, `#bkx9perid` ("fresh NON-DEGRADED session" per its own text), `#exch-intermix-verify`, and `#tmux-switch-lag` are **all** live-verification / clean-session work, and `#lvbatch` is literally the operator batch that bundles those verifications. None of them can be completed or safely landed in this degraded session — and I'm not gating them (you asked for no new gates), they're just genuinely blocked on the one thing only you can do: the restart you've mentioned twice.
+
+**The unblock is the restart, then `#lvbatch`.** Start a fresh session (clears the corruption too), drive the `#lvbatch` operator batch under real typing load, and I'll check the logs and close each item — no gates, just verification in a session that works. Everything committed so far (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`) is correct on `main`. I'm stopping the auto-loop here rather than spinning more no-op cycles (8 already in 30 min) against a corrupting IPC path.
+<!-- agent:boundary:5d80d6b7 -->
 <!-- /agent:exchange -->
 
 ## Queue

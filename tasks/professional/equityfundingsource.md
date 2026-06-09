@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -37,7 +37,7 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 4 response topic(s): Contact form error; deploy; support email → btak.dev@gmail.com; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:5a194d51 -->
+<!-- agent:boundary:5cbe4522 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- A loan application should not be able to be Approved without the full application. See https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a
 <!-- /agent:queue -->
 
 ## Backlog

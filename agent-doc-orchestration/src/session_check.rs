@@ -579,6 +579,42 @@ fn is_queue_directive_prompt(text: &str) -> bool {
         || t.contains("[#")
 }
 
+/// True when a queue prompt references a slash command (e.g. `/agent-doc`,
+/// `/clear`, `/compact`, `/loop`) at a token boundary.
+///
+/// `#queue-contamination-guard-false-positive`: such a prompt is a
+/// user-authored instruction, not assistant answer prose copied into the queue.
+/// The contamination guard targets declarative answer prose ("Yes. I drove
+/// ..."), which never leads with slash-command instructions, so a legit user
+/// prompt that mentions `/agent-doc`/`/clear` must not be flagged just because
+/// it shares a verbatim 40-char run with a response that discussed the same
+/// commands. (A leading `/` is also a unix-path shape, which is likewise user
+/// content, not copied answer prose — so this skip stays conservative.)
+fn mentions_slash_command(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b'/' {
+            continue;
+        }
+        // The slash must begin a token (start of string or after a non-word char)
+        // so `src/agent-doc` (a path segment after a word char) is not matched.
+        let at_token_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if !at_token_start {
+            continue;
+        }
+        // Require at least two command-name chars after the slash so a bare
+        // separator `/` is not treated as a command reference.
+        let cmd_len = text[i + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .count();
+        if cmd_len >= 2 && text[i + 1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+            return true;
+        }
+    }
+    false
+}
+
 /// `#jb-run-agent-doc-response-queue-contamination`: `Run Agent Doc` / queue
 /// synthesis must never enqueue assistant response prose. The live repro added
 /// `- Yes. I drove the already-authenticated Google Ads browser session ...`
@@ -612,6 +648,12 @@ fn check_queue_response_contamination_guard(
     for prompt in crate::queue::prompts(&entries) {
         let text = prompt.text.trim();
         if text.is_empty() || is_queue_directive_prompt(text) {
+            continue;
+        }
+        // #queue-contamination-guard-false-positive: a queue prompt that
+        // references a slash command (/agent-doc, /clear, /compact, ...) is a
+        // user instruction, not copied answer prose — skip it.
+        if mentions_slash_command(text) {
             continue;
         }
         // Only treat substantial prose as a contamination candidate; short
@@ -10728,6 +10770,71 @@ Body\n\
             }
             other => panic!("expected contamination error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn queue_contamination_guard_skips_user_prompt_mentioning_slash_command() {
+        // #queue-contamination-guard-false-positive: a legit user queue prompt
+        // that mentions slash commands must not be flagged as contamination
+        // just because the response discussed the same commands (sharing a
+        // verbatim 40-char run with the prompt).
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let user_prompt =
+            "JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded";
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: clear opt-in — gpt-5\n\n",
+                "JB Run Agent Doc /clear opt-in should pre-emptively run /clear at the configured threshold; I wired the /agent-doc console path accordingly.\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- do [#nbsearch]\n",
+                "- {user_prompt}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            user_prompt = user_prompt
+        );
+        fs::write(&doc, content).unwrap();
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::None
+            ),
+            "a user prompt mentioning /clear and /agent-doc must not be flagged as response contamination"
+        );
+    }
+
+    #[test]
+    fn queue_contamination_guard_still_flags_prose_without_slash_command() {
+        // Guard rail for the slash-command skip: response prose copied into the
+        // queue that does NOT reference a slash command is still flagged.
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let prose = "Yes. I drove the already-authenticated Google Ads browser session with chromium-bridge to demote the campaign.";
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: #gads106demote — gpt-5\n\n{prose}\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- {prose}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prose = prose
+        );
+        fs::write(&doc, content).unwrap();
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::Error(_)
+            ),
+            "response prose without a slash command must still be flagged as contamination"
+        );
     }
 
     #[test]

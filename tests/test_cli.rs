@@ -737,7 +737,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // resolution as the sibling no-response-active-head guard. Its own ops_log
         // diagnostic (`reaped_queue_head_without_response_fired`) carries no
         // `guard_` substring.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 91,
+        // +2 (#queue-contamination-guard-false-positive): two new
+        // `queue_contamination_guard_*` regression test-fn names
+        // (`..._skips_user_prompt_mentioning_slash_command` and
+        // `..._still_flags_prose_without_slash_command`) for the slash-command
+        // skip that stops the contamination guard from flagging legit user
+        // prompts that mention `/agent-doc`/`/clear`. The skip itself
+        // (`mentions_slash_command`) carries no `guard_` substring.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 93,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

@@ -37,7 +37,22 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 2 response topic(s): [#67v2a] Admin loan pipeline Kanban; [#zwws-phase6-dashboard] Workflow-priority investor dashboard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:bbe9f4b1 -->
+
+### Re: Contact form error — persist submissions + route to support email — opus-4-8
+
+Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@equityfundingsource.com`, which isn't the Resend-verified sender (only `EFS_EMAIL_FROM` = `info@briantakita.me` is verified in testing mode), so every send failed — and the handler then discarded the submission and showed "not available right now." Application leads work because they use the verified sender and persist to D1; contact did neither.
+
+**What changed (EFS commit `79ac942`, pushed to `main`):**
+
+- **Submissions are now stored first.** New `contact_messages` D1 table (migration `0054`) + repo. Every valid inquiry is persisted before any email, so it's never lost even when email is degraded.
+- **Email routes to the configured support recipient via the verified sender.** Switched to `email_send_direct_` (uses `EFS_EMAIL_FROM`) and a new `CONTACT_NOTIFICATION_TO` setting (falls back to `APPLICATION_LEAD_NOTIFICATION_TO`, then the site contact email). Wired into `wrangler.toml`, `worker.ts`, and `.env.example`.
+- **Admin access.** New **Contact Messages** section at `/portal-admin/contact-messages` — filter by status, see notification-delivery state, and move messages through new/read/responded/archived (mirrors Application Leads).
+- **The form only fails closed** when an inquiry can be *neither* stored *nor* emailed.
+
+**Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
+
+**Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
+<!-- agent:boundary:47f06c4d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,11 +60,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+https://equityfundingsource.brian-takita.workers.dev/contact had an error, "The online contact form is not available right now. Please email info@equityfundingsource.com or call (323) 225-3800.". Please make the contact form submissions be accessible in the admin and go to the configured support email.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#0jds] Deploy contact-form persistence to workers.dev: run cf:d1:migrate:remote (migration 0054_contact_messages) + deploy:worker, then smoke-test a /contact submission and /portal-admin/contact-messages on prod. Gated on deploy authorization (#spec-test-commit-push-deploy or "deploy"). Until then the live /contact still shows the "not available right now" error.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

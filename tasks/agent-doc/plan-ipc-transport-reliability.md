@@ -25,9 +25,11 @@ The keystone is the **IPC degrade/timeout state machine** in `agent-doc-orchestr
 
 Decouple the sender's liveness probe from the plugin's apply latency. The plugin should send an early `accepted`/`pending` ack the moment it receives the patch (before `awaitIdleBeforeDocumentMutation`), then a terminal ack/sidecar. FFI-first: define the early-ack message in the `ipc_socket` protocol + `ffi.rs` listener contract, then emit it from `PatchWatcher.handleSocketMessageV2`. Removes the timeout/apply-window coupling entirely.
 
-## Phase 3 — prefer file-IPC over raw disk when degraded (`#ipc-degraded-prefers-file-ipc`) [follow-up]
+## Phase 3 — prefer file-IPC over raw disk when degraded (`#ipc-degraded-prefers-file-ipc`) — DONE 2026-06-09
 
 Even in the rare genuine-degrade case, route writes through the file-watch patch queue (the plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures File Cache Conflicts. Disk write becomes the true last resort.
+
+**Landed:** A latched-degraded socket means only the plugin's *socket* listener is wedged — the file-IPC patch queue uses a separate plugin file watcher that is very likely still alive. `try_ipc` (`write.rs`) no longer returns straight to a raw disk write on degrade: it skips only the wedged socket attempt and falls through to the file-IPC patch queue (`write_ipc_and_poll`), where the plugin applies the patch via the Document API — no foreign disk write, no File Cache Conflict. The socket-ack-timeout arm that *newly* latches degraded likewise falls through to file IPC instead of returning. `run_stream` now always calls `try_ipc` when the plugin is installed (dropped the `!ipc_direct_disk_degraded` gate and its dead direct-disk branch), so the stream/finalize path inherits the same routing; the raw disk write only happens on the existing IPC-timeout (`exit 75`) last-resort path when file IPC also fails to deliver. The fire-and-forget `reposition_boundary` signal keeps its direct-disk-skip (no response body). Tests: `try_ipc_prefers_file_ipc_when_socket_degraded`, `try_ipc_degraded_succeeds_via_file_ipc_when_plugin_consumes`. Spec: `specs/process-topology.md` R3 ✅.
 
 ## Phase 4 — visible-write provenance (`#ipc-drift-writeprovenance`) — DONE 2026-06-09
 

@@ -53,13 +53,35 @@ Done across the admin portal. Committed + pushed to `equityfundingsource-dev` ma
 - Application Leads, Contact Messages, Funding Commits, Lender Management (`?status`)
 - Documents (`?kind` tab + `?window`/`?status`)
 - Loans (`?borrower&application_status&order`)
+- The full pages view gains **Open About ↗ / Open Contact ↗** deep-link buttons above each editor.
+- The route opens a **focused single-key editor** (just About or just Contact) with a "Back to public contents" link and a "View" link to the live page — reusing the existing `public-contents` section (the client reads `:key` from the path, so no new section/nav wiring needed).
 
 Read/write stay symmetric — each page only syncs the params it already reads on load, so a refresh restores the same view. Pages that already synced (pipeline, payments modal, tmo-loans, messages) were left as-is.
 
 **Verification:** unit-tested the pure URL builder + asserted every filtered list uses the helper; full suite **421 pass / 0 fail**, worker bundle clean. (This rebased on top of a remote pagination refactor that touched the same files — conflicts resolved keeping both the new pagination and the URL sync.)
 
 Continuing the queue: `#pzj5` (Public Contents detail) and `#f632` (Documents detail) next.
-<!-- agent:boundary:c564c507 -->
+
+### Re: #pzj5 — Public Contents detail route — opus-4-8
+
+> **Queue prompt:**
+>
+> [#pzj5]
+
+
+Done. Committed + pushed to `equityfundingsource-dev` main (`b0cd34f`).
+
+Public Contents is a key-based singleton editor (not a discrete-row list), so the addressable "items" are the content keys. Added `/portal-admin/public-contents/:key` (`key` ∈ `about` | `contact`):
+- The route opens a **focused single-key editor** (just About or just Contact) with a "Back to public contents" link and a "View" link to the live page — reusing the existing `public-contents` section (the client reads `:key` from the path, so no new section/nav wiring needed).
+- The full pages view gains **Open About ↗ / Open Contact ↗** deep-link buttons above each editor.
+
+**Decision on the nested-items question:** About *sections* and *team members* stay inline array fields edited within the About editor — they're not given their own routes. Key-level (about/contact) deep-linking is the right granularity; per-array-item routes would be over-engineering for content blocks saved as one document.
+
+**Verification:** full suite **422 pass / 0 fail**, browser + worker bundles clean; added a test locking in the route + focused-editor logic.
+
+Last queue item next: `#f632` (Documents detail routes).
+<!-- agent:boundary:3d15af6c -->
+<!-- agent:boundary:b4944352 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,14 +90,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.~~
-- [#pzj5]
+- ~~[#pzj5]~~
 - [#f632]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pzj5] Add individual-item detail route for admin Public Contents: it is a key-based singleton editor (about/contact), not a discrete-row list. Add /portal-admin/public-contents/:key to deep-link the about/contact editor section, plus tab/row links. Confirm whether nested About sections/team-members also need addressable routes.
 - [ ] [#f632] Add individual-item detail routes for admin Documents (uploads + investor-document-requests sub-lists): add by-id GET APIs, client detail components, server portal sections, and row links. Decide whether uploads and document-requests each get their own detail section since Documents has multiple sub-lists.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.

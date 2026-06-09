@@ -119,7 +119,7 @@ Commits pushed:
 - Parent `agent-loop`: `8fced3a8b` `tsift: advance indexed memory candidates`, pushed to `origin/main`.
 
 Confidence: high. Local clippy/tests/build/install/smokes passed, and the only unresolved external signal is the in-progress GitHub Actions run.
-<!-- agent:boundary:53a8e80d -->
+<!-- agent:boundary:9fbaa693 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +141,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qs5v] Materialize semantic vectors in a typed table/blob and add a GraphStore top-candidate query so semantic related does not scan and parse every semantic node property.
 - [ ] [#zkft] Make memory graph projection incremental with memory watermarks/content hashes and explicit recent-first, oldest-first, and query-relevant read policies.
 - [ ] [#58p8] Fold observed-at decay and memory node signals into shared GraphStore ranked_neighborhood scoring so memory and code prune through one graph-ranking path.
 - [ ] [#kn0d] Push semantic seeded neighborhood caps into GraphStore/SQLite with SQL-side edge ranking limits and batched node lookup.

@@ -13887,7 +13887,12 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 /// writes — provenance is only meaningful for the editor-visible document. The
 /// path is canonicalized to match the lookup key used by the visible-write
 /// reconcile guard. Best-effort: never fails the write.
-fn record_document_write_provenance(path: &Path, content: &str) {
+///
+/// Shared by every agent-doc document-write path (the IPC/finalize `write.rs`
+/// `atomic_write` and the direct-run `run.rs` `atomic_write`) so a foreign-looking
+/// disk change from any agent-doc writer is positively attributed instead of
+/// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
+pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
     if path.components().any(|c| c.as_os_str() == ".agent-doc") {
         return;
     }

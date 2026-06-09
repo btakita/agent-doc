@@ -106,9 +106,13 @@ race class instead of papering over each symptom.
   writers conflict the editor surfaces as a memory-vs-disk "File Cache Conflict".
 - **Write provenance.** Every controller/session-actor disk write is stamped with
   a write-provenance generation id plus its `OpActor`, durably recorded alongside
-  the write (provenance sidecar or extended live-buffer digest). The visible-write
-  reconcile guard (`live_buffer_diverges_from_content` / `guard_visible_write_
-  reconcile`) attributes a foreign disk change to the controller/supervisor by
+  the write (provenance sidecar or extended live-buffer digest). This is enforced
+  uniformly: both agent-doc document-write paths — the IPC/finalize/queue
+  `write.rs::atomic_write` and the direct-run `run.rs::atomic_write` — stamp through
+  the one shared `record_document_write_provenance` recorder (`#ipc-drift-writeprovenance`),
+  so no document-write path can land a foreign-looking change unattributed. The visible-write
+  reconcile guard (`live_buffer_diverges_from_content` / `guard_visible_write_reconcile`)
+  attributes a foreign disk change to the controller/supervisor by
   **reading that provenance**, not by inferring foreign-vs-unsaved-edit from the
   `LIVE_BUFFER_STALE_SKEW_MS` mtime skew. The mtime heuristic may remain only as a
   shadow-mode fallback during migration. Provenance builds on the existing

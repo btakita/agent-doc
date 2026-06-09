@@ -43,7 +43,8 @@ flowchart TB
     IDLE -->|disk write| DOC
     TT -->|digest+content| SIDE
     GUARD -->|reads| SIDE
-    FIN -->|stamps write-provenance #pcp2| SIDE
+    FIN -->|stamps write-provenance #pcp2\n(shared recorder: write.rs + run.rs atomic_write)| SIDE
+    IDLE -->|stamps write-provenance #pcp2| SIDE
     PW <-->|FFI socket / file IPC patches| FIN
     SA --> DB
     SUP --> DB

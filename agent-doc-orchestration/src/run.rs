@@ -1642,6 +1642,11 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         .with_context(|| "failed to write temp file")?;
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    // #ipc-drift-writeprovenance: the direct-run document-write path must tag the
+    // same write-provenance as `write.rs::atomic_write`, so a subsequent
+    // visible-write reconcile guard positively attributes this foreign-looking
+    // disk change to agent-doc instead of inferring from the mtime heuristic.
+    crate::write::record_document_write_provenance(path, content);
     Ok(())
 }
 
@@ -2277,6 +2282,29 @@ mod tests {
         std::fs::write(&path, "old content").unwrap();
         atomic_write(&path, "new content").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new content");
+    }
+
+    /// #ipc-drift-writeprovenance: the direct-run document-write path records the
+    /// same write-provenance as the IPC/finalize `write.rs::atomic_write`, so a
+    /// foreign-looking disk change from a direct-run write is positively
+    /// attributed to agent-doc instead of inferred from the mtime heuristic.
+    #[test]
+    fn direct_run_atomic_write_records_provenance() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let path = dir.path().join("prov-direct-run.md");
+        atomic_write(&path, "direct run body").unwrap();
+        let key = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.clone())
+            .to_string_lossy()
+            .to_string();
+        let prov = crate::debounce::write_provenance(&key)
+            .expect("direct-run document write should record provenance");
+        assert_eq!(prov.len, "direct run body".len());
+        assert_eq!(prov.hash, crate::debounce::content_hash("direct run body"));
+        assert_eq!(prov.actor, "agent");
+        assert!(!prov.write_id.is_empty());
     }
 
     #[test]

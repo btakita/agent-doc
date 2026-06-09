@@ -106,7 +106,29 @@ Commits:
 Escalation: none.
 Confidence: high.
 <!-- agent-doc:exchange-end -->
-<!-- agent:boundary:e3882973 -->
+Implemented `#pcache-boundary`.
+
+> **Queue prompt:**
+>
+> [#pcache-boundary]
+
+
+I added a shared `prompt_cache` renderer in `src/agent-doc` that emits a stable prefix plus an explicit `<agent_doc_prompt_cache_boundary ... />` marker before volatile turn data. The direct `run` prompt now keeps durable response contracts above that marker and moves diffs, document excerpts, prompt-target summaries, status/accretion context, and compaction guidance below it.
+
+I also routed the Codex owner-pane queue continuation payload through the same boundary helper, so the file path and active queue head no longer occupy the first bytes of the prompt. Tests now assert those volatile queue fields, plus direct-run prompt targets and accretion diagnostics, remain after the boundary.
+
+Commits:
+- `src/agent-doc`: `486913a7` (`agent-doc: add prompt cache boundary`)
+- parent: `79a024587` (`tsift: advance prompt cache boundary`)
+
+Verification:
+- `cargo test -p agent-doc-orchestration prompt_cache`
+- `cargo test -p agent-doc-orchestration build_prompt_places_turn_churn_after_cache_boundary`
+- `cargo test -p agent-doc-orchestration idle_queue_drain_payload_uses_owner_continuation_for_codex`
+- `cargo test -p agent-doc-orchestration`
+- `make check`
+- Latest CI run `27218407978` (`agent-doc: add prompt cache boundary`) was in progress when checked.
+<!-- agent:boundary:f32d3577 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,14 +140,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#pcache-measure]~~
 - ~~[#pcache-fingerprint]~~
-- [#pcache-boundary]
+- ~~[#pcache-boundary]~~
 - [#pcache-adapters]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-boundary] Prompt caching: refactor agent-doc prompt assembly into stable cached prefix blocks and volatile suffix blocks, keeping queue/status/compaction churn after the cache boundary.
 - [ ] [#pcache-adapters] Prompt caching: enforce provider-specific adapter behavior for Anthropic cache_control, OpenAI prompt_cache_key, and replica-local routing affinity.
 <!-- /agent:backlog -->
 

@@ -136,7 +136,32 @@ cargo test -p agent-doc-orchestration --lib write_queue
 **What stays gated (correctly, not part of #0pke's core):** the live call-site cutover that switches the real write/finalize/supervisor paths onto this queue is the `#pcpc5` migration (08b authority ladder), which depends on 2–5 and needs live verification. The queue itself lands behind the seam now.
 
 Closing #0pke as done.
-<!-- agent:boundary:7e2a6a38 -->
+
+### Re: do #v7m3 (pcpc2-supervisor-adapter) — opus-4-8
+
+> **Queue prompt:**
+>
+> do #v7m3
+
+Already complete and committed — no new implementation needed.
+
+**#v7m3 = pcpc2-supervisor-adapter** is realized by commit `bcb63a1f` ("pcpc2: in-process supervisor adapter"), an ancestor of submodule HEAD. It hosts the harness child PTY/stdin/restart/heartbeat as a controller-managed task instead of a separate OS process (08b in-process actors), while preserving the Unix-socket external boundary for CLI/editor callers. Core is in `agent-doc-orchestration/src/supervisor/in_process.rs` (551 lines):
+
+- `InProcessSupervisor` — one live child; `tick_at(now)` advances the heartbeat and applies `state::CrashPolicy` on exit (restart/prompt/halt); `restart`/`inject`/`stop`/`state`/`pid`/`generation` mirror the `IpcMethod` boundary so external callers see no behavior change.
+- `SupervisedChild` trait decouples the adapter from the child; `PtySupervisedChild` is the production PTY wrapper, a fake child drives SimWorld tests.
+- Heartbeat loss + reattach: `reattach()` rebinds a live child without restart; `generation()` distinguishes a reattach from a restart.
+
+**Verification:** the 7 shipped SimWorld determinism tests pass green:
+```
+cargo test -p agent-doc-orchestration --lib in_process
+→ 7 passed; 0 failed (heartbeat tick/loss, reattach vs restart generation,
+  crash-policy restart/prompt/halt, inject/stop/state/pid boundary mirror)
+```
+
+**What stays gated (correctly, not part of #v7m3's core):** the live `agent-doc start` socket cutover that switches the real supervisor process onto this in-process adapter is the `#pcpc5` migration (08b authority ladder), which depends on the full pcpc1-4 stack and needs live verification. The adapter itself lands behind the seam now.
+
+Closing #v7m3 as done.
+<!-- agent:boundary:4b59afa9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -144,7 +169,7 @@ Closing #0pke as done.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do #dj14~~
 - ~~do #0pke~~
-- do #v7m3
+- ~~do #v7m3~~
 - do #2bhm
 - do #z2jy
 - do #xkpf
@@ -175,7 +200,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#v7m3] pcpc2-supervisor-adapter: Replace the out-of-process agent-doc start supervisor with an in-process supervisor adapter hosted by the controller (owns harness child PTY/stdin, readiness, restart/clear, heartbeat as a controller task); preserve the Unix-socket external boundary for CLI/editor callers. SimWorld: heartbeat loss + reattach, restart/clear in-process. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#2bhm] pcpc1-actor-runtime: Turn session_actor.rs from a data struct into a real in-process actor — per-document mailbox processed on one owning thread; SQLite CAS stays the durable backstop. SimWorld: concurrent commands to one document actor serialize deterministically. ACTIONABLE NOW (SimWorld-verifiable, NO live editor). First phase of #pf15/#pcp-consol; unblocks #pcpc2-4. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#z2jy] bkx9-pure-detector: Extract per-id response-loss detection as a PURE function (cycle_state + committed content + HEAD archives -> reaped do#id directive heads whose ### Re: did not materialize) with deterministic unit/SimWorld tests for reap-only loss, captured-but-id-lost, AND the multi-directive-single-heading FALSE-POSITIVE case. DORMANT: do NOT wire into the live check_reaped_queue_head_without_response guard. ACTIONABLE NOW (pure fn + tests, no live editor); the wiring + drift-repro validation stays gated as #bkx9. Spec: specs/07-closeout-commands.md
 <!-- /agent:backlog -->

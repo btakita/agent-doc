@@ -51,7 +51,7 @@ Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@eq
 
 **Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
 
-### Re: deploy — contact form is live on workers.dev — opus-4-8 (HEAD)
+### Re: deploy — contact form is live on workers.dev — opus-4-8
 
 > **Queue prompt:**
 >
@@ -64,7 +64,7 @@ Deployed and verified end-to-end.
 - **Live smoke test** — `POST /contact` now returns **303 (success)** instead of the old 503 "not available" error. The submission persisted to D1 with `staff_notification_status=sent` — so on production the staff email **actually delivered** (Cloudflare Email from the verified `info@briantakita.me` sender), and the record is reviewable at `/portal-admin/contact-messages`. The labeled smoke-test row was deleted afterward to keep the admin clean.
 
 The original error from your report is resolved: the public contact form accepts submissions, stores them for admin review, and notifies the support recipient.
-<!-- agent:boundary:b9f58a1f -->
+<!-- agent:boundary:410ad19a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -119,7 +119,41 @@ Commits:
 
 - `src/agent-doc`: `3570a63c` (`prompt-cache: document boundary contract`), pushed to `origin/main`.
 - superproject: `86efd465b` (`agent-doc: update prompt cache boundary contract`), ready to push with the session closeout commit.
-<!-- agent:boundary:1ea4552d -->
+
+### Re: pcache-ci-history — gpt-5
+
+> **Queue prompt:**
+>
+> do [#pcache-ci-history]
+
+
+Implemented prompt-cache effectiveness history for the token/performance gate.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/prompt_cache.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/05-agent-backend.md`
+
+What changed:
+- Added `PromptCacheEffectivenessSample` JSONL persistence with provider, harness, transcript id, observation time, and the existing session-cost sample.
+- Added trend-check status and thresholds so the gate reports `baseline_required`, `pass`, or `fail` for the latest matching workload history.
+- Reused the existing miss-ranking path so failures include actionable cached-input deltas, creation-token spikes, stable-prefix fingerprint changes, adapter-state changes, and routing-affinity changes.
+- Covered Codex/OpenAI and Claude/Anthropic real-transcript sample flows in focused tests, including baseline-required, pass, token-regression fail, and fingerprint-regression fail cases.
+- Updated the prompt-cache specs to require JSONL history and operator-readable trend failures.
+
+Verification:
+- `cargo test -p agent-doc-orchestration prompt_cache --lib`
+- `make check`
+- `make install`
+- `gh run watch 27234883466 --exit-status` passed for `9959a6e8`
+
+Commit / push:
+- `src/agent-doc`: `9959a6e8 prompt-cache: persist effectiveness history` pushed to `origin/main`
+- superproject: `291f77cec agent-doc: update prompt cache ci history`
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:6cce3a0a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,16 +163,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#pcache-replaygate]~~
-- ~~do [#pcache-missrank]~~
-- ~~do [#pcache-boundary-contract]~~
-- do [#pcache-ci-history]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-ci-history] Prompt caching: persist prompt-cache effectiveness history and trend checks in the token/performance gate so regressions across real Codex/OpenAI and Claude/Anthropic transcripts fail with actionable deltas.
 <!-- /agent:backlog -->
 
 ## Review

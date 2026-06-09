@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Session History
@@ -139,7 +139,39 @@ Confidence: high.
 ### Re: Closeout repair — gpt-5
 
 The GPU-build response above is the authoritative closeout for this queue item. The prompt-prefixed duplicate lines immediately above were a terminal echo artifact from the failed finalize attempt; no additional repo work was performed in this repair step.
-<!-- agent:boundary:5080a99a -->
+
+### Re: Sheets create/share — gpt-5
+
+> **Queue prompt:**
+>
+> [#sheets-create-share]
+
+
+Completed `#sheets-create-share`.
+
+Changed paths:
+- `src/corky/src/cli.rs` and `src/corky/src/main.rs` add and dispatch `corky sheets create <TITLE>` and `corky sheets share <SHEET> <EMAIL> [--role reader|writer|commenter] [--notify]`.
+- `src/corky/crates/corky-google/src/doc/sheets.rs` implements Sheets `spreadsheets.create` and Drive `permissions.create`, including role validation, no-notify default, ID/URL output, and request/URL unit coverage.
+- `src/corky/tests/test_cli.rs` adds CLI registration tests for both new commands.
+- `src/corky/AGENTS.md`, `SKILL.md`, `.claude/skills/corky/SKILL.md`, bundled skill assets, README, SPEC, command guide, and VERSIONS now document the create/share workflow and OAuth scopes.
+
+Commands and verification:
+- `cargo test --workspace --features transcribe-cuda sheets` passed.
+- `make precommit` passed with CUDA-feature clippy, tests, and `audit-docs`.
+- `make release` passed with `cargo build --release --features transcribe-cuda`.
+- `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
+- `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
+- Installed `corky sheets create --help` and `corky sheets share --help` show the new command surfaces.
+- Did not run live Google create/share mutations; coverage is local unit/CLI/request construction plus build/install.
+- Latest GitHub Actions `CI` run for `Add Sheets create and share commands` was still `in_progress` when checked after push, so closeout uses the passing local suite per queue rules.
+
+Commits and push:
+- Pushed corky submodule commit `6e23893` (`Add Sheets create and share commands`) to `btakita/corky main`.
+- Pushed owner repo commit `8233008cc` (`Update corky submodule for Sheets create share`) to `btakita/agent-loop main`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:a5a50e3f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,18 +182,17 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.~~
-- [#sheets-create-share]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#sheets-create-share] [Feature] `corky sheets` can populate tabs in an existing spreadsheet (push/write) but cannot CREATE a new spreadsheet or SHARE one. Add: (1) `corky sheets create <TITLE> [--account <email>]` → create a new spreadsheet (Sheets API spreadsheets.create), print the URL/ID; (2) `corky sheets share <SHEET> <EMAIL> [--role reader|writer|commenter] [--notify]` → Drive permissions.create. Surfaced 2026-06-09 on boost-client (MRH): "use corky to create a google sheet with tabs for each CSV and share with ron-berkes" could not be completed because corky 0.29.0 has neither command and the brian.takita@gmail.com token lacked Sheets/Drive scopes (workaround: `corky auth --email <e> --scope workspace` then raw Sheets/Drive API for create+share, `corky sheets push` for tabs).
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/corky.done.md -->
+
+<!-- completed work archived in tasks/software/corky.done.md -->
 <!-- /agent:done -->

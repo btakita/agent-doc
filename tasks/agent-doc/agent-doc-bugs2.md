@@ -90,7 +90,8 @@ The 8 blocked items stay in the **backlog** as the actionable completion list yo
 **Triaged (not fixed here — the JB UX needs live IntelliJ):** added backlog item **jb-claim-cross-session** + plan `tasks/agent-doc/plan-jb-claim-cross-session.md`. Fix = a structured cross-session-reject result from `claim` + a JB choice dialog (Force claim / Switch project session / Cancel), mirrored in VS Code, verified live (pairs with #xkpf). I did not attempt a code fix + closeout in this degraded session, which corrupted its own response twice today via the `#ipc-crdt-response-drift` path.
 
 Note: the report landed in the now-inactive queue (`queue: stop`), so the binary flagged it `inactive_queue_residue` rather than an executable prompt — I triaged it anyway.
-<!-- agent:boundary:a74747d5 -->
+**Queue note:** go-mode re-populated the inactive queue with the 8 blocked backlog ids (#saev…#xkpf) during this cycle. I am deliberately clearing them unrun — every one is blocked on a fresh non-degraded session and/or live IntelliJ/Codex verification (see each backlog item's blocker), so they are not runnable in this session. This is the same go-mode-auto-queues-blocked-work product bug noted above. <!-- no-queue-removal-guard -->
+<!-- agent:boundary:e3d60f16 -->
 <!-- /agent:exchange -->
 
 ## Queue

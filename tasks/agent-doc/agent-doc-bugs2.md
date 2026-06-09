@@ -110,14 +110,40 @@ cargo test -p agent-doc-orchestration --lib document_watcher
 **Scope note:** the agent-doc submodule has a broader uncommitted working tree (23 files of in-flight supervisor-migration work). That is outside #dj14's scope, so I left it untouched and did not fold it into this closeout.
 
 Closing #dj14 as done.
-<!-- agent:boundary:37537103 -->
+
+### Re: do #0pke (pcpc3-write-queue) — opus-4-8
+
+> **Queue prompt:**
+>
+> do #0pke
+
+
+Already complete and committed — no new implementation needed.
+
+**#0pke = pcpc3-write-queue** is realized by commit `ef47c07e` ("pcpc3: in-process ordered write queue (realizes #pcp3b)"), an ancestor of submodule HEAD. It routes all same-process document writers (agent write/stream/finalize, repair, supervisor idle/file-watch) through the `#pcpc1` session-actor mailbox so they execute in one serialized order; `flock` is demoted to a cross-process backstop only. That removes the R6 self-race / exit-75 root: a single process can no longer interleave a supervisor idle-write and an agent finalize between flock acquisitions. Core is in `agent-doc-orchestration/src/write_queue.rs`:
+
+- `run_serialized` — the queue primitive (RMW critical section on the document actor owner thread).
+- `serialized_atomic_write` — disk-write convenience over it.
+- `DocumentWriteQueue` — typed agent/repair/supervisor facade, one shared order.
+
+**Verification:** the 4 shipped SimWorld tests pass green:
+```
+cargo test -p agent-doc-orchestration --lib write_queue
+→ 4 passed; 0 failed (no-lost-update RMW, finalize never observes a half-applied
+  write, persistence, shared submission order across writer classes)
+```
+
+**What stays gated (correctly, not part of #0pke's core):** the live call-site cutover that switches the real write/finalize/supervisor paths onto this queue is the `#pcpc5` migration (08b authority ladder), which depends on 2–5 and needs live verification. The queue itself lands behind the seam now.
+
+Closing #0pke as done.
+<!-- agent:boundary:7e2a6a38 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do #dj14~~
-- do #0pke
+- ~~do #0pke~~
 - do #v7m3
 - do #2bhm
 - do #z2jy
@@ -149,7 +175,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#0pke] pcpc3-write-queue: Route all write/stream/finalize/repair disk writes AND supervisor idle/file-watch writes through the session actor single ordered write queue (realizes #pcp3b); flock becomes a cross-process backstop only. Kills the R6 self-race / exit-75 at the root. SimWorld: concurrent supervisor-write + agent-finalize serialize; finalize never observes a half-applied write. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1+#pcpc2. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#v7m3] pcpc2-supervisor-adapter: Replace the out-of-process agent-doc start supervisor with an in-process supervisor adapter hosted by the controller (owns harness child PTY/stdin, readiness, restart/clear, heartbeat as a controller task); preserve the Unix-socket external boundary for CLI/editor callers. SimWorld: heartbeat loss + reattach, restart/clear in-process. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#2bhm] pcpc1-actor-runtime: Turn session_actor.rs from a data struct into a real in-process actor — per-document mailbox processed on one owning thread; SQLite CAS stays the durable backstop. SimWorld: concurrent commands to one document actor serialize deterministically. ACTIONABLE NOW (SimWorld-verifiable, NO live editor). First phase of #pf15/#pcp-consol; unblocks #pcpc2-4. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#z2jy] bkx9-pure-detector: Extract per-id response-loss detection as a PURE function (cycle_state + committed content + HEAD archives -> reaped do#id directive heads whose ### Re: did not materialize) with deterministic unit/SimWorld tests for reap-only loss, captured-but-id-lost, AND the multi-directive-single-heading FALSE-POSITIVE case. DORMANT: do NOT wire into the live check_reaped_queue_head_without_response guard. ACTIONABLE NOW (pure fn + tests, no live editor); the wiring + drift-repro validation stays gated as #bkx9. Spec: specs/07-closeout-commands.md

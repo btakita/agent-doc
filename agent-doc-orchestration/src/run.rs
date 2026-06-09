@@ -137,6 +137,13 @@ impl RunMode {
             Self::Append
         }
     }
+
+    fn cache_label(self) -> &'static str {
+        match self {
+            Self::Append => "append",
+            Self::Template => "template",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -393,6 +400,12 @@ fn run_once(
         .or(config.default_agent.as_deref())
         .unwrap_or("claude");
     let agent_config = config.agents.get(agent_name);
+    let harness = agent_doc_core::model_tier::harness_key_for_agent_name(agent_name);
+    let resolved_model = model
+        .or(fm.resolve_harness_model(&harness))
+        .map(|m| agent_doc_core::model_tier::canonical_model_name(m, &harness, &config.model));
+    let prompt_cache_routing_affinity =
+        prompt_cache_routing_affinity(run_mode, agent_name, resolved_model.as_deref());
 
     // Expand frontmatter env vars (applied to the spawned agent child process).
     let expanded_env = if fm.env.is_empty() {
@@ -423,6 +436,16 @@ fn run_once(
         eprintln!("--- Diff ---");
         print!("{}", the_diff);
         eprintln!("--- Prompt would be {} bytes ---", prompt.len());
+        if let Some(blocks) = crate::prompt_cache::PromptCacheBlocks::from_rendered(&prompt) {
+            let replay_key = blocks.replay_key(&prompt_cache_routing_affinity);
+            eprintln!(
+                "--- Prompt cache stable_prefix_sha256={} provider_cache_key={} cache_control={} routing_affinity={} ---",
+                replay_key.stable_prefix_sha256,
+                replay_key.provider_cache_key,
+                replay_key.cache_control,
+                replay_key.routing_affinity
+            );
+        }
         return Ok(RunCycleOutcome {
             dispatched: false,
             queue_synthetic_diff,
@@ -553,10 +576,6 @@ fn run_once(
 
     // Send to agent — use `resume` for agent conversation tracking
     let fork = prompt_fm.resume.is_none();
-    let harness = agent_doc_core::model_tier::harness_key_for_agent_name(agent_name);
-    let resolved_model = model
-        .or(fm.resolve_harness_model(&harness))
-        .map(|m| agent_doc_core::model_tier::canonical_model_name(m, &harness, &config.model));
     let response_result = {
         let _heartbeat = RunHeartbeat::start(
             file,
@@ -1403,6 +1422,18 @@ fn build_prompt(
     crate::prompt_cache::PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
 }
 
+fn prompt_cache_routing_affinity(
+    run_mode: RunMode,
+    agent_name: &str,
+    resolved_model: Option<&str>,
+) -> String {
+    format!(
+        "agent_doc_run:v1;agent={agent_name};model={};mode={}",
+        resolved_model.unwrap_or("<default>"),
+        run_mode.cache_label()
+    )
+}
+
 fn build_prompt_stable_prefix(run_mode: RunMode) -> String {
     let response_format = match run_mode {
         RunMode::Template => {
@@ -2025,6 +2056,144 @@ mod tests {
         assert!(
             prompt.starts_with("<agent_doc_prompt_stable_prefix>"),
             "stable prefix should be the first prompt block:\n{prompt}"
+        );
+    }
+
+    #[test]
+    fn prompt_cache_replay_key_survives_session_churn_and_invalidates_on_durable_contract() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let report = crate::session_accretion::SessionAccretionReport {
+            level: crate::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document closed 3 no-op cycles in the last hour".to_string()],
+            recent_noop_closeouts: 3,
+            ..Default::default()
+        };
+        let base_diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n\
+           complete\n\
+           +do [#pcache-replaygate]\n\
+           +queue_active: true\n";
+        let churn_diff = "--- snapshot\n+++ document\n@@ -1,5 +1,7 @@\n\
+           -complete\n\
+           +working\n\
+           +do [#pcache-replaygate]\n\
+           +<!-- agent:boundary:churn -->\n";
+        let base_doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "complete\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior topic - gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#pcache-replaygate]\n",
+            "- do [#pcache-missrank]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let churn_doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "working\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior topic - gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:churn -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#pcache-replaygate]\n",
+            "- do [#pcache-missrank]\n",
+            "- do [#pcache-ci-history]\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        let base_prompt = build_prompt(
+            Path::new("session.md"),
+            RunMode::Template,
+            &fm,
+            base_diff,
+            base_doc,
+            Some(&report),
+        );
+        let churn_prompt = build_prompt(
+            Path::new("session.md"),
+            RunMode::Template,
+            &fm,
+            churn_diff,
+            churn_doc,
+            Some(&report),
+        );
+        assert_ne!(
+            base_prompt, churn_prompt,
+            "precondition: volatile session churn should change the full prompt"
+        );
+
+        let routing_affinity =
+            prompt_cache_routing_affinity(RunMode::Template, "codex", Some("gpt-5"));
+        let base_key = crate::prompt_cache::PromptCacheBlocks::from_rendered(&base_prompt)
+            .expect("template prompt should expose prompt-cache blocks")
+            .replay_key(&routing_affinity);
+        let churn_key = crate::prompt_cache::PromptCacheBlocks::from_rendered(&churn_prompt)
+            .expect("churn prompt should expose prompt-cache blocks")
+            .replay_key(&routing_affinity);
+
+        assert_eq!(base_key, churn_key);
+        assert_eq!(
+            base_key.cache_control,
+            crate::prompt_cache::PROMPT_CACHE_CONTROL
+        );
+        assert_eq!(
+            base_key.routing_affinity,
+            "agent_doc_run:v1;agent=codex;model=gpt-5;mode=template"
+        );
+
+        let churn_boundary = churn_prompt
+            .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .expect("prompt-cache boundary should be present");
+        for volatile in [
+            "working",
+            "do [#pcache-replaygate]",
+            "agent:boundary:churn",
+            "Accretion reason: document closed 3 no-op cycles in the last hour.",
+        ] {
+            let pos = churn_prompt
+                .find(volatile)
+                .unwrap_or_else(|| panic!("missing volatile fragment {volatile:?}"));
+            assert!(
+                pos > churn_boundary,
+                "volatile fragment {volatile:?} must remain after cache boundary:\n{churn_prompt}"
+            );
+        }
+
+        let append_prompt = build_prompt(
+            Path::new("session.md"),
+            RunMode::Append,
+            &fm,
+            base_diff,
+            base_doc,
+            Some(&report),
+        );
+        let append_same_route_key =
+            crate::prompt_cache::PromptCacheBlocks::from_rendered(&append_prompt)
+                .expect("append prompt should expose prompt-cache blocks")
+                .replay_key(&base_key.routing_affinity);
+        assert_eq!(
+            append_same_route_key.routing_affinity,
+            base_key.routing_affinity
+        );
+        assert_ne!(
+            append_same_route_key.stable_prefix_sha256, base_key.stable_prefix_sha256,
+            "changing the durable response contract should invalidate the stable-prefix fingerprint"
+        );
+        assert_ne!(
+            append_same_route_key.provider_cache_key, base_key.provider_cache_key,
+            "provider cache key must change when durable instructions change"
         );
     }
 

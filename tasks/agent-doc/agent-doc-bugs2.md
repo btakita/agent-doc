@@ -35,7 +35,7 @@ complete
 Compacted content:
 - Archived 1 response topic(s): go
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:574a8ed7 -->
+<!-- agent:boundary:99901f09 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -79,7 +79,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#install-stale-guard] [recommended] #agent-doc-bug Warn when the installed agent-doc binary or cdylib is older than the current submodule HEAD even at the SAME version string. This session found the installed binary (built 13:55) + cdylib (13:53) predated the 14:06 diagnostics commit e9146147 (no version bump), so tmux/JB sessions silently ran a pre-diagnostics binary and the early-ack/live-buffer markers were missing/dormant. Actionable: at preflight/status, compare installed binary+cdylib build time against HEAD commit time and emit a stale-install warning recommending make install. Files: preflight.rs / status.
 - [ ] [#exch-intermix] #agent-doc-bug RESPONSE INTERMIXING / LOSS in agent:exchange — live repro captured THIS session 2026-06-09: a finalize --stream hit "IPC proof insufficient ... invariant=live_prompt_drift_after_preflight" when the operator re-invoked /agent-doc mid-finalize; the pending mutations (backlog/review) landed but the ### Re: response body was LOST (never reached exchange), and the snapshot/visible-file drifted (snapshot 10587b vs file 9437b) so the next commit was refused as "manual cleanup". This is #ipc-crdt-response-drift on the IPC/CRDT closeout path. ROOT-FIX is #pcpconsol (single ordered write queue removes the supervisor/finalize self-race). NEAR-TERM actionable in a FRESH session: when finalize detects live_prompt_drift_after_preflight, auto-recover (reset --from-current --preserve-session -> re-finalize --force-disk) instead of leaving the response lost + commit wedged. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#pcpconsol] ROOT-FIX (priority per operator). Supervisor-in-process consolidation / single-process control plane (spec 08b): make the supervisor an in-process adapter so the session actor owns ONE ordered write queue + ONE controller-owned filesystem watcher; demote plugin WatchService to read-only buffer reporting + thin EDT apply+ack shim. Decomposed into dependency-ordered phases #pcpc1 to #pcpc5 in tasks/agent-doc/plan-supervisor-in-process.md. Run as a FRESH focused session starting at #pcpc1 (NOT a saturated queue-drain). Root-fixes #ipc-crdt-response-drift and R1/R2/R5/R6. Absorbs review #pf15/#pcp3/#pcp4/#pcp7 + the degraded-routing half of #pcp5. Large/multi-day.
 - [ ] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.

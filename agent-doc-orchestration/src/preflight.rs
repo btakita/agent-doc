@@ -1308,11 +1308,15 @@ fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
     })
 }
 
-/// Grace window (seconds) so an artifact built moments before the source commit
-/// — the normal build → install → commit ordering — is not flagged. The real
-/// `#install-stale-guard` failure had an ~11-minute install/commit gap; the
-/// same-cycle gap is seconds, so 60s cleanly separates them.
-const STALE_INSTALL_GRACE_SECS: u64 = 60;
+/// Grace window (seconds) so an artifact built shortly before the source commit
+/// is not flagged. In the normal build → install → verify → commit ordering the
+/// install necessarily predates the commit it covers (the install cannot know
+/// about a commit that follows it), and a careful cycle's install→commit gap can
+/// run a couple of minutes. 5 minutes comfortably covers that while still
+/// catching genuine staleness — the real `#install-stale-guard` failure left the
+/// install ~11 minutes behind a same-version commit, and forgotten reinstalls
+/// leave sessions on hours-old code.
+const STALE_INSTALL_GRACE_SECS: u64 = 300;
 
 /// Pure classifier for `#install-stale-guard`: given the unix timestamp of the
 /// latest source commit and a set of `(label, mtime)` installed artifacts

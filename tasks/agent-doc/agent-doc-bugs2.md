@@ -159,7 +159,34 @@ So the dual-write routed path has not fired yet. Restarting (kill the tmux serve
 **`#pcpc5live` step 2 — what unblocks it.** After you restart and run one finalize cycle, the write path should emit `write_authority gate=dual-write action=routed`. Re-invoke `/agent-doc` on this doc and I'll grep that proof to confirm the routed write queue is actually carrying the real document write (spec 08b step 2). Until then there's no routed event to verify — the env is correct, the live process is just stale.
 
 One caveat unchanged from last turn: this session still has the post-commit working-tree corruption (`#postcommit-ipc-worktree-corruption`) from the live IPC listener. A fresh post-restart session is the clean place to capture the dual-write proof anyway.
-<!-- agent:boundary:103dd260 -->
+
+### Re: continue / do I need to restart IDEA? — opus-4-8
+
+**No restart needed — and `#pcpc5live` step 2 is now proven.** Your shell has `dual-write`, and the write-authority gate is read per-call by whichever binary does the write (`current_gate()` re-reads the env every call), so the CLI write path already routes. Proof landed in `ops.log` this session:
+
+```
+1781047338  write_authority gate=dual-write action=routed
+```
+
+That's the real document write going through the ordered write queue — spec 08b step 2 confirmed (step 1 `gate=shadow action=would-route` was already proven). IDEA's JVM env doesn't gate this; the routing decision happens in the CLI binary, not the editor FFI. So `#pcpc5live` now has only **step 3** left: pcpc5d/e (delete the out-of-process supervisor direct-disk writers + demote the editor WatchService to read-only). That step needs live editor-boundary proof and *is* the supervisor-in-process migration (`tasks/agent-doc/plan-supervisor-in-process.md`, `#pcpc1`→`#pcpc5`) — best run as its own focused session, since it's also the root fix for the post-commit working-tree corruption this session keeps reproducing.
+
+### Re: do [#s760wire] — opus-4-8
+
+I dug into the actual blocker instead of deferring it; it stays open with narrowed scope. The predicate (`ContextResetDecision.shouldClearBeforeDispatch`, unit-tested), the threshold (`clear_threshold_for_doc`), and the `agent_doc_queue_context_reset` opt-in are all shipped. The one missing input is **the live context-usage %** — and `SubmitAction.kt` is a thin dispatcher with no access to it, so per the Shared Foundation pattern this belongs in `route.rs` (which already captures panes), not the plugin.
+
+I captured the real formats from your live panes to see what a parser would face:
+
+| Harness | Footer text | Pattern |
+|---------|-------------|---------|
+| Claude Code (your custom statusline) | `Opus 4.8 ctx:12%` | `ctx:NN%` |
+| Codex | `Context 0% used` | `Context NN% used` |
+
+**The finding that matters:** the `ctx:%` here is *your custom statusLine script*, not stock Claude Code — so a route.rs TUI-scrape keyed to one format would silently do nothing for every other user/config. For a shipped product the robust source is the **session transcript token usage** (Claude's JSONL / Codex's session state) divided by the model context window, not pane-text scraping. That's the concrete remaining design, and it needs a live pane to develop+verify against.
+
+`#s760wire` now reads: *add a harness-aware, transcript-token-based context-% reader to `route.rs`, gate dispatch through `shouldClearBeforeDispatch`, emit the `[s760] clear-decision …` line, send `/clear` when true.* CLI-side, so no JB install from you.
+
+I'm not auto-looping the rest of the queue in this session — it reproduces the IPC working-tree corruption on every commit (restored from HEAD again this cycle), and `#s760wire` + `#pcpc5live` step 3 both want a clean pane to verify against. The dual-write proof and this design finding are the real wins here; a fresh session is where the route.rs reader + supervisor migration get built and verified.
+<!-- agent:boundary:05ec673f -->
 <!-- /agent:exchange -->
 
 ## Queue

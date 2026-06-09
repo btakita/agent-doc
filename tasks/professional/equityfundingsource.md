@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,31 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): A loan application should not be approvable without the full application
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:47bd7eca -->
+
+### Re: "Accept and send to TMO" error shown in green; should be disabled when incomplete — opus-4-8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a has an error "TMO writeback not sent: draft applications cannot be sent to TMO" in green when I clicked "Accept and send to TMO". This should be disabled if the application is incomplete.
+
+
+Fixed the admin UI. Committed + pushed to EFS `main` (`b731aa4`); **not deployed** (preset was `#spec-test-commit-push`, so the live workers.dev site is unchanged until deploy).
+
+What you hit: the `cda67748…` application is a **draft**, so the backend correctly refused the writeback — but the failure message *"TMO writeback not sent: draft applications cannot be sent to TMO"* was rendered in the **green success-note style**, and the button was always clickable, so the only feedback was that misleading post-click message.
+
+Three fixes in the admin loan-application detail (`full_applications.tsx`):
+- **"Accept and send to TMO" is now disabled** whenever the application is incomplete, driven by `full_application_approval_blockers_(detail)` — a pure client mirror of the server-side gate I added in the previous cycle. The disabled button lists exactly what's missing inline (e.g. *"missing: submitted full application, declarations, e-signature"*), so you see why up front instead of after a click.
+- **A failed writeback now renders as a red inline error**, not a green success note.
+- **Decision errors render inline** in the detail view instead of replacing the whole page (the full-screen red card is now only for load failures).
+
+The server's `application_approval_blockers_` stays the authoritative gate; the client helper is just the affordance, kept in sync with it (same required set: submitted status, borrower name + email, complete current + subject-property addresses, loan amount, declarations, e-signature).
+
+**Verification:** `bun run check` green — 387 tests pass (added behavioral coverage of the client blocker helper + source assertions for the disabled button and red-error styling).
+
+**Spec:** apply4 build-plan P6 documents the UI affordance.
+
+Deploy is still queued (backlog **#xyp5**, covering both the backend `b136519` and this UI `b731aa4`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push both live and smoke-test against the `cda67748…` draft.
+<!-- agent:boundary:fe454474 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +69,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- https://equityfundingsource.brian-takita.workers.dev/loan-applications/cda67748-3a99-49b7-95b4-cdfede0fcb7a has an error "TMO writeback not sent: draft applications cannot be sent to TMO" in green when I clicked "Accept and send to TMO". This should be disabled if the application is incomplete.
 <!-- /agent:queue -->
 
 ## Backlog

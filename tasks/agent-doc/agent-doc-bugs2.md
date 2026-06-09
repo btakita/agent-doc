@@ -211,12 +211,18 @@ Stopping here by your call ("Stop & restart for `#lvbatch`"). The queue can't au
 **`#tmux-switch-lag` is scoped for the fresh session.** I located the exact culprit: `safe_passive_focus_actor_after_sync_lock` (`sync.rs:700`) calls `tmux.select_pane()` on the actor pane, which raises the stash frame when that pane is still stashed at select time — before reconcile moves it into `0:agent-doc`. Fix is the move-before-select reorder the backlog already describes + SimWorld ordering coverage. Noted so the fresh session starts from the line, not a search.
 
 **Clean handoff:** restart (clears the `#postcommit-ipc-worktree-corruption` churn), then drive `#lvbatch` under real typing load — I'll check logs and close `#saevon`, `#exch-intermix-verify`, and `#pcpc5live` step 3. Everything committed this turn (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, this finding) is correct on `main`. The go-mode queue stays as-is so the fresh session resumes the drain.
-<!-- agent:boundary:602a08a4 -->
+
+### Re: queue halt — opus-4-8
+
+Halted the queue to make your "Stop & restart" stick. The auto-loop kept re-firing `#saevon` because go-mode stayed active (frontmatter `queue: start` + `go` marker) and the session wasn't restarted — so each `/agent-doc` re-synced the same blocked head. I set the queue marker to `stop`; preflight canonicalized it (`queue: stop` in frontmatter, activation token stripped), and `queue_active` is now `false`. The Claude-Code auto-loop's `queue_active == false` skip condition now terminates it, so re-invoking won't nag the blocked items anymore.
+
+Nothing else changed — all this turn's real work is on `main` (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, the `#exch-intermix` auto-recovery evidence, the `#tmux-switch-lag` culprit at `sync.rs:700`). When you're ready, restart (clears the `#postcommit-ipc-worktree-corruption` churn) and re-enable go-mode (`go` on the queue marker, or run with `queue: start`) in the clean session to drive `#lvbatch`. I'll check the logs and close the live-gated items there.
+<!-- agent:boundary:0f1c69db -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~:pushpin: do [#opsproof-falsepos]~~
 - ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
 - ~~:pushpin: do [#pcpc5live]~~
@@ -228,6 +234,7 @@ k- :round_pushpin: do [#lvbatch]
 - :round_pushpin: do [#exch-intermix-verify]
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - ~~do [#dropqueue-consumed-falsecount]~~
+- :round_pushpin: do [#lvbatch]
 - Automatically add the env vars to ~/ so I can test. I can restart.
 <!-- /agent:queue -->
 ###

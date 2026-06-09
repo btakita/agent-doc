@@ -438,12 +438,25 @@ fn run_once(
         eprintln!("--- Prompt would be {} bytes ---", prompt.len());
         if let Some(blocks) = crate::prompt_cache::PromptCacheBlocks::from_rendered(&prompt) {
             let replay_key = blocks.replay_key(&prompt_cache_routing_affinity);
+            let adapter_state = if prompt_fm.resume.is_some() {
+                "resumed"
+            } else {
+                "fresh"
+            };
+            let current_cost = crate::prompt_cache::PromptCacheSessionCostSample::from_replay_key(
+                &replay_key,
+                adapter_state,
+            );
             eprintln!(
                 "--- Prompt cache stable_prefix_sha256={} provider_cache_key={} cache_control={} routing_affinity={} ---",
                 replay_key.stable_prefix_sha256,
                 replay_key.provider_cache_key,
                 replay_key.cache_control,
                 replay_key.routing_affinity
+            );
+            eprintln!(
+                "--- Prompt cache session_cost {} ---",
+                crate::prompt_cache::render_cache_miss_ranking(None, &current_cost)
             );
         }
         return Ok(RunCycleOutcome {

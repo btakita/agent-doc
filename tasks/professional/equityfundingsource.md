@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -72,7 +72,16 @@ Done and deployed. The root issue: `PortalModal` had `overflow:hidden` with **no
 **Verification:** `bun run check` green — full suite passes (added 2 layout tests), `build` + `build:worker` clean. **Deployed** to production (Version `4298b450-3a7d-480d-92ef-1030fcf7d875`, no DB migrations). Smoke test: `/`, `/apply` → 200; `/portal-admin/pipeline` → 303→login.
 
 To see it: open `/portal-admin/pipeline`, click a lead card — the dialog is wider, the data sits in two columns, and on a short window it scrolls inside the dialog instead of overflowing.
-<!-- agent:boundary:f84ee065 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Already live. The wider/shorter dialog change was deployed earlier this turn as part of completing it — production is running **Version `4298b450-3a7d-480d-92ef-1030fcf7d875`** (EFS `3d90502`, pointer `658df787e`), with no commits since, so this `deploy` is already satisfied. No redundant redeploy. Smoke test was green (`/`, `/apply` → 200; `/portal-admin/pipeline` → 303→login). Queue drained.
+<!-- agent:boundary:8773f7f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,8 +89,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~Make the dialog wider and shorter. ![img_4.png](img_4.png) Use a scrollbar for short monitors. Make sure this works on mobile.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

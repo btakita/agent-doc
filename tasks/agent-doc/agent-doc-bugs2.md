@@ -30,69 +30,17 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-050025.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-055644.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#ipc-early-ack]
+- Archived 2 response topic(s): do [#ipc-degraded-prefers-file-ipc]; do [#loop-guard-exchange-node-granularity]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#ipc-degraded-prefers-file-ipc] — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
-
-
-Done — Phase 3 of `plan-ipc-transport-reliability.md`. A degraded session now routes writes through the file-IPC patch queue instead of a raw disk write, so it never manufactures an IDEA "File Cache Conflict".
-
-**Root cause:** a latched-degraded socket only means the plugin's *socket* listener is wedged. The file-IPC patch queue uses a *separate* plugin file watcher that is almost always still alive. The old code conflated the two — on degrade it returned straight to a raw foreign disk write (the exact thing IntelliJ flags as a cache conflict on the open buffer).
-
-**Fix (all in `write.rs`):**
-- `try_ipc` no longer early-returns to disk on degrade. It skips only the wedged socket attempt and falls through to the file-IPC patch queue (`write_ipc_and_poll`), where the plugin applies via the Document API.
-- The socket-ack-timeout arm that *newly* latches degraded also falls through to file IPC instead of returning.
-- `run_stream` always calls `try_ipc` when the plugin is installed (dropped the `!ipc_direct_disk_degraded` gate + its dead direct-disk branch), so the stream/finalize path inherits the routing.
-- Raw disk write stays the **true last resort** — reached only on the existing IPC-timeout (`exit 75`) path when file IPC *also* fails to deliver. The fire-and-forget `reposition_boundary` signal keeps its direct-disk-skip (no response body).
-
-**Verification:** `make check` green (clippy clean). New tests: `try_ipc_prefers_file_ipc_when_socket_degraded` (no plugin → routes through file IPC, times out, disk last resort) and `try_ipc_degraded_succeeds_via_file_ipc_when_plugin_consumes` (live file watcher → degraded write succeeds via plugin, no disk write). FlowCore `reason=` budget bumped 29→30 for the audited prefer-file-ipc diagnostic. Spec: `process-topology.md` R3 ✅.
-
-**Shipped:** `cargo install` + `cargo build --release` both rebuilt 0.34.0. Submodule pushed (`0b931d04`); superproject pointer + plan advanced. CI in progress for the pushed commit — local suite is green.
-
-Note: this is the file-IPC-routing half of review item `#pcp5`; the early-ack Kotlin half (`#ipc-early-ack`, Phase 2) is still its gated remainder and needs live IntelliJ verification.
-
-### Re: do [#loop-guard-exchange-node-granularity] — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#loop-guard-exchange-node-granularity]
-
-
-Done. Narrowed the loop-guard's exchange affectedness from whole-component to the active tail, so editing an OLD response block no longer preempts the auto-loop drain.
-
-**The bug:** `TurnScope` held `exchange:0` (whole component) in both read and write sets. Because a component-level address overlaps *any* node in that component, an edit to an old/unrelated bulleted exchange block classified `input_affecting` → `turn_affected` → the drain halted.
-
-**Empirical grounding (before touching the classifier):** I probed `diff_node_events` on realistic exchange edits. Findings that shaped the fix:
-- A prose user prompt or prose edit emits **0 node events** (only bulleted lines decompose into exchange item nodes) — so prose was never driving this path anyway.
-- A new **bulleted** prompt appended at the tail → `Insert` at index = node-count.
-- An edit to an **old bullet** → re-inserts at its original low index.
-
-So a simple **node-index floor** cleanly separates tail appends (index ≥ floor → affects the turn) from old-block edits (index < floor → independent), with no false negative for genuine mid-loop prompts.
-
-**Implementation:**
-- `TurnScope` gains `exchange_tail_floor` (= count of exchange nodes at turn start; preflight computes it via `all_item_nodes`). `for_driver_with_exchange_tail` sets it; `for_driver` stays a `None` wrapper.
-- `DocumentOp` gains `node_index` (after-index for inserts/replaces, before-index for removes), threaded from the semantic node event.
-- `classify_op` takes the op index; for an exchange op with a floor set, only index ≥ floor is in scope. `LiveBuffer` tail drift stays `provenance_spoofed`. No floor (or non-exchange) → unchanged whole-component behavior.
-
-**Verification:** `make check` green (4110 tests, clippy clean). New deterministic coverage: `turn_scope::tests::exchange_tail_floor_*`, `classify_cycle_narrows_exchange_old_edit_but_keeps_tail`, and an end-to-end `preflight::tests::exchange_old_block_edit_is_independent_but_tail_append_affects`. Spec updated (`specs/02-document-format.md`); plan item marked DONE.
-
-**Shipped:** `cargo install` + `cargo build --release` rebuilt 0.34.0. Submodule pushed (`d6bf54a8`, CI queued); superproject pointer + plan advanced. Local suite is green.
-<!-- agent:boundary:b7395c43 -->
+<!-- agent:boundary:ae1c029e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#ipc-degraded-prefers-file-ipc]~~
-- ~~:round_pushpin: do [#loop-guard-exchange-node-granularity]~~
 - :round_pushpin: do [#queue-completed-items-escape-below-component]
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]
 - :round_pushpin: do [#stale-capture-captured-only-drift]

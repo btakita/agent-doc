@@ -246,7 +246,25 @@ Shipped the binary foundation (Phase 1) and gated the editor behavior (Phase 2) 
 **Phase 2 (gated → review) — the editor behavior needs live IntelliJ:** the JB plugin must read its live Claude Code context-usage **percentage** (a signal only the editor has), compare it to `report.clear_threshold`, and pre-emptively run `agent-doc session clear` before the next `Run Agent Doc` dispatch when exceeded (under the `agent_doc_queue_context_reset` opt-in). That's a JB UI-action behavior verifiable only in a live IDE, so I narrowed `#clear-opt-in-threshold` to Phase 2 and gated it (pairs with `#live-verify-batch`). This is the honest split: the threshold config is done and tested; the context-% trigger is genuinely blocked on live-editor verification, not effort.
 
 **CI:** cycles 1–6 are all **green**; this push kicked `27192480789` (pending). Closed from local evidence.
-<!-- agent:boundary:1ccfefb6 -->
+
+### Re: do [#console-input-accumulation] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#console-input-accumulation]
+
+
+Assessed the binary/route coverage and gated the genuine residual on live IntelliJ — no headlessly-verifiable binary gap remains.
+
+**The three asks are already enforced on the binary/route dispatch path:**
+- *"console idle before sending"* → `route` runs a quiescence/idle gate; `dispatch_only_blocker_reason` blocks dispatch into a busy pane.
+- *"one command at a time"* → on a busy pane, route **queues the pending dispatch into `agent:queue` instead of injecting a duplicate trigger** (`enqueue_route_dispatch_prompt`).
+- *"never schedule a duplicate when one is pending"* → that enqueue is `already_present`-deduped; `session clear` (the `/clear` path) has its own busy-cue fail-closed gate.
+
+**Residual (gated → review, needs live IntelliJ):** the accumulation the operator observed is below route's `agent:queue` dedup — at the JB plugin's **console-keystroke** layer. The `Run Agent Doc` (SubmitAction) and `Clear Session Context` actions don't coalesce a console invocation when one is already pending for the doc, so rapidly-fired actions (auto-loop + manual) can still stack `/agent-doc` + `/clear` keystrokes into the terminal. The fix is a plugin-side per-doc in-flight-invocation guard + console-idle pre-send check — a JB UI behavior verifiable only in a live IDE. Narrowed `#console-input-accumulation` to that residual and gated it (pairs with `#live-verify-batch`). Honest split: the dispatch-level protection exists and is tested; the console-keystroke coalescing is genuinely live-editor-blocked.
+
+**CI:** cycles 1–6 green; cycle 8 (Phase-1 config) run was pending at last check. Closed from local evidence.
+<!-- agent:boundary:033a5760 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -260,7 +278,7 @@ Shipped the binary foundation (Phase 1) and gated the editor behavior (Phase 2) 
 - ~~:round_pushpin: do [#stale-capture-captured-only-drift]~~
 - ~~:pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]~~
 - ~~:pushpin: :round_pushpin: do [#clear-opt-in-threshold]~~
-- :pushpin: :round_pushpin: do [#console-input-accumulation]
+- ~~:pushpin: :round_pushpin: do [#console-input-accumulation]~~
 - :round_pushpin: do [#nm1x-livebuf-content]
 - :round_pushpin: do [#vbk7]
 - do [#exit75-done-reap-not-atomic]

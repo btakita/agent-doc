@@ -12,8 +12,10 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Please create a contact for andreas-kovountzis https://www.linkedin.com/in/andreas-kavountzis-88a87310/
 
-<!-- agent:boundary:47b52974 -->
+Use corky gpu to transcribe + diarize [2026-06-02 13-00-37-compressed.mp4](../../../../../Videos/2026-06-02%2013-00-37-compressed.mp4)
+<!-- agent:boundary:c7673973 -->
 <!-- /agent:exchange -->
 
 ## Queue

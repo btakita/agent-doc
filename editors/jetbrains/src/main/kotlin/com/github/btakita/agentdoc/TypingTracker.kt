@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import java.security.MessageDigest
 
 /**
  * Tracks document changes and provides debounce via the FFI shared library.
@@ -27,12 +26,13 @@ object TypingTracker : DocumentListener {
         val lib = AgentDocLib.get()
         if (lib != null) {
             val text = event.document.text
-            lib.agent_doc_document_changed_digest(
-                vFile.path,
-                text.toByteArray(Charsets.UTF_8).size.toLong(),
-                sha256HexUtf8(text),
-            )
-            LOG.debug("[native] document_changed: ${vFile.name}")
+            // #pcp6: send the full editor buffer content for .md session documents
+            // so the CLI visible-write reconcile guard can positively confirm the
+            // editor buffer equals on-disk content (no unsaved edit ahead of disk)
+            // instead of inferring from a len/hash digest. The text stays local to
+            // the project .agent-doc/ state dir.
+            lib.agent_doc_document_changed_digest_content(vFile.path, text)
+            LOG.debug("[native] document_changed (content): ${vFile.name}")
         } else {
             // Fallback: track locally if FFI unavailable
             lastChangeMs = System.currentTimeMillis()
@@ -82,9 +82,4 @@ object TypingTracker : DocumentListener {
     // Fallback local tracking (used when FFI unavailable or file untracked)
     @Volatile
     private var lastChangeMs: Long = 0
-
-    private fun sha256HexUtf8(content: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(content.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

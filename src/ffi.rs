@@ -222,6 +222,34 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest(
     agent_doc_orchestration::debounce::document_changed_with_digest(path, len, hash);
 }
 
+/// Record a document change plus the editor's FULL visible buffer content (#pcp6).
+///
+/// Unlike [`agent_doc_document_changed_digest`], this sends the buffer text so the
+/// CLI visible-write reconcile guard can positively confirm the editor buffer
+/// equals on-disk content (no unsaved edit ahead of disk) instead of inferring
+/// from a len/hash digest plus the mtime/provenance heuristics. Plugins use this
+/// for `.md` session documents where scope-classifying a genuine unsaved editor
+/// edit matters; the text stays local to the project `.agent-doc/` state dir.
+///
+/// # Safety
+///
+/// `file_path` and `content` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
+    file_path: *const c_char,
+    content: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+    agent_doc_orchestration::debounce::document_changed_with_content(path, text);
+}
+
 /// Check if the document has been tracked (at least one `document_changed` call recorded).
 ///
 /// Returns `true` if the file has been tracked, `false` if never seen.

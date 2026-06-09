@@ -112,6 +112,20 @@ pub fn document_changed_with_digest(file: &str, content_len: usize, content_hash
     }
 }
 
+/// Record a document change and the editor-visible buffer digest WITH full
+/// content (#pcp6). Editor integrations that can cheaply read the buffer text
+/// prefer this so the visible-write reconcile guard can positively confirm the
+/// editor buffer equals on-disk content.
+pub fn document_changed_with_content(file: &str, content: &str) {
+    document_changed(file);
+    if let Err(e) = record_live_buffer_digest_content(file, content) {
+        eprintln!(
+            "[debounce] live buffer content digest write failed for {:?}: {}",
+            file, e
+        );
+    }
+}
+
 /// Compute the SHA-256 hex digest used for live-buffer sidecars.
 pub fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -179,12 +193,21 @@ const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
 const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
 
 /// Latest editor-visible buffer digest for a document.
+///
+/// `content` (#pcp6) is the editor's full buffer text when the plugin reports it
+/// (`agent_doc_document_changed_digest_content`); `None` for the len/hash-only
+/// digest path. When present it lets `live_buffer_diverges_from_content`
+/// positively confirm the editor buffer equals on-disk content (no unsaved edit
+/// ahead of disk) instead of inferring from len/hash + the mtime/provenance
+/// heuristics.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LiveBufferSnapshot {
     pub path: String,
     pub len: usize,
     pub hash: String,
     pub timestamp_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 /// Write-provenance record for agent-doc's own most-recent disk write to a
@@ -311,11 +334,33 @@ fn write_typing_indicator(file: &str) -> std::io::Result<()> {
     std::fs::write(&typing_path, now.to_string())
 }
 
-/// Record the latest editor-visible buffer digest for the given document path.
+/// Record the latest editor-visible buffer digest (len/hash only) for the given
+/// document path.
 pub fn record_live_buffer_digest(
     file: &str,
     content_len: usize,
     content_hash: &str,
+) -> std::io::Result<()> {
+    write_live_buffer_snapshot(file, content_len, content_hash.to_ascii_lowercase(), None)
+}
+
+/// Record the latest editor-visible buffer digest WITH the full buffer content
+/// (#pcp6). The plugin reports the editor's text so the visible-write reconcile
+/// guard can positively confirm the editor buffer equals on-disk content.
+pub fn record_live_buffer_digest_content(file: &str, content: &str) -> std::io::Result<()> {
+    write_live_buffer_snapshot(
+        file,
+        content.len(),
+        content_hash(content),
+        Some(content.to_string()),
+    )
+}
+
+fn write_live_buffer_snapshot(
+    file: &str,
+    content_len: usize,
+    hash: String,
+    content: Option<String>,
 ) -> std::io::Result<()> {
     let live_path = live_buffer_snapshot_path(file);
     if let Some(parent) = live_path.parent() {
@@ -324,11 +369,12 @@ pub fn record_live_buffer_digest(
     let snapshot = LiveBufferSnapshot {
         path: file.to_string(),
         len: content_len,
-        hash: content_hash.to_ascii_lowercase(),
+        hash,
         timestamp_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis(),
+        content,
     };
     let encoded = serde_json::to_string(&snapshot)?;
     std::fs::write(&live_path, encoded)
@@ -429,6 +475,20 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
     let expected_len = content.len();
     let expected_hash = content_hash(content);
     if snapshot.len == expected_len && snapshot.hash.eq_ignore_ascii_case(&expected_hash) {
+        return None;
+    }
+
+    // #pcp6 content-based positive confirmation: when the plugin reported the
+    // editor's full buffer text and it exactly equals the current on-disk
+    // content, the editor holds no unsaved edits *ahead* of disk. A len/hash
+    // mismatch against `content` (the caller's expected/merge baseline) is then a
+    // stale comparison, not a live user edit. This is definitive (full content,
+    // not the len/hash + mtime heuristics) and only suppresses when the editor
+    // provably matches disk, so it can never mask a genuine unsaved edit.
+    if let Some(ref editor_text) = snapshot.content
+        && let Ok(disk) = std::fs::read_to_string(file)
+        && *editor_text == disk
+    {
         return None;
     }
 
@@ -913,6 +973,66 @@ mod tests {
         assert!(
             live_buffer_diverges_from_content(&doc_str, "saved").is_some(),
             "genuine unsaved edit reported after agent-doc's write must stay protected"
+        );
+    }
+
+    #[test]
+    fn live_buffer_content_digest_roundtrips() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("content-roundtrip.md");
+        std::fs::write(&doc, "hello").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        document_changed_with_content(&doc_str, "hello");
+        let snap = live_buffer_snapshot(&doc_str).expect("snapshot recorded");
+        assert_eq!(snap.content.as_deref(), Some("hello"));
+        assert_eq!(snap.len, 5);
+        assert_eq!(snap.hash, content_hash("hello"));
+    }
+
+    /// #pcp6: when the editor reports its full buffer content and it exactly
+    /// equals on-disk content, the editor holds no unsaved edits — divergence is
+    /// suppressed even against a different caller `content` baseline, and even
+    /// when len/hash differ from that baseline.
+    #[test]
+    fn live_buffer_content_matching_disk_suppresses_divergence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("content-match.md");
+        std::fs::write(&doc, "saved disk content").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor reports its buffer == current disk content.
+        document_changed_with_content(&doc_str, "saved disk content");
+
+        // The caller's expected/merge baseline differs (stale), so len/hash do not
+        // match it — but the editor provably matches disk, so no live divergence.
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "a stale expected merge baseline").is_none(),
+            "editor buffer equal to disk must suppress divergence regardless of the caller baseline"
+        );
+    }
+
+    /// #pcp6 complement: when the editor's reported content is ahead of disk
+    /// (genuine unsaved edit), the content path must NOT suppress — the edit stays
+    /// protected.
+    #[test]
+    fn live_buffer_content_ahead_of_disk_still_diverges() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("content-ahead.md");
+        std::fs::write(&doc, "saved disk content").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor holds unsaved edits ahead of disk.
+        document_changed_with_content(&doc_str, "saved disk content plus a real unsaved edit");
+
+        // Disk still holds the saved content; the editor content != disk, so the
+        // #pcp6 path does not fire and the genuine edit stays protected.
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved disk content").is_some(),
+            "genuine unsaved edit ahead of disk must not be suppressed by the content path"
         );
     }
 

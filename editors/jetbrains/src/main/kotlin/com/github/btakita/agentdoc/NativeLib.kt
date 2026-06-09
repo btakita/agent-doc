@@ -216,6 +216,13 @@ interface AgentDocLib : Library {
     /** Record a document change event plus the editor-visible buffer digest. */
     fun agent_doc_document_changed_digest(file_path: String, content_len: Long, content_hash: String)
 
+    /**
+     * Record a document change plus the editor's FULL visible buffer content (#pcp6).
+     * Lets the CLI confirm the editor buffer equals on-disk content (no unsaved edit
+     * ahead of disk). Text stays local to the project `.agent-doc/` state dir.
+     */
+    fun agent_doc_document_changed_digest_content(file_path: String, content: String)
+
     /** Non-blocking idle check. Returns true if no document_changed event within debounce_ms. */
     fun agent_doc_is_idle(file_path: String, debounce_ms: Long): Boolean
 

@@ -217,6 +217,12 @@ pub struct ProjectConfig {
     /// `/clear` that churns the session or is rejected mid-turn.
     #[serde(default, alias = "queue_context_reset")]
     pub agent_doc_queue_context_reset: Option<bool>,
+    /// Project-default context-usage percentage (0–100) at or above which an
+    /// opted-in editor pre-emptively runs `/clear` (`#clear-opt-in-threshold`).
+    /// A per-document frontmatter `agent_doc_clear_threshold` takes precedence;
+    /// absent here too, the built-in default of 50 applies.
+    #[serde(default, alias = "clear_threshold")]
+    pub agent_doc_clear_threshold: Option<u8>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,

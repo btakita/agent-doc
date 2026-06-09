@@ -71,6 +71,11 @@ pub struct SessionAccretionReport {
     pub recent_restart_count: usize,
     pub recent_session_loss_count: usize,
     pub startup_miss_active: bool,
+    /// Resolved editor `/clear` opt-in threshold (context-usage %, 0–100) for
+    /// this document (`#clear-opt-in-threshold`). The editor compares its live
+    /// context-usage percentage against this value to decide a pre-emptive clear.
+    #[serde(default)]
+    pub clear_threshold: u8,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -140,6 +145,32 @@ pub fn queue_context_reset_opted_in(file: &Path) -> bool {
     crate::project_config_io::load_project_for_doc(file)
         .agent_doc_queue_context_reset
         .unwrap_or(false)
+}
+
+/// Built-in default for the editor `/clear` opt-in threshold when neither the
+/// document frontmatter nor the project config sets one.
+pub const DEFAULT_CLEAR_THRESHOLD: u8 = 50;
+
+/// Resolve the context-usage percentage (0–100) at or above which an opted-in
+/// editor should pre-emptively run `/clear` (`#clear-opt-in-threshold`).
+///
+/// Resolution order mirrors [`queue_context_reset_opted_in`]: a per-document
+/// frontmatter `agent_doc_clear_threshold` takes precedence, then the project
+/// config `.agent-doc/config.toml`, then [`DEFAULT_CLEAR_THRESHOLD`]. The value
+/// is clamped to `0..=100`. The binary owns this threshold so every editor shares
+/// it; the context-percentage comparison and the actual pre-emptive clear remain
+/// the editor's responsibility.
+pub fn clear_threshold_for_doc(file: &Path) -> u8 {
+    if let Ok(content) = std::fs::read_to_string(file)
+        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+        && let Some(threshold) = fm.clear_threshold
+    {
+        return threshold.min(100);
+    }
+    crate::project_config_io::load_project_for_doc(file)
+        .agent_doc_clear_threshold
+        .unwrap_or(DEFAULT_CLEAR_THRESHOLD)
+        .min(100)
 }
 
 pub fn queue_context_reset_reason(
@@ -348,6 +379,7 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
         recent_restart_count,
         recent_session_loss_count,
         startup_miss_active,
+        clear_threshold: clear_threshold_for_doc(file),
         reasons,
         guidance,
     })
@@ -480,6 +512,7 @@ fn inspect_at_with_context(
         recent_restart_count,
         recent_session_loss_count,
         startup_miss_active,
+        clear_threshold: clear_threshold_for_doc(file),
         reasons,
         guidance,
     })
@@ -758,6 +791,42 @@ mod tests {
         let on = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_on, doc_on) = setup_doc(on);
         assert!(queue_context_reset_opted_in(&doc_on), "frontmatter opt-in honored");
+    }
+
+    #[test]
+    fn clear_threshold_defaults_to_50_and_honors_frontmatter() {
+        // #clear-opt-in-threshold: the editor /clear opt-in threshold resolves
+        // from frontmatter, then project config, then the built-in default of 50.
+        let base = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir_d, doc_d) = setup_doc(base);
+        assert_eq!(
+            clear_threshold_for_doc(&doc_d),
+            DEFAULT_CLEAR_THRESHOLD,
+            "unconfigured threshold defaults to 50"
+        );
+
+        let fm70 = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 70\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir_70, doc_70) = setup_doc(fm70);
+        assert_eq!(
+            clear_threshold_for_doc(&doc_70),
+            70,
+            "frontmatter agent_doc_clear_threshold is honored"
+        );
+
+        // An out-of-range value is clamped to 100.
+        let fm_over = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 150\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir_o, doc_o) = setup_doc(fm_over);
+        assert_eq!(clear_threshold_for_doc(&doc_o), 100, "threshold clamps to 100");
+    }
+
+    #[test]
+    fn accretion_report_surfaces_clear_threshold() {
+        // The resolved threshold is surfaced on the SessionAccretionReport so the
+        // editor (which reads preflight output) can compare its live context %.
+        let fm = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 65\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
+        let (_dir, doc) = setup_doc(fm);
+        let report = inspect(&doc).unwrap();
+        assert_eq!(report.clear_threshold, 65, "report carries the resolved threshold");
     }
 
     #[test]

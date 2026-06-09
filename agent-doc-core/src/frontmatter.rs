@@ -496,6 +496,19 @@ pub struct Frontmatter {
         rename = "agent_doc_queue_context_reset"
     )]
     pub queue_context_reset: Option<bool>,
+    /// Context-usage percentage (0–100) at or above which an opted-in editor
+    /// (JB `Run Agent Doc`) pre-emptively runs `/clear` before the next dispatch
+    /// (`#clear-opt-in-threshold`). Resolution: this frontmatter value, then the
+    /// project config `.agent-doc/config.toml`, then the built-in default of 50.
+    /// The threshold value is owned by the binary so all editors share it; the
+    /// context-percentage comparison and the actual pre-emptive clear are the
+    /// editor's responsibility.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_clear_threshold"
+    )]
+    pub clear_threshold: Option<u8>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -1872,6 +1885,7 @@ mod tests {
             links: vec![],
             auto_compact: None,
             queue_context_reset: None,
+            clear_threshold: None,
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,

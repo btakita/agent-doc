@@ -13045,6 +13045,7 @@ mod tests {
                 recent_restart_count: 0,
                 recent_session_loss_count: 0,
                 startup_miss_active: false,
+                clear_threshold: 50,
                 reasons: vec!["exchange has grown".to_string()],
                 guidance: vec!["Run `agent-doc compact session.md --commit`.".to_string()],
             }),

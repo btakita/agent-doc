@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -101,7 +101,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js out/promptPolling.test.js",
+    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js out/promptPolling.test.js out/crossSession.test.js",
     "package": "vsce package",
     "publish": "vsce publish"
   },

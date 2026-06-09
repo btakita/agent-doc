@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor plugins render a choice dialog on a cross-session claim reject
+  (`#jb-claim-cross-session`, plugin half).** Building on the binary
+  `cross-session-reject` marker, the JetBrains "Claim for Tmux Pane" action
+  (`ClaimAction`, plugin 0.2.156) and the VS Code claim command
+  (`crossSession` + `extension.ts`, 0.2.24) now parse the marker
+  (`parseCrossSessionReject`) and prompt **Force Claim** (`claim --force`) /
+  **Switch Project Session** (`session set <pane_session>` then re-claim) /
+  **Cancel** instead of surfacing the raw exit-1. Unit coverage:
+  `ClaimActionTest` (JB) and `crossSession.test.ts` (VS Code), each covering
+  ordered/unordered/missing-field/no-marker parsing. Live click-through
+  verification against a genuinely cross-session pane remains gated on a live
+  IntelliJ/VS Code session (`#xkpf`). Plan:
+  `tasks/agent-doc/plan-jb-claim-cross-session.md`.
+
 - **Agent prompts now expose a stable prompt-cache prefix
   (`#pcache-boundary`).** Direct `run` prompts and Codex owner-pane queue
   continuations now render through a shared prompt-cache boundary helper: stable

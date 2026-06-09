@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import * as native from './native';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
+import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildBusySessionRestartBlockedMessage,
@@ -877,9 +878,12 @@ async function claimActionInternal(force: boolean): Promise<void> {
     }
     commandRunning = true;
 
+    let crossSession: CrossSessionReject | undefined;
+    let recoveryCtx: { cwd: string; rel: string; position?: string } | undefined;
     try {
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const split = detectSplit(editor);
+        recoveryCtx = { cwd, rel, position: split.position };
         const args = ['claim', rel];
         if (force) {
             args.push('--force');
@@ -893,6 +897,74 @@ async function claimActionInternal(force: boolean): Promise<void> {
         showHint(output || `${actionVerb} ${rel} (pos=${split.position || 'none'})`);
 
         // Trigger silent layout sync after claiming
+        await syncLayoutInternal(cwd, false, true);
+    } catch (err: any) {
+        // A cross-session reject carries a structured marker (claim.rs); branch to a
+        // choice dialog instead of surfacing the raw exit-1. Force claims can't
+        // cross-session-reject, so only parse on the non-force path.
+        const reject = force ? undefined : parseCrossSessionReject(err?.message ?? '');
+        if (reject) {
+            crossSession = reject;
+        } else {
+            showError(`claim failed: ${err.message}`);
+        }
+    } finally {
+        commandRunning = false;
+    }
+
+    // Run the dialog/recovery after commandRunning is cleared so the re-claim can re-enter.
+    if (crossSession && recoveryCtx) {
+        await handleCrossSessionReject(recoveryCtx.cwd, recoveryCtx.rel, recoveryCtx.position, crossSession);
+    }
+}
+
+/** Prompt Force Claim / Switch Project Session / Cancel on a cross-session reject. */
+async function handleCrossSessionReject(
+    cwd: string,
+    rel: string,
+    position: string | undefined,
+    reject: CrossSessionReject,
+): Promise<void> {
+    const choice = await vscode.window.showWarningMessage(
+        `Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's ` +
+            `configured session is '${reject.configured}'. How do you want to claim it?`,
+        { modal: true },
+        'Force Claim',
+        'Switch Project Session',
+    );
+    if (choice === 'Force Claim') {
+        await reclaimAfterCrossSession(cwd, rel, position, { force: true });
+    } else if (choice === 'Switch Project Session') {
+        await reclaimAfterCrossSession(cwd, rel, position, { switchTo: reject.paneSession });
+    }
+    // undefined (Esc / dismiss) => Cancel, leave the file unclaimed.
+}
+
+/** Force-claim, or switch the configured session then claim, after a cross-session reject. */
+async function reclaimAfterCrossSession(
+    cwd: string,
+    rel: string,
+    position: string | undefined,
+    opts: { force?: boolean; switchTo?: string },
+): Promise<void> {
+    if (commandRunning) {
+        showHint('Command already in progress');
+        return;
+    }
+    commandRunning = true;
+    try {
+        if (opts.switchTo) {
+            await runCli(['session', 'set', opts.switchTo], cwd);
+        }
+        const args = ['claim', rel];
+        if (opts.force) {
+            args.push('--force');
+        }
+        if (position) {
+            args.push('--position', position);
+        }
+        const output = await runCli(args, cwd);
+        showHint(output || `Claimed ${rel}`);
         await syncLayoutInternal(cwd, false, true);
     } catch (err: any) {
         showError(`claim failed: ${err.message}`);

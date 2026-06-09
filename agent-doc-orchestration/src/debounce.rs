@@ -879,7 +879,9 @@ mod tests {
         let ops_log = tmp.path().join(".agent-doc").join("logs").join("ops.log");
         let log = std::fs::read_to_string(&ops_log).expect("ops.log written");
         assert!(
-            log.contains("live_buffer_classify decision=diverges reason=unsaved_buffer_ahead_of_disk"),
+            log.contains(
+                "live_buffer_classify decision=diverges reason=unsaved_buffer_ahead_of_disk"
+            ),
             "ops.log missing diverges marker, got: {log}"
         );
     }

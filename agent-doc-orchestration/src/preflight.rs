@@ -1399,7 +1399,14 @@ fn source_head_git_field(repo: &Path, fmt: &str) -> Option<String> {
     let output = Command::new("git")
         .current_dir(repo)
         .args([
-            "log", "-1", fmt, "--", "*.rs", "Cargo.toml", "Cargo.lock", "build.rs",
+            "log",
+            "-1",
+            fmt,
+            "--",
+            "*.rs",
+            "Cargo.toml",
+            "Cargo.lock",
+            "build.rs",
         ])
         .output()
         .ok()?;
@@ -6273,7 +6280,8 @@ mod tests {
         // Built just inside the grace window (install-then-commit seconds apart)
         // → not flagged; older than grace → flagged.
         assert!(
-            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 30))], grace).is_empty()
+            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 30))], grace)
+                .is_empty()
         );
         assert_eq!(
             classify_stale_install_artifacts(commit, &[("bin", Some(commit - 61))], grace),
@@ -6307,10 +6315,7 @@ mod tests {
         let src = superproject.path().join("src/agent-doc");
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(src.join("Cargo.toml"), agent_doc_manifest).unwrap();
-        assert_eq!(
-            locate_agent_doc_source_repo(superproject.path()),
-            Some(src)
-        );
+        assert_eq!(locate_agent_doc_source_repo(superproject.path()), Some(src));
 
         // Unrelated repo (no agent-doc crate) → no warning source.
         let other = TempDir::new().unwrap();

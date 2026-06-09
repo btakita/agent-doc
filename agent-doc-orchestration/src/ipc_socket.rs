@@ -587,7 +587,10 @@ mod tests {
         let msg = serde_json::json!({"type": "patch", "early_ack": true});
         let result = send_message(&root, &msg).unwrap();
         let ack: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert_eq!(ack["status"], "ok", "terminal ack must be returned, not pending");
+        assert_eq!(
+            ack["status"], "ok",
+            "terminal ack must be returned, not pending"
+        );
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);

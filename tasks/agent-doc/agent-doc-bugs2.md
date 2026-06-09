@@ -35,20 +35,21 @@ complete
 Compacted content:
 - Archived 1 response topic(s): go
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7c4a2762 -->
+<!-- agent:boundary:574a8ed7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#lvb-run]
-- do [#exch-intermix]
-- do [#pcpconsol]
-- do [#pcpc5cut]
-- do [#s760wire]
-- do [#saevon]
-- do [#bkx9perid]
-- do [#tmux-switch-lag]
+- do [#install-stale-guard]
+- :round_pushpin: do [#exch-intermix]
+- :round_pushpin: do [#pcpconsol]
+- :round_pushpin: do [#pcpc5cut]
+- :round_pushpin: do [#s760wire]
+- :round_pushpin: do [#saevon]
+- :round_pushpin: do [#bkx9perid]
+- :round_pushpin: do [#tmux-switch-lag]
+- ~~do [#lvb-run]~~
 <!-- /agent:queue -->
 ###
 <!--

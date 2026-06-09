@@ -201,7 +201,17 @@ So the flip is *defined* to require the live batch first, not a SimWorld test �
 **Honest status of the whole remaining queue.** `#saevon`, `#s760wire`'s verify step, `#pcpc5live` step 3, `#bkx9perid` ("fresh NON-DEGRADED session" per its own text), `#exch-intermix-verify`, and `#tmux-switch-lag` are **all** live-verification / clean-session work, and `#lvbatch` is literally the operator batch that bundles those verifications. None of them can be completed or safely landed in this degraded session — and I'm not gating them (you asked for no new gates), they're just genuinely blocked on the one thing only you can do: the restart you've mentioned twice.
 
 **The unblock is the restart, then `#lvbatch`.** Start a fresh session (clears the corruption too), drive the `#lvbatch` operator batch under real typing load, and I'll check the logs and close each item — no gates, just verification in a session that works. Everything committed so far (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`) is correct on `main`. I'm stopping the auto-loop here rather than spinning more no-op cycles (8 already in 30 min) against a corrupting IPC path.
-<!-- agent:boundary:5d80d6b7 -->
+
+### Re: continue the queue (#saevon head) — opus-4-8
+
+Stopping here by your call ("Stop & restart for `#lvbatch`"). The queue can't auto-drain in this session — every remaining item is blocked on live verification or careful fresh-session implementation — so this was a runaway loop (4 re-invocations, no new prompt, just the managed queue re-syncing `#saevon`). A clean session is the right vehicle.
+
+**One real finding to carry over — `#exch-intermix-verify` has supporting evidence already.** While checking logs this cycle I confirmed `ops.log` is emitting `live_prompt_drift_auto_recovered` on real IPC-listener drift (e.g. `file=…/tasks/software/lazily-rs.md`, plus the `ipc_snapshot_adopt` flow events). So the `#exch-intermix` auto-recovery path is firing in live conditions across documents — the remaining `#exch-intermix-verify` work is just to capture the deliberate agent-doc-bugs2 closeout repro inside the `#lvbatch` batch, not to prove the mechanism from scratch.
+
+**`#tmux-switch-lag` is scoped for the fresh session.** I located the exact culprit: `safe_passive_focus_actor_after_sync_lock` (`sync.rs:700`) calls `tmux.select_pane()` on the actor pane, which raises the stash frame when that pane is still stashed at select time — before reconcile moves it into `0:agent-doc`. Fix is the move-before-select reorder the backlog already describes + SimWorld ordering coverage. Noted so the fresh session starts from the line, not a search.
+
+**Clean handoff:** restart (clears the `#postcommit-ipc-worktree-corruption` churn), then drive `#lvbatch` under real typing load — I'll check logs and close `#saevon`, `#exch-intermix-verify`, and `#pcpc5live` step 3. Everything committed this turn (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, this finding) is correct on `main`. The go-mode queue stays as-is so the fresh session resumes the drain.
+<!-- agent:boundary:d84a2e27 -->
 <!-- /agent:exchange -->
 
 ## Queue

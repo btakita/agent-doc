@@ -107,20 +107,55 @@ Drained the queue item's instruction: clicking a pipeline card now opens its det
 **No D1 migration.** Full suite **462 pass**, `build` + `build:worker` green. Not deployed (`#spec-test-commit-push`).
 
 **Two notes.** (1) This modal surfaces the board-relevant fields + actions; deeper full-record fetching (borrower contact, documents, payment schedule inside the modal) can layer on later via the existing detail endpoints — captured in the PRD, not the backlog. (2) The queue item `[#vtx8]` carried the modal instruction inline but shares its id with backlog **#vtx8**, which is a *different* item — the "application leads vanish when advanced past intake" bug from the 2026-06-03 call. That bug is **not** addressed by this modal and remains open/actionable; I only annotated it to flag the id collision. This drains the queue.
-<!-- agent:boundary:c5e1b126 -->
+
+### Re: [#ty2v] Admin-editable funding wire values — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ty2v]. Add a setting for the admin to set the wire values. Use a placeholder for now.
+
+Added admin-editable **wiring instructions** to **Platform Settings** so the admin can set the funding wire values themselves, with placeholders shipped for now (per "use a placeholder for now").
+
+**What shipped (committed + pushed, EFS `39c1607`; superproject pointer `19216ad1d`):**
+- New `wire_*` platform settings persisted in the existing `platform_settings` key/value store — **no D1 migration**: `wire_bank_name`, `wire_bank_address`, `wire_routing_number` (ABA), `wire_account_number`, `wire_account_name`, `wire_swift_code` (optional intl), `wire_reference`, `wire_special_instructions`. Placeholder defaults ship in `DEFAULT_PLATFORM_SETTINGS` (e.g. `TBD Bank, N.A.`, `000000000`) plus a "verify with the title company directly" note.
+- `repo.ts`: `platform_settings_from_rows_` (now exported) reads each field with default fallback; `platform_settings_update_` persists supplied string fields and preserves untouched ones; `WIRE_SETTING_KEYS` exported.
+- `PUT /api/admin/settings` accepts and passes the wire fields through.
+- UI: a **Wiring instructions** card on the admin Platform Settings page (`settings.tsx`) — labeled inputs + bank-address / special-instructions textareas, bound to the settings state and saved with the existing Save Settings flow.
+- Spec: lending-portal PRD admin section notes the `wire_*` settings + that secure delivery layers on later. Tests: `tests/admin-wire-settings.test.ts` (read-default fallback, stored-value + cleared-value reads, update round-trip via an in-memory D1 double, UI card + controller passthrough).
+
+**Full suite 470 pass**, `build` + `build:worker` green.
+
+**Scope / id note:** this is the *foundation* of backlog **#ty2v** (secure wiring-instructions delivery), not the whole item — the user explicitly scoped it to "add a setting … placeholder for now". Backlog #ty2v stays **open**, re-scoped to the remaining secure expiring/click-to-reveal delivery + verify-with-title reminder + title/escrow → EFS → lender routing.
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed to production. No new D1 migration (wire values reuse the existing `platform_settings` table), so the migrate step was a confirmed no-op.
+
+- `cf:d1:migrations:list:remote` → **"No migrations to apply!"**
+- `deploy:worker` → **deployed**, worker version `0ad54c0a-58c4-4a95-b724-0d7471fd7d2f` at `https://equityfundingsource.brian-takita.workers.dev` (schedule `0 * * * *` intact).
+- Smoke test: `GET /` → **200**, `GET /funded-deals` → **200**, `GET` + `PUT /api/admin/settings` → **401** (auth-gated, correctly wired).
+
+This drains the queue.
+<!-- agent:boundary:53fd733d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- [#ty2v]. Add a setting for the admin to set the wire values. Use a placeholder for now.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
+- [ ] [#ty2v] Secure wiring-instructions delivery — foundation shipped + deployed (EFS 39c1607, worker 0ad54c0a): admin-editable wire_* values (bank name/address, ABA routing, account number/name, optional SWIFT, reference, special instructions) with placeholder defaults in Platform Settings. Remaining: secure expiring/self-destructing-link or click-to-reveal (bank-style) delivery, the "verify wiring with the title company directly" reminder, and the title/escrow -> EFS -> lender routing. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

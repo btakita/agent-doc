@@ -87,14 +87,31 @@ Understood, and you're right — last turn I leaned on a recovery memory to hand
 **Follow-up filed.** Added `#dropqueue-consumed-falsecount` to the backlog: my fix corrected the auto-recovery *gate*, but the underlying dropped-prompt *counting* still tags a consumed/struck item as "dropped," which is what produced the false `#queue-user-edit-overwrite` session-check INTERRUPTED last turn. That's the sibling bug to fix at the source.
 
 **Memory.** Per your directive, I rewrote the recovery-memory addendum I added last turn — it now points at this product fix instead of teaching the manual `cp snapshot` workaround. Going forward I'll route agent-doc closeout misbehavior to a backlog bug or a product fix, not a recovery memory.
-<!-- agent:boundary:87f61cea -->
+
+### Re: do [#dropqueue-consumed-falsecount] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.
+
+
+Fixed the source-level counterpart to last turn's auto-recovery gate. Shipped: agent-doc `99e0a1cf`, pushed to `origin/main`.
+
+**Root cause.** `dropped_queue_prompt_lines_after_content_ours` (`write.rs`) counted only `content_ours`'s **active** queue prompts — `queue_prompt_texts` filters out `QueueEntry::Completed` (struck) entries. So a queue item the user added this cycle that `content_ours` legitimately **consumed (struck `~~…~~`)** showed up as "added in the candidate, absent from `content_ours`" → recorded as a dropped user edit. That's what produced the false `#queue-user-edit-overwrite` `session-check` INTERRUPTED two turns ago (the struck `do [#opsproof-falsepos]` read as a dropped edit).
+
+**Fix.** Added `queue_prompt_texts_including_consumed` (active `Prompt` + struck `Completed`) and use it for `content_ours` coverage in the dropped-queue detector. A consumed item is answered, not dropped, so it counts as covered and is no longer recorded. Active-item and genuine-drop behavior is unchanged.
+
+**Why two fixes.** `#exch-intermix-falsedrop` (last turn) made the auto-*recovery* gate tolerant of a false dropped-prompt record via snapshot containment; this fixes the *record itself* at the source, so the false `session-check` interruption — which the recovery gate didn't cover — stops firing too.
+
+**Coverage.** Regression test `dropped_queue_prompt_lines_after_content_ours_excludes_consumed_struck_item` (consumed item not recorded; active/genuine-drop cases still pass). Full `make check` green (4176 tests via nextest); `make install` + `cargo build --release` refreshed both binaries + cdylib. `specs/07-closeout-commands.md` §`#exchange-prompt-dropped-on-merge` and `VERSIONS.md` updated. CI for the prior fix `60803ebd` passed; this commit's CI is in progress, continuing from green local evidence.
+<!-- agent:boundary:3217b94e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#opsproof-falsepos]~~
-- :pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.
+- ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
 - :pushpin: do [#pcpc5live]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
@@ -102,7 +119,7 @@ Understood, and you're right — last turn I leaned on a recovery memory to hand
 - :round_pushpin: do [#bkx9perid]
 - :round_pushpin: do [#tmux-switch-lag]
 - do [#exch-intermix-verify]
-- do [#dropqueue-consumed-falsecount]
+- ~~do [#dropqueue-consumed-falsecount]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -132,7 +149,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#dropqueue-consumed-falsecount] #agent-doc-bug dropped_queue_prompt_lines_after_content_ours (write.rs) counts a queue item consumed (struck) this cycle as a dropped prompt, because content_ours excludes struck items from queue_prompt_texts. The over-count feeds session-check #queue-user-edit-overwrite and can emit a FALSE INTERRUPTED on a correct closeout (seen live after #opsproof-falsepos recovery: struck do[#opsproof-falsepos] read as a dropped user edit). #exch-intermix-falsedrop fixed the auto-recovery gate via snapshot containment; the underlying record is still over-broad. Fix: exclude prompts that survive struck/consumed in content_ours from the dropped record (or diff against raw queue text incl. struck lines). Add SimWorld/unit coverage. Files: write.rs dropped_queue_prompt_lines_after_content_ours + queue_prompt_texts; session_check.rs #queue-user-edit-overwrite.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

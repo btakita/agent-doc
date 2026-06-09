@@ -36,7 +36,32 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 7 response topic(s): URL reflects selected filters without a refresh; #pzj5; #f632; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:b45c1a09 -->
+
+### Re: Deal Pipeline rename + action-needed pipeline count — opus-4-8
+
+> **Queue prompt:**
+>
+> The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.
+
+
+Done (EFS `909b866`, pushed). This was queue item 1 of 3; the auto-loop continues with the payments pipeline, then `deploy`.
+
+**Rename Pipeline → Deal Pipeline.** Nav item, board page title (`/portal-admin/pipeline`), and the lead-detail card title all now read **Deal Pipeline**. The section id (`pipeline`), route, and API endpoint (`/api/admin/pipeline`) are unchanged — label only, so nothing else breaks.
+
+**Action-needed badge count.** The Deal Pipeline sidebar badge was `COUNT(*) FROM loans` — a lifetime total that only ever grew and never signalled a work queue. It now counts items that still need action:
+
+- open **Leads** (`new` / `contacted`) +
+- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
+
+Terminal/parked stages (Funded, Closed, On Hold, Unassigned, Application Denied) are excluded. The status sets are derived from the pipeline column definitions (`PIPELINE_ACTION_NEEDED_STATUSES`, `LEAD_ACTION_NEEDED_STATUSES` in `repo.ts`) so TMO status strings stay in sync, and the nav-counts query is one isolated, fail-closed subquery sum (a single section failure still yields 0, never a 500). No D1 migration.
+
+**Changed:** `repo.ts` (action-status constants), `nav_counts/index.ts` (count query), `layout.tsx` / `pipeline.tsx` / `application_lead_detail.tsx` (labels), `prds/67v2` Phase F, and the two pipeline/nav-counts test files.
+
+**Verification:** `make check` green — 426 pass / 0 fail, build + worker bundle OK. The EFS repo has no GitHub Actions CI workflow, so local `make check` is the gate.
+<!-- agent:boundary:bb79a2b5 -->
+- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
+- open **Leads** (`new` / `contacted`) +
+<!-- agent:boundary:9e62f8f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +69,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.
+- ~~The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.~~
 - We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.
 - deploy
 <!-- /agent:queue -->

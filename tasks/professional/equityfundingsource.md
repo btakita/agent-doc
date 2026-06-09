@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -62,14 +62,27 @@ Done and deployed (Worker `2319bce6-b3ae-4efe-b1b5-423b31900437`).
 
 
 Already deployed this cycle — the lead-detail work shipped in Worker version **`2319bce6-b3ae-4efe-b1b5-423b31900437`** (EFS `ef3b76e` = `origin/main`, no unpushed commits). The served bundle already contains the detail-page code, so there's nothing new to push; draining the queue.
-<!-- agent:boundary:7338db4f -->
+<!-- agent:boundary:80b30df1 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+---
+Create admin routes for individual items the other types of list items including. Add links to the individual item route where appropriate:
+- Loan Applications
+- Contact Messages
+- Investor Deals
+- Funding Commits
+- Payments
+- Documents
+- Public Contents
+- Messages
+- Lender Management
+- User Management
+---
 <!-- /agent:queue -->
 
 ## Backlog

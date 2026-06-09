@@ -89,92 +89,12 @@ queue_active: false
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260530-033821.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260609-163150.md`*
 
 Compacted content:
-- Archived 1 response topic(s): corky crate split
+- Archived 4 response topic(s): GCP OAuth app verification; Register the GCP App with Google so I don't get the unsafe menu.; Queue cleanup; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-Register the GCP App with Google so I don't get the unsafe menu.
-
-### Re: GCP OAuth app verification — gpt-5
-
-I could not register the Google-side app from this shell. `gcloud` is not installed here, and Google OAuth app verification has to be submitted in Google Cloud Console by a project owner/editor with access to the project that owns Corky's OAuth client. I did not modify the Cloud project.
-
-What matters for the unsafe/unverified screen: Google says apps that request sensitive or restricted OAuth scopes can show the unverified-app warning until the app has been reviewed, and the warning can also appear when requested scopes are missing from the consent-screen configuration. Personal/testing use can continue by clicking through, but it does not remove the warning. Sources: [Unverified apps](https://support.google.com/googleapi/answer/7454865?hl=en), [Sensitive scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification), and [OAuth verification requirements](https://support.google.com/cloud/answer/13464321?hl=en).
-
-For Corky, the Google client needs verification/registration for the scopes it can request. I checked the code and docs; the built-in Google path uses Gmail, Drive, Docs, Sheets, Chat, Tasks, and People/Contacts scopes. At minimum, make sure the Google Auth Platform **Data Access** page declares the exact scopes Corky requests, including:
-
-- `https://www.googleapis.com/auth/gmail.readonly`
-- `https://www.googleapis.com/auth/gmail.compose`
-- `https://www.googleapis.com/auth/gmail.settings.basic`
-- `https://www.googleapis.com/auth/gmail.labels`
-- `https://www.googleapis.com/auth/drive.file`
-- `https://www.googleapis.com/auth/drive.readonly`
-- `https://www.googleapis.com/auth/documents`
-- `https://www.googleapis.com/auth/spreadsheets.readonly`
-- `https://www.googleapis.com/auth/spreadsheets`
-- `https://www.googleapis.com/auth/contacts`
-- `https://www.googleapis.com/auth/chat.messages`
-- `https://www.googleapis.com/auth/tasks`
-
-Concrete Cloud Console path:
-
-1. Select the project that owns Corky's built-in OAuth client. The session notes mention project number `873280095295`; confirm it against the OAuth client ID prefix from `pass corky/gcp/client_id`.
-2. Go to **Google Auth Platform → Branding**. Set app name `Corky`, support email, developer contact, homepage URL, privacy policy URL, and terms URL.
-3. Use a verified domain you own for the homepage and policy pages. Corky already has source docs at `src/corky/docs/reference/privacy-policy.md` and `src/corky/docs/reference/terms-of-service.md`, but Google expects the public URLs to be hosted under the verified app domain.
-4. Go to **Audience**. Move to production/public only if the goal is to remove the warning for arbitrary Google users. Keep testing only for a small personal/test-user flow where clicking through is acceptable.
-5. Go to **Data Access**. Add every scope Corky requests and provide per-scope justifications. For example, `gmail.readonly` is for syncing mail into local files; `gmail.compose` is for draft creation/sending; Drive/Docs/Sheets scopes are for document upload/read/write workflows; `contacts` is for People API contact push/delete.
-6. Submit verification. Expect Google to ask for a demo video showing the OAuth flow and each sensitive/restricted scope in use.
-
-Local proof:
-
-- Changed paths: none.
-- Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status --fix`, targeted `rg`/`sed` reads, and `gcloud auth list` / `gcloud config get-value project`.
-- Verification: no code verification was needed because no repo files changed. The Google Cloud check was blocked because `gcloud` exits `127` here.
-- Confidence: high that verification is the required path to remove the unsafe/unverified screen; medium on the project number until you confirm it from the client ID.
-- Escalation: none.
-
-### Re: Register the GCP App with Google so I don't get the unsafe menu. — gpt-5
-
-Handled in the preceding response. I could not complete the Google-side registration from this shell because `gcloud` is unavailable here and Google requires a project owner/editor to submit OAuth app verification in Cloud Console. The actionable checklist above is the path to remove the unsafe/unverified warning; no local repo or Cloud project files were changed.
-
-### Re: Queue cleanup — gpt-5
-
-Cleared the stale auto queue entry that duplicated the prompt already answered above.
-❯ Are all the crates published?
-
-### Re: Are all the crates published? — gpt-5
-
-No. The root `corky` crate is published, but the split workspace crates are not published on crates.io at the current local version.
-
-I verified the local workspace with `cargo metadata --format-version 1 --no-deps`; it has six workspace packages, all at `0.28.2`:
-
-- `corky`
-- `corky-core`
-- `corky-google`
-- `corky-mail`
-- `corky-social`
-- `corky-transcribe`
-
-Then I checked crates.io from outside the workspace with `cargo info --registry crates-io <crate>@0.28.2` so Cargo could not accidentally resolve local path packages. Result:
-
-- `corky@0.28.2`: published — https://crates.io/crates/corky/0.28.2
-- `corky-core@0.28.2`: not found in crates.io
-- `corky-google@0.28.2`: not found in crates.io
-- `corky-mail@0.28.2`: not found in crates.io
-- `corky-social@0.28.2`: not found in crates.io
-- `corky-transcribe@0.28.2`: not found in crates.io
-
-So the current session status line `crates.io publish — v0.28.2` is accurate for the public root `corky` package, but not for every crate in the split workspace. If those internal crates are intended to be independently consumable, they still need to be published; if not, the release/status wording should say "root crate published" rather than "all crates published."
-
-Local proof:
-
-- Changed paths: none outside the session document.
-- Commands run: `cargo metadata --format-version 1 --no-deps`; `cargo info --registry crates-io` for all six package names.
-- Verification: registry lookup succeeded only for `corky@0.28.2`; the other five returned `could not find ... in registry`.
-- Confidence: high.
-- Escalation: none.
-<!-- agent:boundary:7e721c1f -->
+<!-- agent:boundary:ef0424e2 -->
 <!-- /agent:exchange -->
 ###
 <!--

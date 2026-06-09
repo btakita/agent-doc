@@ -80,12 +80,28 @@ The 8 blocked items stay in the **backlog** as the actionable completion list yo
 **Two agent-doc product bugs surfaced this turn (each worth its own fix session):**
 1. Go-mode auto-queued genuinely-blocked backlog work — gated/blocked ids should be excluded from the auto-drain set.
 2. The exit-75 CRDT closeout path mangled document structure (emptied the backlog, orphaned ids into the queue, duplicated review items, split the boundary marker) — the `#ipc-crdt-response-drift` family, reproduced here in degraded mode.
-<!-- agent:boundary:fda01685 -->
+
+### Re: JB "Claim for Tmux Pane" cross-session error (andreas-kovountzis.md) — opus-4-8
+
+> **Reported:** `agent-doc andreas-kovountzis.md` JB "Claim for Tmux Pane" → `Claim failed (exit 1): pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force`
+
+**Root cause:** `claim.rs::cross_session_decision` returns `Reject` when the target pane lives in a tmux session other than the configured project session, the configured session is alive, and `--force` wasn't passed (claim.rs:121-137); `enforce_cross_session_claim` bails with that exact message (claim.rs:161). The guard itself is correct — it's the same cross-session drift this session keeps resyncing ("panes span tmux sessions 0, 5"). The defect is **ergonomic**: the JB "Claim for Tmux Pane" button shells `agent-doc claim` without `--force` and renders the raw exit-1, giving no in-plugin path to switch session or force.
+
+**Triaged (not fixed here — the JB UX needs live IntelliJ):** added backlog item **jb-claim-cross-session** + plan `tasks/agent-doc/plan-jb-claim-cross-session.md`. Fix = a structured cross-session-reject result from `claim` + a JB choice dialog (Force claim / Switch project session / Cancel), mirrored in VS Code, verified live (pairs with #xkpf). I did not attempt a code fix + closeout in this degraded session, which corrupted its own response twice today via the `#ipc-crdt-response-drift` path.
+
+Note: the report landed in the now-inactive queue (`queue: stop`), so the binary flagged it `inactive_queue_residue` rather than an executable prompt — I triaged it anyway.
+<!-- agent:boundary:a74747d5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+---
+agent-doc andreas-kovountzis.md JB `Claim for Tmux Pane` error:
+```
+Claim failed (exit 1): Error: pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force
+```
+---
 <!-- /agent:queue -->
 ###
 <!--
@@ -113,6 +129,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#4wxr] jb-claim-cross-session: JB "Claim for Tmux Pane" surfaces a raw exit-1 when the target pane is in a non-configured tmux session (claim.rs cross_session_decision Reject, claim.rs:161). Give claim a structured cross-session-reject result + a JB plugin choice dialog (Force claim / Switch project session / Cancel); mirror in VS Code. BLOCKED on live IntelliJ verification (pairs with #xkpf). Plan: tasks/agent-doc/plan-jb-claim-cross-session.md
 - [ ] [#saev] earlyack-impl: Implement early-ack IPC protocol — ipc_socket accepted/pending ack on patch receipt + terminal ack/sidecar; ffi.rs listener contract then PatchWatcher.handleSocketMessageV2. BLOCKED (fresh focused session): the Rust core modifies send_message (ipc_socket.rs) = THIS session closeout write path; spec-08b forbids landing write/ack-path changes in the same cycle that persists a response through that path, and review #pcp5 flags it as delicate state-machine work. Unblocked by a fresh non-degraded session with live IntelliJ/Codex (#xkpf). Completes review #ipc-early-ack + early-ack half of #pcp5. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#9adk] consacc-guard: Add JB plugin per-doc in-flight-invocation guard + console-idle pre-send check so Run Agent Doc / Clear Session Context coalesce when one invocation is already pending. BLOCKED on live IntelliJ verification. Completes review #console-input-accumulation (verify in #xkpf).
 - [ ] [#s760] clearthr2: Implement JB plugin phase-2 pre-emptive clear — read live Claude Code context-usage %, compare against report.clear_threshold, trigger session clear before the next Run Agent Doc dispatch when exceeded (gated by agent_doc_queue_context_reset). BLOCKED on live IntelliJ verification. Completes review #clear-opt-in-threshold (verify in #xkpf).

@@ -264,7 +264,20 @@ Assessed the binary/route coverage and gated the genuine residual on live Intell
 **Residual (gated → review, needs live IntelliJ):** the accumulation the operator observed is below route's `agent:queue` dedup — at the JB plugin's **console-keystroke** layer. The `Run Agent Doc` (SubmitAction) and `Clear Session Context` actions don't coalesce a console invocation when one is already pending for the doc, so rapidly-fired actions (auto-loop + manual) can still stack `/agent-doc` + `/clear` keystrokes into the terminal. The fix is a plugin-side per-doc in-flight-invocation guard + console-idle pre-send check — a JB UI behavior verifiable only in a live IDE. Narrowed `#console-input-accumulation` to that residual and gated it (pairs with `#live-verify-batch`). Honest split: the dispatch-level protection exists and is tested; the console-keystroke coalescing is genuinely live-editor-blocked.
 
 **CI:** cycles 1–6 green; cycle 8 (Phase-1 config) run was pending at last check. Closed from local evidence.
-<!-- agent:boundary:d78f7a0a -->
+
+### Re: do [#nm1x-livebuf-content] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#nm1x-livebuf-content]
+
+
+Consolidated into the gated review item `#pcp6`, which already explicitly "absorbs #nm1x-livebuf-content" — not a separate piece of work.
+
+Both describe the identical change: capture the editor-buffer **content** (not just len/hash) in the `.agent-doc/live-buffer` sidecar so `guard_visible_write_reconcile` can scope-classify a genuine unsaved editor edit against the TurnScope instead of failing closed. The item itself states it "Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read" and `#pcp6` records the same: "JB+VSCode plugin + FFI classifier. Requires live editor verification."
+
+That's a live-editor-blocked plugin change (the editor must write buffer text into the digest, verifiable only in a live IDE), so it stays gated under the canonical `#pcp6` (PCP phase 6, plan `tasks/agent-doc/plan-pcp-consolidate.md`). Keeping a separate backlog item for it just churns the go-mode queue and double-tracks one task, so I closed the backlog duplicate; `#pcp6` remains the single gated tracker. This is a consolidation (duplicate removed), not a fix — the work itself is genuinely blocked on a fresh live-IntelliJ/VSCode session.
+<!-- agent:boundary:a9e8d184 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -279,7 +292,7 @@ Assessed the binary/route coverage and gated the genuine residual on live Intell
 - ~~:pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]~~
 - ~~:pushpin: :round_pushpin: do [#clear-opt-in-threshold]~~
 - ~~:pushpin: :round_pushpin: do [#console-input-accumulation]~~
-- :round_pushpin: do [#nm1x-livebuf-content]
+- ~~:round_pushpin: do [#nm1x-livebuf-content]~~
 - :round_pushpin: do [#vbk7]
 - do [#exit75-done-reap-not-atomic]
 - do [#partial-staging-guard-cross-doc-noise]
@@ -312,7 +325,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#partial-staging-guard-cross-doc-noise] [recommended] In a multi-session dogfooding superproject many unrelated task docs stay perpetually dirty; check_partial_staging_closeout_guard then WARNs on nearly every closeout because its overlapping-changed-string-literal heuristic matches incidental shared vocabulary (e.g. "make check", "agent-doc", "id not found in backlog") between the committed session doc and unrelated dirty companions. Surfaced by #cross-session-agent-doc-issue-survey: 154 partial_staging_closeout_guard_fired entries across tsift/lazily-rs/monsterrodholders/equityfundingsource ops logs 2026-06-09. Tighten the overlap signal (require a more specific shared token, same-component path, or scope to the intended path set) so unrelated superproject churn does not trip the WARN. WARN-only, low severity.
 - [ ] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
-- [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [x] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 - [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 <!-- /agent:backlog -->
 

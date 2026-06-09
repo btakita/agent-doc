@@ -190,7 +190,24 @@ Fixed and shipped (submodule `100549e7`) — `make check` green (4121/4121, clip
 **Tests:** `dag_operator_pin_position_locked_with_movable_edges` (pin stays anchored at its slot while `#x`/`#y` reorder to satisfy `after=#x`) and `dag_operator_pin_no_spurious_reorder_with_edges` (the pre-fix bug floated `#p` to the front and reordered a correct queue; now it returns None). Existing `dag_blocker_outranks_pin` still passes. Spec `#queue-auto-dag-priority` updated.
 
 **CI:** cycles 1–4 are all **green** now; this push kicked `27191140661` (pending). Closed from local evidence.
-<!-- agent:boundary:ffc364a1 -->
+
+### Re: do [#stale-capture-captured-only-drift] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#stale-capture-captured-only-drift]
+
+
+Fixed and shipped (submodule `778c8bd9`) — `make check` green (4122/4122, clippy clean), both binaries built + installed.
+
+**What I found first (a false start worth recording):** the stale-capture retire path keys off `load_active`, which only ever returns the **current cycle's** capture (`cycle_state.capture_id`). So the deadlock orphan is always the current cycle's never-written `Captured` body — a "different/superseded cycle_id" gate (my first attempt) would never fire for the real path. I reworked it.
+
+**Fix — gate retire on the captured prompt being already answered:** extend the retire path to a `Captured`-only orphan when there's **positive superseding-turn evidence** — the captured response's `### Re:` heading is already present in the live `agent:exchange` (a later answer to the same prompt landed). `response_already_applied*` already covers the body-itself-present case; this covers heading-present-but-body-differs. With that evidence **and** a drifted baseline, the never-written body is a stale duplicate, so `repair::retire_superseded_captured_only_orphan_if_drifted` discards it (body preserved on disk for forensics), clears the pending sidecar, and returns `StaleCaptureRetired` — breaking the `validate_replay` deadlock that otherwise needs a manual `reset --from-current --preserve-session`. The superseding answer's committed cycle owns the snapshot/CRDT, so they're left intact (terminal-lifecycle idempotency).
+
+**Conservative default preserved:** without the already-answered evidence, a `Captured`-only orphan stays fail-closed — its body may be a genuinely pending response that was never written, and silently retiring it would lose it. Tests cover both: `retires_superseded_captured_only_orphan_on_drift` (heading already answered → retire) and `captured_only_orphan_on_drift_still_fails_closed` (no evidence → fail closed). Spec `#stale-capture-deadlock-autoretire` / `#stale-capture-captured-only-drift` updated.
+
+**CI:** cycles 1–5 are all **green**; this push kicked `27191740440` (pending). Closed from local evidence.
+<!-- agent:boundary:882530ff -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -201,7 +218,7 @@ Fixed and shipped (submodule `100549e7`) — `make check` green (4121/4121, clip
 - ~~:pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]~~
 - ~~:pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]~~
 - ~~:round_pushpin: do [#queue-operator-pin-position-lock-dag]~~
-- :round_pushpin: do [#stale-capture-captured-only-drift]
+- ~~:round_pushpin: do [#stale-capture-captured-only-drift]~~
 - :pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]
 - :pushpin: :round_pushpin: do [#clear-opt-in-threshold]
 - :pushpin: :round_pushpin: do [#console-input-accumulation]
@@ -236,7 +253,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
-- [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
+- [x] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
 - [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).

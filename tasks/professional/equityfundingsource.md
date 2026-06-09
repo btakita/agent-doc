@@ -31,91 +31,19 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-192046.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-195525.md`*
 
 Compacted content:
-- Archived 7 response topic(s): URL reflects selected filters without a refresh; #pzj5; #f632; 4 more
+- Archived 3 response topic(s): Deal Pipeline rename + action-needed pipeline count; Track borrower payments; deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Deal Pipeline rename + action-needed pipeline count — opus-4-8
-
-> **Queue prompt:**
->
-> The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.
-
-
-Done (EFS `909b866`, pushed). This was queue item 1 of 3; the auto-loop continues with the payments pipeline, then `deploy`.
-
-**Rename Pipeline → Deal Pipeline.** Nav item, board page title (`/portal-admin/pipeline`), and the lead-detail card title all now read **Deal Pipeline**. The section id (`pipeline`), route, and API endpoint (`/api/admin/pipeline`) are unchanged — label only, so nothing else breaks.
-
-**Action-needed badge count.** The Deal Pipeline sidebar badge was `COUNT(*) FROM loans` — a lifetime total that only ever grew and never signalled a work queue. It now counts items that still need action:
-
-- open **Leads** (`new` / `contacted`) +
-- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
-- **Paid Off** — nothing left owed
-- **Current** — next unpaid payment further out
-- **Due Soon** — next unpaid payment due within 30 days
-- **Overdue** — loan has ≥1 unpaid, past-due payment
-- open **Leads** (`new` / `contacted`) +
-- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
-
-Terminal/parked stages (Funded, Closed, On Hold, Unassigned, Application Denied) are excluded. The status sets are derived from the pipeline column definitions (`PIPELINE_ACTION_NEEDED_STATUSES`, `LEAD_ACTION_NEEDED_STATUSES` in `repo.ts`) so TMO status strings stay in sync, and the nav-counts query is one isolated, fail-closed subquery sum (a single section failure still yields 0, never a 500). No D1 migration.
-
-**Changed:** `repo.ts` (action-status constants), `nav_counts/index.ts` (count query), `layout.tsx` / `pipeline.tsx` / `application_lead_detail.tsx` (labels), `prds/67v2` Phase F, and the two pipeline/nav-counts test files.
-
-**Verification:** `make check` green — 426 pass / 0 fail, build + worker bundle OK. The EFS repo has no GitHub Actions CI workflow, so local `make check` is the gate.
-
-### Re: Track borrower payments — Payments Pipeline board — opus-4-8
-
-> **Queue prompt:**
->
-> We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.
-
-
-Done (EFS `d8eb783`, pushed). This was queue item 2 of 3; the auto-loop continues with `deploy`.
-
-The admin **Payments** section (`/portal-admin/payments`) now has a **Pipeline / Table** view toggle. Pipeline is the default — it's a borrower-payment tracking board, one card per loan, grouped by payment health:
-
-- **Overdue** — loan has ≥1 unpaid, past-due payment
-- **Due Soon** — next unpaid payment due within 30 days
-- **Current** — next unpaid payment further out
-- **Paid Off** — nothing left owed
-
-Each card shows exactly what was asked: **next payment due date, next amount, next principal, and overdue count + total** (with a red overdue footer when applicable). A payment is "owed" until confirmed `paid` — a `denied` submission still counts as owed. The existing Table view (filters, confirm/deny/hide actions, detail modal) is unchanged and still where mutations happen; the board is a read-only snapshot.
-
-**How it's built.** Pure board logic lives in `repo.ts` (`payment_is_owed_`, `payment_days_until_`, `loan_payment_pipeline_card_`, `payments_pipeline_columns_`, `PAYMENT_PIPELINE`) and is unit-tested with no D1. New read-only endpoint `GET /api/admin/payments/pipeline` groups `loan_payments` rows per loan; it's registered **before** `/api/admin/payments/:payment_id` so `pipeline` isn't captured as a payment id. No D1 migration.
-
-**Changed:** `repo.ts`, `payment_management/index.ts`, `routes.ts`, `payments.tsx`, the portal PRD (Admin Portal section), and a new `tests/admin-payments-pipeline.test.ts`.
-
-**Verification:** `make check` green — **437 pass / 0 fail**, build + worker bundle OK, including after rebasing onto an incoming `fix(applications)` commit. EFS has no GitHub Actions CI workflow, so local `make check` is the gate.
-
-**Note:** This board reads whatever is in `loan_payments`. Per the MVP servicing model (PRD §7), those rows come from TMO's payment schedule, and live data depends on the TMO sync being populated — the board is empty until loans have schedule rows.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed to production. Worker version **`ff80afcd-c969-4377-bedd-ac33af4e8a44`** is live at 100%, shipping both queue items from this drain (Deal Pipeline rename + action-needed count `909b866`, and the Payments Pipeline board `d8eb783`).
-
-**Procedure (per `runbooks/deployment.md`):** pre-deploy checks clean — working tree clean, on `main` synced with origin, `make check` green (437 pass / 0 fail), no pending D1 migrations. Then `make deploy` (build → migrate → deploy); migration step was a no-op (neither feature needed a migration).
-
-**Post-deploy verification:**
-- Public `/` → **200**
-- Admin `/portal-admin/payments` → **303** (Cloudflare Access redirect — expected for admin routes)
-- D1 migrations remaining: **none**
-
-That drains the queue (3/3 done). The Status block above is updated to record the new production version and both features. The Payments Pipeline reads `loan_payments`, which under the MVP servicing model is sourced from TMO's payment schedule — so the board populates as loans gain synced schedule rows.
-<!-- agent:boundary:1498bf6c -->
+<!-- agent:boundary:8df0e4d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

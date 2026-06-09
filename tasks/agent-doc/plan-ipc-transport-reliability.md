@@ -29,6 +29,8 @@ Decouple the sender's liveness probe from the plugin's apply latency. The plugin
 
 Even in the rare genuine-degrade case, route writes through the file-watch patch queue (the plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures File Cache Conflicts. Disk write becomes the true last resort.
 
-## Phase 4 — visible-write provenance (`#ipc-drift-writeprovenance`) [follow-up]
+## Phase 4 — visible-write provenance (`#ipc-drift-writeprovenance`) — DONE 2026-06-09
 
 Tag agent-doc's own disk writes with a write-provenance / generation id so `guard_visible_write_reconcile` / `live_buffer_diverges_from_content` can positively attribute a foreign disk change to the supervisor instead of inferring it from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic. Builds on `#op-scoped-drift-*` op provenance; eliminates the residual fail-closed churn the bounded `#ipc-drift-visbuf-reconcile` retry currently papers over.
+
+**Landed:** The producer/consumer halves were already in place from `#pcp2`/`#pcp6` (`debounce.rs::record_write_provenance`/`write_provenance`, provenance attribution in `live_buffer_diverges_from_content`, and `write.rs::atomic_write` stamping via `record_document_write_provenance`). The residual gap was that the **direct-run** document-write path (`run.rs::atomic_write`, used by the four `direct_run_*` writes) did NOT stamp provenance, so a direct-exec foreign-looking disk change fell back to the mtime heuristic. Fix: shared the one `record_document_write_provenance` recorder (`pub(crate)`) so `run.rs::atomic_write` stamps identically. Now every agent-doc document-write path stamps provenance uniformly. Test: `run.rs::direct_run_atomic_write_records_provenance`. Spec: `specs/08b` (uniform-enforcement note) + `specs/process-topology.md` (R4 ✅, shared-recorder edge).

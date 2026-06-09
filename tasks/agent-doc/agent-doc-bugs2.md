@@ -190,7 +190,7 @@ Fixed and shipped (submodule `100549e7`) — `make check` green (4121/4121, clip
 **Tests:** `dag_operator_pin_position_locked_with_movable_edges` (pin stays anchored at its slot while `#x`/`#y` reorder to satisfy `after=#x`) and `dag_operator_pin_no_spurious_reorder_with_edges` (the pre-fix bug floated `#p` to the front and reordered a correct queue; now it returns None). Existing `dag_blocker_outranks_pin` still passes. Spec `#queue-auto-dag-priority` updated.
 
 **CI:** cycles 1–4 are all **green** now; this push kicked `27191140661` (pending). Closed from local evidence.
-<!-- agent:boundary:13fdc946 -->
+<!-- agent:boundary:ffc364a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -236,7 +236,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
-- [x] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).

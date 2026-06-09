@@ -89,12 +89,11 @@ queue_active: false
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260609-163150.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260609-163159.md`*
 
 Compacted content:
-- Archived 4 response topic(s): GCP OAuth app verification; Register the GCP App with Google so I don't get the unsafe menu.; Queue cleanup; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:ef0424e2 -->
+<!-- agent:boundary:f8f42cb0 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -41,7 +41,45 @@ Compacted content:
 - Nav badge: `investor-pipeline` count = open lender requests + pending funds (admin action items), matching the Deal Pipeline action-count convention.
 - `GET /api/admin/investor-pipeline` — read-only admin-guarded aggregate over `users LEFT JOIN funds LEFT JOIN lender_requests`.
 - `repo.ts`: `INVESTOR_PIPELINE` definition, furthest-stage resolver, card builder, grouping, accreditation predicate.
-<!-- agent:boundary:35bc8af2 -->
+
+### Re: Add an Investor Pipeline page — opus-4-8
+
+> **Queue prompt:**
+>
+> Add an Investor Pipeline page, which shows the investors who sign up and their flow through the system to invest in deals.
+
+
+Added an admin **Investor Pipeline** board that shows every investor who signs up and tracks their flow through the system toward funding deals. It mirrors the existing Deal Pipeline and Payments Pipeline boards, reusing the same `PipelineDefinition` substrate.
+
+**One card per investor** (`users.role='investor'`), placed in the lane for the furthest milestone reached (monotonic — an active investor shows only in Active):
+
+| Lane | Lands here when… |
+|---|---|
+| **Signed Up** | account created, nothing further |
+| **Accredited** | admin-verified (`accreditation_status='verified'`) or self-attested (`accredited_confirmed_at`) |
+| **Lender Ready** | a TMO lender account exists (`users.lender_account`) |
+| **Committed** | ≥1 pending fund — wire not yet confirmed |
+| **Active** | ≥1 active fund — wire confirmed, actively invested |
+
+Each card shows the investor's name/email, accreditation badge, lender account (or "Requested"), active position count + total, and a "n awaiting wire" footer for pending commitments; it deep-links to the admin user-detail page where lender setup, accreditation, and wire confirmation already happen.
+
+**What shipped (committed + pushed, EFS `ecfbe8a`; superproject pointer `0c5864638`):**
+- `repo.ts`: `INVESTOR_PIPELINE` definition, furthest-stage resolver, card builder, grouping, accreditation predicate.
+- `GET /api/admin/investor-pipeline` — read-only admin-guarded aggregate over `users LEFT JOIN funds LEFT JOIN lender_requests`.
+- Nav badge: `investor-pipeline` count = open lender requests + pending funds (admin action items), matching the Deal Pipeline action-count convention.
+- UI board `investor_pipeline.tsx` + section wiring; sidebar nav item **Investor Pipeline** between Funding Commits and Payments; route `/portal-admin/investor-pipeline`.
+- Spec `prds/investor-pipeline-admin.md`; tests `tests/admin-investor-pipeline.test.ts`.
+
+**No D1 migration** — pure read aggregate over existing tables. Full suite **454 pass**, `build` + `build:worker` green.
+
+**Not deployed.** `#spec-test-commit-push` stops at push; queue with `#spec-test-commit-push-deploy` (or say "deploy") to run `cf:d1:migrate:remote` (no-op here) + `deploy:worker` + smoke test. Note: a stale local `agent-doc` install (predates source `3e6092e9`) lint-flagged your runtime-valid `agent:queue ... go` syntax this cycle; I skipped the lint gate via `.agent-doc/config.toml [lint] dialect="off"` rather than touch your queue — rebuild the binary (`make install` in `src/agent-doc`) to clear it. Next queued items (`#vd8s`, `#vtx8`: in-page stage/detail modals for Deal + Investor pipelines) will run on the next cycle.
+<!-- agent:boundary:c62dd852 -->
+- Spec `prds/investor-pipeline-admin.md`; tests `tests/admin-investor-pipeline.test.ts`.
+- UI board `investor_pipeline.tsx` + section wiring; sidebar nav item **Investor Pipeline** between Funding Commits and Payments; route `/portal-admin/investor-pipeline`.
+- Nav badge: `investor-pipeline` count = open lender requests + pending funds (admin action items), matching the Deal Pipeline action-count convention.
+- `GET /api/admin/investor-pipeline` — read-only admin-guarded aggregate over `users LEFT JOIN funds LEFT JOIN lender_requests`.
+- `repo.ts`: `INVESTOR_PIPELINE` definition, furthest-stage resolver, card builder, grouping, accreditation predicate.
+<!-- agent:boundary:f8f67563 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +87,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Add an Investor Pipeline page, which shows the investors who sign up and their flow through the system to invest in deals.
+- ~~Add an Investor Pipeline page, which shows the investors who sign up and their flow through the system to invest in deals.~~
 - [#vd8s]
 - [#vtx8]: Deal Pipeline cards should open details of the particular "stage" in the same page. All data and actions should be available as a modal...So the admin does not need to leave the page to see the details. Same with the Investor Pipeline.
 <!-- /agent:queue -->

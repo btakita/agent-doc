@@ -51,7 +51,27 @@ You cleared the completed `#install-stale-guard` / `#lvb-run` strikes; the activ
 - `#pcpc5cut` (depends on `#pcpconsol`), `#s760wire` / `#saevon` (live IntelliJ pane), `#bkx9perid` (needs a repro), `#tmux-switch-lag` (fresh code session).
 
 Draining these here would mean rushing high-stakes work in a saturated session. Start a fresh `/agent-doc` session for `#exch-intermix` and I'll implement it properly. Not auto-looping.
-<!-- agent:boundary:dc98e13b -->
+
+### Re: do #exch-intermix — implemented the live_prompt_drift auto-recovery — opus-4-8
+
+Done — this is the fresh session the prior cycle asked for, and `#exch-intermix` is now implemented, tested, built, installed, committed, and pushed.
+
+**The wedge it fixes.** After the IPC drift guard adopts `content_ours` on a `live_prompt_drift_after_preflight` block, the snapshot (baseline + your `### Re:` response) is *larger* than the fragmented visible file that lost the response. The next commit then fails closed via `guard_no_stale_snapshot_reset_drift` ("looks like a manual cleanup") and strands the response — forcing the manual `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk` dance you've hit ~4× recently.
+
+**What it does now.** `agent-doc commit` auto-recovers that one narrow, benign case: when the cycle carries `ipc_snapshot_adoption_blocked`, no dropped exchange/queue prompts were recorded, and the adopted snapshot provably owns every prompt-bearing user line still on disk, it writes the snapshot to the working tree (the `--force-disk` half of the manual recovery, with agent write-provenance) and commits the response — logging `live_prompt_drift_auto_recovered`.
+
+**Airtight on the dangerous direction.** Because this is automatic data mutation, it fails closed the instant any genuine post-preflight user content on disk is absent from the snapshot — a disk-only `❯ do #...` prompt or an unowned `do [#id]` queue line leaves the existing guard to error out. It never silently drops a user prompt or queue item.
+
+**Verification (all local; CI pending).**
+- 7 unit tests in `write.rs` (positive/negative discriminator + the blocked-flag / dropped-prompt skip paths).
+- 2 integration tests in `ipc_closeout_model.rs` driving the *real* `agent-doc commit` path: one asserts auto-recovery lands the response in HEAD + working tree, the other asserts a disk-only user prompt fails closed and stays on disk.
+- `make check`: **4152/4152 passed**, clippy clean (bumped the audited FlowCore `guard_` budget 85→87 for the two doc-comment guard cross-references).
+- `cargo build --release` + `cargo install --path .` (both binaries refreshed). agent-doc submodule pushed as `723b998c`; CI run `723b998c` is in progress.
+
+**Closeout.** Marked `#exch-intermix` done and queued one `[recommended]` live-verification follow-up (`#exch-intermix-verify`) to watch the `live_prompt_drift_auto_recovered` marker fire in a real listener-active drift repro alongside your `#lvb-run` operator batch.
+
+**Not auto-looping.** The remaining queue (`#pcpconsol`, `#pcpc5cut`, `#s760wire`, `#saevon`, `#bkx9perid`, `#tmux-switch-lag`) is entirely fresh-session / live-pane / root-fix gated. `#pcpconsol` in particular is the multi-day single-process-control-plane root-fix that's explicitly meant to start as its own fresh focused session at `#pcpc1`, not be drained at the tail of this one. Start a fresh `/agent-doc` session for it.
+<!-- agent:boundary:7f7ddbd2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -93,7 +113,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#exch-intermix] #agent-doc-bug RESPONSE INTERMIXING / LOSS in agent:exchange — live repro captured THIS session 2026-06-09: a finalize --stream hit "IPC proof insufficient ... invariant=live_prompt_drift_after_preflight" when the operator re-invoked /agent-doc mid-finalize; the pending mutations (backlog/review) landed but the ### Re: response body was LOST (never reached exchange), and the snapshot/visible-file drifted (snapshot 10587b vs file 9437b) so the next commit was refused as "manual cleanup". This is #ipc-crdt-response-drift on the IPC/CRDT closeout path. ROOT-FIX is #pcpconsol (single ordered write queue removes the supervisor/finalize self-race). NEAR-TERM actionable in a FRESH session: when finalize detects live_prompt_drift_after_preflight, auto-recover (reset --from-current --preserve-session -> re-finalize --force-disk) instead of leaving the response lost + commit wedged. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md.
+- [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#pcpconsol] ROOT-FIX (priority per operator). Supervisor-in-process consolidation / single-process control plane (spec 08b): make the supervisor an in-process adapter so the session actor owns ONE ordered write queue + ONE controller-owned filesystem watcher; demote plugin WatchService to read-only buffer reporting + thin EDT apply+ack shim. Decomposed into dependency-ordered phases #pcpc1 to #pcpc5 in tasks/agent-doc/plan-supervisor-in-process.md. Run as a FRESH focused session starting at #pcpc1 (NOT a saturated queue-drain). Root-fixes #ipc-crdt-response-drift and R1/R2/R5/R6. Absorbs review #pf15/#pcp3/#pcp4/#pcp7 + the degraded-routing half of #pcp5. Large/multi-day.
 - [ ] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.

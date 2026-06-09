@@ -114,7 +114,24 @@ I also corrected the R6 mechanism: "could not drain the active closeout / exit 7
 **Operator fork — your call:** (A) invest in the supervisor-in-process consolidation now (large, multi-day) to unblock `#pcp3b`/`#pcp4`/`#pcp7`; or (B) ship the unblocked wins first — `#pcp3a` (R6 hardening) plus `#pcp5` (early-ack IPC) and `#pcp6` (buffer content), which don't need the consolidation. I recommend **B**: it directly fixes the exit-75 and File-Cache-Conflict symptoms with bounded risk, and the consolidation can follow as its own focused effort.
 
 I'm pausing the auto-loop here rather than draining into `#pcp4` (also consolidation-gated) — this fork is a real architectural decision. Tell me A or B (or just "do #pcp3a") and I'll proceed.
-<!-- agent:boundary:2d4c52bf -->
+
+### Re: #pcp4 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#pcp4]
+
+
+You chose **ship unblocked wins first**, so I deferred `#pcp4` and implemented the unblocked `#pcp3a` this cycle.
+
+**`#pcp4` (gated):** single controller-owned filesystem watcher — blocked on the same supervisor-in-process consolidation as `#pcp3b`/`#pcp7`. Moved to review and added `#pcp-consol` to track the consolidation prerequisite that unblocks all three.
+
+**`#pcp3a` done — R6 drain race-hardening (committed `15bbe021`, pointer `11f0b4be2`):** `route::drain_open_closeout_before_routed_dispatch` used to fail closed (`Blocked` → exit 75 "could not drain the active closeout") whenever a finalize in another process moved the cycle baseline mid-drain — the supervisor self-race. It now wraps the `repair`+`session_check` in a bounded retry (3 attempts, 200ms backoff) driven by a pure `classify_drain_retry` decision: if the cycle reloaded as closed/absent, a concurrent finalize completed (drain satisfied); if its phase/`cycle_id` advanced and attempts remain, back off and retry; otherwise fail closed as before. A genuine non-advancing block still fails fast on the first attempt — no retry-spin. Six deterministic unit tests cover every branch. `make check` green, both binaries rebuilt + installed. CI in progress for the commit.
+
+**Next unblocked in the queue:** `#pcp5` (early-ack IPC) then `#pcp6` (buffer content). `#pcp7` stays pinned but will gate when reached (also consolidation-blocked).
+
+You asked for `#pcp3a` as its own focused cycle — it's done and verified. I'll pause here rather than auto-chain into `#pcp5` (a substantial FFI + plugin change needing live editor verification); re-invoke `/agent-doc` when you want me to pick it up, ideally in a fresher session since this one's closeouts have been fighting the IPC drift.
+<!-- agent:boundary:68f94247 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -123,7 +140,7 @@ I'm pausing the auto-loop here rather than draining into `#pcp4` (also consolida
 - ~~:pushpin: [#pcp1]~~
 - ~~:pushpin: [#pcp2]~~
 - ~~:pushpin: [#pcp3]~~
-- :pushpin: [#pcp4]
+- ~~:pushpin: [#pcp4]~~
 - :pushpin: [#pcp5]
 - :pushpin: [#pcp6]
 - :pushpin: [#pcp7]
@@ -194,8 +211,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcp3a] PCP phase 3a — R6 drain race-hardening (achievable now, no consolidation): make route.rs drain_open_closeout_before_routed_dispatch fail soft on a concurrent-finalize baseline drift (detect transient in-flight write, bounded retry/backoff or clean transiently-busy outcome) instead of hard Blocked / exit-75. SimWorld-testable. Plan: tasks/agent-doc/plan-pcp-consolidate.md
-- [ ] [#pcp4] PCP phase 4 — Single controller-owned filesystem watcher replacing per-process notify watchers (kills R1 two-watchers). Binary-side first. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#pcp-consol] Supervisor-in-process consolidation (single-process control plane, specs/08b): make the supervisor an in-process adapter in the controller so the session actor can own one ordered write queue + one filesystem watcher. Prerequisite that unblocks #pcp3b, #pcp4, #pcp7. Large/multi-day; deferred per operator decision. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp5] PCP phase 5 — Early-ack IPC + degraded-prefers-file-IPC (absorbs #ipc-early-ack, #ipc-degraded-prefers-file-ipc). FFI-first: accepted/pending ack on receipt, then terminal ack; degraded routes through file-IPC, never raw disk. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp6] PCP phase 6 — Capture editor-buffer CONTENT in the live-buffer sidecar (absorbs #nm1x-livebuf-content) so a genuine unsaved edit is scope-classified vs failing closed (R4). JB+VSCode plugin + FFI classifier. Requires live editor verification. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#pcp7] PCP phase 7 — Demote plugin WatchService to read-only buffer reporting + reduce FFI socket listener to a thin EDT apply+ack shim (closes R1/R2/R5 TOCTOU). Requires live IntelliJ/Codex verification; pairs with #live-verify-batch. Plan: tasks/agent-doc/plan-pcp-consolidate.md
@@ -210,9 +226,10 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-1. [/] [#pcp3] PCP phase 3b — In-process ordered write queue in the session actor; serialize supervisor idle/file-watch writes + agent finalize writes. BLOCKED on supervisor-in-process consolidation (supervisor and agent are separate processes today, flock-only). Gated until the single-process control-plane consolidation lands. Plan: tasks/agent-doc/plan-pcp-consolidate.md
-2. [/] [#ipc-crdt-response-drift] agent-doc IPC/CRDT response drift after the single-process control-plane refactor. TWO LAYERS FIXED + INSTALLED: (1) merge layer c9d276b9 — crdt::merge protects committed ### Re: history from a stale/divergent theirs; (2) visible-buffer layer 51b9ed40 — live_buffer_diverges_from_content suppresses a stale live-buffer sidecar (disk modified after the editor last reported = lagging foreign disk write, not a user edit), killing the false-positive 'visible editor buffer differs' finalize block. Both shipped via cargo install + build --release + agent-doc lib-install (0.34.0). REMAINING (still gated, needs clean-session live repro): reversed-lines/hoisted-above-prior symptom under theirs>base in the IPC node-patch/boundary-append path (ipc_socket.rs, template boundary, stream.rs), and write-back serialization across concurrent supervisors. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
-3. [/] [#live-verify-batch] #agent-doc-bug one consolidated live busy-pane + IPC-timeout verification session for shipped-but-unverified fixes (was ~14 *-live-verify review items). Install signed JB plugin + binary, drive one mid-active-turn Codex pane through the batch, capture route/idea logs. Blocked on live IntelliJ/Codex panes.
+1. [/] [#pcp4] PCP phase 4 — Single controller-owned filesystem watcher replacing per-process notify watchers (kills R1 two-watchers). BLOCKED on supervisor-in-process consolidation (#pcp-consol); deferred per operator decision to ship unblocked wins first. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+2. [/] [#pcp3] PCP phase 3b — In-process ordered write queue in the session actor; serialize supervisor idle/file-watch writes + agent finalize writes. BLOCKED on supervisor-in-process consolidation (supervisor and agent are separate processes today, flock-only). Gated until the single-process control-plane consolidation lands. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+3. [/] [#ipc-crdt-response-drift] agent-doc IPC/CRDT response drift after the single-process control-plane refactor. TWO LAYERS FIXED + INSTALLED: (1) merge layer c9d276b9 — crdt::merge protects committed ### Re: history from a stale/divergent theirs; (2) visible-buffer layer 51b9ed40 — live_buffer_diverges_from_content suppresses a stale live-buffer sidecar (disk modified after the editor last reported = lagging foreign disk write, not a user edit), killing the false-positive 'visible editor buffer differs' finalize block. Both shipped via cargo install + build --release + agent-doc lib-install (0.34.0). REMAINING (still gated, needs clean-session live repro): reversed-lines/hoisted-above-prior symptom under theirs>base in the IPC node-patch/boundary-append path (ipc_socket.rs, template boundary, stream.rs), and write-back serialization across concurrent supervisors. Plan: tasks/agent-doc/plan-ipc-crdt-response-drift.md
+4. [/] [#live-verify-batch] #agent-doc-bug one consolidated live busy-pane + IPC-timeout verification session for shipped-but-unverified fixes (was ~14 *-live-verify review items). Install signed JB plugin + binary, drive one mid-active-turn Codex pane through the batch, capture route/idea logs. Blocked on live IntelliJ/Codex panes.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

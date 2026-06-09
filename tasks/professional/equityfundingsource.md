@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -89,7 +89,7 @@ Applied to the portal submission forms:
 **Spec:** `prds/form-error-standard.md` documents the convention and where it's applied.
 
 Deploy is still queued (backlog **#xyp5**, now also covering this `39a60c0`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push all the pending UI/backend fixes live.
-<!-- agent:boundary:b3a0ad8b -->
+<!-- agent:boundary:c76911cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,6 +97,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

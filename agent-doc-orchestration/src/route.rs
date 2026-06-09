@@ -1795,6 +1795,53 @@ fn scrub_duplicate_prompt_comments_for_route(
     }
 }
 
+/// Decision for the #pcp3a drain retry loop after a mid-drain `repair` +
+/// `session_check` failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainRetryDecision {
+    /// A concurrent finalize in another process closed the cycle — the drain is
+    /// satisfied; routed dispatch may proceed.
+    ConcurrentlyClosed,
+    /// The cycle advanced concurrently and attempts remain — back off and retry.
+    Retry,
+    /// No concurrent progress observed, or attempts exhausted — fail closed.
+    GiveUp,
+}
+
+/// Classify whether a mid-drain `repair` + `session_check` failure is a transient
+/// concurrent-finalize race (#pcp3a). `original_*` is the cycle observed when the
+/// drain started; `reloaded` is the cycle re-read after the failed check as
+/// `(cycle_id, phase, is_open)`, or `None` when no open cycle remains on disk.
+///
+/// The route-owned supervisor can race the agent's own finalize writes on the
+/// same document: a finalize in the *other* process moves the cycle/baseline
+/// mid-drain, so `session_check` sees "captured response baseline no longer
+/// matches current document". That is transient — the finalize will close the
+/// cycle. We only retry when there is positive evidence of concurrent progress
+/// (the cycle closed, or its `cycle_id`/`phase` advanced); a genuine,
+/// non-advancing block fails closed immediately so we never paper over a real
+/// stuck cycle.
+fn classify_drain_retry(
+    original_cycle_id: &str,
+    original_phase: crate::cycle_state::CyclePhase,
+    reloaded: Option<(&str, crate::cycle_state::CyclePhase, bool)>,
+    attempt: u32,
+    max_attempts: u32,
+) -> DrainRetryDecision {
+    match reloaded {
+        None => DrainRetryDecision::ConcurrentlyClosed,
+        Some((_, _, false)) => DrainRetryDecision::ConcurrentlyClosed,
+        Some((cycle_id, phase, true)) => {
+            let progressed = cycle_id != original_cycle_id || phase != original_phase;
+            if progressed && attempt + 1 < max_attempts {
+                DrainRetryDecision::Retry
+            } else {
+                DrainRetryDecision::GiveUp
+            }
+        }
+    }
+}
+
 fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseoutDrainOutcome> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
@@ -1813,67 +1860,111 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         ),
     );
 
-    // Reap completed tracked items across ALL surfaces (backlog, review, icebox)
-    // and re-sync the snapshot before the focused repair, matching what a manual
-    // re-run's full preflight maintenance does. The repair sub-step only reaps
-    // the backlog, so a deployed/completed `[x]` item left in review or icebox
-    // would make that reap a no-op, the post-repair session-check would still
-    // find the completed item, and route would refuse dispatch until the user
-    // manually retried (the "JB Run Agent Doc failed; repeat succeeded" report).
-    // run_pending_maintenance is idempotent, so this is safe even when there is
-    // nothing to reap.
-    if let Err(e) = crate::preflight::run_pending_maintenance(file) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_drain_pending_maintenance_warning file={} error={}",
-                file.display(),
-                crate::secret_redact::redact(&e.to_string())
-            ),
-        );
-    }
-    match crate::repair::repair(file) {
-        Ok(outcome) => match crate::session_check::inspect(file)? {
-            crate::session_check::SessionCheckStatus::Ok(_) => {
-                let label = format!("{outcome:?}");
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
-                        file.display(),
-                        state.cycle_id,
-                        label
-                    ),
-                );
-                Ok(RouteCloseoutDrainOutcome::Recovered(label))
-            }
-            crate::session_check::SessionCheckStatus::Interrupted(reason) => {
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
-                        file.display(),
-                        state.cycle_id,
-                        crate::secret_redact::redact(&reason)
-                    ),
-                );
-                Ok(RouteCloseoutDrainOutcome::Blocked(reason))
-            }
-        },
-        Err(err) => {
-            let reason = err.to_string();
+    // #pcp3a: a concurrent finalize in another process (the route-owned supervisor
+    // self-race) can move the document/cycle baseline mid-drain, so `repair` +
+    // `session_check` observe a transient "captured response baseline no longer
+    // matches current document" mismatch. Rather than fail closed on the first
+    // such block (the "could not drain the active closeout" / exit 75 the user
+    // hit, which self-resolves once the finalize completes), retry a bounded
+    // number of times when there is positive evidence the cycle is concurrently
+    // progressing (phase/cycle_id advanced) or has just closed. A genuine,
+    // non-advancing block still fails closed after the first attempt.
+    const DRAIN_MAX_ATTEMPTS: u32 = 3;
+    const DRAIN_RETRY_BACKOFF_MS: u64 = 200;
+    let mut last_reason = String::new();
+
+    for attempt in 0..DRAIN_MAX_ATTEMPTS {
+        // Reap completed tracked items across ALL surfaces (backlog, review,
+        // icebox) and re-sync the snapshot before the focused repair, matching
+        // what a manual re-run's full preflight maintenance does. The repair
+        // sub-step only reaps the backlog, so a deployed/completed `[x]` item left
+        // in review or icebox would make that reap a no-op, the post-repair
+        // session-check would still find the completed item, and route would
+        // refuse dispatch until the user manually retried (the "JB Run Agent Doc
+        // failed; repeat succeeded" report). run_pending_maintenance is
+        // idempotent, so this is safe even when there is nothing to reap.
+        if let Err(e) = crate::preflight::run_pending_maintenance(file) {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
+                    "route_dispatch_drain_pending_maintenance_warning file={} error={}",
                     file.display(),
-                    state.cycle_id,
-                    crate::secret_redact::redact(&reason)
+                    crate::secret_redact::redact(&e.to_string())
                 ),
             );
-            Ok(RouteCloseoutDrainOutcome::Blocked(reason))
+        }
+
+        let block_reason = match crate::repair::repair(file) {
+            Ok(outcome) => match crate::session_check::inspect(file)? {
+                crate::session_check::SessionCheckStatus::Ok(_) => {
+                    let label = format!("{outcome:?}");
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
+                            file.display(),
+                            state.cycle_id,
+                            label
+                        ),
+                    );
+                    return Ok(RouteCloseoutDrainOutcome::Recovered(label));
+                }
+                crate::session_check::SessionCheckStatus::Interrupted(reason) => reason,
+            },
+            Err(err) => err.to_string(),
+        };
+
+        // Concurrent-finalize detection: re-read the cycle after the failed check.
+        let reloaded = crate::cycle_state::load(file)?;
+        let decision = classify_drain_retry(
+            &state.cycle_id,
+            state.phase,
+            reloaded
+                .as_ref()
+                .map(|s| (s.cycle_id.as_str(), s.phase, s.is_open())),
+            attempt,
+            DRAIN_MAX_ATTEMPTS,
+        );
+        last_reason = block_reason;
+        match decision {
+            DrainRetryDecision::ConcurrentlyClosed => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_concurrent_finalize_closed file={} cycle_id={}",
+                        file.display(),
+                        state.cycle_id
+                    ),
+                );
+                return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+            }
+            DrainRetryDecision::Retry => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_retry_concurrent_progress file={} cycle_id={} attempt={}",
+                        file.display(),
+                        state.cycle_id,
+                        attempt + 1
+                    ),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(DRAIN_RETRY_BACKOFF_MS));
+                continue;
+            }
+            DrainRetryDecision::GiveUp => break,
         }
     }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
+            file.display(),
+            state.cycle_id,
+            crate::secret_redact::redact(&last_reason)
+        ),
+    );
+    Ok(RouteCloseoutDrainOutcome::Blocked(last_reason))
 }
 
 fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {

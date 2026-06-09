@@ -11367,3 +11367,96 @@ fn busy_route_queued_diagnostic_names_turn_in_progress_and_no_rerun() {
     // Must NOT carry the generic busy diagnostic's rerun instruction.
     assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");
 }
+
+// #pcp3a: classify_drain_retry — the route-drain concurrent-finalize race
+// hardening decision. A mid-drain repair+session_check failure should retry
+// (not fail closed) when there is positive evidence a finalize in another
+// process is concurrently progressing or has just closed the cycle.
+use crate::cycle_state::CyclePhase;
+
+#[test]
+fn drain_retry_concurrent_close_when_cycle_gone() {
+    // The cycle is no longer on disk — a concurrent finalize closed it.
+    assert_eq!(
+        classify_drain_retry("cyc-1", CyclePhase::PreflightStarted, None, 0, 3),
+        DrainRetryDecision::ConcurrentlyClosed
+    );
+}
+
+#[test]
+fn drain_retry_concurrent_close_when_cycle_no_longer_open() {
+    // The cycle reloaded as not-open (Committed) — a concurrent finalize closed it.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::Committed, false)),
+            0,
+            3
+        ),
+        DrainRetryDecision::ConcurrentlyClosed
+    );
+}
+
+#[test]
+fn drain_retry_retries_when_phase_advanced_and_attempts_remain() {
+    // The cycle is still open but its phase advanced (PreflightStarted ->
+    // WriteApplied) — a finalize is actively progressing in another process.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::WriteApplied, true)),
+            0,
+            3
+        ),
+        DrainRetryDecision::Retry
+    );
+}
+
+#[test]
+fn drain_retry_retries_when_cycle_id_changed_and_attempts_remain() {
+    // A different, newer open cycle replaced ours — concurrent progress.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-2", CyclePhase::PreflightStarted, true)),
+            1,
+            3
+        ),
+        DrainRetryDecision::Retry
+    );
+}
+
+#[test]
+fn drain_retry_gives_up_when_no_progress_observed() {
+    // Same cycle, same phase, still open — no concurrent finalize. A genuine
+    // stuck cycle must fail closed immediately rather than retry-spin.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::PreflightStarted, true)),
+            0,
+            3
+        ),
+        DrainRetryDecision::GiveUp
+    );
+}
+
+#[test]
+fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
+    // Concurrent progress, but this is the last attempt — fail closed instead
+    // of looping forever.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::WriteApplied, true)),
+            2,
+            3
+        ),
+        DrainRetryDecision::GiveUp
+    );
+}

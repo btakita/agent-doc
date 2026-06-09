@@ -169,7 +169,64 @@ verification:
 confidence: high
 
 escalation: none
-<!-- agent:boundary:3ed18ad7 -->
+
+### Re: zkft - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#zkft]
+
+
+Implemented `#zkft`.
+
+Summary:
+- Made memory reads explicit and watermarkable in `tsift-memory` with `oldest_first`, `recent_first`, and `query_relevant` policies, plus selection content hashes and source high-water marks.
+- Switched memory graph projection to default `recent_first`, added policy/query CLI controls, and persisted a `memory_projection` metadata node carrying the read policy, limit, event counts, source watermark, and content hash.
+- Made SQLite graph upserts incremental for unchanged node/edge row hashes so repeated identical projections do not rewrite materialized rows.
+- Updated README/spec/version notes for the policy and watermark behavior.
+
+Changed paths:
+- `src/tsift/packages/tsift-memory/src/lib.rs`
+- `src/tsift/packages/tsift-memory/README.md`
+- `src/tsift/packages/tsift-memgraphrag/src/lib.rs`
+- `src/tsift/packages/tsift-memgraphrag/README.md`
+- `src/tsift/packages/tsift-cli/src/cli.rs`
+- `src/tsift/packages/tsift-cli/src/commands/memory.rs`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift/packages/tsift-sqlite/src/lib.rs`
+- `src/tsift/specs/memgraphrag-direction.md`
+- `src/tsift/VERSIONS.md`
+
+Commands:
+- `cargo test -p tsift-memory read_memory_events_with_policy_orders_explicitly -- --nocapture`
+- `cargo test -p tsift-memory query_relevant_read_policy_requires_query_and_hashes_selection -- --nocapture`
+- `cargo test -p tsift-cli project_memory_into_graph_persists_memory_nodes -- --nocapture`
+- `cargo test -p tsift-sqlite sqlite_upsert_projection_batches_rows_and_properties -- --nocapture`
+- `cargo test -p tsift-memory`
+- `cargo test -p tsift-memgraphrag`
+- `cargo test -p tsift-sqlite`
+- `cargo test -p tsift-cli`
+- `cargo test -p tsift-cli cli_parses_memory_project_graph_read_policy -- --nocapture`
+- `git diff --check`
+- `make check`
+- `cargo install --path .`
+- `tsift memory project-graph /tmp/tsift-zkft-smoke.wCTBzr --graph-db /tmp/tsift-zkft-smoke.wCTBzr/graph.db --read-policy query-relevant --query semantic --limit 3 --json`
+- `gh run watch 27186383876 --exit-status`
+
+Verification:
+- Local targeted and package tests passed.
+- Workspace `make check` passed.
+- Installed CLI smoke test passed and returned `read_policy`, `source_watermark`, `content_hash`, `events_available`, and a `memory_projection` node kind in JSON.
+- Pushed `src/tsift` CI run `27186383876` passed: `live Convex graph acceptance` and `clippy + test` both green.
+- Parent repo has no workflow named `CI` to query with `gh run list --workflow CI --limit 1`; the applicable `src/tsift` workflow was checked instead.
+
+Commits:
+- `src/tsift`: `503978c memgraphrag: make memory projection incremental`
+- parent: `7d95ad685 tsift: advance incremental memory projection`
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:32a02ddb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,17 +238,16 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kx6s]~~
 - ~~do [#qszc]~~
-- do [#qs5v]
-- do [#zkft]
-- do [#58p8]
-- do [#kn0d]
-- What are #next-steps to improve prompt caching?
+- ~~:pushpin: :round_pushpin: do [#zkft]~~
+- :pushpin: :round_pushpin: do [#58p8]
+- :pushpin: :round_pushpin: do [#kn0d]
+- ~~do [#qs5v]~~
+- :pushpin: What are #next-steps to improve prompt caching?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#zkft] Make memory graph projection incremental with memory watermarks/content hashes and explicit recent-first, oldest-first, and query-relevant read policies.
 - [ ] [#58p8] Fold observed-at decay and memory node signals into shared GraphStore ranked_neighborhood scoring so memory and code prune through one graph-ranking path.
 - [ ] [#kn0d] Push semantic seeded neighborhood caps into GraphStore/SQLite with SQL-side edge ranking limits and batched node lookup.
 <!-- /agent:backlog -->

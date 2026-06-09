@@ -744,7 +744,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // skip that stops the contamination guard from flagging legit user
         // prompts that mention `/agent-doc`/`/clear`. The skip itself
         // (`mentions_slash_command`) carries no `guard_` substring.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 93,
+        // +1 (#partial-staging-guard-cross-doc-noise): the
+        // `partial_staging_closeout_guard_ignores_cross_document_markdown_noise`
+        // regression test-fn name (substring `guard_`). The fix itself drops `md`
+        // from `is_partial_staging_relevant_path` and adds no `guard_` token.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 94,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

@@ -3634,7 +3634,13 @@ fn is_partial_staging_relevant_path(path: &str) -> bool {
             | "go"
             | "rb"
             | "swift"
-            | "md"
+            // `#partial-staging-guard-cross-doc-noise`: markdown is NOT source/test
+            // code. In a multi-session superproject the latest commit is usually a
+            // session DOCUMENT (`.md`) and the dirty companions are other session
+            // docs; their shared prose vocabulary (e.g. "make check", "agent-doc")
+            // is incidental, not a source+test partial-staging signal, so including
+            // `md` made the guard WARN on nearly every closeout. The guard targets
+            // source+test code partial staging; documents are excluded.
             | "txt"
             | "snap"
             | "json"
@@ -9411,6 +9417,41 @@ Body\n\
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         let joined = report.warnings.join("\n");
         assert!(!joined.contains("partial staging closeout"), "{joined}");
+    }
+
+    #[test]
+    fn partial_staging_closeout_guard_ignores_cross_document_markdown_noise() {
+        // #partial-staging-guard-cross-doc-noise: a markdown-document commit plus a
+        // dirty companion markdown doc sharing incidental prose vocabulary (e.g.
+        // `make check`) must NOT trip the source+test partial-staging guard, which
+        // previously WARNed on nearly every closeout in a multi-session superproject.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = setup_partial_staging_repo(root);
+
+        // Latest commit changes only a markdown doc carrying a common phrase.
+        fs::write(
+            root.join("notes_a.md"),
+            "Run `make check` before committing the agent-doc change.\n",
+        )
+        .unwrap();
+        partial_staging_git(root, &["add", "notes_a.md"]);
+        partial_staging_git(root, &["commit", "-m", "notes a", "--no-verify"]);
+
+        // A dirty companion markdown doc shares the same incidental phrase.
+        fs::write(
+            root.join("notes_b.md"),
+            "Reminder: `make check` is required for the agent-doc workflow.\n",
+        )
+        .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        let joined = report.warnings.join("\n");
+        assert!(
+            !joined.contains("partial staging closeout"),
+            "markdown cross-document vocabulary must not trip the source+test guard:\n{joined}"
+        );
     }
 
     #[test]

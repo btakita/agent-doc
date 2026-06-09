@@ -62,7 +62,44 @@ Done and deployed (Worker `2319bce6-b3ae-4efe-b1b5-423b31900437`).
 
 
 Already deployed this cycle — the lead-detail work shipped in Worker version **`2319bce6-b3ae-4efe-b1b5-423b31900437`** (EFS `ef3b76e` = `origin/main`, no unpushed commits). The served bundle already contains the detail-page code, so there's nothing new to push; draining the queue.
-<!-- agent:boundary:80b30df1 -->
+
+### Re: Individual-item admin routes — opus-4-8
+
+> **Queue prompt:**
+>
+> Create admin routes for individual items the other types of list items including. Add links to the individual item route where appropriate:
+> - Loan Applications
+> - Contact Messages
+> - Investor Deals
+> - Funding Commits
+> - Payments
+> - Documents
+> - Public Contents
+> - Messages
+> - Lender Management
+> - User Management
+
+
+Done for the four list types that fit the existing detail-page pattern (loans/deals/users/leads already had it). Shipped, tested, committed, and pushed to `equityfundingsource-dev` main (`dae5d5f`).
+
+**New individual-item routes (each list row now links to it; parent nav highlights):**
+- **Contact Messages** → `/portal-admin/contact-messages/:id`
+- **Funding Commits** → `/portal-admin/funding/:id`
+- **Payments** → `/portal-admin/payments/:payment_id`
+- **Lender Management** → `/portal-admin/lenders/:id`
+
+Each is backed by a new by-id D1 API (`GET /api/admin/{contact-messages,funds,payments,lender-requests}/:id`), a Preact detail component (reads the id from the URL, fetches, renders info cards + the existing status/confirm/deny/done actions), a server portal route registered before the generic `/:section` catch-all, and a section added to `admin_section_T` in all three places.
+
+**Already had detail routes (no work needed):** Loan Applications, Investor Deals, Messages, User Management.
+
+**Deferred — queued as actionable backlog** (`#pzj5` + Documents item), because they aren't discrete-row lists and need a design call:
+- **Documents** has *multiple* sub-lists (uploads + document-requests) — needs a decision on whether each gets its own detail section.
+- **Public Contents** is a *singleton key-editor* (about/contact), not a row list — the natural route is `/portal-admin/public-contents/:key` deep-linking the editor.
+
+**Verification:** full suite **412 pass / 0 fail**, browser + worker bundles build clean. Added a test locking in the four new routes/sections/APIs. The rebase from remote main also surfaced a pre-existing red test (`#form-error-standard`) — unrelated to this work: broker `submit_deal` was refactored to reuse `FullApplication`, which keeps its own top red error banner but not the shared helper; I updated that stale test to match (`dae5d5f`).
+
+Not deployed — that's the next queued item.
+<!-- agent:boundary:438a670d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +107,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
----
+~~~done
 Create admin routes for individual items the other types of list items including. Add links to the individual item route where appropriate:
 - Loan Applications
 - Contact Messages
@@ -82,7 +119,8 @@ Create admin routes for individual items the other types of list items including
 - Messages
 - Lender Management
 - User Management
----
+~~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

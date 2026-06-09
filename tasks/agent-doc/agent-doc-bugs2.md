@@ -35,13 +35,36 @@ complete
 Compacted content:
 - Archived 1 response topic(s): do [#ipc-early-ack]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a4d07e88 -->
+
+### Re: do [#ipc-degraded-prefers-file-ipc] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
+
+
+Done — Phase 3 of `plan-ipc-transport-reliability.md`. A degraded session now routes writes through the file-IPC patch queue instead of a raw disk write, so it never manufactures an IDEA "File Cache Conflict".
+
+**Root cause:** a latched-degraded socket only means the plugin's *socket* listener is wedged. The file-IPC patch queue uses a *separate* plugin file watcher that is almost always still alive. The old code conflated the two — on degrade it returned straight to a raw foreign disk write (the exact thing IntelliJ flags as a cache conflict on the open buffer).
+
+**Fix (all in `write.rs`):**
+- `try_ipc` no longer early-returns to disk on degrade. It skips only the wedged socket attempt and falls through to the file-IPC patch queue (`write_ipc_and_poll`), where the plugin applies via the Document API.
+- The socket-ack-timeout arm that *newly* latches degraded also falls through to file IPC instead of returning.
+- `run_stream` always calls `try_ipc` when the plugin is installed (dropped the `!ipc_direct_disk_degraded` gate + its dead direct-disk branch), so the stream/finalize path inherits the routing.
+- Raw disk write stays the **true last resort** — reached only on the existing IPC-timeout (`exit 75`) path when file IPC *also* fails to deliver. The fire-and-forget `reposition_boundary` signal keeps its direct-disk-skip (no response body).
+
+**Verification:** `make check` green (clippy clean). New tests: `try_ipc_prefers_file_ipc_when_socket_degraded` (no plugin → routes through file IPC, times out, disk last resort) and `try_ipc_degraded_succeeds_via_file_ipc_when_plugin_consumes` (live file watcher → degraded write succeeds via plugin, no disk write). FlowCore `reason=` budget bumped 29→30 for the audited prefer-file-ipc diagnostic. Spec: `process-topology.md` R3 ✅.
+
+**Shipped:** `cargo install` + `cargo build --release` both rebuilt 0.34.0. Submodule pushed (`0b931d04`); superproject pointer + plan advanced. CI in progress for the pushed commit — local suite is green.
+
+Note: this is the file-IPC-routing half of review item `#pcp5`; the early-ack Kotlin half (`#ipc-early-ack`, Phase 2) is still its gated remainder and needs live IntelliJ verification.
+<!-- agent:boundary:e98b6ccc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
+- ~~:round_pushpin: do [#ipc-degraded-prefers-file-ipc]~~
 - :round_pushpin: do [#loop-guard-exchange-node-granularity]
 - :round_pushpin: do [#queue-completed-items-escape-below-component]
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]

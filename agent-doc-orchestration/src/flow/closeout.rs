@@ -99,6 +99,28 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     ensure_cycle_committed(file)?;
     timer.mark("cycle_state");
 
+    // `#exit75-done-reap-not-atomic`: reap any `[x]` tracked items the response
+    // cycle marked done (`--done`) within the SAME closeout. The direct-write
+    // finalize path reaps during document mutation, but the IPC-timeout / file-IPC
+    // fallback (exit 75) commits the `[x]` and exits before that reap, so the
+    // completed item lingers and `enforce_clean_closeout` below fails closed —
+    // forcing a manual recovery `preflight` that also strands a fresh
+    // `preflight_started` cycle. `run_pending_maintenance` is the same reap
+    // preflight runs at cycle start: it writes the reaped/archived document +
+    // snapshot (it does not commit), so the snapshot-vs-HEAD retry immediately
+    // below stages the reap. It is idempotent — a no-op when nothing is `[x]`
+    // (the direct path already reaped), so it only closes the exit-75 gap. Errors
+    // are non-fatal: the `completed_pending_reap` guard still catches a miss.
+    match crate::preflight::run_pending_maintenance(file) {
+        Ok(_) => {
+            rc.invalidate_head_content();
+            timer.mark("closeout_reap");
+        }
+        Err(e) => eprintln!(
+            "[commit] closeout pending-reap maintenance failed (non-fatal): {e}"
+        ),
+    }
+
     if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
         rc.snapshot_commit_status()
     {
@@ -1068,6 +1090,65 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success(), "git {args:?} failed with {status}");
+    }
+
+    #[test]
+    fn complete_required_closeout_reaps_lingering_completed_item() {
+        // #exit75-done-reap-not-atomic: the exit-75 / file-IPC fallback commits a
+        // `[x]` item without reaping it, then reaches complete_required_closeout.
+        // The closeout must reap the lingering completed item in the same pass so
+        // session-check passes without a separate recovery preflight.
+        let base = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: close the loop — gpt-5\n\nImplemented and verified.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#donelinger] Close the loop\n",
+            "- [ ] [#keep] Keep tracking follow-up\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n<!-- /agent:done -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+
+        // Committed response cycle (capture present), with the `[x]` already on
+        // disk + in HEAD — exactly the exit-75 residual shape.
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let response =
+            "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
+        crate::capture::capture_response(&doc, response).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+
+        complete_required_closeout(&doc).expect("closeout must reap the lingering completed item");
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("- [x] [#donelinger]"),
+            "closeout must reap the lingering completed item:\n{content}"
+        );
+        assert!(
+            content.contains("- [ ] [#keep] Keep tracking follow-up"),
+            "live follow-up must remain:\n{content}"
+        );
+        assert!(
+            content.contains("<!-- agent:done -->") && content.contains("[#donelinger]"),
+            "reaped item must be archived to agent:done:\n{content}"
+        );
+
+        // HEAD reflects the reap, and session-check accepts the closeout.
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            !head.contains("- [x] [#donelinger]"),
+            "HEAD must not strand the completed item:\n{head}"
+        );
+        matches!(
+            crate::session_check::inspect(&doc).unwrap(),
+            crate::session_check::SessionCheckStatus::Ok(_)
+        )
+        .then_some(())
+        .expect("session-check must accept the atomic-reap closeout");
     }
 
     #[test]

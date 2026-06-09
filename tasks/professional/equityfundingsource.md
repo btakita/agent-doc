@@ -99,7 +99,7 @@ Each is backed by a new by-id D1 API (`GET /api/admin/{contact-messages,funds,pa
 **Verification:** full suite **412 pass / 0 fail**, browser + worker bundles build clean. Added a test locking in the four new routes/sections/APIs. The rebase from remote main also surfaced a pre-existing red test (`#form-error-standard`) — unrelated to this work: broker `submit_deal` was refactored to reuse `FullApplication`, which keeps its own top red error banner but not the shared helper; I updated that stale test to match (`dae5d5f`).
 
 Not deployed — that's the next queued item.
-<!-- agent:boundary:438a670d -->
+<!-- agent:boundary:efa2d35f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,6 +126,8 @@ Create admin routes for individual items the other types of list items including
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#pzj5] Add individual-item detail route for admin Public Contents: it is a key-based singleton editor (about/contact), not a discrete-row list. Add /portal-admin/public-contents/:key to deep-link the about/contact editor section, plus tab/row links. Confirm whether nested About sections/team-members also need addressable routes.
+- [ ] [#f632] Add individual-item detail routes for admin Documents (uploads + investor-document-requests sub-lists): add by-id GET APIs, client detail components, server portal sections, and row links. Decide whether uploads and document-requests each get their own detail section since Documents has multiple sub-lists.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

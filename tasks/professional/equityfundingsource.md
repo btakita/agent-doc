@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -106,7 +106,7 @@ Deployed now. You were right — the previous three cycles were `#spec-test-comm
 **Smoke tests (unauthenticated):** homepage `200`, `/apply` `200`, the admin loan-application route `303` (redirects to login — route resolves), the status endpoint `401` (auth-gated, not a 500), and the homepage now serves the freshly-deployed bundle `index.browser-6KUZXKHY.js`. The admin/borrower-gated behaviors (button disabled, `accepted` rejected, error toast) need a logged-in session to see visually — they're covered by the 393 passing tests; load `/loan-applications/cda67748…` while signed in as admin and the Accept button should now be disabled with the missing-parts reason.
 
 Marked the deploy item **#xyp5** done and updated the Status block with the new Worker version and the now-live gates.
-<!-- agent:boundary:1fbab7c7 -->
+<!-- agent:boundary:cfb1f046 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,6 +114,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications: Add "Leads" to the pipeline. Rename "Applications Received" to "Applications". Is there a difference between "Processing" and "Approved"? If yes, add "Approved". If no, Approved applications move straight to "Processing".
 <!-- /agent:queue -->
 
 ## Backlog

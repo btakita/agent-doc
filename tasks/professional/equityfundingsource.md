@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,26 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 9 response topic(s): Add an Investor Pipeline page; [#vd8s] Investor Pipeline phase 2; [#vtx8] In-page pipeline card detail modals; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:d4b4d398 -->
+
+### Re: Move Deal Pipeline above Loan Applications — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:**
+>
+> Move Deal Pipeline above Loan Applications in the Admin menu.
+
+Reordered the admin sidebar: **Deal Pipeline** now sits directly under Dashboard, above **Loan Applications**.
+
+**What shipped (committed + pushed, EFS `6dac30d`; superproject pointer `edc2c09e7`):**
+- `layout.tsx` `NAV_ITEMS`: swapped the `pipeline` and `full-applications` entries so the order is Dashboard → Deal Pipeline → Loan Applications → Application Leads → …
+- Test in `tests/admin-pipeline.test.ts` asserts Deal Pipeline is ordered before Loan Applications.
+
+**Full suite 491 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the final queued item — the queue is now empty.
+<!-- agent:boundary:5ef2863b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +63,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

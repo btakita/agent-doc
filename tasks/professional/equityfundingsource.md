@@ -140,7 +140,7 @@ Deployed to production. No new D1 migration (wire values reuse the existing `pla
 - Smoke test: `GET /` → **200**, `GET /funded-deals` → **200**, `GET` + `PUT /api/admin/settings` → **401** (auth-gated, correctly wired).
 
 This drains the queue.
-<!-- agent:boundary:eeeff37a -->
+<!-- agent:boundary:557eeef3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,6 +148,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+- [#ty2v]. Add a setting for the admin to set the wire values. Use a placeholder for now.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

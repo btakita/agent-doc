@@ -126,13 +126,33 @@ Applied the preset to the **actionable** half of `#4wxr`. The cross-session guar
 `#4wxr` stays open for its **remaining gated half**: the JB "Claim for Tmux Pane" + VS Code claim command must parse the marker and render **Force claim / Switch project session / Cancel** — needs live IntelliJ/VS Code, funnels through `#xkpf`.
 
 **The other 8 queued ids are unchanged from last turn's triage** — `#saev` (fresh-session, modifies the closeout write path), `#9adk #s760 #f5d2` (live IntelliJ), `#bkx9` (blocked on `#ipc-crdt-response-drift`), `#pf15 #21w2` (supervisor-in-process / 08b cutover, fresh-session), `#xkpf` (live verify batch). I did not re-drain them; none is runnable in this degraded shared session.
-<!-- agent:boundary:1c63b2ff -->
+
+### Re: do [#4wxr] — cross-session claim dialog shipped (code-complete) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#4wxr]
+
+
+> **Queue head:** `do [#4wxr]` (go-mode also auto-queued `do [#saev] … do [#xkpf]`)
+
+Completed the implementable remainder of `#4wxr`. Last cycle shipped the binary marker; this cycle shipped the **plugin choice dialog** in both editors so the JB "Claim for Tmux Pane" button (and VS Code claim) no longer dead-ends on the raw exit-1:
+
+- **JetBrains** (`ClaimAction`, plugin **0.2.156**) — `parseCrossSessionReject` reads the `[claim] cross-session-reject pane_id=… pane_session=… configured=…` marker from the merged claim output and shows a `Messages.showDialog`: **Force Claim** (`claim --force`) / **Switch Project Session** (`session set <pane_session>` then re-claim) / **Cancel** (leave unclaimed).
+- **VS Code** (`crossSession.ts` + `extension.ts`, **0.2.24**) — same parse + a modal `showWarningMessage` with the same three branches; re-claim re-enters after `commandRunning` clears.
+- **Tests** — `ClaimActionTest` (JB) + `crossSession.test.ts` (VS Code), each covering ordered / unordered / missing-field / no-marker parsing (fails closed on a missing field). Full JB gradle suite + `npm test` green. Spec 07 + VERSIONS updated; both plugin artifacts built (JB signed+unsigned zips, VS Code tsc-compiled).
+- **Pushed** — submodule `2b50f0e2`, superproject pointer + plan, both on origin/main. Staged only my 9 files; the shared checkout's concurrent in-flight work (incl. a `#pcache-boundary` commit that landed on top of mine) was left untouched.
+
+`#4wxr` is now **code-complete, gated** — the only remainder is a human clicking each dialog branch in a live IDE against a genuinely cross-session pane, which is exactly what `#xkpf` (the consolidated live-verify batch) exists to do.
+
+**The other 8 go-queued ids stay blocked — I did not drain them.** `#saev` (ack-path change to the closeout write path — spec-08b forbids landing it in a cycle that persists through that path), `#9adk #s760 #f5d2` (live IntelliJ), `#bkx9` (`#ipc-crdt-response-drift`), `#pf15 #21w2` (supervisor-in-process / 08b cutover — fresh-session), `#xkpf` (needs live panes). They are not runnable in this degraded shared session, so I am **not auto-looping** into them; run them in fresh focused / live-IDE sessions. (Closeout note: this session's default IPC finalize drifted again last cycle, so I committed via `--force-disk`.)
+<!-- agent:boundary:52d5644c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#4wxr]
+- ~~do [#4wxr]~~
 - do [#saev]
 - do [#9adk]
 - do [#s760]
@@ -168,7 +188,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#4wxr] jb-claim-cross-session: BINARY HALF SHIPPED (submodule 6c0ae573): claim emits a structured CROSS_SESSION_REJECT_MARKER line ([claim] cross-session-reject pane_id=.. pane_session=.. configured=..) to stderr before the human bail on a cross-session Reject, so editor plugins can branch on it; unit test + spec 07 + VERSIONS. REMAINING (gated on live IntelliJ/VS Code, verify in #xkpf): JB "Claim for Tmux Pane" + VS Code claim command must parse the marker and render a Force claim / Switch project session / Cancel dialog instead of the raw exit-1. Plan: tasks/agent-doc/plan-jb-claim-cross-session.md
 - [ ] [#saev] earlyack-impl: Implement early-ack IPC protocol — ipc_socket accepted/pending ack on patch receipt + terminal ack/sidecar; ffi.rs listener contract then PatchWatcher.handleSocketMessageV2. BLOCKED (fresh focused session): the Rust core modifies send_message (ipc_socket.rs) = THIS session closeout write path; spec-08b forbids landing write/ack-path changes in the same cycle that persists a response through that path, and review #pcp5 flags it as delicate state-machine work. Unblocked by a fresh non-degraded session with live IntelliJ/Codex (#xkpf). Completes review #ipc-early-ack + early-ack half of #pcp5. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#9adk] consacc-guard: Add JB plugin per-doc in-flight-invocation guard + console-idle pre-send check so Run Agent Doc / Clear Session Context coalesce when one invocation is already pending. BLOCKED on live IntelliJ verification. Completes review #console-input-accumulation (verify in #xkpf).
 - [ ] [#s760] clearthr2: Implement JB plugin phase-2 pre-emptive clear — read live Claude Code context-usage %, compare against report.clear_threshold, trigger session clear before the next Run Agent Doc dispatch when exceeded (gated by agent_doc_queue_context_reset). BLOCKED on live IntelliJ verification. Completes review #clear-opt-in-threshold (verify in #xkpf).

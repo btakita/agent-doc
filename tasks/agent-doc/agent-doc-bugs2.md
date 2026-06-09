@@ -30,42 +30,25 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-182549.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-184643.md`*
 
 Compacted content:
-- Archived 1 response topic(s): clear all gates → actionable backlog, + two new bugs triaged
+- Archived 1 response topic(s): go
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: go — drained head #lvb-run, found+fixed a stale install — opus-4-8
-
-Processing the queue head `do [#lvb-run]`. Before touching anything I checked the working tree and the install state, and the picture differs from what the queue assumes.
-
-**The queue head `#lvb-run` was not actually runnable — its install prerequisite was silently stale.**
-- The item claims "binary 0.34.0, cdylib lib-installed." True by *version*, but the installed `~/.cargo/bin/agent-doc` was built **13:55** and the cdylib **13:53** — both *older* than the diagnostics commit `e9146147` (**14:06**) that adds the `live_buffer_classify` / `early-ack` log markers the verification greps for. Same version string `0.34.0`, no bump, so the staleness was invisible.
-- I ran `make install`. Binary now **14:33**, cdylib **14:34**, both carrying the diagnostics. Verified in the installed binary: `live_buffer_classify decision` present, `visible_write_live_buffer_matches_disk` present.
-- The 5th marker, `[ipc-socket] early-ack pending emitted before apply`, is **compiled out** (dead-code-eliminated) while `EARLY_ACK_ENABLED=false`. It only appears once **#saevon** flips that flag — so the early-ack leg of `#lvb-run` is gated behind `#saevon`, not the binary.
-
-**`#lvb-run` is ready for you to run — 4 of 5 legs.** Install the signed plugin `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.158-signed.zip`, drive one mid-active-turn pane through the batch, then grep:
-- `#4wxr` claim stderr → `[claim] cross-session-reject pane_id=.. pane_session=.. configured=..`
-- `#9adk` idea.log → `[run]/[clear] coalesced duplicate`
-- `#f5d2/#pcp6` ops.log → `live_buffer_classify decision=.. reason=..` and write.rs → `visible_write_live_buffer_matches_disk` / `visible_write_deferred_current_changed`
-- `#saev` (only after `#saevon` flips the flag + reinstall) session-log → `[ipc-socket] early-ack pending emitted before apply`
-
-I **gated `#lvb-run`** (prep complete; awaiting your live pane) rather than marking it done — it is the one legitimate operator-live-verification gate, not an agent gate. If you want the early-ack leg in the same pass, say so and I will flip `#saevon` + reinstall first.
-
-**This cycle also reproduced `#exch-intermix` live.** The first `finalize --stream` hit `IPC proof insufficient ... invariant=live_prompt_drift_after_preflight`: pending mutations landed but the `### Re:` body fragmented out of the exchange (snapshot 12489b vs file 11082b). I recovered per the documented path — `git checkout HEAD -- FILE` → `reset --from-current --preserve-session` → `preflight` → this `finalize --force-disk`. Concrete fresh repro for `#exch-intermix` / `#pcpconsol`.
-
-**Working-tree note (not committed):** the submodule had 22 files of uncommitted churn. I checked all of it — **not feature work**: pure rustfmt-1.9.0 reflow (zero logic), a tsift code-nav block bump (`v0.1.65→0.1.66`), and a `lazily 0.10.1→0.10.2` lockfile bump. `make check`/CI don't enforce fmt, so the reflow is disposable. I left the tree as-is (the `lazily` bump is now baked into the binary I installed). Your call: commit just the `lazily` bump and discard the fmt reflow, or revert all of it.
-
-**Remaining queue:** `#pcpconsol` (root-fix, multi-day fresh session), `#pcpc5cut` (depends on `#pcpconsol`), `#s760wire` (live IntelliJ pane), and `#bkx9perid` (needs a real `#ipc-crdt-response-drift` repro) are each fresh-session/live-pane gated per their own text — not work to drain in this saturated session. The two pure-code items are `#exch-intermix` (finalize auto-recover on `live_prompt_drift_after_preflight`) and `#tmux-switch-lag` (atomic stash→agent-doc pane move). Reorder either to the head and I will take it now; otherwise the highest-value next move is you running `#lvb-run` live.
-
-I did **not** auto-loop — the head is operator-gated.
-<!-- agent:boundary:6cd33d0f -->
+<!-- agent:boundary:b6ff46cb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- do [#lvb-run]
+- do [#exch-intermix]
+- do [#pcpconsol]
+- do [#pcpc5cut]
+- do [#s760wire]
+- do [#saevon]
+- do [#bkx9perid]
+- do [#tmux-switch-lag]
 <!-- /agent:queue -->
 ###
 <!--

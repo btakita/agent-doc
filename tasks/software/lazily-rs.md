@@ -154,8 +154,33 @@ Completed `#pz3k`: added `cdylib` crate type, build targets, and `cbindgen` conf
 - Pushed `btakita/lazily-rs` `a64b49f` and superproject `d2e81d4bc`
 
 **Note on safer-ffi / diplomat:** deferred as future options. The current `cbindgen` approach is sufficient for C ABI consumers. `safer-ffi` would require rewriting the FFI surface; `diplomat` would add multi-language binding generation. Both can be adopted incrementally.
-<!-- agent:boundary:fa0f5d8c -->
-<!-- agent:boundary:ffc8e9ce -->
+
+### Re: #kavj — Binary serialization — glm-5.1
+
+> **Queue prompt:**
+>
+> [#kavj]
+
+
+Completed `#kavj`: added optional binary serialization via `postcard` alongside JSON.
+
+**Changed paths** (in `src/lazily-rs`):
+- `Cargo.toml`: added `postcard` optional dep + `ipc-binary` feature (`ipc-binary = ["ipc", "dep:postcard"]`)
+- `src/ipc.rs`: added `IpcMessage::encode_binary/decode_binary`, `encode_json/decode_json`, `EncodeError`/`DecodeError` error types
+- `src/ffi.rs`: added 5 binary FFI functions (`lazily_ffi_channel_send_binary`, `recv_binary`, `validate_binary`, `kind_binary`, `clone_binary`)
+- `src/lib.rs`: conditional exports for binary FFI and error types
+- `tests/ffi.rs`: 3 binary FFI tests (validate/classify/clone, channel relay, invalid bytes)
+- `tests/ipc.rs`: 4 binary IPC tests (snapshot round-trip, delta round-trip, invalid rejection, size comparison)
+- `Makefile`: added `test-ffi-binary` and `test-ipc-binary` targets
+- `SPEC.md`: documented binary serialization section
+- `Cargo.lock`: updated for postcard
+
+**Key design:** Binary is **not** self-describing; peers must agree on schema. JSON remains default for cross-language; binary for same-Rust/postcard-aware transports. All `make check` targets pass (including both binary test suites).
+
+Pushed `btakita/lazily-rs` `f808ee8` and superproject `eb4e6bc15`.
+
+Exchange size note: 125+ lines, 10 cycles. Compact recommended when queue drains.
+<!-- agent:boundary:12251fb5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,7 +192,7 @@ Completed `#pz3k`: added `cdylib` crate type, build targets, and `cbindgen` conf
 - ~~[#n994]~~
 - ~~[#w30b]~~
 - ~~[#pz3k]~~
-- [#kavj]
+- ~~[#kavj]~~
 - [#jpf1]
 - [#ms7x]
 - [#9qce]

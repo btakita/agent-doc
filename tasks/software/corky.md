@@ -190,6 +190,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#sheets-create-share] [Feature] `corky sheets` can populate tabs in an existing spreadsheet (push/write) but cannot CREATE a new spreadsheet or SHARE one. Add: (1) `corky sheets create <TITLE> [--account <email>]` → create a new spreadsheet (Sheets API spreadsheets.create), print the URL/ID; (2) `corky sheets share <SHEET> <EMAIL> [--role reader|writer|commenter] [--notify]` → Drive permissions.create. Surfaced 2026-06-09 on boost-client (MRH): "use corky to create a google sheet with tabs for each CSV and share with ron-berkes" could not be completed because corky 0.29.0 has neither command and the brian.takita@gmail.com token lacked Sheets/Drive scopes (workaround: `corky auth --email <e> --scope workspace` then raw Sheets/Drive API for create+share, `corky sheets push` for tabs).
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 

@@ -207,7 +207,13 @@ Pushed `btakita/lazily-rs` `7cfffae` and superproject `0d89ac0d1`.
 5. Add `make test-webrtc-data` Makefile target
 
 Gated in review pending str0m dependency decision and implementation.
-<!-- agent:boundary:3648d96c -->
+
+### Re: Queue reorganization — glm-5.1
+
+Acknowledged content reorganization. All queue items consolidated under the `#pz3k` response. Safer-ffi/diplomat noted as deferred.
+
+Queue remaining: `#ms7x` (cross-lang conformance tests), `#9qce` (standalone docs). Exchange at 153 lines, 11 cycles — compact recommended after queue drains.
+<!-- agent:boundary:0b320236 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -128,6 +128,7 @@ pub mod sync;
 pub mod turn_scope_store;
 pub mod watch;
 pub mod write;
+pub mod write_queue;
 
 // Core-backed shim for the CRDT merge path (merge -> crdt).
 pub mod merge;

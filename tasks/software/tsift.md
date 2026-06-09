@@ -273,7 +273,55 @@ Commits:
 Escalation: none.
 
 Confidence: high; local workspace checks, package tests, full `make check`, and pushed CI are green.
-<!-- agent:boundary:04a9e4b3 -->
+
+### Re: kn0d - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#kn0d]
+
+
+Implemented `#kn0d`.
+
+Summary:
+- Added `GraphStore::semantic_seeded_neighborhood`, `semantic_seeded_expansion_edges`, and `nodes_by_ids` so semantic seeded graph expansion now lives behind the store API instead of the CLI-only helper path.
+- Added the semantic seeded neighborhood option/result types plus shared graph edge scoring helpers in `tsift-core`.
+- Added SQLite overrides for SQL-side ranked edge expansion using the existing from/to edge indexes, SQL `LIMIT` edge scan caps, exact skipped-edge accounting, and batched node lookup by id.
+- Updated the CLI `graph-db semantic-seeded-neighborhood` path to delegate into the store implementation while preserving current diagnostics for missing seeds, skipped caps, and truncation.
+- Added regression coverage proving edge scoring happens before caps in core, SQLite, and the CLI conformance path; updated graph/memgraphrag docs and `VERSIONS.md`.
+
+Changed paths in `src/tsift`:
+- `VERSIONS.md`
+- `packages/tsift-cli/src/lib.rs`
+- `packages/tsift-core/src/lib.rs`
+- `packages/tsift-core/src/store.rs`
+- `packages/tsift-core/src/types.rs`
+- `packages/tsift-sqlite/src/lib.rs`
+- `specs/graph.md`
+- `specs/memgraphrag-direction.md`
+
+Verification:
+- `cargo test -p tsift-core semantic_seeded_neighborhood_scores_before_caps -- --nocapture`
+- `cargo test -p tsift-sqlite sqlite_semantic_seeded_neighborhood_scores_before_sql_edge_cap -- --nocapture`
+- `cargo test -p tsift-cli graph_db_semantic_seeded_neighborhood_scores_before_caps -- --nocapture`
+- `cargo test -p tsift-core`
+- `cargo test -p tsift-sqlite`
+- `cargo test -p tsift-cli`
+- `cargo test -p tsift-memgraphrag`
+- `git diff --check`
+- `make check`
+- GitHub Actions `CI` run `27188140396` passed for the pushed `src/tsift` commit.
+
+Commits pushed:
+- `src/tsift`: `513a9e1 graph: push semantic seeded caps into store`
+- parent repo: `2a350c63a tsift: advance semantic seeded graph caps`
+
+Notes:
+- `cargo fmt --check` still reports unrelated pre-existing workspace formatting drift in other files, so I did not use it as the completion gate; `make check` passed cleanly.
+- Parent repo unrelated dirty files were left untouched.
+
+Confidence: high.
+<!-- agent:boundary:aee30ecc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -287,7 +335,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~~do [#qszc]~~
 - ~~:pushpin: :round_pushpin: do [#zkft]~~
 - ~~:pushpin: :round_pushpin: do [#58p8]~~
-- :pushpin: :round_pushpin: do [#kn0d]
+- ~~:pushpin: :round_pushpin: do [#kn0d]~~
 - ~~do [#qs5v]~~
 - :pushpin: What are #next-steps to improve prompt caching?
 <!-- /agent:queue -->
@@ -295,7 +343,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kn0d] Push semantic seeded neighborhood caps into GraphStore/SQLite with SQL-side edge ranking limits and batched node lookup.
 <!-- /agent:backlog -->
 
 ## Review

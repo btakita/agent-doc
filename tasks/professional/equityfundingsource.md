@@ -17,14 +17,13 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `f64bfedb-c8c6-471f-903d-550363c9746b` as of 2026-06-09 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from the `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent with no error (test row deleted). NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `e66abd2e-c02d-49af-8e77-49f3a153b5ac` as of 2026-06-09 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). As of Worker version `e66abd2e` (deployed 2026-06-09, EFS `39a60c0`): loan-application Approval is gated on a complete full application — `POST /api/admin/full-applications/:id/status` no longer accepts `accepted` (in_review/declined only) and `/approve` fails closed unless the submitted application is complete (#approve-requires-full-app, EFS `b136519`); the admin "Accept and send to TMO" button is disabled with a missing-parts list on incomplete apps (EFS `b731aa4`). Portal form-submission errors now render a red banner at the top of the form plus an error toast via `portal/shared/form_error.tsx` (#form-error-standard); public/auth full-reload forms keep their red top-of-form alert (no JS toast). No new D1 migration was required for this deploy. Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from the `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent with no error (test row deleted). NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -89,7 +88,25 @@ Applied to the portal submission forms:
 **Spec:** `prds/form-error-standard.md` documents the convention and where it's applied.
 
 Deploy is still queued (backlog **#xyp5**, now also covering this `39a60c0`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push all the pending UI/backend fixes live.
-<!-- agent:boundary:c76911cd -->
+
+### Re: Did you deploy? Deploy. — opus-4-8
+
+> **Queue prompt:**
+>
+> I do not see the deployed changes. Did you deploy? If not, deploy.
+
+
+Deployed now. You were right — the previous three cycles were `#spec-test-commit-push` (commit + push, no deploy), so prod was still running the old Worker. It's live now.
+
+**Deployed:** Worker version `e66abd2e-c02d-49af-8e77-49f3a153b5ac` → https://equityfundingsource.brian-takita.workers.dev (no D1 migration needed — all three commits are code-only). This ships all the pending work:
+- `b136519` — Approval gated on a complete full application (status endpoint can't set `accepted`; `/approve` fails closed).
+- `b731aa4` — admin "Accept and send to TMO" disabled with a missing-parts list when incomplete.
+- `39a60c0` — standardized form-submission errors (red banner at top of form + toast).
+
+**Smoke tests (unauthenticated):** homepage `200`, `/apply` `200`, the admin loan-application route `303` (redirects to login — route resolves), the status endpoint `401` (auth-gated, not a 500), and the homepage now serves the freshly-deployed bundle `index.browser-6KUZXKHY.js`. The admin/borrower-gated behaviors (button disabled, `accepted` rejected, error toast) need a logged-in session to see visually — they're covered by the 393 passing tests; load `/loan-applications/cda67748…` while signed in as admin and the Accept button should now be disabled with the missing-parts reason.
+
+Marked the deploy item **#xyp5** done and updated the Status block with the new Worker version and the now-live gates.
+<!-- agent:boundary:1fbab7c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,13 +114,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xyp5] Deploy pending EFS production fixes to prod (deploy:worker; no remote D1 migration needed): (a) #approve-requires-full-app — efs b136519 backend + b731aa4 admin UI; (b) #form-error-standard — efs 39a60c0 top-of-form red error banner + toast across portal submission forms. Smoke-test: status endpoint rejects accepted; /approve fails closed + Accept button disabled with missing-list on draft cda67748; a failed form submission shows a red top-of-form error AND a toast. Held pending deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

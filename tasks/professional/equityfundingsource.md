@@ -36,7 +36,12 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 3 response topic(s): Deal Pipeline rename + action-needed pipeline count; Track borrower payments; deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a9ebfc58 -->
+- Spec `prds/investor-pipeline-admin.md`; tests `tests/admin-investor-pipeline.test.ts`.
+- UI board `investor_pipeline.tsx` + section wiring; sidebar nav item **Investor Pipeline** between Funding Commits and Payments; route `/portal-admin/investor-pipeline`.
+- Nav badge: `investor-pipeline` count = open lender requests + pending funds (admin action items), matching the Deal Pipeline action-count convention.
+- `GET /api/admin/investor-pipeline` — read-only admin-guarded aggregate over `users LEFT JOIN funds LEFT JOIN lender_requests`.
+- `repo.ts`: `INVESTOR_PIPELINE` definition, furthest-stage resolver, card builder, grouping, accreditation predicate.
+<!-- agent:boundary:35bc8af2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,11 +50,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - Add an Investor Pipeline page, which shows the investors who sign up and their flow through the system to invest in deals.
+- [#vd8s]
+- [#vtx8]: Deal Pipeline cards should open details of the particular "stage" in the same page. All data and actions should be available as a modal...So the admin does not need to leave the page to see the details. Same with the Investor Pipeline.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#vd8s] [recommended] Investor Pipeline phase 2: per-investor activity timeline on the card/detail, drag-to-confirm-wire from the Committed lane, stalled-stage outreach highlighting (signed up > N days, no accreditation; ties into #q2x2 drip), and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md (Future phases).
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

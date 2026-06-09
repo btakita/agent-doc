@@ -26,6 +26,20 @@ class SubmitAction : AnAction() {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
+        // Coalesce a rapid re-fire (auto-loop tick racing a manual click, or a
+        // double key-chord) so a second `/agent-doc` keystroke for this same
+        // document doesn't stack up at the terminal layer (#9adk).
+        val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
+        val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
+        if (!InvocationCoalescer.shouldProceed(
+                InvocationCoalescer.key("run", routeKey),
+                System.currentTimeMillis(),
+            )
+        ) {
+            LOG.warn("[run] coalesced duplicate Run Agent Doc for ${file.name} (invocation already pending)")
+            return
+        }
+
         LOG.warn("[run] actionPerformed: ${file.name}")
 
         Thread {

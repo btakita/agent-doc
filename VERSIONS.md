@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains plugin coalesces rapid-fire Run Agent Doc / Clear invocations
+  (`#9adk` / review `#console-input-accumulation`).** A per-document,
+  per-action `InvocationCoalescer` guard skips a second invocation of the same
+  action for the same document within a short window (default 750ms), so a
+  rapidly re-fired action (auto-loop tick racing a manual click, or a double
+  key-chord) can no longer stack a duplicate `/agent-doc` or `/clear` keystroke
+  at the terminal layer below the route/queue dedup. `SubmitAction` keys on
+  `run:<routeKey>` and `ClearSessionContextAction` on `clear:<routeKey>`, so a
+  deliberate Run-then-Clear for the same doc is NOT coalesced — only same-kind
+  rapid re-fires collapse. The coalesce decision is pure given `nowMillis`
+  (unit-tested in `InvocationCoalescerTest`); live in-IDE behavioral
+  verification of rapid-fire coalescing is gated on `#xkpf`. JB plugin
+  `0.2.157`.
+
 - **Early-ack IPC protocol landed (dormant) (`#ipc-early-ack` / `#saev`,
   Phase 2).** The socket IPC handshake now supports a two-phase ack:
   `ipc_socket::start_listener` emits a `pending` ack the instant it receives a

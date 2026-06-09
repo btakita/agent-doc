@@ -229,7 +229,7 @@ This session's ledger stands: `#pcp1` spec, `#pcp2` write-provenance, `#pcp3a` R
 **The only genuinely-actionable next step is `#pcpc1`** (`tasks/agent-doc/plan-supervisor-in-process.md`) — a controller concurrency refactor that needs a fresh, unsaturated session. After this cycle the queue is empty, so the auto-drain stops cleanly. Start a new `/agent-doc` session and queue `#pcpc1` to make real progress.
 
 Session ledger: `#pcp1`, `#pcp2`, `#pcp3a`, `#pcp6` shipped + verified; `#pcp-consol` decomposed into `#pcpc1`–`#pcpc5`; queue contamination + dead pins cleared.
-<!-- agent:boundary:e743c388 -->
+<!-- agent:boundary:46d37b04 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,12 +245,6 @@ Session ledger: `#pcp1`, `#pcp2`, `#pcp3a`, `#pcp6` shipped + verified; `#pcp-co
 - ~~:pushpin: [#pcp-consol]~~
 - ~~:pushpin: [#pcp3]~~
 - ~~:pushpin: [#pcp4]~~
-- :pushpin: [#pcp5]
-- :pushpin: [#pcp7]
-- :pushpin: complete rest of tasks/agent-doc/plan-pcp-consolidate.md
-- :round_pushpin: [#ipc-early-ack]
-- :round_pushpin: [#ipc-degraded-prefers-file-ipc]
-- :round_pushpin: [#ipc-drift-writeprovenance]
 - :round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.
 - :pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.
 - Fix **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift. Can we replace the plugin's WatchService with a client for the supervisor's file-watcher? Would the IPC lag cause race conditions? Can the race condition be prevented in the overall system?

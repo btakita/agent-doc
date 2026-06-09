@@ -161,7 +161,33 @@ cargo test -p agent-doc-orchestration --lib in_process
 **What stays gated (correctly, not part of #v7m3's core):** the live `agent-doc start` socket cutover that switches the real supervisor process onto this in-process adapter is the `#pcpc5` migration (08b authority ladder), which depends on the full pcpc1-4 stack and needs live verification. The adapter itself lands behind the seam now.
 
 Closing #v7m3 as done.
-<!-- agent:boundary:4b59afa9 -->
+
+### Re: do #2bhm (pcpc1-actor-runtime) — opus-4-8
+
+> **Queue prompt:**
+>
+> do #2bhm
+
+Already complete and committed — no new implementation needed.
+
+**#2bhm = pcpc1-actor-runtime** is realized by commit `55243328` ("pcpc1: session-actor message runtime (in-process mailbox)"), an ancestor of submodule HEAD. It turns `session_actor.rs` from a data/CAS struct into a real in-process actor: a per-document mailbox (mpsc) drained on a single owning thread that serializes all document-scoped ops (write submit, closeout, queue-head selection, lifecycle), with the SQLite CAS kept as the durable cross-process backstop. Core is in `agent-doc-orchestration/src/session_actor.rs`:
+
+- `DocumentActor::spawn` + `submit`/`enqueue` over a typed `SessionOpKind` — one owning thread drains the mailbox FIFO.
+- `SessionActorRuntime` registry funnels one document id → exactly one mailbox, so concurrent commands to a document never overlap.
+
+This is the seam every later phase builds on: `#v7m3` (pcpc2 supervisor adapter), `#0pke`/`#2bhm`-adjacent `#pcpc3` write-queue, and `#dj14` (pcpc4 watcher) all serialize through this mailbox. Call sites stay unchanged until the `#pcpc5` cutover.
+
+**Verification:** the session-actor SimWorld suite passes green:
+```
+cargo test -p agent-doc-orchestration --lib session_actor
+→ 18 passed; 0 failed (incl. the 3 pcpc1 determinism tests: FIFO ordering,
+  concurrent submit no-overlap, registry one-doc-one-mailbox)
+```
+
+**Note (drift recovered this turn):** the prior `#v7m3` closeout hit `#ipc-crdt-response-drift` — its committed HEAD response was correct, but a post-commit CRDT merge corrupted the working-tree copy (wedged the `#v7m3` bullets into the `#0pke` section and dropped the standalone `#v7m3` heading). Recovered by restoring the document from HEAD (`git checkout HEAD -- <doc>`); snapshot already matched HEAD, so no response was lost.
+
+Closing #2bhm as done.
+<!-- agent:boundary:5cd74adc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -170,7 +196,7 @@ Closing #v7m3 as done.
 - ~~do #dj14~~
 - ~~do #0pke~~
 - ~~do #v7m3~~
-- do #2bhm
+- ~~do #2bhm~~
 - do #z2jy
 - do #xkpf
 <!-- /agent:queue -->
@@ -200,7 +226,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#2bhm] pcpc1-actor-runtime: Turn session_actor.rs from a data struct into a real in-process actor — per-document mailbox processed on one owning thread; SQLite CAS stays the durable backstop. SimWorld: concurrent commands to one document actor serialize deterministically. ACTIONABLE NOW (SimWorld-verifiable, NO live editor). First phase of #pf15/#pcp-consol; unblocks #pcpc2-4. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#z2jy] bkx9-pure-detector: Extract per-id response-loss detection as a PURE function (cycle_state + committed content + HEAD archives -> reaped do#id directive heads whose ### Re: did not materialize) with deterministic unit/SimWorld tests for reap-only loss, captured-but-id-lost, AND the multi-directive-single-heading FALSE-POSITIVE case. DORMANT: do NOT wire into the live check_reaped_queue_head_without_response guard. ACTIONABLE NOW (pure fn + tests, no live editor); the wiring + drift-repro validation stays gated as #bkx9. Spec: specs/07-closeout-commands.md
 <!-- /agent:backlog -->
 

@@ -99,7 +99,7 @@ Each list row links to its detail page (eye action), and both detail sections hi
 **Verification:** full suite **423 pass / 0 fail**, browser + worker bundles clean; added a test locking in both routes, sections, APIs, and row links.
 
 Queue drained — all admin list types now have individual-item routes.
-<!-- agent:boundary:9acadea4 -->
+<!-- agent:boundary:76a221f3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +112,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#f632] Add individual-item detail routes for admin Documents (uploads + investor-document-requests sub-lists): add by-id GET APIs, client detail components, server portal sections, and row links. Decide whether uploads and document-requests each get their own detail section since Documents has multiple sub-lists.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

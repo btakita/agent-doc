@@ -30,66 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-193253.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-203718.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #install-stale-guard
+- Archived 3 response topic(s): queue continues; do #exch-intermix; do #tagpath-queue-lint-falsepos
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: queue continues — captured the #exch-intermix repro, deferring the fix to a fresh session — opus-4-8
-
-You cleared the completed `#install-stale-guard` / `#lvb-run` strikes; the active head is now `#exch-intermix`. I'm **not** implementing it in this session, and here's the honest reasoning:
-
-- **The binary isn't dispatching it** — `agent-doc plan` returns `prompt_targets: null` this cycle (the diff was struck-item cleanup, not a new `do` directive).
-- **It's high-stakes, fresh-session work.** `#exch-intermix` is *automatic data-mutation recovery* — on a `live_prompt_drift_after_preflight` it would auto-run `git checkout HEAD` / `reset --from-current` / `finalize --force-disk`. Get the guard wrong and it silently destroys real user content for **every** user. That deserves a focused session with careful negative-case test design, exactly as the item says — not the tail of this long session (a fmt commit, the install-stale-guard feature, and three drift recoveries deep), on the very path that's actively drifting.
-
-**What I did instead (low-risk, high-value prep):** captured the reliable repro into `tasks/agent-doc/plan-ipc-crdt-response-drift.md` (committed `4c5b3e22f`) while it's fresh — it reproduced ~4× today. The new section records the exact `finalize` signature, the **IPC-listener-active trigger** (`skipping working-tree boundary reposition — IPC listener active`), the proven manual recovery order, and a **guarded** auto-recover approach with SimWorld coverage including the negative fail-closed case. The fresh session can implement straight from that.
-
-**Recommendation:** the entire remaining queue is fresh-session / live-pane / root-fix gated:
-- `#exch-intermix` → fresh session, implement from the enriched plan (start here — it's the recurring pain).
-- `#pcpconsol` → its own multi-day fresh session (root-fixes this whole drift class via the single ordered write queue).
-- `#pcpc5cut` (depends on `#pcpconsol`), `#s760wire` / `#saevon` (live IntelliJ pane), `#bkx9perid` (needs a repro), `#tmux-switch-lag` (fresh code session).
-
-Draining these here would mean rushing high-stakes work in a saturated session. Start a fresh `/agent-doc` session for `#exch-intermix` and I'll implement it properly. Not auto-looping.
-
-### Re: do #exch-intermix — implemented the live_prompt_drift auto-recovery — opus-4-8
-
-Done — this is the fresh session the prior cycle asked for, and `#exch-intermix` is now implemented, tested, built, installed, committed, and pushed.
-
-**The wedge it fixes.** After the IPC drift guard adopts `content_ours` on a `live_prompt_drift_after_preflight` block, the snapshot (baseline + your `### Re:` response) is *larger* than the fragmented visible file that lost the response. The next commit then fails closed via `guard_no_stale_snapshot_reset_drift` ("looks like a manual cleanup") and strands the response — forcing the manual `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk` dance you've hit ~4× recently.
-
-**What it does now.** `agent-doc commit` auto-recovers that one narrow, benign case: when the cycle carries `ipc_snapshot_adoption_blocked`, no dropped exchange/queue prompts were recorded, and the adopted snapshot provably owns every prompt-bearing user line still on disk, it writes the snapshot to the working tree (the `--force-disk` half of the manual recovery, with agent write-provenance) and commits the response — logging `live_prompt_drift_auto_recovered`.
-
-**Airtight on the dangerous direction.** Because this is automatic data mutation, it fails closed the instant any genuine post-preflight user content on disk is absent from the snapshot — a disk-only `❯ do #...` prompt or an unowned `do [#id]` queue line leaves the existing guard to error out. It never silently drops a user prompt or queue item.
-
-**Verification (all local; CI pending).**
-- 7 unit tests in `write.rs` (positive/negative discriminator + the blocked-flag / dropped-prompt skip paths).
-- 2 integration tests in `ipc_closeout_model.rs` driving the *real* `agent-doc commit` path: one asserts auto-recovery lands the response in HEAD + working tree, the other asserts a disk-only user prompt fails closed and stays on disk.
-- `make check`: **4152/4152 passed**, clippy clean (bumped the audited FlowCore `guard_` budget 85→87 for the two doc-comment guard cross-references).
-- `cargo build --release` + `cargo install --path .` (both binaries refreshed). agent-doc submodule pushed as `723b998c`; CI run `723b998c` is in progress.
-
-**Closeout.** Marked `#exch-intermix` done and queued one `[recommended]` live-verification follow-up (`#exch-intermix-verify`) to watch the `live_prompt_drift_auto_recovered` marker fire in a real listener-active drift repro alongside your `#lvb-run` operator batch.
-
-**Not auto-looping.** The remaining queue (`#pcpconsol`, `#pcpc5cut`, `#s760wire`, `#saevon`, `#bkx9perid`, `#tmux-switch-lag`) is entirely fresh-session / live-pane / root-fix gated. `#pcpconsol` in particular is the multi-day single-process-control-plane root-fix that's explicitly meant to start as its own fresh focused session at `#pcpc1`, not be drained at the tail of this one. Start a fresh `/agent-doc` session for it.
-
-### Re: do #tagpath-queue-lint-falsepos — released tagpath 0.12.2, lint-gate unblocked — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: :round_pushpin: do [#tagpath-queue-lint-falsepos]
-
-
-Fixed and shipped (you authorized the cross-repo work). The blocker was that the **published** crates.io `tagpath 0.12.1` predated the `go`/`start`/`stop`/`preset` queue-control-token acceptance — the code was already in tagpath `main` (commit `9289827` + `allowed_attrs`), just never released, so the agent-doc binary (which resolves tagpath from crates.io) kept flagging your `&lt;!-- agent:queue priority preset="…" go --&gt;` marker (`go` → error-class `malformed-attr`, `preset` → `unknown-attr`) and blocking finalize for every go-mode preset queue.
-
-**What I did (tagpath repo):**
-- Added a regression test locking the exact `priority preset="#…" go` marker fully clean (no error, no warning).
-- Bumped lockstep `0.12.1 → 0.12.2` (facade + `tagpath-core`); fixed the two version-pinned `test_core_split_plan` assertions.
-- `cargo clippy --workspace -D warnings` clean; full workspace tests green (115 + suites). Committed + pushed (`e7cfdbc`), tagged `v0.12.2`.
-- **Published `tagpath-core` 0.12.2 then `tagpath` 0.12.2 to crates.io.**
-- Reinstalled agent-doc (`cargo install --path . --force`) — it now resolves `tagpath 0.12.2`, so the finalize lint-gate accepts the go-mode preset marker (this very closeout no longer needs `--lint off`).
-
-The `#exch-intermix-verify` and `#tagpath-queue-lint-falsepos` follow-ups are resolved at the source. The remaining queue (`#pcpconsol` chain, live-pane verify items) stays for the dedicated fresh sessions / your live-verification batch.
-<!-- agent:boundary:418d2929 -->
+<!-- agent:boundary:81a2d2ff -->
 <!-- /agent:exchange -->
 
 ## Queue

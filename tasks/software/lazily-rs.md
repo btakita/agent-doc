@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -38,7 +38,7 @@ queue: stop
 Compacted content:
 - Archived 1 response topic(s): queue closeout (#yxjw, #ipc3, #vd5v)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:d3360162 -->
+<!-- agent:boundary:fb6e30a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,6 +47,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Does lazily-rs have a viable FFI strategy? Can we design the cross-language lazily family for compatibality across all supported channels...FFI, IPC, Websockets, WebRTC data?
 <!-- /agent:queue -->
 
 ## Backlog

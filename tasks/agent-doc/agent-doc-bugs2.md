@@ -56,14 +56,41 @@ Captured. I added four backlog items — three from agent-doc issues I directly 
 **Re: prioritize + sync the backlog with the queue** — the four new items go at the top of `agent:backlog`. The highest-priority fix is `#compact-reap-no-response-record` (silent loss of a response record is worse than the cosmetic drifts below it). A full backlog/review reprioritization + queue re-sync is itself substantial; given this session's context is now very large from three shipped fixes, that reorg is best done in a fresh `/agent-doc` session where I can hold the whole backlog/review cleanly.
 
 **Also shipped this turn (now recorded):** `#queue-completed-items-escape-below-component` — the parking-lot boundary-displacement repair (submodule `78c61351`); it was already reaped before its response could land, which is exactly what `#compact-reap-no-response-record` captures.
-<!-- agent:boundary:5b6b5fb9 -->
+
+### Re: Prioritize the backlog into actionable steps and sync the queue — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: Look at the backlog and review items. Please ensure the backlog items give an actionable set of prioritized steps to complete review items and fix issues. Sync the prioritized backlog with the queue.
+
+
+Reordered `agent:backlog` into a priority-first actionable list. The organizing principle: **fix what destabilizes every closeout before anything else**, because this session has proven those bugs block reliable progress on all the rest.
+
+**Tier 1 — closeout stabilization (actionable Rust, unblocks everything):**
+1. `#compact-reap-no-response-record` — root data-integrity bug: a `do #id` gets reaped to `agent:done` with no `### Re:` recorded. Fix first; it's the cause of the response-loss churn.
+2. `#finalize-stale-baseline-reopen-friction` — finalize should auto-reopen a committed cycle instead of forcing a manual `preflight` re-run.
+3. `#exit75-crdt-drift-closeout-dup-lines` — exit-75 closeout duplicating/reversing response lines (the `#ipc-crdt-response-drift` producer; needs the clean-session repro to pin).
+
+**Tier 2 — actionable Rust queue/capture fixes (no live verification needed):**
+4. `#queue-contamination-guard-false-positive` · 5. `#queue-operator-pin-position-lock-dag` · 6. `#stale-capture-captured-only-drift`
+
+**Tier 3 — survey + JB features:**
+7. `#cross-session-agent-doc-issue-survey` · 8. `#clear-opt-in-threshold` · 9. `#console-input-accumulation`
+
+**Tier 4 — plugin / live-IntelliJ verification (need a fresh, non-saturated session):**
+10. `#nm1x-livebuf-content` (overlaps review `#pcp6`) · 11. `#vbk7` (overlaps review `#pcp7`)
+
+**Review items:** the 9 gated `[/]` items are almost all the PCP control-plane consolidation (`#pcpc5`, `#pcp3`–`#pcp7`) — hard-blocked on `#pcp-consol` and spec-08b's "never land control-plane changes in a cycle that persists a live response," plus `#live-verify-batch`. Their actionable unblock is a single fresh consolidation session, not piecemeal backlog items; I left them gated rather than manufacture redundant entries.
+
+**Queue sync:** `agent:backlog` carries `priority queue` and the queue is `go`, so on the next drain the queue repopulates from this prioritized order — Tier 1 (`#compact-reap-no-response-record`) becomes the next actionable head. The recommended next action is to fix Tier 1 in a fresh session, which would end the response-loss churn that forced manual recovery on the last three closeouts here.
+<!-- agent:boundary:bfab22f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: Add backlog items to address agent-doc issues in my current active sessions: this document, tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md.~~
-- :round_pushpin: Look at the backlog and review items. Please ensure the backlog items give an actionable set of prioritized steps to complete review items and fix issues. Sync the prioritized backlog with the queue.
+- ~~:round_pushpin: Look at the backlog and review items. Please ensure the backlog items give an actionable set of prioritized steps to complete review items and fix issues. Sync the prioritized backlog with the queue.~~
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]
 - :round_pushpin: do [#stale-capture-captured-only-drift]
 - :round_pushpin: do [#queue-contamination-guard-false-positive]
@@ -71,6 +98,10 @@ Captured. I added four backlog items — three from agent-doc issues I directly 
 - :round_pushpin: do [#clear-opt-in-threshold]
 - :round_pushpin: do [#console-input-accumulation]
 - :round_pushpin: do [#vbk7]
+- do [#compact-reap-no-response-record]
+- do [#finalize-stale-baseline-reopen-friction]
+- do [#exit75-crdt-drift-closeout-dup-lines]
+- do [#cross-session-agent-doc-issue-survey]
 <!-- /agent:queue -->
 ###
 <!--
@@ -101,14 +132,14 @@ What are #next-steps to fix bugs?
 - [ ] [#compact-reap-no-response-record] Compaction during an active queue drain can strike+reap a do #id queue item into agent:done WITHOUT its ### Re: response landing in the exchange. Observed 2026-06-09 this session: the #queue-completed-items-escape-below-component fix shipped + the item was reaped, but exchange compaction archived the prior responses and this item never got its own ### Re: recorded; finalize then failed --done "id not found in backlog". Reap/compaction must not mark a do #id done unless its response is durably in the exchange (or archived with attribution). Data-integrity bug.
 - [ ] [#finalize-stale-baseline-reopen-friction] finalize refuses with "pre-write gate: cycle already committed; refusing explicit-baseline response" and requires a manual preflight re-run to mint a fresh baseline, even when the response is legitimately new. Hit repeatedly 2026-06-09. Consider finalize auto-reopening the committed cycle or resolving the current baseline itself instead of failing closed.
 - [ ] [#exit75-crdt-drift-closeout-dup-lines] exit-75 CRDT-merge closeout still appends reversed duplicate user-prefixed lines of the just-written response into the exchange tail, needing manual cleanup + reset --from-current --preserve-session. Recurred 2026-06-09 on the #ipc-degraded-prefers-file-ipc cycle. Same family as #ipc-crdt-response-drift; needs the clean-session producer pin.
-- [ ] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
-- [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
-- [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
-- [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).
 - [ ] [#queue-contamination-guard-false-positive] session-check #jb-run-agent-doc-response-queue-contamination false-positives on a legit user queue prompt that mentions slash commands (/agent-doc, /clear) because it resembles response prose; the heuristic must not flag genuine user prompts as contamination.
 - [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
+- [ ] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
+- [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
+- [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).
 - [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
+- [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 <!-- /agent:backlog -->
 
 ## Review

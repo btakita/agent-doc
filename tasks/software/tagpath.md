@@ -18,7 +18,8 @@ queue: start
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.12.0 published to crates.io — tagpath-core split release complete
+
+Tagpath ProjectSession MCP runtime exercise committed and pushed; next queue item is #tglazydecide.
 <!-- /agent:status -->
 
 ## Exchange
@@ -140,12 +141,15 @@ Commits pushed:
 - `btakita/agent-loop@cae1db80b` (`chore: update tagpath project session prototype`) to `origin/main`, updating the `src/tagpath` submodule pointer.
 
 Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
-Implemented and pushed the first runtime exercise for the lazily-rs `ProjectSession` prototype through opt-in request-scoped MCP reads.
+
+### Re: tglazywatch — gpt-5
 
 > **Queue prompt:**
 >
 > [#tglazywatch]
 
+
+Implemented and pushed the first runtime exercise for the lazily-rs `ProjectSession` prototype through opt-in request-scoped MCP reads.
 
 Changed paths in `src/tagpath`:
 - `src/mcp/mod.rs`: added per-process MCP runtime state keyed by project root, refreshed ProjectSession instances at opt-in request boundaries, and routed `indexed_project_query` / `family_by_path` through `runtime: "project_session"` when the `project-session` feature is enabled.
@@ -196,11 +200,11 @@ Verification:
 - `agent-loop` still has no workflow named `CI` (`gh run list --workflow CI --limit 1` returned that no such workflow exists).
 
 Commits pushed:
-- `btakita/tagpath@3f894a1` (`feat: exercise project session via mcp`) to `origin/main`.
 - `btakita/agent-loop@c57ae00f` (`chore: update tagpath project session mcp exercise`) to `origin/main`, updating the `src/tagpath` submodule pointer.
+- `btakita/tagpath@3f894a1` (`feat: exercise project session via mcp`) to `origin/main`.
 
-Escalation: none. Residual working tree notes: the unstaged `src/tagpath/AGENTS.md` and root `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed. `cargo fmt --check` reports pre-existing rustfmt diffs in unrelated tagpath files; those were not staged for this scoped runtime exercise.
-<!-- agent:boundary:4dea1485 -->
+Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
+<!-- agent:boundary:c0e88286 -->
 <!-- /agent:exchange -->
 
 ###

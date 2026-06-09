@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -63,7 +63,7 @@ Verification:
 Escalation: none.
 
 Confidence: high for the release/publish outcome; the crate is visible on crates.io and the full local suite passed.
-<!-- agent:boundary:9d7c30fb -->
+<!-- agent:boundary:33a5fd71 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +72,7 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- What are #next-steps to improve FFI, IPC, network communication? Do we have protocol docs? Do we have docs for lazily family to implement the protocol? Should we have a separate repo for the protocol and lazily family? Should we have a gh organization?
 <!-- /agent:queue -->
 
 ## Backlog

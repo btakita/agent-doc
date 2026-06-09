@@ -58,14 +58,41 @@ Done — Phase 3 of `plan-ipc-transport-reliability.md`. A degraded session now 
 **Shipped:** `cargo install` + `cargo build --release` both rebuilt 0.34.0. Submodule pushed (`0b931d04`); superproject pointer + plan advanced. CI in progress for the pushed commit — local suite is green.
 
 Note: this is the file-IPC-routing half of review item `#pcp5`; the early-ack Kotlin half (`#ipc-early-ack`, Phase 2) is still its gated remainder and needs live IntelliJ verification.
-<!-- agent:boundary:46cad401 -->
+
+### Re: do [#loop-guard-exchange-node-granularity] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#loop-guard-exchange-node-granularity]
+
+
+Done. Narrowed the loop-guard's exchange affectedness from whole-component to the active tail, so editing an OLD response block no longer preempts the auto-loop drain.
+
+**The bug:** `TurnScope` held `exchange:0` (whole component) in both read and write sets. Because a component-level address overlaps *any* node in that component, an edit to an old/unrelated bulleted exchange block classified `input_affecting` → `turn_affected` → the drain halted.
+
+**Empirical grounding (before touching the classifier):** I probed `diff_node_events` on realistic exchange edits. Findings that shaped the fix:
+- A prose user prompt or prose edit emits **0 node events** (only bulleted lines decompose into exchange item nodes) — so prose was never driving this path anyway.
+- A new **bulleted** prompt appended at the tail → `Insert` at index = node-count.
+- An edit to an **old bullet** → re-inserts at its original low index.
+
+So a simple **node-index floor** cleanly separates tail appends (index ≥ floor → affects the turn) from old-block edits (index < floor → independent), with no false negative for genuine mid-loop prompts.
+
+**Implementation:**
+- `TurnScope` gains `exchange_tail_floor` (= count of exchange nodes at turn start; preflight computes it via `all_item_nodes`). `for_driver_with_exchange_tail` sets it; `for_driver` stays a `None` wrapper.
+- `DocumentOp` gains `node_index` (after-index for inserts/replaces, before-index for removes), threaded from the semantic node event.
+- `classify_op` takes the op index; for an exchange op with a floor set, only index ≥ floor is in scope. `LiveBuffer` tail drift stays `provenance_spoofed`. No floor (or non-exchange) → unchanged whole-component behavior.
+
+**Verification:** `make check` green (4110 tests, clippy clean). New deterministic coverage: `turn_scope::tests::exchange_tail_floor_*`, `classify_cycle_narrows_exchange_old_edit_but_keeps_tail`, and an end-to-end `preflight::tests::exchange_old_block_edit_is_independent_but_tail_append_affects`. Spec updated (`specs/02-document-format.md`); plan item marked DONE.
+
+**Shipped:** `cargo install` + `cargo build --release` rebuilt 0.34.0. Submodule pushed (`d6bf54a8`, CI queued); superproject pointer + plan advanced. Local suite is green.
+<!-- agent:boundary:b7395c43 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#ipc-degraded-prefers-file-ipc]~~
-- :round_pushpin: do [#loop-guard-exchange-node-granularity]
+- ~~:round_pushpin: do [#loop-guard-exchange-node-granularity]~~
 - :round_pushpin: do [#queue-completed-items-escape-below-component]
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]
 - :round_pushpin: do [#stale-capture-captured-only-drift]
@@ -101,7 +128,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#loop-guard-exchange-node-granularity] [recommended] The #queue-no-stop-unrelated-edit loop-guard fix scopes turn-affectedness at whole-component exchange granularity (TurnScope write_set holds exchange:0), so an edit to an OLD/unrelated response block inside exchange still classifies as turn-affecting and preempts the drain. Narrow the exchange address in TurnScope to the active turn response node(s) so only edits to the in-scope exchange tail preempt. Overlaps op-scoped-drift node granularity.
 - [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
 - [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).

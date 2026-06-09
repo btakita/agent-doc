@@ -18,6 +18,39 @@ While closing out `#codex-exchange-prompt-no-dispatch` I hit the same failure mo
 
 This matches the reported "reversed lines / missing header / inserted above" exactly: a concurrent foreign write changes `theirs` mid-generation, the CRDT merge base selection produces mis-ordered content, and the commit/visible-buffer boundary then disagrees.
 
+## Reliable repro — `live_prompt_drift_after_preflight` (2026-06-09)
+
+A second, **more specific and reliably reproducible** manifestation surfaced repeatedly during `agent-doc-bugs2.md` closeouts on 2026-06-09 (hit ~4× across the session, twice in one cycle). This is the near-term-actionable slice — distinct from the deeper CRDT-ordering root cause above.
+
+**Exact signature** (from `finalize --stream`):
+```
+[write] socket IPC patch delivered
+[write] IPC proof insufficient ... invariant=live_prompt_drift_after_preflight
+        recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar
+        candidate_len=<visible> content_ours_len=<snapshot, LARGER>
+[write] snapshot from content_ours (<larger> bytes)
+Error: refusing commit ... snapshot is <N> bytes but the visible file is <M<N> bytes,
+       which looks like a manual cleanup with stale snapshot/CRDT state.
+```
+
+**What happens:** the pending mutations (`--done`/`--pending-gate`/`--pending-add`, queue strike) **land**, but the `### Re:` response **body fragments out of `exchange`** (only partial bullets reach the file, or none). The `content_ours` snapshot (baseline + full response) is **larger** than the visible file, so the next commit fails closed as "manual cleanup". The response is **not lost** — it is intact in the `ack_content_sidecar` / `content_ours` snapshot.
+
+**Trigger condition:** correlates with an **active IPC listener** during closeout — every failing finalize logged `[commit] skipping working-tree boundary reposition — IPC listener active`. A live editor/supervisor holds the buffer and the post-preflight live state drifts from the baseline preflight captured, so the IPC write proof fails closed. This is the supervisor/finalize **self-race** (root-fixed by `#pcpconsol` single ordered write queue), surfacing on the IPC/CRDT closeout path.
+
+**Proven manual recovery** (works every time this session — keep this exact order; do NOT run bare `reset --from-current`):
+1. `git checkout HEAD -- <FILE>` — discard the fragmented/partial visible state.
+2. `agent-doc reset --from-current --preserve-session <FILE>` — clear the wedged cycle sidecars, keep session.
+3. `agent-doc preflight <FILE>` — re-baseline (auto-reaps already-done mirror items, auto-strikes resolved queue heads).
+4. `agent-doc finalize <FILE> --force-disk [--done <id>] ` — re-land the response via the disk path, bypassing the live-buffer IPC drift. If a `--done <id>` was already reaped by the failed attempt, drop the flag (`id not found in backlog/icebox`) and finalize the response alone.
+
+**Near-term fix (this plan's actionable slice — `#exch-intermix`):** when `finalize` detects `invariant=live_prompt_drift_after_preflight` with the response safe in `content_ours`/`ack_content_sidecar`, **auto-run the recovery above** instead of erroring out and stranding the response. Guard rails (must be airtight — this is automatic data mutation):
+- Only auto-recover when the captured `content_ours` snapshot hash matches the expected baseline+response (the response is provably safe), and the visible-file drift is the known benign boundary/IPC pattern — never when the drift could be real user content.
+- Prefer `reset --from-current --preserve-session` + `finalize --force-disk` without `git checkout` when the visible file already contains the prior committed state plus only benign boundary markers; fall back to `git checkout HEAD` only when the visible file is fragmented.
+- Emit a `ops.log` marker (e.g. `live_prompt_drift_auto_recovered`) so the recovery is observable and testable.
+- SimWorld coverage: drive a closeout where an IPC-listener-active live buffer drifts post-preflight → assert the response lands intact (single clean `### Re:`), pending mutations apply once (no dup), and no `manual cleanup` wedge. Include the negative case: genuine user content drift must NOT be auto-recovered (fail closed).
+
+**Files (near-term slice):** `agent-doc-orchestration/src/write.rs` (IPC proof / `live_prompt_drift_after_preflight` branch), `git.rs` (the `manual cleanup` commit refusal), `reset.rs`, plus SimWorld harness.
+
 ## Suspected area — recent "single-process control plane" refactor
 
 Recent commits that touch the implicated paths (run `git log` in `src/agent-doc`):

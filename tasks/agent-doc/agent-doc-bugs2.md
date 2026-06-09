@@ -35,29 +35,49 @@ complete
 Compacted content:
 - Archived 5 response topic(s): R1–R6 + remaining queue items; do [#pcpc1]; do [#pcpc2]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f36c9ef6 -->
+
+### Re: do [#vbk7] — blocked on #pcpc5 + live verification, not redundant — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#vbk7]
+
+
+**Investigated, not executed — and the "already resolved" flag is a false positive.**
+
+Preflight/plan flagged #vbk7 as possibly already resolved by the completed #pcpc4 (semantic score 1.989). That is wrong. Verified:
+
+- `git show --stat 038f0165` (the #pcpc4 commit) touched **only** `agent-doc-orchestration/src/document_watcher.rs` + `lib.rs`. Its message says verbatim: *"Plugin WatchService read-only demotion (#pcp7) carved out as #pcpc4b (needs live IntelliJ verification)."* #vbk7 **is** #pcpc4b — the carved-out plugin work, still unbuilt.
+- The #pcpc4 controller-owned watcher is **unwired**: `document_watcher` appears only as `pub mod document_watcher;` in lib.rs with zero call sites repo-wide. It is not yet an event source; its notify-feed wiring + old-watcher removal is gated in **#pcpc5**.
+
+**Why I did not ship it this turn (correctness, not effort):**
+
+1. The plugin's *only* editor↔disk reconcile authority today is `PromptPoller.kt::mergeOrReload` (VFS `BulkFileListener` → `NativePatching.mergeCrdt` → `doc.setText`). Demoting it to read-only now removes that authority with **no replacement** — #pcpc4's watcher will not feed reconciles until #pcpc5 wires the controller-watcher → IPC patch path. That is a functional gap, independent of verification.
+2. #vbk7 needs **live IntelliJ verification**; this is a headless tmux session.
+3. This dogfooding session itself runs through the JB plugin's IPC write-back — rebuilding/reinstalling a half-cutover plugin mid-session risks breaking the path this turn depends on.
+
+The plan's Safety section says exactly this: the watcher/plugin-demotion phases "need live IntelliJ/Codex verification" and must not be attempted in a saturated session.
+
+**Action:** gated #vbk7 into `agent:review` with the proven blocker + a hard dependency on #pcpc5 (must sequence after it). Added a low-priority backlog item to discount the semantic-match false positive that sent me chasing this.
+<!-- agent:boundary:5823aa1a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#pcpc1]~~
-- ~~do [#pcpc2]~~
-- ~~do [#pcpc3]~~
-- ~~do [#pcpc4]~~
-- do [#vbk7]
+- ~~do [#vbk7]~~
+- :pushpin: do [#pcpc5]
 - do [#queue-no-stop-unrelated-edit]
 - do [#queue-completed-items-escape-below-component]
 - do [#queue-operator-pin-position-lock-dag]
 - do [#ipc-drift-writeprovenance]
 - do [#ipc-early-ack]
 - do [#ipc-degraded-prefers-file-ipc]
-- do [#pcpc5]
+- do [#stale-capture-captured-only-drift]
+- do [#queue-contamination-guard-false-positive]
+- do [#nm1x-livebuf-content]
 - do [#clear-opt-in-threshold]
 - do [#console-input-accumulation]
-- do [#queue-contamination-guard-false-positive]
-- do [#stale-capture-captured-only-drift]
-- do [#nm1x-livebuf-content]
 <!-- /agent:queue -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -140,14 +140,15 @@ Deployed to production. No new D1 migration (wire values reuse the existing `pla
 - Smoke test: `GET /` → **200**, `GET /funded-deals` → **200**, `GET` + `PUT /api/admin/settings` → **401** (auth-gated, correctly wired).
 
 This drains the queue.
-<!-- agent:boundary:557eeef3 -->
+<!-- agent:boundary:34ce321e -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#wir3]
 <!-- /agent:queue -->
 
 ## Backlog

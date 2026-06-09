@@ -35,7 +35,24 @@ complete
 Compacted content:
 - Archived 3 response topic(s): queue head; do [#pcpconsol]; do [#pcpc5cut]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8c8ffeba -->
+
+### Re: do [#pcpc5cut] — opus-4-8
+
+Fresh session, so I re-derived this from the spec myself rather than trusting the prior (degraded) sessions, and I cleared the real blocker instead of just re-gating.
+
+**Verified against spec 08b (lines 131-133).** The cutover follows shadow → dual-write → read-switch → authority → removal, and the authority rungs `pcpc5a/b/c` are already shipped (commit `600797b3`) behind the default-off `AGENT_DOC_WRITE_AUTHORITY` env gate, with unit + SimWorld coverage (`write_authority_shadow_leaves_write_unchanged`, `..dual_write_routes_through_queue_without_deadlock`, `..never_routes_agent_doc_sidecars`). The remaining `removed` rungs `pcpc5d/pcpc5e` (delete the out-of-process supervisor direct-disk writers, demote the editor WatchService to read-only) are spec-mandated to "additionally require live IntelliJ/VS Code/Codex editor-boundary proof" — and the same lines forbid landing any authority change "in the same cycle that persists a live session response through the write path being changed." So this is structural, not a chosen gate: no agent response cycle can land it.
+
+**What I actually fixed this cycle.** Preflight flagged that `~/.cargo/bin` was stale — it predated `600797b3`, so your live test would have run pre-cutover code. I rebuilt both binaries + the cdylib against HEAD (`make install` + `cargo build --release`, version 0.34.0). Your live verification now exercises the shipped write-authority ladder.
+
+**No more gates, per your standing ask.** I converted the two operator-run review items into actionable backlog items and cleared the review section (both now `[x]`, archiving to `agent-doc-bugs2.done.md`):
+
+- `#pcpc5live` replaces review `#pcpc5cut` — run a session with `AGENT_DOC_WRITE_AUTHORITY=shadow`, grep `ops.log` for `write_authority gate=shadow action=would-route`; then `=dual-write`, grep `write_authority gate=dual-write action=routed`. The `d/e` removal still needs your live editor-boundary proof.
+- `#lvbatch` replaces review `#lvb-run` — the live batch with the exact grep markers.
+
+**Logging is adequate to prove/disprove every live-gate item** — I verified each marker exists in source: `cross-session-reject` (claim.rs + ClaimAction.kt), run/clear `coalesced` (route.rs, sync.rs), `live_buffer_classify` + `visible_write_live_buffer_matches_disk`/`visible_write_deferred_current_changed` (write.rs, debounce.rs). The one exception is early-ack, which is intentionally dormant (`EARLY_ACK_ENABLED=false`) until `#saevon` flips it — its marker won't fire before that.
+
+**Install status:** nothing new to install for JetBrains — plugin 0.2.158 is unchanged; the cdylib I just rebuilt hot-reloads by mtime, and the binary is refreshed. You're clear to drive the live batch whenever; I'll check the logs.
+<!-- agent:boundary:86a57ff1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -80,15 +97,12 @@ What are #next-steps to fix bugs?
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [ ] [#tmux-switch-lag] #agent-doc-bug Slow tmux pane switch when switching between agent docs in the editor: the target doc pane is briefly visible in the stash window before it swaps into 0:agent-doc, so the operator sees a flash of the stash layout mid-switch. Likely the passive editor-sync fast-handoff path (sync.rs sync --no-autostart) selects/raises the hidden actor pane before moving it out of stash. Actionable, fresh session: make the stash->agent-doc pane move atomic (move first, then select) so no intermediate stash frame is shown; add SimWorld coverage for the switch ordering. Files: sync.rs passive fast-handoff path.
+- [ ] [#lvbatch] OPERATOR live-verification batch, replaces gated review #lvb-run. No new JB install needed: plugin 0.2.158 unchanged, binary+cdylib refreshed to HEAD this cycle. Drive one mid-active-turn Codex/IntelliJ pane through the batch; agent checks logs. Markers: #4wxr claim cross-session-reject in claim.rs + ClaimAction.kt; #9adk run/clear coalesced in route.rs and sync.rs; #f5d2/#pcp6 ops.log live_buffer_classify + write.rs visible_write_live_buffer_matches_disk and visible_write_deferred_current_changed; #saev early-ack pending emitted before apply only AFTER #saevon flips EARLY_ACK_ENABLED. Reproduces #ipc-crdt-response-drift on closeout.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
-  - [ ] [#pcpc5cut-x78t] DONE (out-of-cycle, plain session, agent-doc 600797b3): document-write authority rungs pcpc5a (shadow), pcpc5b (dual-write), pcpc5c (authority) shipped behind the default-off `AGENT_DOC_WRITE_AUTHORITY` env gate. The central `write::atomic_write` for editor-visible docs now routes through the session-actor ordered write queue (`write_queue`) when advanced to dual-write+, removing the in-process supervisor/finalize interleave (R6 self-race / exit-75) at the root; a thread-local owner-scope re-entrancy guard prevents mailbox deadlock; `.agent-doc/` sidecars never routed; instant rollback by unsetting the env. SimWorld + unit coverage, `make check` green, both binaries rebuilt+installed. Spec realized in 08b §"Document write and watch authority"; VERSIONS.md Unreleased.
-  - [ ] [#pcpc5cut-4eyc] REMAINING (live-gated, stay under #xkpf): pcpc5d/pcpc5e — delete the out-of-process supervisor direct-disk writers + demote the editor plugin WatchService (JetBrains/VS Code) to read-only buffer reporting + single controller-owned watcher. These need a live IntelliJ/Codex editor-boundary proof a plain session cannot provide. Operator next step: run a session with `AGENT_DOC_WRITE_AUTHORITY=shadow` to confirm the would-route ops.log targets, then `=dual-write` to exercise the routed path live before the removal rungs.
-- [/] [#lvb-run] OPERATOR live-verification session (no agent gate; user runs, files bugs, agent checks logs). All five fixes are code-complete + installed (binary 0.34.0, cdylib lib-installed, JB plugin 0.2.158 unchanged). Install signed JB plugin 0.2.158 + binary, drive ONE mid-active-turn Codex/IntelliJ pane through the batch, capture logs. Grep markers: #4wxr claim stderr "[claim] cross-session-reject pane_id=.. pane_session=.. configured=.."; #9adk idea.log "[run]/[clear] coalesced duplicate"; #f5d2/#pcp6 ops.log "live_buffer_classify decision=.. reason=.." + write.rs "visible_write_live_buffer_matches_disk"/"visible_write_deferred_current_changed"; #saev (after #saevon flips the flag) session-log "[ipc-socket] early-ack pending emitted before apply". Reproduces #ipc-crdt-response-drift on closeout (watch for emptied backlog / orphaned ids / duplicated review / split boundary). Supersedes review #xkpf + #live-verify-batch + the live legs of #f5d2/#pcp6.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

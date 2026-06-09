@@ -37,13 +37,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): pcache-measure - gpt-5; pcache-fingerprint - gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
+- Superproject pointer: `e4c047fd9` (`agent-doc: update prompt cache replay gate`).
+- `src/agent-doc`: `3e6092e9` (`prompt-cache: add replay gate metadata`), pushed to `origin/main`.
+- Latest GitHub Actions `CI` run on `main` was green before closeout.
+- `cargo install --path .` completed from that isolated tree and installed `agent-doc 0.34.0` locally.
+- `make check` passed in an isolated sibling-layout worktree containing only this three-file patch: 4,143 tests passed, 237 skipped, doctests passed, and the medium SimWorld check passed.
+- `cargo test -p agent-doc-orchestration build_prompt --lib` passed.
+- `cargo test -p agent-doc-orchestration prompt_cache --lib` passed.
+- Documented the replay metadata invariant in `SPEC.md`.
+- Added a consecutive-turn replay test proving volatile status/queue/boundary/accretion churn changes the full prompt but preserves replay metadata, while durable response-contract changes invalidate the fingerprint and provider key.
+- Added dry-run diagnostics that print the replay metadata without changing agent prompt delivery.
+- Added prompt-cache replay metadata: stable-prefix SHA-256, provider cache key, cache-control policy, and routing affinity.
+- superproject gitlink `src/agent-doc`
+- `agent-doc-orchestration/src/run.rs`
+- `agent-doc-orchestration/src/prompt_cache.rs`
+- `SPEC.md`
 
 ### Re: prompt caching backlog — gpt-5
+
+> **Queue prompt:**
+>
+> do [#pcache-replaygate]
+
 
 Added prompt-caching follow-up backlog items in priority order. Top backlog item: `#pcache-replaygate`.
 
 No code/test run was needed because this cycle only mutates the session backlog.
-<!-- agent:boundary:6bcd3799 -->
+<!-- agent:boundary:decdc4c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,7 +73,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#pcache-replaygate]
+- ~~do [#pcache-replaygate]~~
 - do [#pcache-missrank]
 - do [#pcache-boundary-contract]
 - do [#pcache-ci-history]
@@ -62,7 +82,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-replaygate] Prompt caching: add a real consecutive-turn replay gate for agent-doc sessions that proves stable-prefix fingerprints, provider cache keys/cache_control, and routing affinity stay constant across no-op/status/queue churn, then intentionally invalidates on durable instruction changes.
 - [ ] [#pcache-missrank] Prompt caching: add cache-miss ranking to session-cost output by fingerprint, adapter state, routing affinity, cached-input delta, and creation-token spike so the highest-impact invalidation cause is visible without JSON analysis.
 - [ ] [#pcache-boundary-contract] Prompt caching: document and test the cache-boundary contract for agent-doc prompt assembly: which blocks may live above the boundary, which must stay in the volatile suffix, and provider-specific breakpoint/key requirements.
 - [ ] [#pcache-ci-history] Prompt caching: persist prompt-cache effectiveness history and trend checks in the token/performance gate so regressions across real Codex/OpenAI and Claude/Anthropic transcripts fail with actionable deltas.

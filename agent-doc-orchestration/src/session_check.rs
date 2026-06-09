@@ -1244,6 +1244,75 @@ fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
     })
 }
 
+/// Pure inputs for the dormant per-id response-loss detector
+/// ([`reaped_directive_ids_without_response`], `#z2jy` bkx9-pure-detector).
+///
+/// All ids are normalized (no leading `#`, lowercased — the caller passes them
+/// through [`crate::pending::normalize_pending_id`]). The detector performs no
+/// I/O: the caller resolves `content` (the live committed exchange) and
+/// `archives` (the HEAD-referenced compact-archive bodies) up front, so the core
+/// logic stays deterministically unit-testable.
+// Dormant (#z2jy): constructed only by unit tests until the #bkx9 wiring lands.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub(crate) struct ReapedResponseLossInput<'a> {
+    /// `do #id` directive target ids active this cycle.
+    pub directive_ids: &'a [String],
+    /// Pending ids reaped into `agent:done` this cycle.
+    pub reaped_ids: &'a [String],
+    /// Live committed exchange content.
+    pub content: &'a str,
+    /// HEAD-referenced compact-archive bodies (each searched like `content`).
+    pub archives: &'a [String],
+}
+
+/// Pure per-id response-loss detector (`#z2jy` bkx9-pure-detector). DORMANT.
+///
+/// Returns the reaped `do #id` directive ids whose `### Re: ... #id` response
+/// heading did NOT materialize — neither in the live exchange `content` nor in
+/// any HEAD compact `archives` entry. Order follows `directive_ids`; duplicates
+/// are collapsed.
+///
+/// Unlike the live [`check_reaped_queue_head_without_response`] guard, this core
+/// does not consult per-cycle capture state, so it also surfaces the `#bkx9`
+/// residual — a response body *was* captured this cycle but a specific id's
+/// `### Re:` was lost in a CRDT merge (the captured-but-id-lost case).
+///
+/// It is intentionally NOT wired into the live guard yet: wiring it (and proving
+/// it against a reproduced `#ipc-crdt-response-drift`) is gated as `#bkx9`,
+/// because this guard runs at every `write --commit` closeout and a false
+/// positive would wedge all closeouts. The known false-positive class is pinned
+/// by the unit tests: a single `### Re:` heading that answers `do #A` + `do #B`
+/// but names only `#A` flags `#B` as lost.
+///
+/// See `specs/07-closeout-commands.md` `#compact-reap-no-response-record`.
+// Dormant (#z2jy): exercised only by unit tests until the #bkx9 wiring lands.
+#[allow(dead_code)]
+pub(crate) fn reaped_directive_ids_without_response(
+    input: &ReapedResponseLossInput<'_>,
+) -> Vec<String> {
+    let reaped: std::collections::HashSet<&str> =
+        input.reaped_ids.iter().map(String::as_str).collect();
+    let mut lost: Vec<String> = Vec::new();
+    for id in input.directive_ids {
+        if id.is_empty() || !reaped.contains(id.as_str()) {
+            continue;
+        }
+        let materialized = content_has_re_heading_for_id(input.content, id)
+            || input
+                .archives
+                .iter()
+                .any(|archive| content_has_re_heading_for_id(archive, id));
+        if materialized {
+            continue;
+        }
+        if !lost.iter().any(|existing| existing == id) {
+            lost.push(id.clone());
+        }
+    }
+    lost
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JbCacheConflictAcceptDuplicateReplay {
     pub heading: String,
@@ -6365,6 +6434,127 @@ Body\n\
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "a non-directive reaped id is not a queue-head response loss"
+        );
+    }
+
+    // --- #z2jy bkx9-pure-detector: dormant pure per-id loss detector ---
+
+    fn loss_input<'a>(
+        directive_ids: &'a [String],
+        reaped_ids: &'a [String],
+        content: &'a str,
+        archives: &'a [String],
+    ) -> ReapedResponseLossInput<'a> {
+        ReapedResponseLossInput {
+            directive_ids,
+            reaped_ids,
+            content,
+            archives,
+        }
+    }
+
+    #[test]
+    fn pure_detector_flags_reap_only_loss() {
+        // The reap-only silent-loss shape: the id was reaped this cycle but no
+        // `### Re: ... #id` heading exists anywhere — flag it.
+        let directive = vec!["lostresp".to_string()];
+        let reaped = vec!["lostresp".to_string()];
+        let content = "### Re: prior — gpt-5\n\nAnswered something else.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            )),
+            vec!["lostresp".to_string()],
+        );
+    }
+
+    #[test]
+    fn pure_detector_flags_captured_but_id_lost() {
+        // The #bkx9 residual: a response WAS captured this cycle (the `#kept`
+        // heading is present), but `#lost` lost its own `### Re:` in a CRDT
+        // merge. The pure detector ignores capture state, so it surfaces `#lost`
+        // even though a sibling id materialized in the same cycle.
+        let directive = vec!["kept".to_string(), "lost".to_string()];
+        let reaped = vec!["kept".to_string(), "lost".to_string()];
+        let content = "### Re: do #kept — opus-4-8\n\nShipped the kept fix.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            )),
+            vec!["lost".to_string()],
+        );
+    }
+
+    #[test]
+    fn pure_detector_passes_when_materialized_in_archive() {
+        // A legitimate prior-cycle reap whose `### Re:` was compacted into a HEAD
+        // archive (absent from the live exchange) is not a loss.
+        let directive = vec!["archived".to_string()];
+        let reaped = vec!["archived".to_string()];
+        let content = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
+        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            ))
+            .is_empty(),
+            "a reaped id materialized in a HEAD compact archive is not a loss"
+        );
+    }
+
+    #[test]
+    fn pure_detector_ignores_unreaped_directive() {
+        // A directive head that was NOT reaped this cycle carries no
+        // response-landing expectation, even without a materialized heading.
+        let directive = vec!["pending".to_string()];
+        let reaped: Vec<String> = Vec::new();
+        let content = "### Re: prior — gpt-5\n\nAnswered.\n";
+        let archives: Vec<String> = Vec::new();
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            ))
+            .is_empty(),
+            "an unreaped directive id is not a loss"
+        );
+    }
+
+    #[test]
+    fn pure_detector_multi_directive_single_heading_false_positive() {
+        // KNOWN false-positive class (pinned so the #bkx9 wiring must address it
+        // before going live): a single `### Re:` heading legitimately answers
+        // `do #a` + `do #b` in one cycle but names only `#a` in the heading line,
+        // addressing `#b` in the body. The heading-scoped detector cannot see the
+        // body mention, so it flags `#b` as lost — a false positive.
+        let directive = vec!["a".to_string(), "b".to_string()];
+        let reaped = vec!["a".to_string(), "b".to_string()];
+        let single_heading = "### Re: do #a — opus-4-8\n\nFixed #a; also addressed #b inline.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive,
+                &reaped,
+                single_heading,
+                &archives
+            )),
+            vec!["b".to_string()],
+            "documents the multi-directive-single-heading false positive"
+        );
+
+        // When the grouped heading names BOTH ids, neither is flagged — the
+        // recommended shape that avoids the false positive.
+        let grouped_heading = "### Re: do #a, #b — opus-4-8\n\nFixed both.\n";
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive,
+                &reaped,
+                grouped_heading,
+                &archives
+            ))
+            .is_empty(),
+            "a grouped heading naming both ids is not a loss"
         );
     }
 

@@ -6,6 +6,18 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Pre-emptive `/clear` decision predicate (groundwork) (`#s760` / review
+  `#clear-opt-in-threshold`, phase 2).** Added the pure, unit-tested
+  `ContextResetDecision.shouldClearBeforeDispatch(contextUsagePct, clearThreshold,
+  optIn)` that pins the phase-2 semantics: clear before a Run Agent Doc dispatch
+  only when the operator opted into `agent_doc_queue_context_reset` AND the live
+  Claude Code context-usage % is known and at/above the configured
+  `clear_threshold` (an unknown % or a 0 threshold never clears — fail-safe).
+  This is **groundwork only and not yet wired**: the two genuinely live-gated
+  pieces — reading the live context-usage % from the Claude Code pane, and
+  triggering the clear in `SubmitAction`'s pre-dispatch path — plus their live
+  in-IDE verification remain gated on `#xkpf`. JB plugin `0.2.158`.
+
 - **JetBrains plugin coalesces rapid-fire Run Agent Doc / Clear invocations
   (`#9adk` / review `#console-input-accumulation`).** A per-document,
   per-action `InvocationCoalescer` guard skips a second invocation of the same

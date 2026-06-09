@@ -38,7 +38,10 @@ queue: start
 Compacted content:
 - Archived 2 response topic(s): do [#ipc2]; closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:aa6c45bd -->
+- `gh run list --workflow CI --limit 1`: latest CI run was `completed/success` for `chore: refresh benchmark results` on `main`.
+- `make check` in `src/lazily-rs`: passed fmt, clippy, all-targets/all-features build, default/tokio/async/loom/distributed/ipc/signaling-client tests, doctests, and benchmark result check. The heavy loom target completed successfully with 15/15 tests after 573.61s.
+- `npm run check` in `src/lazily-rs/signaling`: typecheck passed; Vitest/workerd passed 31 tests across protocol, permissions, room core, Worker, client, and client e2e coverage.
+<!-- agent:boundary:ee05eac2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +50,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#yxjw]
+- ~~do [#yxjw]~~
 - do [#ipc3]
 - do [#vd5v]
 <!-- /agent:queue -->
@@ -55,7 +58,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->

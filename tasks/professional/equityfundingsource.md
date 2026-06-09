@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `734df89a-8af6-401e-83e4-fd5215a48e3f` as of 2026-05-28 from EFS commit `0afd62b`; public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `3068bd9d-0618-4bb7-9559-80f3791c989f` as of 2026-06-08 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=brian.takita@gmail.com` from the Cloudflare-Email verified `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender; a live POST smoke test persisted a submission with staff_notification_status=sent (test row deleted). Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -51,14 +51,11 @@ Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@eq
 
 **Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
 
-**Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued a backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
-
-### Re: deploy — contact form is live on workers.dev — opus-4-8
+### Re: deploy — contact form is live on workers.dev — opus-4-8 (HEAD)
 
 > **Queue prompt:**
 >
 > deploy [#0jds]
-
 
 Deployed and verified end-to-end.
 

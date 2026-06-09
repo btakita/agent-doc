@@ -41,7 +41,10 @@ Compacted content:
 - `gh run list --workflow CI --limit 1`: latest CI run was `completed/success` for `chore: refresh benchmark results` on `main`.
 - `make check` in `src/lazily-rs`: passed fmt, clippy, all-targets/all-features build, default/tokio/async/loom/distributed/ipc/signaling-client tests, doctests, and benchmark result check. The heavy loom target completed successfully with 15/15 tests after 573.61s.
 - `npm run check` in `src/lazily-rs/signaling`: typecheck passed; Vitest/workerd passed 31 tests across protocol, permissions, room core, Worker, client, and client e2e coverage.
-<!-- agent:boundary:ee05eac2 -->
+- `gh run list --workflow CI --limit 1`: latest CI was `completed/success` on `main`.
+- `make check` in `src/lazily-rs`: passed fmt, clippy, build, all configured Rust feature/test targets, doctests, loom, and benchmark result check.
+- `npm run check` in `src/lazily-rs/signaling`: passed typecheck and 31 Vitest/workerd tests.
+<!-- agent:boundary:93ca3f2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,14 +54,13 @@ Compacted content:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#yxjw]~~
-- do [#ipc3]
+- ~~do [#ipc3]~~
 - do [#vd5v]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [ ] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:backlog -->
 

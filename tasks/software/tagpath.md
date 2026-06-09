@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,14 +46,18 @@ The order is deliberately measurement first, prototype second. `lazily-rs` is on
 I would keep `tagpath-core` out of this until there is strong evidence. The core crate should stay small and deterministic; the likely win is in derived project state, watcher invalidation, ontology/index sidecars, and MCP query freshness.
 
 Proof notes: changed paths are limited to this session document. No code was changed and no build/tests were run because this cycle only captured backlog next steps. Escalation: none.
-<!-- agent:boundary:5499f67d -->
+<!-- agent:boundary:1fa83f22 -->
 <!-- /agent:exchange -->
 
 ###
 <!--
 -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#tglazymeasure]
+- [#tglazyproto]
+- [#tglazywatch]
+- [#tglazydecide]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -52,12 +52,36 @@ Fresh session, so I re-derived this from the spec myself rather than trusting th
 **Logging is adequate to prove/disprove every live-gate item** — I verified each marker exists in source: `cross-session-reject` (claim.rs + ClaimAction.kt), run/clear `coalesced` (route.rs, sync.rs), `live_buffer_classify` + `visible_write_live_buffer_matches_disk`/`visible_write_deferred_current_changed` (write.rs, debounce.rs). The one exception is early-ack, which is intentionally dormant (`EARLY_ACK_ENABLED=false`) until `#saevon` flips it — its marker won't fire before that.
 
 **Install status:** nothing new to install for JetBrains — plugin 0.2.158 is unchanged; the cdylib I just rebuilt hot-reloads by mtime, and the binary is refreshed. You're clear to drive the live batch whenever; I'll check the logs.
-<!-- agent:boundary:63a2f10f -->
+
+### Re: do [#opsproof-falsepos] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#opsproof-falsepos]
+
+
+Fixed the ops-proof closeout auto-completion false-positive at its root in `preflight.rs`, and shipped it to both binaries (0.34.0, `agent-doc` submodule `ff1e3c70`, pushed to origin/main).
+
+**Root cause.** `classify_ops_proof_completion` reaped any open backlog/review item whose text held a completion marker (`DONE`/`SHIPPED`/`IMPLEMENTED`/`COMPLETE`/`COMPLETED`) + a commit hash + no blocker word. That fires on *descriptive* prose: a fresh actionable item that merely cites already-landed dependency work ("Authority rungs pcpc5a/b/c already landed … 600797b3") matched and was auto-archived to `done.md` on the same cycle it was created — the exact churn you hit, same class as the operator-reported queue-item deletion.
+
+**Two-part fix (both bias toward *not* reaping):**
+
+1. **Marker must be the item's own leading status verb.** For an open (non-gated) item, the completion marker now must appear in the leading status segment — the prefix before the first clause break (`: ` / `. `), capped to the first few words after skipping `#hashtag` tags. A marker buried in a cited-dependency clause ("the predicate already shipped in abc1234") no longer counts. Gated `[/]` items keep the marker-anywhere behavior, because gating is a deliberate agent code-complete signal.
+
+2. **Never reap a brand-new same-cycle add.** Pending maintenance now compares each ops-proof candidate against the cycle-start snapshot (the post-commit `content_ours` baseline). An item absent from that snapshot was added *this* cycle and is skipped — it must be closed explicitly, never archived the moment it appears. The guard only engages when a snapshot baseline exists (untracked scaffolds are unaffected).
+
+**Coverage.** Two new tests: `ops_proof_does_not_reap_cited_dependency_marker` (open cited-dependency marker stays open; leading-status sibling still reaps) and `pending_maintenance_does_not_reap_same_cycle_add` (a same-cycle add survives while a pre-existing leading-status item is reaped). Full `make check` green; the existing `pending_maintenance_auto_reaps_ops_proof_done_items` still passes (snapshot == file there, so legitimate reaps are unchanged). `SPEC.md` line 61 and `VERSIONS.md` updated.
+
+**Build/install:** `cargo build --release` + `cargo install --path .` both done, so `.bin/agent-doc` (release) and `~/.cargo/bin/agent-doc` (tmux) are on the fixed code. CI run 27240004787 for the push is in progress; `make check` is green locally, so I'm continuing from local evidence rather than gating on CI.
+<!-- agent:boundary:e5a2bbb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: do [#opsproof-falsepos]~~
+- :pushpin: do [#lvbatch]
+- :pushpin: do [#pcpc5live]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
@@ -92,7 +116,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#opsproof-falsepos] #agent-doc-bug ops-proof closeout auto-completion false-positive. preflight.rs classify_ops_proof_completion reaps a backlog/review item as done when its text has a completion marker word (shipped/done/complete) + a commit hash + no blocker word, even when the item action is undone and the commit/marker only describe prior context. Hit live this session: a freshly-added actionable backlog item describing already-landed pcpc5a/b/c (cited a commit hash) was auto-reaped + archived to done.md on the SAME cycle it was created. Same churn class as operator-reported queue-item-deletion. Fix: attach proof to THIS item action (only reap items already gated, or whose marker is the item leading status verb, not a cited dependency); never reap a brand-new same-cycle add. Add SimWorld/unit coverage. Files: agent-doc-orchestration/src/preflight.rs classify_ops_proof_completion + has_ops_completion_marker + contains_commit_hash.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

@@ -55,19 +55,37 @@ I am **not** draining the rest of the go-mode queue in this session, and I'm not
 **Recommended next move:** restart cleanly and open a fresh focused session for the supervisor-in-process migration (`tasks/agent-doc/plan-supervisor-in-process.md`), starting at the next undone phase after `#pcpc1`. The live-gated items (`#s760wire`, `#saevon`, `#lvb-run`, `#exch-intermix-verify`) need you at a live IntelliJ/Codex pane — say the word and I'll prep the JB plugin install + log markers for that batch.
 
 Nothing was marked done this cycle because no implementation work was safe to perform here.
-<!-- agent:boundary:8a55d88d -->
+do [#pcpconsol]. #spec-test-build-install-commit-push
+
+### Re: do [#pcpconsol] — opus-4-8
+
+The supervisor-in-process consolidation is already shipped. Its four actionable phases are committed, on `origin/main`, and CI-green:
+
+- `#pcpc1` session-actor message runtime (`55243328`)
+- `#pcpc2` in-process supervisor adapter (`bcb63a1f` — `supervisor/in_process.rs` + SimWorld coverage)
+- `#pcpc3` in-process ordered write queue (`ef47c07e` — `write_queue.rs`)
+- `#pcpc4` single controller-owned filesystem watcher (`038f0165` — `document_watcher.rs`)
+
+That is the entire in-process realization the plan decomposes (`tasks/agent-doc/plan-supervisor-in-process.md`). No pure-Rust slice of `#pcpconsol` remains to write in this session, so I marked it done.
+
+The one phase left is the cutover, `#pcpc5` (tracked as `#pcpc5cut`), and it is hard-gated by spec — not merely "fresh-session preferred." `specs/08b-single-process-control-plane.md` (lines 131-133) states the write/watch-authority change "must never be landed in the same cycle that persists a live session response through the write path being changed." Every agent-doc response cycle, including this one, persists my reply through exactly that `write.rs` path — so the cutover, including its first shadow gate, cannot land inside any agent response cycle. It is irreducibly operator-driven and out-of-cycle: drive shadow to dual-write to read-switch to authority to removal, each with a rollback flag and live IntelliJ/Codex editor-boundary proof.
+
+On `#spec-test-build-install-commit-push`: nothing new to spec, build, or commit — the migration is already committed and pushed. I did not run a blind "commit all" because the only uncommitted tree in the submodule is a concurrent prompt-cache effort (423 lines in `prompt_cache.rs`, authored 16:29 today), which is not part of this task.
+
+When you want the cutover, it needs its own fresh session with no live response persisting through the write path mid-gate. Say the word and I will lay out the gate-by-gate plan with the log markers to watch while you test.
+<!-- agent:boundary:9eae9cbb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: :round_pushpin: do [#pcpconsol]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - :pushpin: :round_pushpin: do [#pcpc5cut]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
 - :pushpin: :round_pushpin: do [#tmux-switch-lag]
-- do [#exch-intermix-verify]
+- :pushpin: do [#exch-intermix-verify]
+- do [#pcpconsol]
 <!-- /agent:queue -->
 ###
 <!--
@@ -98,7 +116,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
-- [ ] [#pcpconsol] ROOT-FIX (priority per operator). Supervisor-in-process consolidation / single-process control plane (spec 08b): make the supervisor an in-process adapter so the session actor owns ONE ordered write queue + ONE controller-owned filesystem watcher; demote plugin WatchService to read-only buffer reporting + thin EDT apply+ack shim. Decomposed into dependency-ordered phases #pcpc1 to #pcpc5 in tasks/agent-doc/plan-supervisor-in-process.md. Run as a FRESH focused session starting at #pcpc1 (NOT a saturated queue-drain). Root-fixes #ipc-crdt-response-drift and R1/R2/R5/R6. Absorbs review #pf15/#pcp3/#pcp4/#pcp7 + the degraded-routing half of #pcp5. Large/multi-day.
 - [ ] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

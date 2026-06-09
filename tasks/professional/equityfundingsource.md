@@ -31,42 +31,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-053621.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-055402.md`*
 
 Compacted content:
-- Archived 5 response topic(s): "Accept and send to TMO" error shown in green; should be disabled when incomplete; All form-submission errors should show at the top + a toast, in red; Did you deploy? Deploy.; 2 more
+- Archived 2 response topic(s): Management links should show item counts + deploy; deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Management links should show item counts + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> In the /admin pages, the Management links should have the number of items in the page ![img_2.png](img_2.png).
-
-
-Done and deployed. Worker version **`1f1b4241-2ed9-41cd-806d-caa6d7e0c3af`** is live.
-
-Each admin **Management** sidebar link now shows a right-aligned count badge of the items in that section (Loan Applications, Pipeline, Application Leads, Contact Messages, Investor Deals, Funding Commits, Payments, Documents, Public Contents, Messages, Lender Management, User Management).
-
-**How it works:**
-- New `GET /api/admin/nav-counts` runs `COUNT(*)` on each section's primary table and returns them keyed by nav section id. Each query is isolated and fails closed to `0`, so one bad count can't 500 the nav.
-- The admin layout fetches the counts on mount and renders a `.sb-count` pill next to each link (gold when the section is active). If the fetch fails, the nav just renders without badges.
-
-**Smoke tests:** homepage `200`; `/api/admin/nav-counts` `401` (auth-gated, not 500); `/portal-admin/dashboard` `303`; the deployed bundle `index.browser-A4M6U3MM.js` contains both `/api/admin/nav-counts` and `sb-count`. (The `.sb-count` CSS is inline in the server-rendered portal shell, which is auth-gated, so it ships with every portal page — sign in to see the badges.)
-
-**Verification:** `bun run check` green — 402 tests pass. **Spec:** `docs/current_progress.md` (Admin Portal → Navigation). Committed + pushed (`0d9708a`) + deployed.
-
-Note: the counts are total table rows per section — if you'd rather a badge reflect a filtered view (e.g. only *new* leads, or *unread* messages), tell me which sections and I'll scope them.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Already deployed — this was the same cycle as the nav-counts work, so the deploy already happened. Production is live at Worker version **`1f1b4241-2ed9-41cd-806d-caa6d7e0c3af`**, built from EFS `0d9708a` (= `origin/main`, no unpushed commits). The served bundle `index.browser-A4M6U3MM.js` already contains the nav-counts code, so there's nothing new to push — re-running `deploy:worker` would only mint an identical version. Nothing to do; draining the queue.
-<!-- agent:boundary:1df9ed52 -->
+<!-- agent:boundary:ac72ead5 -->
 <!-- /agent:exchange -->
 ###
 <!--

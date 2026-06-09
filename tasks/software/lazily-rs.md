@@ -66,6 +66,16 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 
 ### Re: Next Steps — FFI, IPC, Network Communication — glm-5.1
 
+> **Queue prompt:**
+>
+> [#w30b]
+
+
+> **Queue prompt:**
+>
+> [#n994]
+
+
 **Current state:** lazily-rs already has substantial infrastructure:
 
 | Surface | Feature Gate | File | Status |
@@ -87,6 +97,22 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 2. **Docs for lazily family to implement the protocol?** Partial — SPEC.md defines the protocol normatively, but each language binding would benefit from a standalone protocol spec (not embedded in the Rust crate).
 3. **Separate repo for the protocol?** Recommended. Extract the wire format spec (message schemas, delta ops, snapshot format) into a `lazily-spec` repo that all bindings reference. This avoids Rust-specific SPEC.md being the canonical source for Python/Zig implementations.
 4. **GH organization?** Recommended. You already use `@lazily` on npm. A `lazily-reactive` (or similar) org on GitHub would: consolidate the 4+ repos, enable org-level CI secrets, and align with the npm scope. The `btakita/` personal namespace works but doesn't scale for multi-language collaboration.
+- `examples/` — snapshot, delta, and signaling session example messages
+4. Update `@lazily/signaling` npm scope if needed
+3. Update submodule URLs in the superproject
+   - `btakita/lazily-signaling` (signaling Worker) → `<org>/signaling`
+   - `btakita/lazily-spec` → `<org>/lazily-spec`
+   - `btakita/lazily-zig` → `<org>/lazily-zig`
+   - `btakita/lazily-py` → `<org>/lazily-py`
+   - `btakita/lazily-rs` → `<org>/lazily-rs`
+2. Transfer repos:
+1. Create org — suggested names: `lazily-reactive`, `lazily-dev`, or `lazily` (npm scope is `@lazily`)
+- `schemas/distributed.json` — JSON Schema for distributed types (PeerId, NodeId, RemoteOp, OpKind, HLCStamp)
+- `schemas/ffi.json` — JSON Schema for FFI boundary types (LazilyFfiBytes, LazilyFfiStatus, LazilyFfiMessageKind)
+- `schemas/signaling.json` — JSON Schema for all client→server and server→client signaling frames
+- `schemas/delta.json` — JSON Schema for Delta + all 7 DeltaOp variants
+- `schemas/snapshot.json` — JSON Schema (Draft 2020-12) for Snapshot + NodeSnapshot + EdgeSnapshot
+- `protocol.md` — standalone language-agnostic protocol spec covering all wire surfaces (IPC Snapshot/Delta, FFI, signaling, CRDT distributed, capability negotiation, permission boundary)
 
 **Priority backlog for FFI/IPC/network improvements:**
 
@@ -99,35 +125,7 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 | `#webrtc-data` | WebRTC data channel transport for peer-to-peer IPC (beyond signaling) | Medium |
 | `#cross-lang-tests` | Shared conformance test suite against the spec repo — run in CI for each binding | Medium |
 | `#ipc-docs` | Standalone protocol docs page (not inside SPEC.md) with examples per transport | Low |
-
-### Re: #n994 — Protocol spec extraction — glm-5.1
-
-> **Queue prompt:**
->
-> [#n994]
-
-
-Completed `#n994`: extracted the wire protocol specification into a standalone `lazily-spec` repo.
-
-**Created:** `btakita/lazily-spec` — https://github.com/btakita/lazily-spec
-
-**Contents:**
-- `protocol.md` — standalone language-agnostic protocol spec covering all wire surfaces (IPC Snapshot/Delta, FFI, signaling, CRDT distributed, capability negotiation, permission boundary)
-- `schemas/snapshot.json` — JSON Schema (Draft 2020-12) for Snapshot + NodeSnapshot + EdgeSnapshot
-- `schemas/delta.json` — JSON Schema for Delta + all 7 DeltaOp variants
-- `schemas/signaling.json` — JSON Schema for all client→server and server→client signaling frames
-- `schemas/ffi.json` — JSON Schema for FFI boundary types (LazilyFfiBytes, LazilyFfiStatus, LazilyFfiMessageKind)
-- `schemas/distributed.json` — JSON Schema for distributed types (PeerId, NodeId, RemoteOp, OpKind, HLCStamp)
-- `examples/` — snapshot, delta, and signaling session example messages
-
-**Submodule:** added `src/lazily-spec` to the superproject (pending superproject commit).
-
-**Schema format:** JSON Schema Draft 2020-12, matching the existing JSON wire format. Binary codecs (protobuf/flatbuffers) can encode the same schemas in future.
-
-**Note:** Created under `btakita/` for now. Transfer to a lazily org (`#w30b`) when that item is resolved.
-
-Changed paths: `src/lazily-spec/` (new submodule), `.gitmodules`.
-<!-- agent:boundary:8b0fc948 -->
+<!-- agent:boundary:f71c98b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,9 +133,9 @@ Changed paths: `src/lazily-spec/` (new submodule), `.gitmodules`.
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~[#n994]~~
-- [#w30b]
+- ~~[#w30b]~~
 - [#pz3k]
 - [#kavj]
 - [#jpf1]
@@ -148,7 +146,6 @@ Changed paths: `src/lazily-spec/` (new submodule), `.gitmodules`.
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
 - [ ] [#pz3k] #ffi-derive=Add cdylib crate type + build targets; consider safer-ffi or diplomat for auto-generated headers
 - [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
 - [ ] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
@@ -159,6 +156,7 @@ Changed paths: `src/lazily-spec/` (new submodule), `.gitmodules`.
 ## Review
 
 <!-- agent:review -->
+- [/] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
 <!-- /agent:review -->
 
 ## Icebox

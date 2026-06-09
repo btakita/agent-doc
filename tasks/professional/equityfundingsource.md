@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -52,7 +52,22 @@ Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@eq
 **Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
 
 **Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued a backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
-<!-- agent:boundary:b53c46c0 -->
+
+### Re: deploy — contact form is live on workers.dev — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy [#0jds]
+
+
+Deployed and verified end-to-end.
+
+- **Remote D1 migration** — `0054_contact_messages` applied to production (`equityfundingsource` DB).
+- **Worker deployed** — version `3068bd9d-0618-4bb7-9559-80f3791c989f`, with `CONTACT_NOTIFICATION_TO=brian.takita@gmail.com` bound.
+- **Live smoke test** — `POST /contact` now returns **303 (success)** instead of the old 503 "not available" error. The submission persisted to D1 with `staff_notification_status=sent` — so on production the staff email **actually delivered** (Cloudflare Email from the verified `info@briantakita.me` sender), and the record is reviewable at `/portal-admin/contact-messages`. The labeled smoke-test row was deleted afterward to keep the admin clean.
+
+The original error from your report is resolved: the public contact form accepts submissions, stores them for admin review, and notifies the support recipient.
+<!-- agent:boundary:b9f58a1f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,13 +75,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy [#0jds]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#0jds] Deploy contact-form persistence to workers.dev: run cf:d1:migrate:remote (migration 0054_contact_messages) + deploy:worker, then smoke-test a /contact submission and /portal-admin/contact-messages on prod. Gated on deploy authorization (#spec-test-commit-push-deploy or "deploy"). Until then the live /contact still shows the "not available right now" error.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

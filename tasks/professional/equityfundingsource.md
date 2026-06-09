@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -127,7 +127,22 @@ So the board now reads: **Leads → Applications → Processing → Documents �
 **Verification:** `bun run check` green — 398 tests pass (Leads column model + card builder + handler/UI wiring; the existing label assertion was updated to "Applications").
 
 **Spec:** `prds/67v2-admin-loan-pipeline-kanban.md` Phase E. Queued the deploy as a backlog item (#pipeline-leads). Exchange is getting large (≈80 lines) — flagging per the size warning; no action needed.
-<!-- agent:boundary:fe742a99 -->
+
+### Re: [#r76a] — deploy the pipeline Leads column + Applications rename — opus-4-8
+
+> **Queue prompt:**
+>
+> [#r76a]
+
+
+Deployed. Worker version **`320e794e-64e4-4b0e-8898-e634e9df4a68`** → https://equityfundingsource.brian-takita.workers.dev (no D1 migration). The pipeline change (`877c3eb`, #pipeline-leads) is now live.
+
+**Smoke tests:** homepage `200`; `/portal-admin/pipeline` `303` (auth redirect — route resolves); `/api/admin/pipeline` `401` (auth-gated, not a 500); and the freshly-deployed browser bundle `index.browser-JNWX3QJA.js` contains the change (greps positive for both `No open leads` and `/portal-admin/application-leads`, confirming the read-only Leads-column code shipped). The "Applications" label comes from the server pipeline API (deployed in the same Worker version).
+
+Sign in as admin and open `/portal-admin/pipeline`: you should see **Leads → Applications → Processing → Documents → Underwriting → Funded**, with the Leads column showing your open prequalification leads (read-only) and no separate "Approved" column.
+
+Marked **#r76a** done. All EFS work through this session is now deployed (approval gate, admin Accept-button gating, form-error standard, and this pipeline update).
+<!-- agent:boundary:143c5d63 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,13 +150,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#r76a]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#r76a] Deploy the pipeline Leads-column + 'Applications' rename (#pipeline-leads, efs 877c3eb) to production: deploy:worker (no D1 migration). Smoke-test /portal-admin/pipeline shows a leftmost read-only 'Leads' column from open application_leads, the entry column reads 'Applications', and no separate 'Approved' column. Held pending deploy authorization (say 'deploy' or re-queue with #spec-test-commit-push-deploy).
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

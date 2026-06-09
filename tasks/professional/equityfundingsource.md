@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -54,15 +54,15 @@ Shipped and deployed. The interactive **Deal Pipeline controls** from `img_3.png
 - **loan / payment / lender / funding / document / contact** detail modals aren't leads — a borrower-invite/lead-status block doesn't apply.
 
 If by "all dialog types" you meant each dialog should get an **editable status dropdown for its own entity** (e.g. change a loan's pipeline stage from the loan dialog), that's a real but separate feature — each needs its own status-write endpoint. Tracked as **#pipeline-dialog-controls-scope**; tell me which dialogs + which actions and I'll build them.
-<!-- agent:boundary:db38ef7c -->
+<!-- agent:boundary:9084b55f -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
-- Add Deal Pipeline controls to the Deal Pipeline dialog in the admin portal ![img_3.png](img_3.png). Do this for all dialog types.
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- Make the dialog wider and shorter. ![img_4.png](img_4.png) Use a scrollbar for short monitors. Make sure this works on mobile.
 - deploy
 <!-- /agent:queue -->
 

@@ -1408,6 +1408,103 @@ fn retire_wedged_write_applied_capture_if_drifted(
     Ok(true)
 }
 
+/// `#stale-capture-captured-only-drift`: extend the stale-capture retire path to
+/// a `Captured`-only orphan (write never attempted) whose baseline drifted — but
+/// ONLY when there is positive superseding-turn evidence.
+///
+/// [`retire_wedged_write_applied_capture_if_drifted`] is deliberately scoped to
+/// `WriteApplied` captures because the write was already attempted, so re-running
+/// fresh is safe. A bare `Captured` orphan could still be a legitimate pending
+/// response (captured but not yet written — e.g. a crash between capture and
+/// write), so blindly retiring it would lose that response. The conservative
+/// default therefore stays on the `validate_replay` fail-closed path.
+///
+/// The one safe exception: the captured response's prompt has **already been
+/// answered** in the live document. `run` only ever loads the *current* cycle's
+/// capture (`load_active` keys off `cycle_state.capture_id`), so the deadlock
+/// orphan is the current cycle's Captured body. Positive superseding-turn
+/// evidence is therefore that the captured response's `### Re:` heading already
+/// appears in the live `agent:exchange` — a later turn's answer to the same
+/// prompt landed — so this never-written body is a stale duplicate, not the only
+/// answer. (The `response_already_applied*` checks earlier in `run` already
+/// handle the case where the captured *body* itself is present; this covers the
+/// heading-present-but-body-differs supersession.) When that holds, retire the
+/// orphan — discard the body as a `Discarded` record (preserved on disk for
+/// forensics) and clear the pending sidecar — breaking the `validate_replay`
+/// deadlock that otherwise needs a manual `reset --from-current --preserve-session`.
+/// Without the evidence, stay on the conservative fail-closed path. Returns
+/// `true` when it retired the orphan.
+fn retire_superseded_captured_only_orphan_if_drifted(
+    file: &Path,
+    doc_content: &str,
+    capture: &crate::capture::CaptureRecord,
+) -> Result<bool> {
+    if capture.state != crate::capture::CaptureState::Captured {
+        return Ok(false);
+    }
+    if !crate::capture::replay_baseline_drifted(file, capture)? {
+        return Ok(false);
+    }
+    // Positive superseding-turn evidence: the captured response's heading is
+    // already answered in the live exchange.
+    let Some(heading) = first_response_heading_line(&capture.response_body) else {
+        return Ok(false);
+    };
+    if !live_exchange_answers_heading(doc_content, heading) {
+        return Ok(false);
+    }
+
+    let pending_path = snapshot::pending_path_for(file)?;
+    if pending_path.exists() {
+        std::fs::remove_file(&pending_path).with_context(|| {
+            format!(
+                "failed to remove pending response while retiring superseded captured orphan {}",
+                pending_path.display()
+            )
+        })?;
+    }
+    if let Err(e) = snapshot::delete_pre_response(file) {
+        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
+    }
+    crate::capture::mark_discarded(file)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_retire_superseded_captured_only_orphan file={} capture_id={} cycle_id={}",
+            file.display(),
+            capture.capture_id,
+            capture.cycle_id
+        ),
+    );
+    eprintln!(
+        "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange + baseline drifted); preserved the captured body for forensics",
+        file.display()
+    );
+    Ok(true)
+}
+
+/// True when the live document's `agent:exchange` already contains a `### Re:`
+/// response heading whose normalized topic matches `heading` — i.e. the prompt
+/// the orphan answered is already answered by a landed response.
+fn live_exchange_answers_heading(doc_content: &str, heading: &str) -> bool {
+    let target = normalize_replay_topic(heading);
+    if target.is_empty() {
+        return false;
+    }
+    let Ok(components) = crate::component::parse(doc_content) else {
+        return false;
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return false;
+    };
+    exchange
+        .content(doc_content)
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("### Re:"))
+        .any(|line| normalize_replay_topic(line) == target)
+}
+
 fn respect_manual_exchange_tail_removal_if_safe(
     file: &Path,
     doc_content: &str,
@@ -1574,6 +1671,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
             return Ok(RepairOutcome::ManualTailRemovalRespected);
         }
         if retire_wedged_write_applied_capture_if_drifted(&canonical, &doc_content, capture)? {
+            return Ok(RepairOutcome::StaleCaptureRetired);
+        }
+        if retire_superseded_captured_only_orphan_if_drifted(&canonical, &doc_content, capture)? {
             return Ok(RepairOutcome::StaleCaptureRetired);
         }
         crate::capture::validate_replay(&canonical, capture)?;
@@ -2829,7 +2929,53 @@ mod tests {
         let err = run(&doc).unwrap_err();
         assert!(
             err.to_string().contains("baseline no longer matches"),
-            "captured-only orphan must keep failing closed: {err}"
+            "captured-only orphan must keep failing closed without superseding evidence: {err}"
+        );
+    }
+
+    // `#stale-capture-captured-only-drift`: a `Captured`-only orphan whose
+    // baseline drifted IS retired (non-destructively) once there is positive
+    // superseding-turn evidence — the captured response's `### Re:` heading is
+    // already answered in the live exchange, so the never-written body is a stale
+    // duplicate, not the only answer.
+    #[test]
+    fn retires_superseded_captured_only_orphan_on_drift() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        // State when the orphan was captured: the prompt is NOT yet answered.
+        let v1 = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, v1).unwrap();
+        snapshot::save(&doc, v1).unwrap();
+
+        // Capture a response (never written) answering `### Re: new`.
+        let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
+        let capture = crate::capture::capture_response(&doc, lost).unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Captured);
+
+        // A superseding turn answered the SAME prompt with a DIFFERENT body and
+        // drifted the live document off the capture's recorded baseline.
+        let v2 = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n### Re: new — opus-4-8\n\nThe real landed answer.\n<!-- agent:boundary:def -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, v2).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(
+            recovered,
+            RepairOutcome::StaleCaptureRetired,
+            "a Captured-only orphan whose heading is already answered + drifted must be retired"
+        );
+        // Current document preserved verbatim; the stale body is not replayed.
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, v2, "current document must be preserved verbatim");
+        assert!(
+            !result.contains("Lost duplicate."),
+            "stale captured body must not be replayed:\n{result}"
+        );
+        // Orphan retired (Discarded); body preserved on disk for forensics.
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
+        assert_eq!(
+            capture.response_body, lost,
+            "captured body must be preserved for forensics"
         );
     }
 

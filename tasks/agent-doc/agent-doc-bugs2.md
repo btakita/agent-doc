@@ -277,7 +277,22 @@ Consolidated into the gated review item `#pcp6`, which already explicitly "absor
 Both describe the identical change: capture the editor-buffer **content** (not just len/hash) in the `.agent-doc/live-buffer` sidecar so `guard_visible_write_reconcile` can scope-classify a genuine unsaved editor edit against the TurnScope instead of failing closed. The item itself states it "Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read" and `#pcp6` records the same: "JB+VSCode plugin + FFI classifier. Requires live editor verification."
 
 That's a live-editor-blocked plugin change (the editor must write buffer text into the digest, verifiable only in a live IDE), so it stays gated under the canonical `#pcp6` (PCP phase 6, plan `tasks/agent-doc/plan-pcp-consolidate.md`). Keeping a separate backlog item for it just churns the go-mode queue and double-tracks one task, so I closed the backlog duplicate; `#pcp6` remains the single gated tracker. This is a consolidation (duplicate removed), not a fix — the work itself is genuinely blocked on a fresh live-IntelliJ/VSCode session.
-<!-- agent:boundary:86da03b0 -->
+
+### Re: do [#vbk7] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#vbk7]
+
+
+Consolidated into gated review item `#pcp7`, which `#vbk7` explicitly "realizes" — same work, double-tracked.
+
+`#vbk7` is "plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile)." Review `#pcp7` is "PCP phase 7 — Demote plugin WatchService to read-only buffer reporting + reduce FFI socket listener to a thin EDT apply+ack shim (closes R1/R2/R5 TOCTOU)." Identical change.
+
+`#pcp7` records the blockers precisely: **BLOCKED on supervisor-in-process consolidation (`#pcp-consol`) AND requires live IntelliJ/Codex verification** (pairs with `#live-verify-batch`). So this is genuinely gated on both a prerequisite refactor and live-editor verification — neither doable in this headless session. Closed the backlog duplicate so the go-mode queue stops re-surfacing it; `#pcp7` remains the single gated tracker. Consolidation, not a fix.
+
+This drains the backlog of its JB-plugin / live-verify duplicates — the substantive remaining queue items are the two actionable binary bugs I filed this session (`#exit75-done-reap-not-atomic`, `#partial-staging-guard-cross-doc-noise`).
+<!-- agent:boundary:5ffcb521 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -293,7 +308,7 @@ That's a live-editor-blocked plugin change (the editor must write buffer text in
 - ~~:pushpin: :round_pushpin: do [#clear-opt-in-threshold]~~
 - ~~:pushpin: :round_pushpin: do [#console-input-accumulation]~~
 - ~~:round_pushpin: do [#nm1x-livebuf-content]~~
-- :round_pushpin: do [#vbk7]
+- ~~:round_pushpin: do [#vbk7]~~
 - do [#exit75-done-reap-not-atomic]
 - do [#partial-staging-guard-cross-doc-noise]
 <!-- /agent:queue -->
@@ -325,7 +340,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#partial-staging-guard-cross-doc-noise] [recommended] In a multi-session dogfooding superproject many unrelated task docs stay perpetually dirty; check_partial_staging_closeout_guard then WARNs on nearly every closeout because its overlapping-changed-string-literal heuristic matches incidental shared vocabulary (e.g. "make check", "agent-doc", "id not found in backlog") between the committed session doc and unrelated dirty companions. Surfaced by #cross-session-agent-doc-issue-survey: 154 partial_staging_closeout_guard_fired entries across tsift/lazily-rs/monsterrodholders/equityfundingsource ops logs 2026-06-09. Tighten the overlap signal (require a more specific shared token, same-component path, or scope to the intended path set) so unrelated superproject churn does not trip the WARN. WARN-only, low severity.
 - [ ] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
-- [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [x] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 <!-- /agent:backlog -->
 
 ## Review

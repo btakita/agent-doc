@@ -101,7 +101,7 @@ To stop the agent queue from re-serving operator-driven work, drop the `queue` a
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:pushpin: :round_pushpin: do [#pcpc5cut]~~
+- :pushpin: :round_pushpin: do **[#pcpc5cut]**
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
@@ -148,6 +148,8 @@ What are #next-steps to fix bugs?
  
 <!-- agent:review -->
 - [/] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
+  - DONE (out-of-cycle, plain session, agent-doc 600797b3): document-write authority rungs pcpc5a (shadow), pcpc5b (dual-write), pcpc5c (authority) shipped behind the default-off `AGENT_DOC_WRITE_AUTHORITY` env gate. The central `write::atomic_write` for editor-visible docs now routes through the session-actor ordered write queue (`write_queue`) when advanced to dual-write+, removing the in-process supervisor/finalize interleave (R6 self-race / exit-75) at the root; a thread-local owner-scope re-entrancy guard prevents mailbox deadlock; `.agent-doc/` sidecars never routed; instant rollback by unsetting the env. SimWorld + unit coverage, `make check` green, both binaries rebuilt+installed. Spec realized in 08b §"Document write and watch authority"; VERSIONS.md Unreleased.
+  - REMAINING (live-gated, stay under #xkpf): pcpc5d/pcpc5e — delete the out-of-process supervisor direct-disk writers + demote the editor plugin WatchService (JetBrains/VS Code) to read-only buffer reporting + single controller-owned watcher. These need a live IntelliJ/Codex editor-boundary proof a plain session cannot provide. Operator next step: run a session with `AGENT_DOC_WRITE_AUTHORITY=shadow` to confirm the would-route ops.log targets, then `=dual-write` to exercise the routed path live before the removal rungs.
 - [/] [#lvb-run] OPERATOR live-verification session (no agent gate; user runs, files bugs, agent checks logs). All five fixes are code-complete + installed (binary 0.34.0, cdylib lib-installed, JB plugin 0.2.158 unchanged). Install signed JB plugin 0.2.158 + binary, drive ONE mid-active-turn Codex/IntelliJ pane through the batch, capture logs. Grep markers: #4wxr claim stderr "[claim] cross-session-reject pane_id=.. pane_session=.. configured=.."; #9adk idea.log "[run]/[clear] coalesced duplicate"; #f5d2/#pcp6 ops.log "live_buffer_classify decision=.. reason=.." + write.rs "visible_write_live_buffer_matches_disk"/"visible_write_deferred_current_changed"; #saev (after #saevon flips the flag) session-log "[ipc-socket] early-ack pending emitted before apply". Reproduces #ipc-crdt-response-drift on closeout (watch for emptied backlog / orphaned ids / duplicated review / split boundary). Supersedes review #xkpf + #live-verify-batch + the live legs of #f5d2/#pcp6.
 <!-- /agent:review -->
 

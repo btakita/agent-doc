@@ -95,24 +95,39 @@ Root-caused as far as is safely possible here, then **gated** — not from effor
 **First-hand repro captured this session:** the `#queue-completed-items-escape-below-component` cycle shipped its code, but the item reached `agent:done` with no `### Re:` ever recorded (compaction had archived the prior two responses; my finalize then failed `--done "id not found in backlog"` because it was already reaped). That trace is the clean-session repro seed.
 
 **Next:** unblock by running it first in a fresh session where the closeout works — then the materialization-gated done/reap change is verifiable.
-<!-- agent:boundary:9a3029c7 -->
+
+### Re: do [#compact-reap-no-response-record] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#compact-reap-no-response-record]
+
+
+Shipped the safe, high-confidence subset of the fix instead of gating a fourth time — `make check` green (4116/4116, clippy clean), built + installed both binaries, committed + pushed (submodule `9a4cfd01`).
+
+**What landed:** a new read-only `session-check` guard, `check_reaped_queue_head_without_response`. It fails closed when a **no-response reap-only closeout** (`Committed` with no `capture_id`/`response_sha256`) reaped a `do #id` queue-directive head this cycle whose `### Re: … #id` heading is absent from **both** the live `agent:exchange` and **every** HEAD-referenced compact archive. That is exactly the operative loss event in the repro: a maintenance/compaction pass strikes + reaps the head, then `finalize --done <id>` fails "id not found in backlog".
+
+**Why this is safe to land in this (drift-prone) session** — it is the spec-08b concern inverted. The guard does **not** touch the write/reap path; it is purely additive post-commit detection. Its failure mode is "INTERRUPT so the operator recovers the lost response," never corruption. And it cannot false-positive on a real response cycle: any cycle that captures a response (mine included) short-circuits at the `capture_id.is_some()` precondition — the exact precondition the sibling `check_no_response_active_queue_head` guard already trusts. A legitimate prior-cycle reap is recognized by the durable `### Re: … #id` heading (live or archived) and stays clean. Three deterministic tests cover fires / materialized-passes / non-directive-passes.
+
+**The honest residual (still gated, not effort-avoidance):** the *other* half — a response body WAS captured this cycle but this specific id's `### Re:` record was the one lost — needs reliable **per-id** materialization detection. That detection is the unreliable substrate (`#ipc-crdt-response-drift`); building a guard on top of it risks false-positives that would block *every* legitimate `do #id → response → done → reap` closeout across all users. That is a genuine block on a fresh-session repro, so review item #1 stays `[/]`, retitled to the precise residual.
+
+**CI:** push kicked run `27188969343` (in progress); prior CI run is green. Closing from local evidence per the test-bearing-turn rule.
+<!-- agent:boundary:a41e44b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: Add backlog items to address agent-doc issues in my current active sessions: this document, tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md.~~
-- ~~:round_pushpin: Look at the backlog and review items. Please ensure the backlog items give an actionable set of prioritized steps to complete review items and fix issues. Sync the prioritized backlog with the queue.~~
-- :round_pushpin: do [#queue-operator-pin-position-lock-dag]
-- :pushpin: :round_pushpin: do [#compact-reap-no-response-record]
+- ~~:pushpin: :round_pushpin: do [#compact-reap-no-response-record]~~
 - :pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]
 - :pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]
-- :pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]
+- :pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]
+- :round_pushpin: do [#queue-operator-pin-position-lock-dag]
 - :round_pushpin: do [#stale-capture-captured-only-drift]
-- :round_pushpin: do [#queue-contamination-guard-false-positive]
+- :pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]
+- :pushpin: :round_pushpin: do [#clear-opt-in-threshold]
+- :pushpin: :round_pushpin: do [#console-input-accumulation]
 - :round_pushpin: do [#nm1x-livebuf-content]
-- :round_pushpin: do [#clear-opt-in-threshold]
-- :round_pushpin: do [#console-input-accumulation]
 - :round_pushpin: do [#vbk7]
 <!-- /agent:queue -->
 ###

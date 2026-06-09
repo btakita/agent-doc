@@ -6,6 +6,26 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **08b document write-authority cutover gate ladder (`#pcpc5cut`, rungs
+  `pcpc5a`–`pcpc5c`).** New `AGENT_DOC_WRITE_AUTHORITY` env gate routes the
+  central `write::atomic_write` for editor-visible session documents up the 08b
+  migration ladder (`specs/08b-single-process-control-plane.md`
+  §"Document write and watch authority"): `off` (default — unchanged bare
+  `atomic_write`, the rollback target), `shadow` (raw write unchanged, reports
+  the would-route decision to `ops.log`), `dual-write`/`authority` (route the
+  real write through the session actor's single ordered write queue,
+  `write_queue::serialized_atomic_write`, serializing supervisor and
+  agent-finalize writes at the root of the R6 self-race / exit-75 drift), and
+  `removed` (reserved for supervisor/plugin-writer removal; routes like
+  `authority` at this layer). A thread-local owner-scope re-entrancy guard
+  (`write_authority::owner_scope_guard`, installed by
+  `write_queue::run_serialized`) keeps the queue's inner `atomic_write` on the
+  raw path so a routed write cannot deadlock the document's blocking mailbox.
+  `.agent-doc/` sidecar writes are never routed. Default-off, opt-in, instant
+  rollback by unsetting the env. The `removed` rung and the single-watcher /
+  editor WatchService read-only demotion remain gated on live IntelliJ/Codex
+  proof (review `#xkpf`).
+
 - **VS Code reports full editor-buffer content to the live-buffer sidecar
   (`#f5d2` / review `#pcp6`).** The VS Code typing listener now calls
   `agent_doc_document_changed_digest_content` (full buffer text) instead of the

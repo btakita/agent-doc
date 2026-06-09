@@ -132,6 +132,41 @@ flag and must not lose committed controller rows. Behavior changes here must
 never be landed in the same cycle that persists a live session response through
 the write path being changed.
 
+The document-write authority rung of this ladder is realized by the
+`AGENT_DOC_WRITE_AUTHORITY` environment gate, read on each write by
+`write_authority::current_gate` and applied at the single `write::atomic_write`
+chokepoint for editor-visible documents (`.agent-doc/` sidecar and snapshot
+writes are never routed):
+
+- `off` (default) — bare `atomic_write`, no observation, no routing. This is the
+  unchanged shipped behavior and the rollback target for every later rung.
+- `shadow` (`pcpc5a`) — the real write still runs through bare `atomic_write`;
+  after a successful editor-visible write the binary reports the would-route
+  decision (gate, content length, content hash) to `ops.log`, so an operator can
+  confirm the routing target before flipping authority. Observe-only.
+- `dual-write` (`pcpc5b`) — the real editor-visible write is routed through the
+  session actor's single ordered write queue
+  (`write_queue::serialized_atomic_write`). The cross-process advisory `flock`
+  remains a backstop. This removes the in-process supervisor/finalize interleave
+  at the root.
+- `authority` (`pcpc5c`) — same routing as `dual-write`; the ordered write queue
+  is the sole in-process serializer (`flock` is only a foreign-process backstop).
+- `removed` (`pcpc5d`/`pcpc5e`) — reserved for deleting the out-of-process
+  supervisor direct-disk writers and demoting the editor plugin WatchService to
+  read-only buffer reporting. Those rungs additionally require live IntelliJ/VS
+  Code/Codex editor-boundary proof and stay in review `#xkpf`; at this
+  write-routing layer `removed` behaves like `authority`.
+
+Routing a write through the queue re-enters `atomic_write` on the session-actor
+owner thread; the thread-local owner-scope re-entrancy guard
+(`write_authority::owner_scope_guard`, installed by
+`write_queue::run_serialized`) keeps that inner write on the raw path so a routed
+write cannot deadlock the document's blocking mailbox. Rolling a gate back is
+unsetting the env (or setting `off`), which returns the previous write authority
+without losing any committed state. Because the gate is keyed off an env var and
+default-`off`, advancing it is an out-of-cycle operator action — never landed by
+an agent response cycle persisting through this same `write.rs` path.
+
 Deterministic SimWorld coverage for this authority must model at least:
 
 - a supervisor idle/file-watch write and an agent finalize write submitted

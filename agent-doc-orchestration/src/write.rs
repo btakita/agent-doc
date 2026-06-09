@@ -14105,7 +14105,67 @@ pub fn atomic_write_if_current_pub(
     atomic_write(path, content)
 }
 
+/// Atomic write through the `#pcpc5cut` 08b document write-authority gate ladder
+/// ([`crate::write_authority`]). Default gate (`off`) calls [`atomic_write_raw`]
+/// directly — exactly today's behavior. When an operator opts a document write
+/// up the ladder via `AGENT_DOC_WRITE_AUTHORITY`:
+/// - `shadow` performs the raw write unchanged, then reports the would-route
+///   decision to `ops.log`;
+/// - `dual-write`/`authority`/`removed` route the real write through the session
+///   actor's single ordered write queue ([`crate::write_queue`]), serializing
+///   supervisor and agent-finalize writes for the same document at the root.
+///
+/// `.agent-doc/` sidecar/snapshot writes and writes already executing on the
+/// session-actor owner thread always take the raw path (the latter prevents a
+/// re-entrant mailbox deadlock).
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
+    use crate::write_authority::WriteAuthorityGate;
+
+    let gate = if crate::write_authority::is_visible_document(path) {
+        crate::write_authority::current_gate()
+    } else {
+        WriteAuthorityGate::Off
+    };
+
+    if gate.routes_through_queue() && !crate::write_authority::within_owner_scope() {
+        let base_dir = crate::fs_util::find_project_root(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let result = crate::write_queue::serialized_atomic_write(&base_dir, &file, path, content);
+        if result.is_ok() {
+            // Log after the write lands so the document path canonicalizes
+            // (ops.log root resolution requires the file to exist).
+            crate::ops_log::log_op(
+                path,
+                &format!(
+                    "write_authority gate={} action=routed len={} hash={}",
+                    gate.as_str(),
+                    content.len(),
+                    crate::ops_log::content_hash(content)
+                ),
+            );
+        }
+        return result;
+    }
+
+    let result = atomic_write_raw(path, content);
+    if matches!(gate, WriteAuthorityGate::Shadow) && result.is_ok() {
+        crate::ops_log::log_op(
+            path,
+            &format!(
+                "write_authority gate=shadow action=would-route len={} hash={}",
+                content.len(),
+                crate::ops_log::content_hash(content)
+            ),
+        );
+    }
+    result
+}
+
+/// The raw atomic disk write: write to a temp file then rename, recording
+/// write-provenance for editor-visible documents. This is the gate ladder's
+/// `off` path and the path taken inside the ordered write queue.
+fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
     use std::io::Write;
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
@@ -14129,7 +14189,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 /// disk change from any agent-doc writer is positively attributed instead of
 /// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
 pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
-    if path.components().any(|c| c.as_os_str() == ".agent-doc") {
+    if !crate::write_authority::is_visible_document(path) {
         return;
     }
     let canonical = path
@@ -14198,6 +14258,90 @@ mod tests {
             crate::debounce::write_provenance(&sidecar_key).is_none(),
             "an .agent-doc/ sidecar write must not record document provenance"
         );
+    }
+
+    /// RAII guard: serialize on the process-global env lock, set
+    /// `AGENT_DOC_WRITE_AUTHORITY`, and restore the prior value on drop.
+    struct ScopedWriteAuthority {
+        prev: Option<String>,
+        _guard: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl ScopedWriteAuthority {
+        fn set(val: &str) -> Self {
+            let guard = crate::test_support::env_lock();
+            let key = crate::write_authority::ENV_VAR;
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, val) };
+            Self {
+                prev,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedWriteAuthority {
+        fn drop(&mut self) {
+            let key = crate::write_authority::ENV_VAR;
+            match &self.prev {
+                Some(v) => unsafe { std::env::set_var(key, v) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    /// #pcpc5a (shadow): the real write is unchanged (raw path runs, provenance
+    /// recorded); only the would-route decision is reported.
+    #[test]
+    fn write_authority_shadow_leaves_write_unchanged() {
+        let _env = ScopedWriteAuthority::set("shadow");
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("logs")).unwrap();
+        let doc = tmp.path().join("shadow-doc.md");
+        atomic_write(&doc, "shadow content").unwrap();
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "shadow content");
+        let key = doc
+            .canonicalize()
+            .unwrap_or(doc.clone())
+            .to_string_lossy()
+            .to_string();
+        assert!(
+            crate::debounce::write_provenance(&key).is_some(),
+            "shadow runs the raw write path, so provenance is still recorded"
+        );
+    }
+
+    /// #pcpc5b (dual-write): the real document write is routed through the
+    /// session actor's ordered write queue. The routed write executes
+    /// `atomic_write` again on the owner thread; the owner-scope re-entrancy
+    /// guard keeps that inner write on the raw path, so this must not deadlock
+    /// and the content must land.
+    #[test]
+    fn write_authority_dual_write_routes_through_queue_without_deadlock() {
+        let _env = ScopedWriteAuthority::set("dual-write");
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("logs")).unwrap();
+        let doc = tmp.path().join("dual-doc.md");
+        atomic_write(&doc, "routed content").unwrap();
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "routed content");
+        let ops = fs::read_to_string(tmp.path().join(".agent-doc").join("logs").join("ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops.contains("write_authority gate=dual-write action=routed"),
+            "dual-write must report the routed decision to ops.log: {ops:?}"
+        );
+    }
+
+    /// `.agent-doc/` sidecar writes are never routed even when an aggressive
+    /// gate is set — they always take the raw path.
+    #[test]
+    fn write_authority_never_routes_agent_doc_sidecars() {
+        let _env = ScopedWriteAuthority::set("authority");
+        let tmp = TempDir::new().unwrap();
+        let sidecar = tmp.path().join(".agent-doc").join("snapshots").join("s.md");
+        fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        atomic_write(&sidecar, "sidecar bytes").unwrap();
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), "sidecar bytes");
     }
 
     #[test]

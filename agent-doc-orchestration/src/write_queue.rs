@@ -56,7 +56,14 @@ where
     F: FnOnce() -> R + Send + 'static,
 {
     let actor = document_actor_in(base_dir, file);
-    actor.submit(kind, move |_ctx| job())
+    actor.submit(kind, move |_ctx| {
+        // Mark the owner thread so a nested `atomic_write` (e.g. the inner
+        // `atomic_write_pub` of `serialized_atomic_write`, or any document write
+        // performed inside `job`) takes the raw write path instead of
+        // re-entering this blocking mailbox and deadlocking the owner thread.
+        let _owner_scope = crate::write_authority::owner_scope_guard();
+        job()
+    })
 }
 
 /// Serialized atomic disk write: routes `write::atomic_write_pub` through the
@@ -255,6 +262,31 @@ mod tests {
         let abs = seed(&dir, "doc.md", "old\n");
         serialized_atomic_write(dir.path(), "doc.md", &abs, "new content\n").unwrap();
         assert_eq!(std::fs::read_to_string(&abs).unwrap(), "new content\n");
+    }
+
+    #[test]
+    fn run_serialized_marks_owner_scope_and_does_not_leak() {
+        // #pcpc5cut re-entrancy guard: while a job runs on the owner thread, the
+        // owner scope is active so a nested `atomic_write` takes the raw path
+        // instead of re-entering this blocking mailbox (which would deadlock).
+        // The scope must not leak back to the caller thread.
+        let dir = tempfile::TempDir::new().unwrap();
+        seed(&dir, "doc.md", "x");
+        let base = dir.path().to_path_buf();
+
+        assert!(!crate::write_authority::within_owner_scope());
+        let inside = run_serialized(&base, "doc.md", SessionOpKind::WriteSubmit, || {
+            crate::write_authority::within_owner_scope()
+        })
+        .unwrap();
+        assert!(
+            inside,
+            "owner thread must be marked in-scope so nested atomic_write stays raw"
+        );
+        assert!(
+            !crate::write_authority::within_owner_scope(),
+            "owner scope must not leak to the submitting thread"
+        );
     }
 
     #[test]

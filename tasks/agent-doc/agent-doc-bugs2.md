@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,12 +56,21 @@ Mapped the 12 gated review items into 9 actionable backlog items (priority order
 9. **#xkpf lvb-run** — consolidated live verification session (#live-verify-batch; verifies the live-gated items above + reproduces #ipc-crdt-response-drift)
 
 Every review item is now covered by at least one actionable backlog id. The five live-IntelliJ-gated items funnel verification through **#lvb-run**; the three #pcp-consol-blocked phases funnel through **#pf15 pcp-consol**.
-<!-- agent:boundary:b1023288 -->
+<!-- agent:boundary:eabce96d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#saev]
+- [#71f1]
+- [#9adk]
+- [#s760]
+- [#f5d2]
+- [#bkx9]
+- [#pf15]
+- [#21w2]
+- [#xkpf]
 <!-- /agent:queue -->
 ###
 <!--

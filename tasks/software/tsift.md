@@ -90,7 +90,36 @@ Commits:
 
 - `src/agent-doc`: `02a1317a` (`prompt-cache: rank session cost misses`), pushed to `origin/main`.
 - superproject: `356c21565` (`agent-doc: update prompt cache miss ranking`), ready to push with the session closeout commit.
-<!-- agent:boundary:e5439dd9 -->
+
+### Re: pcache-boundary-contract — gpt-5
+
+> **Queue prompt:**
+>
+> do [#pcache-boundary-contract]
+
+
+Implemented `#pcache-boundary-contract`.
+
+- Documented the prompt-cache boundary contract in `specs/05-agent-backend.md` and tightened the top-level invariant in `SPEC.md`.
+- Added module-level boundary-contract guidance in `prompt_cache.rs`: stable prefix, volatile suffix, and provider key requirements.
+- Added provider breakpoint/key-material coverage for the cache boundary and replay key.
+- Added a direct-run prompt test proving durable response/turn contracts stay above the boundary while diff/status/queue/accretion/context content stays below it.
+- Strengthened the Codex owner-continuation test so owner-pane file path and queue head stay in the volatile suffix.
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration prompt_cache --lib`
+- `cargo test -p agent-doc-orchestration prompt_cache_boundary --lib`
+- `cargo test -p agent-doc-orchestration idle_queue_drain_payload_uses_owner_continuation_for_codex --lib`
+- `make check`
+- `make install`
+- `gh run watch 27233820687 --exit-status` passed for CI on `prompt-cache: document boundary contract`.
+
+Commits:
+
+- `src/agent-doc`: `3570a63c` (`prompt-cache: document boundary contract`), pushed to `origin/main`.
+- superproject: `86efd465b` (`agent-doc: update prompt cache boundary contract`), ready to push with the session closeout commit.
+<!-- agent:boundary:1ea4552d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,14 +131,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#pcache-replaygate]~~
 - ~~do [#pcache-missrank]~~
-- do [#pcache-boundary-contract]
+- ~~do [#pcache-boundary-contract]~~
 - do [#pcache-ci-history]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-boundary-contract] Prompt caching: document and test the cache-boundary contract for agent-doc prompt assembly: which blocks may live above the boundary, which must stay in the volatile suffix, and provider-specific breakpoint/key requirements.
 - [ ] [#pcache-ci-history] Prompt caching: persist prompt-cache effectiveness history and trend checks in the token/performance gate so regressions across real Codex/OpenAI and Claude/Anthropic transcripts fail with actionable deltas.
 <!-- /agent:backlog -->
 

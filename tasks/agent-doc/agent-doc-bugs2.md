@@ -132,7 +132,29 @@ I didn't process `#s760wire` this turn — preflight surfaced something more urg
 **Why this matters:** the next preflight misreads that corruption as user `content_edit` prompt_targets, so a response could get built on a corrupted exchange. It's the `#adoc-queue-ipc-buffer-divergence` / supervisor-self-race family — the root fix is the supervisor-in-process migration, not a per-cycle patch.
 
 **Recommendation: halt this session rather than re-invoking.** The live IPC listener corrupts the working tree on every commit here — each cycle I have to restore from HEAD. The remaining queue (`#s760wire`, `#saevon`, `#lvbatch`, `#exch-intermix-verify`, `#bkx9perid`, `#tmux-switch-lag`) all need a live IntelliJ pane or a fresh non-degraded session anyway. Start fresh; the committed history is clean and all this round's fixes are on `origin/main`.
-<!-- agent:boundary:41dfa4b6 -->
+
+### Re: Automatically add the env vars to ~/ so I can test — opus-4-8
+
+Done — and it's already live, no edit needed this cycle.
+
+**What's there.** `~/.zshenv` line 5 already exports the var:
+
+```sh
+export AGENT_DOC_WRITE_AUTHORITY=dual-write
+```
+
+`.zshenv` is the right file: zsh sources it for **every** invocation — interactive, login, and the **non-interactive** shells tmux spawns for agent-doc panes — so child agent-doc processes inherit it. Verified live: a fresh `zsh -c` and this very Bash process both report `[dual-write]`. The only env var that matters here is `AGENT_DOC_WRITE_AUTHORITY` (the early-ack toggle for `#saevon` is a compile-time `const EARLY_ACK_ENABLED`, not an env var, so there's nothing to export for it).
+
+**Why you still need the restart you mentioned.** The persisted var only reaches *new* processes. The supervisor / IPC-listener that actually owns this document's writes was spawned from a shell that predates the change, so it's still on the old gate. Proof from `.agent-doc/logs/ops.log`:
+
+- 34 `write_authority` events, **all** `gate=shadow action=would-route`, **0** `routed` — including events stamped during this session.
+
+So the dual-write routed path has not fired yet. Restarting (kill the tmux server / restart your terminal + IntelliJ) makes the next session's supervisor inherit `dual-write`.
+
+**`#pcpc5live` step 2 — what unblocks it.** After you restart and run one finalize cycle, the write path should emit `write_authority gate=dual-write action=routed`. Re-invoke `/agent-doc` on this doc and I'll grep that proof to confirm the routed write queue is actually carrying the real document write (spec 08b step 2). Until then there's no routed event to verify — the env is correct, the live process is just stale.
+
+One caveat unchanged from last turn: this session still has the post-commit working-tree corruption (`#postcommit-ipc-worktree-corruption`) from the live IPC listener. A fresh post-restart session is the clean place to capture the dual-write proof anyway.
+<!-- agent:boundary:df8fdbe5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -142,7 +164,7 @@ I didn't process `#s760wire` this turn — preflight surfaced something more urg
 - ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
 - ~~:pushpin: do [#pcpc5live]~~
 - :pushpin: :round_pushpin: do [#s760wire]
-- add AGENT_DOC_WRITE_AUTHORITY=dual-write. Automatically add the env vars so I can test. I can restart.
+- Automatically add the env vars to ~/ so I can test. I can restart.
 - :pushpin: :round_pushpin: do [#saevon]
 - :round_pushpin: do [#lvbatch]
 - :round_pushpin: do [#bkx9perid]

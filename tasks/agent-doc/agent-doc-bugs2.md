@@ -51,13 +51,38 @@ Addressing the remaining queue prompts together — all are now resolved or trac
 - **What runs in the PCP process / draw a #mermaid:** the full answer + current and target mermaids are in `specs/process-topology.md`.
 
 The full R1–R6 race→fix table and both topology diagrams live in the evergreen `specs/process-topology.md`. With these dispositioned, the queue is drained — the only substantial open work is `#pcpc1`–`#pcpc5` (the consolidation, fresh session).
-<!-- agent:boundary:d3b989be -->
+
+### Re: do [#pcpc1] — Session-actor message runtime — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#pcpc1]
+
+
+Done — `#pcpc1` (PCP-consol phase 1) is implemented and shipped in both binaries.
+
+**What landed** (`agent-doc-orchestration/src/session_actor.rs`): turned the session actor from a pure data/CAS struct into a real in-process actor runtime.
+
+- `DocumentActor::spawn` — a per-document mailbox (`mpsc` channel) drained on a single owning thread, named `session-actor:<doc-id>`. All document-scoped ops for one document now run in one serialized order.
+- `submit` / `enqueue` — typed `submit::<R>(kind, job)` runs a closure on the owner thread and returns its result; `enqueue` is the non-blocking pipeline variant. `SessionOpKind` (`WriteSubmit`, `Closeout`, `QueueHead`, `Lifecycle`) carries the `08b` op taxonomy and is surfaced via `ActorContext::last_op()` as a #pcpc3 branch hook.
+- `SessionActorRuntime` + `runtime()` singleton + `document_actor_in(base_dir, file)` — a process-wide registry that funnels every caller for one canonical document id into the same mailbox, so serialization holds across call sites, not just within one. Clean `Drop` drops the sender then joins the owner thread.
+- SQLite CAS stays the durable cross-process backstop; the mailbox serializes the same-process writers it could not order before.
+
+**Scope:** phase 1 is the runtime only — existing call sites are unchanged so it lands independently shippable. `#pcpc3` (already queued) routes the concrete `write`/`stream`/`finalize`/repair + supervisor idle/file-watch disk writes through `DocumentActor::submit`.
+
+**SimWorld determinism (3 new tests, all green):**
+- `..._serializes_single_producer_in_fifo_order` — N pipelined ops drain in FIFO submission order; `processed` counter strictly increases.
+- `..._serializes_concurrent_producers_without_overlap` — 32 producer threads hit one actor at a barrier; a re-entrancy guard proves no two ops overlap and each runs exactly once.
+- `..._registry_funnels_one_document_to_one_mailbox` — same doc id → one shared actor (`Arc::ptr_eq`), distinct docs → distinct actors, ordered ops via either handle.
+
+**Verification:** `make check` green (clippy `-D warnings` + full test suite); `cargo build --release` + `cargo install --path .` both refreshed; latest agent-doc CI run green pre-push.
+<!-- agent:boundary:5b65157e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#pcpc1]
+- ~~do [#pcpc1]~~
 - do [#pcpc2]
 - do [#pcpc3]
 - do [#pcpc4]
@@ -89,7 +114,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcpc1] PCP-consol phase 1 — Session-actor message runtime: turn session_actor.rs from a data struct into a per-document mailbox/owner-thread actor that serializes all document-scoped ops (write submit, closeout, queue-head, lifecycle); keep SQLite CAS as durable backstop. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc2] PCP-consol phase 2 — In-process supervisor adapter: host the harness child PTY/stdin/restart/heartbeat as a controller-managed task instead of a separate OS process; preserve the Unix-socket external boundary for CLI/editor callers. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc3] PCP-consol phase 3 — In-process ordered write queue (realizes #pcp3b): route all write/stream/finalize/repair + supervisor idle/file-watch writes through the session actor queue; flock becomes cross-process backstop only. Kills R6/exit-75 at the root. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc4] PCP-consol phase 4 — Single controller-owned filesystem watcher (realizes #pcp4) + demote plugin WatchService to read-only (realizes #pcp7; needs live verification). Plan: tasks/agent-doc/plan-supervisor-in-process.md

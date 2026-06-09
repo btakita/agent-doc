@@ -8581,6 +8581,20 @@ pub fn run_stream(
                     ),
                 }
             }
+            // #exit75-done-reap-not-atomic: this stream IPC-timeout closeout
+            // commits and `exit(75)`s WITHOUT returning to `complete_required_closeout`,
+            // so reap the `[x]` items the --done flags just marked HERE, before the
+            // commit, so the reap lands in the same exit-75 commit instead of
+            // stranding a completed item for a recovery preflight (which also
+            // strands a fresh `preflight_started` cycle). `run_pending_maintenance`
+            // writes the reaped/archived doc + snapshot (no commit); the commit
+            // below stages it. Idempotent (no-op when nothing is `[x]`) + non-fatal.
+            if let Err(e) = crate::preflight::run_pending_maintenance(file) {
+                eprintln!(
+                    "[commit] stream IPC-timeout pending-reap maintenance failed (non-fatal): {}",
+                    e
+                );
+            }
             if crate::git::is_in_git_repo(file) {
                 match crate::git::commit(file) {
                     Ok(_) => cleanup_fallback_patch_files(file),

@@ -363,9 +363,14 @@ pub struct PreflightOutput {
     pub prompt_bearing_changes: Vec<crate::diff::PromptBearingChange>,
     /// `prompt_bearing_changes` with managed-component state edits filtered
     /// out (queue activity toggle, queue items, backlog/review/done items,
-    /// `queue_active:` frontmatter toggle). The Claude Code auto-loop guard
-    /// uses this field instead of `prompt_bearing_changes` so routine
-    /// session bookkeeping does not block the auto-loop. Plan: `#ccloopguard`.
+    /// `queue_active:` frontmatter toggle), AND with edits the affectedness
+    /// classifier scoped as independent of the current turn dropped when
+    /// `op_affectedness.turn_affected` is `false` (`#queue-no-stop-unrelated-edit`).
+    /// The Claude Code auto-loop guard uses this field instead of
+    /// `prompt_bearing_changes` so neither routine session bookkeeping nor an
+    /// edit unrelated to the current turn blocks the auto-loop — only a real
+    /// user prompt (which edits the in-scope `exchange` tail and classifies as
+    /// turn-affecting) preempts. Plan: `#ccloopguard`, `#queue-no-stop-unrelated-edit`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_intent_prompt_changes: Vec<crate::diff::PromptBearingChange>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
@@ -562,6 +567,47 @@ fn op_log_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default()
+}
+
+/// Compute `user_intent_prompt_changes` — the set the Claude Code auto-loop
+/// guard treats as "real user intent that must preempt an active queue drain".
+/// The loop halts only when this is non-empty, so it must exclude everything
+/// that is *not* fresh intent for the current turn:
+///
+/// - a synthetic queue-continuation diff (`diff_from_queue_head_only`) is queue
+///   bookkeeping, never user intent;
+/// - managed-component edits (queue/backlog/review/done items, activity toggles)
+///   are routine session bookkeeping (`change_is_managed_state_only`);
+/// - edits the affectedness classifier scoped as **independent** of the current
+///   turn — i.e. targeting no address in the turn's read/write set
+///   (`#queue-no-stop-unrelated-edit`). When `op_affectedness` ran and reports
+///   `turn_affected == false`, every user op this cycle was independent or
+///   provenance-spoofed, so the drain must not stop.
+///
+/// A genuine user prompt typed mid-loop edits the in-scope `exchange` tail, which
+/// classifies as turn-affecting (`InputAffecting`/`OutputContended`), so
+/// `turn_affected` is `true` and the prompt still preempts. When the classifier
+/// did not run (`op_affectedness` is `None`, e.g. a semantic-diff parse skip),
+/// this stays conservative and falls back to the managed-state filter only.
+fn compute_user_intent_prompt_changes(
+    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    diff_from_queue_head_only: bool,
+    op_affectedness: Option<&agent_doc_core::turn_scope::CycleAffectedness>,
+) -> Vec<crate::diff::PromptBearingChange> {
+    if diff_from_queue_head_only {
+        // Synthetic auto-queue continuation only — no user intent this cycle.
+        return Vec::new();
+    }
+    if op_affectedness.is_some_and(|affectedness| !affectedness.turn_affected) {
+        // The classifier ran and scoped every user op this cycle as independent
+        // of the turn — nothing affects it, so the drain must not halt.
+        return Vec::new();
+    }
+    prompt_bearing_changes
+        .iter()
+        .filter(|change| !crate::diff::change_is_managed_state_only(change))
+        .cloned()
+        .collect()
 }
 
 /// Derive the TurnScope manifest for the current turn (`#op-scoped-drift-2`).
@@ -3459,6 +3505,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     let pipeline = resolve_pipeline_state(file)?;
 
+    // `#queue-no-stop-unrelated-edit`: compute before the struct move so the
+    // affectedness classifier can be borrowed (it is moved into the struct below).
+    let user_intent_prompt_changes = compute_user_intent_prompt_changes(
+        &prompt_bearing_changes,
+        diff_from_queue_head_only,
+        op_affectedness.as_ref(),
+    );
+
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -3475,16 +3529,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         semantic_diff,
         turn_scope,
         op_affectedness,
-        user_intent_prompt_changes: if diff_from_queue_head_only {
-            // Synthetic auto-queue continuation only — no user intent this cycle.
-            Vec::new()
-        } else {
-            prompt_bearing_changes
-                .iter()
-                .filter(|change| !crate::diff::change_is_managed_state_only(change))
-                .cloned()
-                .collect()
-        },
+        user_intent_prompt_changes,
         prompt_bearing_changes,
         inline_annotations,
         slash_commands,
@@ -12676,6 +12721,80 @@ mod tests {
         let scope = derive_turn_scope(content, &targets).expect("scope derived");
         assert!(scope.driver.is_none());
         assert!(scope.write_set.iter().all(|a| a.component != "queue"));
+    }
+
+    fn user_prompt_change(text: &str) -> crate::diff::PromptBearingChange {
+        crate::diff::PromptBearingChange {
+            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            text: text.to_string(),
+        }
+    }
+
+    fn affectedness(turn_affected: bool) -> agent_doc_core::turn_scope::CycleAffectedness {
+        use agent_doc_core::turn_scope::{AffectednessClass, ClassifiedOp};
+        agent_doc_core::turn_scope::CycleAffectedness {
+            turn_affected,
+            classified: vec![ClassifiedOp {
+                component: "queue".to_string(),
+                node_key: "queue:0:other:0".to_string(),
+                op_kind: "move".to_string(),
+                actor: agent_doc_core::op_log::OpActor::User,
+                class: if turn_affected {
+                    AffectednessClass::InputAffecting
+                } else {
+                    AffectednessClass::Independent
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn user_intent_empty_for_synthetic_queue_continuation() {
+        // A pure auto-queue continuation is never user intent, regardless of the
+        // affectedness verdict.
+        let changes = vec![user_prompt_change("do [#next]")];
+        assert!(
+            compute_user_intent_prompt_changes(&changes, true, Some(&affectedness(true))).is_empty()
+        );
+    }
+
+    #[test]
+    fn user_intent_drops_turn_independent_edits() {
+        // #queue-no-stop-unrelated-edit: a real (non-managed) edit that the
+        // classifier scoped as independent of the turn must NOT halt the drain.
+        let changes = vec![user_prompt_change("a stray note in the parking lot")];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(false)));
+        assert!(out.is_empty(), "independent edit should not preempt: {out:?}");
+    }
+
+    #[test]
+    fn user_intent_keeps_turn_affecting_prompt() {
+        // A genuine new user prompt edits the in-scope exchange tail, so the
+        // classifier reports turn_affected — it must still preempt.
+        let changes = vec![user_prompt_change("please also handle the error case")];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+        assert_eq!(out.len(), 1, "turn-affecting prompt must preempt");
+    }
+
+    #[test]
+    fn user_intent_filters_managed_state_when_turn_affected() {
+        // Even when the turn is affected, managed-component bookkeeping (a backlog
+        // item line) stays filtered — it is not a real prompt.
+        let changes = vec![crate::diff::PromptBearingChange {
+            kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+            text: "- [ ] [#newitem] track a follow-up".to_string(),
+        }];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+        assert!(out.is_empty(), "managed-state edit must not preempt: {out:?}");
+    }
+
+    #[test]
+    fn user_intent_conservative_without_classifier() {
+        // No affectedness classifier (semantic-diff skip): fall back to the
+        // managed-state filter only, so a real change still preempts.
+        let changes = vec![user_prompt_change("a real prompt with no classifier")];
+        let out = compute_user_intent_prompt_changes(&changes, false, None);
+        assert_eq!(out.len(), 1, "without classifier, a real change preempts");
     }
 
     #[test]

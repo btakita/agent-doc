@@ -73,7 +73,21 @@ Fixed the ops-proof closeout auto-completion false-positive at its root in `pref
 **Coverage.** Two new tests: `ops_proof_does_not_reap_cited_dependency_marker` (open cited-dependency marker stays open; leading-status sibling still reaps) and `pending_maintenance_does_not_reap_same_cycle_add` (a same-cycle add survives while a pre-existing leading-status item is reaped). Full `make check` green; the existing `pending_maintenance_auto_reaps_ops_proof_done_items` still passes (snapshot == file there, so legitimate reaps are unchanged). `SPEC.md` line 61 and `VERSIONS.md` updated.
 
 **Build/install:** `cargo build --release` + `cargo install --path .` both done, so `.bin/agent-doc` (release) and `~/.cargo/bin/agent-doc` (tmux) are on the fixed code. CI run 27240004787 for the push is in progress; `make check` is green locally, so I'm continuing from local evidence rather than gating on CI.
-<!-- agent:boundary:e5a2bbb2 -->
+
+### Re: Do not use memory to recover — opus-4-8
+
+Understood, and you're right — last turn I leaned on a recovery memory to hand-rebuild a wedged closeout. That papers over a shipped product bug so it keeps biting every user. I traced the real failure from `ops.log` (not memory) and fixed it in the product. Shipped: agent-doc `60803ebd`, pushed to `origin/main`.
+
+**Root cause (`#exch-intermix-falsedrop`).** When `finalize --stream` hit the IPC drift last turn, the binary logged `dropped_queue_prompt_recorded count=3` and `ipc_snapshot_adoption_blocked`. The `#exch-intermix` auto-recovery (`try_auto_recover_live_prompt_drift`, `write.rs`) **unconditionally bails when any `dropped_queue_prompts` is recorded** — so it refused, and I had to hand-recover. But that "dropped" record is computed by comparing the divergent IPC candidate against `content_ours`: a queue item **consumed (struck) this cycle** gets logged as "dropped" even though it survives, struck, in the adopted snapshot. The snapshot was the complete, correct document; the bail was a false positive.
+
+**Fix.** Auto-recovery now bails only when a recorded dropped prompt is **genuinely absent** from the snapshot it would adopt (`snapshot_contains_dropped_prompt`, strike-aware). A consumed/struck or preserved prompt still present no longer blocks recovery; the snapshot↔disk containment gate stays authoritative for current on-disk content. The existing genuine-loss test (`do #dropped`, absent from snapshot) still fails closed.
+
+**Coverage.** Unit test `snapshot_contains_dropped_prompt_matches_consumed_and_active` + integration test `try_auto_recover_live_prompt_drift_fires_when_dropped_prompt_is_consumed_in_snapshot` (the exact struck-queue wedge from last turn). Full `make check` green (4175 tests via nextest); `make install` + `cargo build --release` refreshed both binaries + cdylib. `specs/07-closeout-commands.md` §`#exch-intermix` and `VERSIONS.md` updated. Submodule CI is in progress; continuing from green local evidence.
+
+**Follow-up filed.** Added `#dropqueue-consumed-falsecount` to the backlog: my fix corrected the auto-recovery *gate*, but the underlying dropped-prompt *counting* still tags a consumed/struck item as "dropped," which is what produced the false `#queue-user-edit-overwrite` session-check INTERRUPTED last turn. That's the sibling bug to fix at the source.
+
+**Memory.** Per your directive, I rewrote the recovery-memory addendum I added last turn — it now points at this product fix instead of teaching the manual `cp snapshot` workaround. Going forward I'll route agent-doc closeout misbehavior to a backlog bug or a product fix, not a recovery memory.
+<!-- agent:boundary:a9fd83fa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -81,6 +95,7 @@ Fixed the ops-proof closeout auto-completion false-positive at its root in `pref
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#opsproof-falsepos]~~
 - :pushpin: do [#lvbatch]
+- :pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.
 - :pushpin: do [#pcpc5live]
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
@@ -116,6 +131,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#dropqueue-consumed-falsecount] #agent-doc-bug dropped_queue_prompt_lines_after_content_ours (write.rs) counts a queue item consumed (struck) this cycle as a dropped prompt, because content_ours excludes struck items from queue_prompt_texts. The over-count feeds session-check #queue-user-edit-overwrite and can emit a FALSE INTERRUPTED on a correct closeout (seen live after #opsproof-falsepos recovery: struck do[#opsproof-falsepos] read as a dropped user edit). #exch-intermix-falsedrop fixed the auto-recovery gate via snapshot containment; the underlying record is still over-broad. Fix: exclude prompts that survive struck/consumed in content_ours from the dropped record (or diff against raw queue text incl. struck lines). Add SimWorld/unit coverage. Files: write.rs dropped_queue_prompt_lines_after_content_ours + queue_prompt_texts; session_check.rs #queue-user-edit-overwrite.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

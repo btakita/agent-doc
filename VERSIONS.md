@@ -6,6 +6,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Consumed (struck) queue items are no longer recorded as dropped user edits
+  (`#dropqueue-consumed-falsecount`).** `dropped_queue_prompt_lines_after_content_ours`
+  counted only `content_ours` *active* queue prompts, so a queue item the user
+  added this cycle that `content_ours` consumed (struck `~~…~~`) read as
+  "dropped" — tripping the `#queue-user-edit-overwrite` guard with a false
+  `session-check` INTERRUPTED on a correct closeout. The detector now counts
+  consumed (`QueueEntry::Completed`) items toward coverage via
+  `queue_prompt_texts_including_consumed`. This is the source-level counterpart
+  to `#exch-intermix-falsedrop` (which fixed the auto-recovery gate). `write.rs`;
+  regression test added.
+
 - **`#exch-intermix` auto-recovery no longer fails closed on a false-positive
   dropped-prompt record (`#exch-intermix-falsedrop`).** `try_auto_recover_live_prompt_drift`
   bailed whenever the cycle recorded ANY `dropped_exchange_prompts` /

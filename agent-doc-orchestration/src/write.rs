@@ -603,6 +603,32 @@ fn queue_prompt_texts(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Active + consumed (struck) queue prompt texts. A queue item struck this cycle
+/// (`QueueEntry::Completed`) was CONSUMED, not dropped, so it must count toward
+/// `content_ours` coverage when deciding whether adopting `content_ours` would
+/// drop a user-added candidate prompt (`#dropqueue-consumed-falsecount`).
+/// `queue_prompt_texts` returns only active `Prompt` entries, which made a
+/// consumed item read as a dropped user edit and tripped the
+/// `#queue-user-edit-overwrite` guard on a correct closeout.
+fn queue_prompt_texts_including_consumed(body: &str) -> Vec<String> {
+    let Ok(entries) = crate::queue::parse(body) else {
+        return Vec::new();
+    };
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt)
+            | crate::queue::QueueEntry::Completed(prompt)
+                if !prompt.multiline =>
+            {
+                let text = prompt.text.trim().to_string();
+                (!text.is_empty()).then_some(text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn queue_prompt_counts(prompts: &[String]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for prompt in prompts {
@@ -633,7 +659,10 @@ fn dropped_queue_prompt_lines_after_content_ours(
 
     let baseline_prompts = queue_prompt_texts(&baseline_q);
     let candidate_prompts = queue_prompt_texts(&candidate_q);
-    let content_ours_prompts = queue_prompt_texts(&content_ours_q);
+    // #dropqueue-consumed-falsecount: count items content_ours CONSUMED (struck)
+    // this cycle as covered, not dropped — a struck queue item is answered, not
+    // silently deleted.
+    let content_ours_prompts = queue_prompt_texts_including_consumed(&content_ours_q);
     if candidate_prompts.is_empty() {
         return Vec::new();
     }
@@ -15123,6 +15152,37 @@ Old.
 
         let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, candidate);
         assert!(dropped.is_empty());
+    }
+
+    // #dropqueue-consumed-falsecount: a queue item the user added this cycle that
+    // content_ours CONSUMED (struck `~~...~~`) is answered, not dropped. It must
+    // not be recorded as a dropped user edit (which would trip the
+    // #queue-user-edit-overwrite guard on a correct closeout).
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_excludes_consumed_struck_item() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- do [#consumed]\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content_ours = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- ~~do [#consumed]~~\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let dropped =
+            dropped_queue_prompt_lines_after_content_ours(baseline, candidate, content_ours);
+        assert!(
+            dropped.is_empty(),
+            "a struck/consumed item is answered, not dropped: {dropped:?}"
+        );
     }
 
     #[test]

@@ -93,7 +93,37 @@ queue: start
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:3c565889 -->
+
+### Re: GPU-required local corky builds — gpt-5
+
+> **Queue prompt:**
+>
+> Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.
+
+
+Completed.
+
+Changed paths:
+- `src/corky/Makefile` now requires `CORKY_LOCAL_GPU_FEATURE` for local build, check, release, install, and wheel targets; on this Linux workstation it resolves to `transcribe-cuda`, and the targets fail closed if no GPU feature is selected.
+- `src/corky/install.sh` now requires the CUDA/Metal release artifact when the local platform selects one instead of falling back to CPU.
+- `src/corky/AGENTS.md`, `src/corky/DEV.md`, `src/corky/README.md`, `src/corky/SPEC.md`, and the build/install docs now point local agents at GPU-required build/install commands and document the no-CPU-fallback rule.
+- Updated the gitignored local harness override `src/corky/CLAUDE.local.md` so this CUDA workstation also tells agents to use `make check`, `make release`, and `make install` with GPU support.
+
+Commands and verification:
+- `CORKY_LOCAL_GPU_FEATURE= make build` fails closed with the new GPU-required error.
+- `make precommit` passed with `--features transcribe-cuda` for clippy, tests, and `audit-docs`.
+- `make release` passed with `cargo build --release --features transcribe-cuda` and refreshed `.bin/corky`.
+- `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
+- `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
+- Latest GitHub Actions `CI` run on `main` was `completed success`.
+
+Commits and push:
+- Pushed corky submodule commit `244f664` (`Require GPU for local builds`) to `btakita/corky main`.
+- Pushed owner repo commit `f3abae72d` (`Update corky submodule for GPU builds`) to `btakita/agent-loop main`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:129df070 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,7 +134,8 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue go -->
-- Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.
+- ~~Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.~~
+- [#sheets-create-share]
 <!-- /agent:queue -->
 
 ## Backlog

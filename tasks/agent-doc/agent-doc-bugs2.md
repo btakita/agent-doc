@@ -35,13 +35,33 @@ complete
 Compacted content:
 - Archived 1 response topic(s): go
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:99901f09 -->
+
+### Re: do #install-stale-guard — shipped the stale-install preflight warning — opus-4-8
+
+Implemented, tested, built+installed, committed, and pushed.
+
+**What it does.** Preflight now emits a `stale_install` warning when any installed/built `agent-doc` artifact predates the latest buildable source commit — the exact failure I hit two cycles ago, where `~/.cargo/bin/agent-doc` lagged a *same-version* diagnostics commit by ~11 minutes and the staleness was invisible (no version bump).
+
+**Design (preflight.rs):**
+- Checks four artifacts: `~/.cargo/bin/agent-doc`, the lib-installed `~/.cargo/bin/libagent_doc-*.so` (version-globbed, since the cdylib is named after the binary crate version, not the orchestration crate's), and `target/release/{agent-doc,libagent_doc.so}` (the `.bin` symlink target).
+- Staleness = artifact mtime predates the last commit touching `*.rs`/`Cargo.toml`/`Cargo.lock`/`build.rs`. Doc-only commits never trip it.
+- Best-effort: only fires when an `agent-doc` source repo is locatable (the doc's git root or its `src/agent-doc` submodule) — silent no-op for crates.io installs with no source.
+- Pure classifier + source-repo locator are unit-tested.
+
+**One bug I caught during verification:** the initial 60s grace false-fired on the guard's *own* feature commit. In the normal build → install → verify → commit ordering the install necessarily predates the commit it covers (it can't know about a commit that follows it), and a careful cycle's install→commit gap measured 97s. Widened the grace to 5 minutes (commit `ab91217a`) — routine dogfood commits no longer self-trip, while the ~11-minute real failure and hours-old forgotten reinstalls are still caught.
+
+**Verification:** `make check` → 4141 tests passed / 0 failed, clippy clean. Spec (`07-core-commands.md`) + README aligned with the new warning code.
+**Submodule commits pushed to origin/main:** `fb6937c1` (guard) + `ab91217a` (grace fix). `#install-stale-guard` is done.
+
+This cycle hit `#exch-intermix` (live_prompt_drift_after_preflight) a second time on the `--stream` path; recovered again via `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk`. That IPC/live-editor drift is reproducing reliably on this document — strong evidence for prioritizing `#exch-intermix` / `#pcpconsol`.
+
+Not auto-looping: this session is long-running and the remaining queue shouldn't be drained here — `#pcpconsol` needs a fresh focused session. `#exch-intermix` is the next pure-code item if you want it queued next.
+<!-- agent:boundary:6a15971f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#install-stale-guard]
 - :round_pushpin: do [#exch-intermix]
 - :round_pushpin: do [#pcpconsol]
 - :round_pushpin: do [#pcpc5cut]
@@ -49,6 +69,7 @@ Compacted content:
 - :round_pushpin: do [#saevon]
 - :round_pushpin: do [#bkx9perid]
 - :round_pushpin: do [#tmux-switch-lag]
+- ~~do [#install-stale-guard]~~
 - ~~do [#lvb-run]~~
 <!-- /agent:queue -->
 ###

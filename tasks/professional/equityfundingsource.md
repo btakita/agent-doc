@@ -36,7 +36,25 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 3 response topic(s): Move Deal Pipeline above Loan Applications; deploy; Plan a move to Hetzner US-East (Docker + nginx)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:6c38f07e -->
+
+### Re: Deal Pipeline controls in the admin dialog (+ deploy) — opus-4-8
+
+Shipped and deployed. The interactive **Deal Pipeline controls** from `img_3.png` (Status dropdown · Staff-email status · Send/Resend borrower invite) are now inline in the Deal Pipeline card dialog, so an admin can change a lead's status and (re)send the borrower invite without leaving the board.
+
+**What changed (EFS `9234ba8`, superproject pointer `7b696114f`):**
+- **New shared component** `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx` — extracts the status dropdown + staff-email status + send/resend-invite block, reusing the existing `/api/admin/application-leads/:id/status` and `/invite` endpoints and handing the updated lead back via `on_lead`.
+- **Pipeline lead dialog** (`pipeline.tsx` `LeadModalBody`) now renders the controls; the redundant read-only "Staff notified"/"Borrower invite" rows were removed. Kanban lead cards stay read-only / non-draggable — only the dialog gained controls.
+- **Full-page lead detail** (`application_lead_detail.tsx`) now consumes the same shared component (no behavior change, just DRY).
+- Tests updated to follow the extraction + assert the dialog controls.
+
+**Verification:** `bun run check` green — **493 tests pass** (added 2), `build` + `build:worker` clean. **Deployed** to production (Version `36773d8b-81ef-468f-86db-0b45df30c110`). Smoke test: `/`, `/funded-deals`, `/apply` → 200; `/portal-admin/pipeline` → 303→login (auth guard intact).
+
+**On "all dialog types" — please confirm scope.** These controls are **lead-specific** (statuses new/contacted/converted/archived + borrower invite), so they map to the lead pipeline dialog (the screenshot) and the lead detail page — done. The other dialog types don't take the same controls:
+- The **loan/deal** pipeline dialog already has its own inline actions (publish/close deal, delete loan, open full loan).
+- **loan / payment / lender / funding / document / contact** detail modals aren't leads — a borrower-invite/lead-status block doesn't apply.
+
+If by "all dialog types" you meant each dialog should get an **editable status dropdown for its own entity** (e.g. change a loan's pipeline stage from the loan dialog), that's a real but separate feature — each needs its own status-write endpoint. Tracked as **#pipeline-dialog-controls-scope**; tell me which dialogs + which actions and I'll build them.
+<!-- agent:boundary:db38ef7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,11 +62,15 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+- Add Deal Pipeline controls to the Deal Pipeline dialog in the admin portal ![img_3.png](img_3.png). Do this for all dialog types.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#hetz1] [recommended] Hetzner US-East (Ashburn) migration evaluation for EFS: EFS is a Cloudflare Workers app (D1, R2 x3, Durable Objects, Workers AI, CF Access, cron) with NO Dockerfile — a move to Hetzner Docker+nginx is a full replatform off CF primitives, not a container relocation. Confirm the driver (cost / data residency / long-running processes) and whether 'our Docker container' means EFS or monsterrodholders before scoping.
+- [ ] [#pipeline-dialog-controls-scope] Confirm scope of 'all dialog types' for the Deal Pipeline controls: shipped on the lead pipeline dialog + full-page lead detail. The loan/deal pipeline dialog already has its own inline controls (publish/close deal, delete, open). If admin loan/deal cards or other admin detail modals should gain an editable pipeline-status dropdown, that needs its own status-write endpoint per entity — confirm which dialogs and which actions.
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

@@ -35,14 +35,31 @@ complete
 Compacted content:
 - Archived 1 response topic(s): do [#ipc-drift-writeprovenance]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:55f6929c -->
+
+### Re: do [#ipc-early-ack] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ipc-early-ack]
+
+
+Gated, not done — this one is genuinely blocked on a live editor, and it's risky to land in this session.
+
+**Why gated (two real blockers):**
+1. **Needs live IntelliJ/Codex verification.** The deliverable is the plugin emitting an early `accepted`/`pending` ack *before* `awaitIdleBeforeDocumentMutation` in `PatchWatcher.handleSocketMessageV2` (`PatchWatcher.kt:350–368`, which today blocks up to 5s on the idle-wait, then applies, then acks). Whether the early ack actually fires at receipt-time — before the idle/apply window — can only be confirmed against a running plugin. A CLI session cannot prove that timing.
+2. **The sender half rewires the hot IPC closeout path.** Two-phase ack in `ipc_socket.rs::send_message` (read an early ack → reset liveness, then await the terminal ack) is delicate state-machine code, and its integration can't be unit-tested without a live socket listener. This session is saturated and its own closeouts keep hitting `#ipc-crdt-response-drift` (the prior finalize this drain drifted and had to recover). Modifying `send_message` mid-drain would put the very path I'm using to persist this response at risk.
+
+**Already tracked:** Review `#pcp5` absorbs `#ipc-early-ack` (+ `#ipc-degraded-prefers-file-ipc`) and is the canonical gated home; this backlog id was a duplicate of that gate. Unblock = a fresh, non-saturated session with a live IntelliJ/Codex pane: implement FFI-first (`ipc_socket` early-ack message + `ffi.rs` listener contract), wire the backward-compatible two-phase read into `send_message`, emit from `PatchWatcher.handleSocketMessageV2`, and verify the ack lands before the idle-wait on a live editor.
+
+Continuing the drain to the deterministic CLI-only items below it.
+<!-- agent:boundary:a4d3e5f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#ipc-drift-writeprovenance]~~
-- :round_pushpin: do [#ipc-early-ack]
+- ~~:round_pushpin: do [#ipc-early-ack]~~
 - :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: do [#loop-guard-exchange-node-granularity]
 - :round_pushpin: do [#queue-completed-items-escape-below-component]

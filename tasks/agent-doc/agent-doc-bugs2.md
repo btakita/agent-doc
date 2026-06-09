@@ -132,7 +132,28 @@ Fixed and shipped (submodule `5e7b6f14`) — `make check` green (4117/4117, clip
 **Why it's safe in this drift-prone session:** the auto-reopen path only fires for a response that is *not* already committed, and it refreshes the baseline to `HEAD`, so it cannot duplicate. My own finalize this turn is unaffected — its cycle is `preflight_started`, never `Committed`, so the gate doesn't fire at all. Two deterministic tests: new-response-commits and true-duplicate-replay-still-rejected (single copy in `HEAD`).
 
 **CI:** cycle 1's run (`#compact-reap-no-response-record`) went **green** (`27188969343`); this push kicked `27189714279` (pending). Closed from local evidence per the test-bearing-turn rule.
-<!-- agent:boundary:cd2db2ab -->
+
+### Re: do [#exit75-crdt-drift-closeout-dup-lines] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]
+
+
+Consolidated into the canonical gated review item `#ipc-crdt-response-drift` (review #9) rather than shipping an unverifiable producer change — and captured concrete new evidence that narrows the bug.
+
+**This is a duplicate of gated review #9.** That item already explicitly owns "reversed-lines / hoisted-above-prior symptom under theirs>base in the IPC node-patch/boundary-append path (ipc_socket.rs, template boundary, stream.rs)." Keeping a separate backlog item for the same symptom just churns the go-mode queue. I folded the detail + new evidence into #9 and closed this backlog duplicate.
+
+**New evidence — why it isn't reproducing, and what the producer actually requires:** all three of this session's exit-75 file-IPC closeouts produced **zero** reversed-dup `❯ -` lines. The CRDT merge logs show why:
+- Cycle 1: `base_len=19289 … theirs_len=19301` (+12 bytes = just the boundary marker)
+- Cycle 2: `base_len=21704 … theirs_len=21704` (theirs == base)
+
+The reversed-lines producer fires only when `theirs ≫ base` — i.e. a **live foreign writer** (editor plugin or supervisor) races the closeout and appends content after the baseline was taken. This session's editor IPC is **degraded** (no live plugin acking; every write falls back to file-IPC → direct), so there is no racing writer, `theirs ≈ base`, and the producer never triggers. That means a degraded-IPC session like this one **structurally cannot reproduce or verify a fix** — it needs a clean session with a live IntelliJ/Codex plugin (the `#live-verify-batch` blocker).
+
+**Why not a defensive cleanup instead?** The common dup shapes are *already* stripped by `canonicalize_answered_prompt_prefixes` (`#finalize-retry-ipc-response-duplication`) and the commit-time `dedupe_snapshot_and_worktree_before_commit`. A broader `❯ -`-line stripper risks deleting legitimate user prompt lines (data loss) — worse than the cosmetic residual. The correct fix is pinning the producer with a live-writer repro, which is what #9 is gated on.
+
+**CI:** cycle 1 (`#compact-reap-no-response-record`) is green; cycle 2's run (`#finalize-stale-baseline-reopen-friction`, `27189714279`) was pending at last check.
+<!-- agent:boundary:7069d271 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -140,7 +161,7 @@ Fixed and shipped (submodule `5e7b6f14`) — `make check` green (4117/4117, clip
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#compact-reap-no-response-record]~~
 - ~~:pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]~~
-- :pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]
+- ~~:pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]~~
 - :pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]
 - :round_pushpin: do [#stale-capture-captured-only-drift]

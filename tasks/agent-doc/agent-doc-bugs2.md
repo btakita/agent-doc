@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,6 +35,28 @@ complete
 Compacted content:
 - Archived 16 response topic(s): Add backlog items for agent-doc issues across active sessions; Prioritize the backlog into actionable steps and sync the queue; do [#compact-reap-no-response-record]; 13 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+
+### Re: Add backlog items to complete the review items — opus-4-8
+
+> **Queue prompt:**
+>
+> Look in the review items. Add backlog items to complete the review items.
+
+
+Mapped the 12 gated review items into 9 actionable backlog items (priority order, ships-now code first):
+
+1. **#saev earlyack-impl** — early-ack IPC protocol (completes review #ipc-early-ack + early-ack half of #pcp5)
+2. **#71f1 degraded-fileipc** — degraded writes through file-IPC, never raw disk (degraded half of #pcp5)
+3. **#9adk consacc-guard** — JB plugin in-flight-invocation guard + console-idle pre-send check (#console-input-accumulation)
+4. **#s760 clearthr2** — JB plugin phase-2 pre-emptive /clear at threshold (#clear-opt-in-threshold)
+5. **#f5d2 pcp6-content** — capture editor-buffer CONTENT in live-buffer sidecar (#pcp6)
+6. **#bkx9 compact-reap-perid** — per-id response materialization detection (#compact-reap-no-response-record; blocked on #ipc-crdt-response-drift)
+7. **#pf15 pcp-consol** — supervisor-in-process consolidation; unblocks #pcp3/#pcp4/#pcp7
+8. **#21w2 pcpc5-cutover** — 08b migration cutover, decomposed pcpc5a..e (#pcpc5; depends on #pcp-consol)
+9. **#xkpf lvb-run** — consolidated live verification session (#live-verify-batch; verifies the live-gated items above + reproduces #ipc-crdt-response-drift)
+
+Every review item is now covered by at least one actionable backlog id. The five live-IntelliJ-gated items funnel verification through **#lvb-run**; the three #pcp-consol-blocked phases funnel through **#pf15 pcp-consol**.
+<!-- agent:boundary:b1023288 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -67,6 +89,15 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#saev] earlyack-impl: Implement early-ack IPC protocol — ipc_socket accepted/pending ack on patch receipt (before awaitIdleBeforeDocumentMutation) + terminal ack/sidecar; ffi.rs listener contract then PatchWatcher.handleSocketMessageV2. Completes review #ipc-early-ack and the early-ack half of #pcp5. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
+- [ ] [#71f1] degraded-fileipc: Route degraded-IPC writes through the file-IPC patch queue (plugin applies via Document API) instead of raw disk, so a degraded session never manufactures IDEA File Cache Conflicts. Completes the degraded half of review #pcp5. Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#9adk] consacc-guard: Add JB plugin per-doc in-flight-invocation guard + console-idle pre-send check so Run Agent Doc / Clear Session Context coalesce when one invocation is already pending. Completes review #console-input-accumulation (verify in live-verify-batch).
+- [ ] [#s760] clearthr2: Implement JB plugin phase-2 pre-emptive clear — read live Claude Code context-usage %, compare against report.clear_threshold, trigger session clear before the next Run Agent Doc dispatch when exceeded (gated by agent_doc_queue_context_reset). Completes review #clear-opt-in-threshold (verify in live-verify-batch).
+- [ ] [#f5d2] pcp6-content: Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar (JB+VSCode plugin + FFI classifier) so guard_visible_write_reconcile scope-classifies a genuine unsaved edit instead of failing closed. Completes review #pcp6 (verify in live-verify-batch). Plan: tasks/agent-doc/plan-pcp-consolidate.md
+- [ ] [#bkx9] compact-reap-perid: Add reliable per-id response materialization detection for the compact-reap case where a response WAS captured this cycle but the specific id record was lost. Completes the residual of review #compact-reap-no-response-record; blocked on #ipc-crdt-response-drift. Spec: specs/07-closeout-commands.md
+- [ ] [#pf15] pcp-consol: Supervisor-in-process consolidation (single-process control plane, spec 08b) — make the supervisor an in-process adapter so the session actor owns one ordered write queue + one controller-owned filesystem watcher. Unblocks and completes review #pcp3, #pcp4, #pcp7. Large/multi-day. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#21w2] pcpc5-cutover: 08b migration cutover decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Completes review #pcpc5; depends on supervisor-in-process consolidation. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#xkpf] Run the consolidated live busy-pane + IPC-timeout verification session: install signed JB plugin + binary, drive one mid-active-turn Codex/IntelliJ pane through the batch, capture route/idea logs. Completes review #live-verify-batch and verifies #console-input-accumulation, #clear-opt-in-threshold, #pcp6; reproduces #ipc-crdt-response-drift. Blocked on live IntelliJ/Codex panes.
 <!-- /agent:backlog -->
 
 ## Review

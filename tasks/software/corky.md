@@ -123,7 +123,19 @@ Commits and push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:129df070 -->
+❯ - Pushed owner repo commit `f3abae72d` (`Update corky submodule for GPU builds`) to `btakita/agent-loop main`.
+❯ - Pushed corky submodule commit `244f664` (`Require GPU for local builds`) to `btakita/corky main`.
+❯ - Latest GitHub Actions `CI` run on `main` was `completed success`.
+❯ - `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
+❯ - `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
+❯ - `make release` passed with `cargo build --release --features transcribe-cuda` and refreshed `.bin/corky`.
+❯ - `make precommit` passed with `--features transcribe-cuda` for clippy, tests, and `audit-docs`.
+❯ - `CORKY_LOCAL_GPU_FEATURE= make build` fails closed with the new GPU-required error.
+❯ - Updated the gitignored local harness override `src/corky/CLAUDE.local.md` so this CUDA workstation also tells agents to use `make check`, `make release`, and `make install` with GPU support.
+❯ - `src/corky/AGENTS.md`, `src/corky/DEV.md`, `src/corky/README.md`, `src/corky/SPEC.md`, and the build/install docs now point local agents at GPU-required build/install commands and document the no-CPU-fallback rule.
+❯ - `src/corky/install.sh` now requires the CUDA/Metal release artifact when the local platform selects one instead of falling back to CPU.
+❯ - `src/corky/Makefile` now requires `CORKY_LOCAL_GPU_FEATURE` for local build, check, release, install, and wheel targets; on this Linux workstation it resolves to `transcribe-cuda`, and the targets fail closed if no GPU feature is selected.
+<!-- agent:boundary:6f62e12e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +145,7 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.~~
 - [#sheets-create-share]
 <!-- /agent:queue -->

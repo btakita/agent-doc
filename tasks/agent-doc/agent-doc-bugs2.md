@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -82,12 +82,18 @@ The backlog is now six concrete actionable ids, already in dependency order (top
 **On "100% actionable without gates":** items 1–5 are pure-Rust + SimWorld — zero gates, do them in any focused session. Item 6 (`#xkpf`) is kept **open and actionable**, not gated — its only "blocker" is the operator being at a live IDE, which is an action, not a code dependency. That's the one thing decomposition genuinely can't remove: verifying editor-plugin behavior requires an editor. Every other gate I was hitting has been converted into one of items 1–5.
 
 Two things stay in `agent:review` rather than backlog because they are **not** purely actionable: `#pcpc5` (08b authority cutover — spec-08b forbids landing it in a response cycle, and it depends on 2–5) and the `#pcp7` plugin WatchService demote (live-gated, part of `#z2jy`). Those are correctly review items, not actionable-now backlog. Everything else is queued and unblocked, ordered by dependency.
-<!-- agent:boundary:95e8f0ab -->
+<!-- agent:boundary:4bc6bd20 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do #dj14
+- do #0pke
+- do #v7m3
+- do #2bhm
+- do #z2jy
+- do #xkpf
 <!-- /agent:queue -->
 ###
 <!--

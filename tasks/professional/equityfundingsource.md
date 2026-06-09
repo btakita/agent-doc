@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -52,15 +52,15 @@ Fixed. Root cause: the `/contact` handler sent the staff email **from** `info@eq
 **Verification:** full suite green (380 pass), `build` + `build:worker` clean. Added `tests/contact-messages.test.ts` (spec/source coverage) and a behavioral persistence test in `dev-routes.test.ts` proving a valid POST stores the row and redirects to success. Updated the PRD. EFS repo has no CI workflow, so local is the gate.
 
 **Not yet live.** You ran `#spec-test-commit-push` (no deploy), so production workers.dev still shows the error until deployed. Queued a backlog item to run `cf:d1:migrate:remote` (migration `0054`) + `deploy:worker` + prod smoke-test — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship it.
-<!-- agent:boundary:47f06c4d -->
+<!-- agent:boundary:519a44c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
-https://equityfundingsource.brian-takita.workers.dev/contact had an error, "The online contact form is not available right now. Please email info@equityfundingsource.com or call (323) 225-3800.". Please make the contact form submissions be accessible in the admin and go to the configured support email.
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -64,20 +64,22 @@ Deployed and verified end-to-end.
 - **Live smoke test** — `POST /contact` now returns **303 (success)** instead of the old 503 "not available" error. The submission persisted to D1 with `staff_notification_status=sent` — so on production the staff email **actually delivered** (Cloudflare Email from the verified `info@briantakita.me` sender), and the record is reviewable at `/portal-admin/contact-messages`. The labeled smoke-test row was deleted afterward to keep the admin clean.
 
 The original error from your report is resolved: the public contact form accepts submissions, stores them for admin review, and notifies the support recipient.
+❯ Make the "support" email btak.dev@gmail.com for now.
 
 ### Re: support email → btak.dev@gmail.com — opus-4-8
 
 Done in config. `CONTACT_NOTIFICATION_TO` is now `btak.dev@gmail.com` (EFS commit `af4935d`, pushed to `main`); updated the test assertion to match (`#spec-test-commit-push`), suite green.
 
 **Not live yet** — it's a worker env var, so production keeps routing contact notifications to `brian.takita@gmail.com` until a redeploy. Say **"deploy"** to ship it (just `deploy:worker`, no migration this time). I left the Status block unchanged because it still describes the currently-deployed state.
-<!-- agent:boundary:b685118e -->
+<!-- agent:boundary:cea49e8e -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- I don't see an email in btak.dev@gmail.com
 <!-- /agent:queue -->
 
 ## Backlog

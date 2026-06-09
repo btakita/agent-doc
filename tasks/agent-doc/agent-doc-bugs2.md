@@ -97,7 +97,30 @@ Done — `#pcpc2` (PCP-consol phase 2) is implemented and shipped in both binari
 **SimWorld determinism (7 new tests, all green):** heartbeat advances per tick; reattach of a live child performs no restart; transient exit → restart (fresh generation, Healthy); flap storm → Halted + Stopped; clean exit → PromptOperator; `inject` reaches child stdin; explicit `restart` resets policy and `stop` refuses further ticks.
 
 **Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:11); latest agent-doc CI green.
-<!-- agent:boundary:d3df69fc -->
+
+### Re: do [#pcpc3] — In-process ordered write queue — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#pcpc3]
+
+
+Done — `#pcpc3` (PCP-consol phase 3, realizes `#pcp3b`) is implemented and shipped in both binaries.
+
+**What landed** (`agent-doc-orchestration/src/write_queue.rs`, new module): the in-process ordered write queue, built on `#pcpc1`'s session actor. All same-process writers of a document — agent `write`/`stream`/`finalize`, repair, and supervisor idle/file-watch writes — route through the document's single mailbox, executing in one serialized order on one owner thread. The `flock` stays a cross-process backstop only.
+
+- `run_serialized(base_dir, file, kind, job)` — the queue primitive: runs a write critical section (read-modify-write included) on the document's actor owner thread. Two concurrent critical sections for one document never overlap.
+- `serialized_atomic_write(...)` — disk-write convenience routing `write::atomic_write_pub` through the queue.
+- `DocumentWriteQueue` — typed facade (`agent_write` / `repair_write` / `supervisor_write`) tagging the writer classes the spec enumerates, all sharing one ordered queue.
+
+**Why this kills R6/exit-75 at the root:** today a single process can interleave a supervisor idle-write and an agent finalize between `flock` acquisitions, so finalize observes a document the supervisor half-rewrote (lost-update / torn logical state). With the supervisor in-process (`#pcpc2`), funneling every writer through the actor queue removes that interleave entirely — not just the `#pcp3a` drain-retry mitigation.
+
+**Scope (mirrors `#pcpc1`/`#pcpc2`):** the queue lands behind the seam; the live `write.rs`/`stream.rs`/finalize/repair/supervisor call sites still call `atomic_write` directly. The cutover that points them at the queue is `#pcpc5`'s 08b gate ladder (shadow → dual-write → read-switch → authority → removal) — which is also why this session's own finalize stayed safe on the existing path.
+
+**SimWorld determinism (4 new tests, all green):** 50 concurrent read-modify-write cycles lose no increment (final == initial + N); a racing supervisor-write + agent-finalize never lets finalize observe a half-applied write (always a complete document); `serialized_atomic_write` persists; the three typed writer classes share one submission order.
+
+**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:22); latest agent-doc CI run still in progress for the `#pcpc2` push (recorded pending, continuing from local evidence).
+<!-- agent:boundary:5f733258 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,7 +128,7 @@ Done — `#pcpc2` (PCP-consol phase 2) is implemented and shipped in both binari
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#pcpc1]~~
 - ~~do [#pcpc2]~~
-- do [#pcpc3]
+- ~~do [#pcpc3]~~
 - do [#pcpc4]
 - do [#pcpc5]
 <!-- /agent:queue -->
@@ -135,7 +158,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcpc3] PCP-consol phase 3 — In-process ordered write queue (realizes #pcp3b): route all write/stream/finalize/repair + supervisor idle/file-watch writes through the session actor queue; flock becomes cross-process backstop only. Kills R6/exit-75 at the root. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [x] [#pcpc3] PCP-consol phase 3 — In-process ordered write queue (realizes #pcp3b): route all write/stream/finalize/repair + supervisor idle/file-watch writes through the session actor queue; flock becomes cross-process backstop only. Kills R6/exit-75 at the root. SimWorld. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc4] PCP-consol phase 4 — Single controller-owned filesystem watcher (realizes #pcp4) + demote plugin WatchService to read-only (realizes #pcp7; needs live verification). Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc5] PCP-consol phase 5 — Migration cutover via the 08b gate ladder (shadow -> dual-write -> read-switch -> authority -> removal), each with a rollback flag; remove the out-of-process supervisor + direct-disk writers only after SimWorld/CLI/live-tmux proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.

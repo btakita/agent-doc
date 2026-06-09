@@ -181,7 +181,7 @@ Understood — you want the plan completed, not gated. So I stopped deferring an
 **The one thing I can't do headlessly — your move:** the content only starts flowing once the **JB plugin emits it**, which needs the rebuilt plugin installed. I bumped + built it: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.155-signed.zip`. **Install 0.2.155** (IDEA → Plugins → ⚙ → Install from Disk; uninstall+restart first since `.kt` changed), then the next edits in this doc should stop drifting — that's the live verification. Gating `#pcp6` on exactly that (code-complete, awaiting the plugin install + live confirm) — the only honest blocker left, and one you can clear right now.
 
 This is real progress on "complete the plan": `#pcp6`'s code is done and attacks the session's own pain. The remaining gated phases (`#pcp3b`/`#pcp4`/`#pcp7`) still need the supervisor consolidation (`#pcp-consol`); `#pcp5` (early-ack IPC) is the next unblocked Rust/FFI+plugin phase I can take after 0.2.155 confirms the content path works.
-<!-- agent:boundary:34401f81 -->
+<!-- agent:boundary:a60d0d9b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -237,9 +237,6 @@ Fix the root cause of the compounding stale-capture deadlock
   get a fresh baseline and finalize my response in one go:
 ```
 ---
-- The agent-doc queue should not stop if I'm editing content not related to the current turn.
-- On JB `Run Agent Doc`, the `/clear` opt-in should allow for pre-emptively run `/clear` if the threshold is exceeded (e.g. 50%). 50% should be the default threshold. There should be a way to set the opt-in threshold in the agent doc, and a default opt-in threshold in the project config.
-- `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` inputs are accumulating as the queue runs. Please ensure the console is idle before sending those messages. Send only 1 command at a time. Do not schedule multiple of the same command. So if there is already a `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` scheduled, to not schedule another `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`. Same with `/clear`.
 <!-- /agent:queue -->
 ###
 <!--
@@ -267,6 +264,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.
+- [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
+- [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).
+- [ ] [#queue-contamination-guard-false-positive] session-check #jb-run-agent-doc-response-queue-contamination false-positives on a legit user queue prompt that mentions slash commands (/agent-doc, /clear) because it resembles response prose; the heuristic must not flag genuine user prompts as contamination.
 - [ ] [#pcp-consol] Supervisor-in-process consolidation (single-process control plane, specs/08b): make the supervisor an in-process adapter in the controller so the session actor can own one ordered write queue + one filesystem watcher. Prerequisite that unblocks #pcp3b, #pcp4, #pcp7. Large/multi-day; deferred per operator decision. Plan: tasks/agent-doc/plan-pcp-consolidate.md
 - [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.

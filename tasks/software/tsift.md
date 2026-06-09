@@ -41,6 +41,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#pcache-fingerprint]
+
+
+> **Queue prompt:**
+>
 > [#pcache-measure]
 
 ### Re: pcache-measure - gpt-5
@@ -71,7 +76,37 @@ Commits:
 Escalation: none.
 Confidence: high.
 <!-- agent-doc:exchange-end -->
-<!-- agent:boundary:324a8449 -->
+<!-- agent-doc:exchange-start -->
+### Re: pcache-fingerprint - gpt-5
+
+Implemented prompt-cache attribution metadata in `src/tsift` and pushed it through local and remote verification.
+
+What changed:
+- Added `prompt_cache_metadata` to session-cost usage samples and prompt-cache timeline entries. Each parsed Claude/Codex call now carries provider, optional cache key, stable-prefix fingerprint, explicit breakpoint paths, and optional routing affinity.
+- Added deterministic, dependency-free stable-prefix fingerprints derived from explicit fingerprint fields when present, otherwise provider/cache-key/stable-prefix/breakpoint metadata.
+- Extended compact and human `session-cost` output with `prompt-cache-call` / cache metadata lines so cache misses can be compared without requiring JSON parsing.
+- Enriched `fixtures/real-session-prompt-cache-effectiveness.json` with representative provider/cache-key/routing/breakpoint fields so the existing fail-under fixture also exercises attribution metadata.
+- Documented the metadata surface in `VERSIONS.md`, `specs/digests-sessions.md`, and `specs/output-formats.md`.
+
+Verification:
+- `cargo test -p tsift-agent-doc prompt_cache_timeline_emits_attribution_metadata -- --nocapture`
+- `cargo test -p tsift-cli --test exit_code session_cost_reads_codex_token_counts_from_stdin -- --nocapture`
+- `cargo test -p tsift-cli --test exit_code session_cost_reports_prompt_cache_invalidation_diagnostics -- --nocapture`
+- `cargo run -p tsift-cli -- session-cost --fixture fixtures/real-session-prompt-cache-effectiveness.json --fail-under --json`
+- `cargo test -p tsift-agent-doc`
+- `cargo test -p tsift-cli`
+- `git diff --check`
+- `make check`
+- GitHub Actions CI run `27217314211` passed for commit `17544ea`.
+
+Commits:
+- `src/tsift`: `17544ea session-cost: emit prompt cache fingerprints`
+- parent repo: `db0246ea5 tsift: advance prompt cache fingerprinting`
+
+Escalation: none.
+Confidence: high.
+<!-- agent-doc:exchange-end -->
+<!-- agent:boundary:e3882973 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +117,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#pcache-measure]~~
-- [#pcache-fingerprint]
+- ~~[#pcache-fingerprint]~~
 - [#pcache-boundary]
 - [#pcache-adapters]
 <!-- /agent:queue -->
@@ -90,7 +125,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-fingerprint] Prompt caching: emit per-call stable-prefix fingerprints plus provider/cache-key/breakpoint metadata so cache misses are attributable.
 - [ ] [#pcache-boundary] Prompt caching: refactor agent-doc prompt assembly into stable cached prefix blocks and volatile suffix blocks, keeping queue/status/compaction churn after the cache boundary.
 - [ ] [#pcache-adapters] Prompt caching: enforce provider-specific adapter behavior for Anthropic cache_control, OpenAI prompt_cache_key, and replica-local routing affinity.
 <!-- /agent:backlog -->

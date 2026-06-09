@@ -6813,6 +6813,25 @@ pub fn live_prompt_drift_auto_recovery_safe(snapshot: &str, file_content: &str) 
     true
 }
 
+/// `#exch-intermix-falsedrop`: true when a recorded dropped prompt is still
+/// present in the snapshot auto-recovery would adopt — as an active line, a
+/// struck/consumed queue item (`~~…~~`), or echoed in a `### Re:` heading — so
+/// adopting the snapshot loses nothing. The drift-time dropped-prompt record
+/// compares the divergent IPC candidate against `content_ours` and therefore
+/// false-positives on prompts that `content_ours` consumed or preserved; this
+/// containment check reconciles those against the snapshot text. Returns false
+/// only when the prompt text genuinely does not appear in the snapshot (real
+/// user-content loss → fail closed). Strike markers are stripped from both sides
+/// so a consumed item still matches its recorded prompt text.
+fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
+    let stripped = prompt.replace("~~", "");
+    let needle = stripped.trim();
+    if needle.is_empty() {
+        return true;
+    }
+    snapshot.replace("~~", "").contains(needle)
+}
+
 /// `#exch-intermix`: auto-recover the benign `live_prompt_drift_after_preflight`
 /// closeout wedge instead of stranding the response and forcing a manual
 /// `git checkout HEAD` / `reset --from-current --preserve-session` / `finalize
@@ -6843,7 +6862,20 @@ pub fn try_auto_recover_live_prompt_drift(
     if !cycle.ipc_snapshot_adoption_blocked {
         return Ok(None);
     }
-    if !cycle.dropped_exchange_prompts.is_empty() || !cycle.dropped_queue_prompts.is_empty() {
+    // #exch-intermix-falsedrop: a recorded dropped exchange/queue prompt only
+    // represents real user-content loss when it is genuinely ABSENT from the
+    // snapshot auto-recovery would adopt. A queue item consumed (struck) this
+    // cycle, or a user prompt `content_ours` preserved, is recorded as "dropped"
+    // by the drift-time candidate-vs-`content_ours` heuristic yet still survives
+    // in the snapshot — adopting it loses nothing. Only bail when a dropped
+    // prompt is missing from the snapshot; the snapshot↔disk containment gate
+    // below stays authoritative for current on-disk content.
+    let dropped_missing_from_snapshot = cycle
+        .dropped_exchange_prompts
+        .iter()
+        .chain(cycle.dropped_queue_prompts.iter())
+        .any(|prompt| !snapshot_contains_dropped_prompt(snapshot, prompt));
+    if dropped_missing_from_snapshot {
         return Ok(None);
     }
     if !live_prompt_drift_auto_recovery_safe(snapshot, file_content) {
@@ -17071,6 +17103,59 @@ scratch
             fs::read_to_string(&doc).unwrap(),
             fragmented,
             "the working tree must be untouched when a dropped prompt was recorded"
+        );
+    }
+
+    #[test]
+    fn snapshot_contains_dropped_prompt_matches_consumed_and_active() {
+        let snapshot = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#consumed]~~\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Consumed (struck) item still present → not lost.
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#consumed]"));
+        // Active item present → not lost.
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#active]"));
+        // Genuinely absent → real loss.
+        assert!(!snapshot_contains_dropped_prompt(snapshot, "do [#gone]"));
+    }
+
+    // #exch-intermix-falsedrop: a queue item consumed (struck) this cycle is
+    // recorded as "dropped" by the drift-time candidate-vs-content_ours heuristic,
+    // but it survives struck in the adopted snapshot, so auto-recovery must STILL
+    // fire (it is a false-positive drop record, not real user-content loss). This
+    // is the exact live wedge from agent-doc-bugs2 #opsproof-falsepos closeout.
+    #[test]
+    fn try_auto_recover_live_prompt_drift_fires_when_dropped_prompt_is_consumed_in_snapshot() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        // Snapshot consumed the queued `do [#fix]` (struck) and carries the full
+        // `### Re:` response; the fragmented disk file also struck it but lost the
+        // response body → wedge shape.
+        let snapshot = drift_content_ours()
+            .replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let fragmented = drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        // The drift heuristic recorded the consumed item as a dropped queue prompt.
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()])
+            .unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_some(),
+            "a dropped prompt that survives (struck) in the snapshot must not block recovery"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "auto-recovery must write the adopted snapshot to disk"
         );
     }
 

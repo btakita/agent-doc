@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`#exch-intermix` auto-recovery no longer fails closed on a false-positive
+  dropped-prompt record (`#exch-intermix-falsedrop`).** `try_auto_recover_live_prompt_drift`
+  bailed whenever the cycle recorded ANY `dropped_exchange_prompts` /
+  `dropped_queue_prompts`. But that record compares the divergent IPC candidate
+  against `content_ours`, so a queue item consumed (struck) this cycle is logged
+  as "dropped" even though it survives in the adopted snapshot — stranding the
+  response and forcing a manual `git checkout HEAD` / `reset --from-current` /
+  `finalize --force-disk` recovery (hit live on the `#opsproof-falsepos`
+  closeout: `dropped_queue_prompt_recorded count=3` blocked a snapshot that was
+  the complete correct document). Recovery now bails only when a recorded
+  dropped prompt is genuinely absent from the adopted snapshot; a consumed
+  (struck) or preserved prompt still present no longer blocks it. The
+  snapshot↔disk containment gate remains authoritative for current on-disk
+  content. `write.rs`; unit + integration coverage added.
+
 - **Ops-proof auto-completion no longer false-positives on cited dependency
   work or same-cycle adds (`#opsproof-falsepos`).** Preflight pending
   maintenance previously reaped an open backlog/review item as done whenever its

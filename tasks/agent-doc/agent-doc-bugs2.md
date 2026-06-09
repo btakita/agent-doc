@@ -207,7 +207,28 @@ Fixed and shipped (submodule `778c8bd9`) — `make check` green (4122/4122, clip
 **Conservative default preserved:** without the already-answered evidence, a `Captured`-only orphan stays fail-closed — its body may be a genuinely pending response that was never written, and silently retiring it would lose it. Tests cover both: `retires_superseded_captured_only_orphan_on_drift` (heading already answered → retire) and `captured_only_orphan_on_drift_still_fails_closed` (no evidence → fail closed). Spec `#stale-capture-deadlock-autoretire` / `#stale-capture-captured-only-drift` updated.
 
 **CI:** cycles 1–5 are all **green**; this push kicked `27191740440` (pending). Closed from local evidence.
-<!-- agent:boundary:642ef834 -->
+
+### Re: do [#cross-session-agent-doc-issue-survey] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]
+
+
+Surveyed all four sibling sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) read-only via the shared `.agent-doc/logs/ops.log` scoped per-document — the authoritative record of agent-doc workflow issues per session (their own backlogs are about their projects, not agent-doc). I did not modify any sibling repo.
+
+**Finding: the cross-session issues are the same shared-binary families I addressed this session — IPC degradation is the root.** Distinct failure-signature counts per session were dominated by `drift` / `drift_after_preflight` (the IPC/CRDT response-drift family: 1500+ on tsift, 550+ on lazily-rs, 460+ on monsterrodholders, 1200+ on equityfundingsource), then `contamination`, `deadlock`/stale-capture, and explicit-baseline `_rejected`. Every one maps to work already done or tracked here:
+- `drift` / `drift_after_preflight` → review #9 `#ipc-crdt-response-drift` (gated, needs live-editor repro) + `#ipc-degraded-prefers-file-ipc` (done). This is the **root**: no live editor plugin is acking, so every write degrades to file-IPC → direct → exit-75, which feeds the other symptoms.
+- `contamination` → `#queue-contamination-guard-false-positive` (fixed this session) + `#jb-run-agent-doc-response-queue-contamination` (done).
+- `deadlock` / stale-capture → `#stale-capture-deadlock-autoretire` (done) + `#stale-capture-captured-only-drift` (fixed this session).
+- explicit-baseline `_rejected` → `#finalize-stale-baseline-reopen-friction` (fixed this session).
+
+No genuinely-new data-loss bug class surfaced; the other high-volume signatures (`session_check_interrupted`, `ipc_snapshot_adoption_blocked`, `late_fallback_patch_rejected`, `committed_without_response_body_guard_failed`, route `*_blocked`) are expected defensive guard fires under the persistent IPC-degraded + busy-session condition.
+
+**One new actionable captured:** `#partial-staging-guard-cross-doc-noise` — `partial_staging_closeout_guard_fired` logged 154× across the four sessions because, in a multi-session superproject, many unrelated task docs stay perpetually dirty and the guard's "overlapping changed string literal" heuristic matches incidental shared vocabulary (it tripped on my own closeouts this session too). WARN-only, low severity; queued to tighten the overlap signal.
+
+**Bottom line for the operator:** the highest-leverage cross-session fix remains landing `#ipc-crdt-response-drift` in a clean session with a live IntelliJ/Codex plugin — it's the common root of the drift/deadlock/exit-75 churn every session is hitting.
+<!-- agent:boundary:fdc071c5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -219,7 +240,7 @@ Fixed and shipped (submodule `778c8bd9`) — `make check` green (4122/4122, clip
 - ~~:pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]~~
 - ~~:round_pushpin: do [#queue-operator-pin-position-lock-dag]~~
 - ~~:round_pushpin: do [#stale-capture-captured-only-drift]~~
-- :pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]
+- ~~:pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]~~
 - :pushpin: :round_pushpin: do [#clear-opt-in-threshold]
 - :pushpin: :round_pushpin: do [#console-input-accumulation]
 - :round_pushpin: do [#nm1x-livebuf-content]
@@ -252,8 +273,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#partial-staging-guard-cross-doc-noise] [recommended] In a multi-session dogfooding superproject many unrelated task docs stay perpetually dirty; check_partial_staging_closeout_guard then WARNs on nearly every closeout because its overlapping-changed-string-literal heuristic matches incidental shared vocabulary (e.g. "make check", "agent-doc", "id not found in backlog") between the committed session doc and unrelated dirty companions. Surfaced by #cross-session-agent-doc-issue-survey: 154 partial_staging_closeout_guard_fired entries across tsift/lazily-rs/monsterrodholders/equityfundingsource ops logs 2026-06-09. Tighten the overlap signal (require a more specific shared token, same-component path, or scope to the intended path set) so unrelated superproject churn does not trip the WARN. WARN-only, low severity.
 - [ ] [#exit75-done-reap-not-atomic] exit-75 file-IPC finalize closeout with --done marks the backlog item [x] but does not reap it to agent:done in the same commit, so post-commit session-check fails closed (completed_pending_reap_guard) and requires a manual recovery preflight — which itself leaves a dangling preflight_started cycle needing a second preflight to settle. Hit every exit-75 --done cycle 2026-06-09 (cycles for #finalize-stale-baseline-reopen-friction and #exit75-crdt-drift-closeout-dup-lines). Make finalize --done run the reap+archive maintenance in the same commit transaction on the exit-75/file-IPC path (the same reap preflight performs), so the closeout is atomic and session-check passes without a recovery preflight.
-- [ ] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
+- [x] [#cross-session-agent-doc-issue-survey] Survey sibling active sessions (tsift.md, lazily-rs.md, monsterrodholders.md, equityfundingsource.md) for agent-doc workflow issues and capture them as backlog items here. User request 2026-06-09; could not be done inline from this saturated session.
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
 - [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).
 - [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md

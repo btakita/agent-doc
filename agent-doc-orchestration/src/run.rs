@@ -14,15 +14,18 @@
 //! - Resolves the response write mode from frontmatter via
 //!   `Frontmatter::resolve_mode()`, defaulting to template mode when no
 //!   explicit format is present.
-//! - Builds one of four prompt shapes: append/template × resume/fork. Template
-//!   prompts require `patch:exchange` blocks; append prompts require plain
-//!   markdown without `## Assistant`. Resumed prompts also restate ordered
-//!   request blocks extracted from the diff so the agent does not anchor only
-//!   on the newest question in a changed exchange tail. When session accretion
-//!   has already reached warn/block severity and the diff still contains live
-//!   prompt targets, resumed prompts replace the full exchange tail with a
-//!   bounded response-context pack containing prompt targets, session summary,
-//!   backlog head, and available component names.
+//! - Builds one of four prompt shapes: append/template × resume/fork. A stable
+//!   cached prefix carries the durable response contract before the prompt-cache
+//!   boundary; volatile diffs, queue/status/accretion context, and document
+//!   excerpts follow the boundary. Template prompts require `patch:exchange`
+//!   blocks; append prompts require plain markdown without `## Assistant`.
+//!   Resumed prompts also restate ordered request blocks extracted from the diff
+//!   so the agent does not anchor only on the newest question in a changed
+//!   exchange tail. When session accretion has already reached warn/block
+//!   severity and the diff still contains live prompt targets, resumed prompts
+//!   replace the full exchange tail with a bounded response-context pack
+//!   containing prompt targets, session summary, backlog head, and available
+//!   component names.
 //! - In `--dry-run` mode: prints the diff and prompt size to stderr and returns
 //!   without calling the agent, writing files, or touching git.
 //! - Optionally creates a git branch via `git::create_branch` before committing
@@ -1394,6 +1397,46 @@ fn build_prompt(
     content: &str,
     session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
 ) -> String {
+    let stable_prefix = build_prompt_stable_prefix(run_mode);
+    let volatile_suffix =
+        build_prompt_volatile_suffix(file, run_mode, fm, the_diff, content, session_accretion);
+    crate::prompt_cache::PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
+}
+
+fn build_prompt_stable_prefix(run_mode: RunMode) -> String {
+    let response_format = match run_mode {
+        RunMode::Template => {
+            "Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->"
+        }
+        RunMode::Append => {
+            "Write your response in markdown.\n\
+             Do not include a ## Assistant heading - it will be added automatically.\n\
+             If the volatile payload contains inline prompt-bearing edits, classify them as prompt targets vs content edits before responding."
+        }
+    };
+    format!(
+        "<agent_doc_prompt_stable_prefix>\n\
+         You are responding inside an agent-doc markdown session.\n\n\
+         <response_contract>\n{}\n\
+         </response_contract>\n\n\
+         <turn_payload_contract>\n\
+         Read the volatile turn payload after the cache boundary before acting. Queue heads, status advisories, compaction/accretion diagnostics, diffs, and document excerpts in that payload are current for this turn.\n\
+         </turn_payload_contract>\n\
+         </agent_doc_prompt_stable_prefix>",
+        response_format
+    )
+}
+
+fn build_prompt_volatile_suffix(
+    file: &Path,
+    run_mode: RunMode,
+    fm: &frontmatter::Frontmatter,
+    the_diff: &str,
+    content: &str,
+    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+) -> String {
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
@@ -1405,41 +1448,41 @@ fn build_prompt(
         crate::prompt_context::build_document_section(file, the_diff, content, session_accretion);
     match (run_mode, fm.resume.is_some()) {
         (RunMode::Template, true) => format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
+            "<agent_doc_prompt_volatile_suffix>\n\
+             The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Format your response as patch blocks targeting document components.\n\
-             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+             Respond to the user's new content.\n\
+             </agent_doc_prompt_volatile_suffix>",
             the_diff, prompt_bearing_changes, active_format_requirements, document_section
         ),
         (RunMode::Template, false) => format!(
-            "The user is starting a session document. Here is the full document:\n\n\
+            "<agent_doc_prompt_volatile_suffix>\n\
+             The user is starting a session document. Here is the full document:\n\n\
              {}\
              <document>\n{}\n</document>\n\n\
-             Respond to the user's content. Write your response in markdown.\n\
-             Format your response as patch blocks targeting document components.\n\
-             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+             Respond to the user's content.\n\
+             </agent_doc_prompt_volatile_suffix>",
             active_format_requirements, content
         ),
         (RunMode::Append, true) => format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
+            "<agent_doc_prompt_volatile_suffix>\n\
+             The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
+             Respond to the user's new content.\n\
+             </agent_doc_prompt_volatile_suffix>",
             the_diff, prompt_bearing_changes, active_format_requirements, document_section
         ),
         (RunMode::Append, false) => format!(
-            "The user is starting a session document. Here is the full document:\n\n\
+            "<agent_doc_prompt_volatile_suffix>\n\
+             The user is starting a session document. Here is the full document:\n\n\
              {}\
              <document>\n{}\n</document>\n\n\
-             Respond to the user's content. Write your response in markdown.\n\
-             Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user asked questions or prompt-bearing edits inline (e.g., in blockquotes or prior responses), address those too.",
+             Respond to the user's content. If the user asked questions or prompt-bearing edits inline (e.g., in blockquotes or prior responses), address those too.\n\
+             </agent_doc_prompt_volatile_suffix>",
             active_format_requirements, content
         ),
     }
@@ -1923,6 +1966,66 @@ mod tests {
         );
         assert!(prompt.contains("Do not include a ## Assistant heading"));
         assert!(!prompt.contains("patch:exchange"));
+    }
+
+    #[test]
+    fn build_prompt_places_turn_churn_after_cache_boundary() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+          Done.\n\
+          +do [#pcache-boundary]. keep volatile queue churn below the boundary\n\
+          <!-- /agent:exchange -->\n";
+        let doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: older topic - gpt-5\n\n",
+            "Older response body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#pcache-boundary] Prompt-cache boundary work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let report = crate::session_accretion::SessionAccretionReport {
+            level: crate::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document hit 4 no-op closeouts in the last 30 minutes".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("session.md"),
+            RunMode::Template,
+            &fm,
+            diff,
+            doc,
+            Some(&report),
+        );
+        let boundary = prompt
+            .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .expect("direct-run prompt should expose cache boundary");
+        for volatile in [
+            "<diff>",
+            "do [#pcache-boundary]. keep volatile queue churn below the boundary",
+            "User-authored prompt-bearing changes (oldest first):",
+            "Accretion reason: document hit 4 no-op closeouts in the last 30 minutes.",
+            "<response_context level=\"warn\">",
+        ] {
+            let pos = prompt
+                .find(volatile)
+                .unwrap_or_else(|| panic!("missing volatile fragment {volatile:?}:\n{prompt}"));
+            assert!(
+                pos > boundary,
+                "volatile fragment {volatile:?} must stay after cache boundary:\n{prompt}"
+            );
+        }
+        assert!(
+            prompt.starts_with("<agent_doc_prompt_stable_prefix>"),
+            "stable prefix should be the first prompt block:\n{prompt}"
+        );
     }
 
     #[test]

@@ -555,15 +555,21 @@ fn complete_idle_queue_slash_command_head(
 }
 
 fn codex_owner_queue_continuation_prompt(file: &str, active_head: &str) -> String {
-    format!(
+    let stable_prefix = "\
+Agent-doc active queue continuation.
+
+Stable instructions:
+Continue in this owner pane: answer the queue head described after the cache boundary, then persist the response using the document-specific command in the volatile payload. Do NOT run the bare agent-doc entrypoint for the same document from this pane. Do not send a final answer until the final-gate command in the volatile payload passes.";
+    let volatile_suffix = format!(
         "Agent-doc active queue continuation for {file}.\n\n\
-Queue head:\n{active_head}\n\n\
-Continue in this owner pane: answer the queue head, then persist with \
-`agent-doc finalize {file}` or `agent-doc write --commit {file}`. Do NOT run \
-`agent-doc {file}` from this pane; that re-invokes the owner pane and hits the \
-recursive-direct-invocation guard. Do not send a final answer until \
-`agent-doc session-check {file} --codex-final-gate` passes."
-    )
+         Queue head:\n{active_head}\n\n\
+         Continue in this owner pane: answer the queue head, then persist with \
+         `agent-doc finalize {file}` or `agent-doc write --commit {file}`. Do NOT run \
+         `agent-doc {file}` from this pane; that re-invokes the owner pane and hits the \
+         recursive-direct-invocation guard. Do not send a final answer until \
+         `agent-doc session-check {file} --codex-final-gate` passes."
+    );
+    crate::prompt_cache::PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
 }
 
 fn idle_queue_drain_payload(
@@ -5850,6 +5856,17 @@ Done.
         assert!(payload.contains("answer the queue head"));
         assert!(payload.contains("agent-doc finalize tasks/monsterrodholders.md"));
         assert!(payload.contains("Do NOT run `agent-doc tasks/monsterrodholders.md`"));
+        let boundary = payload
+            .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .expect("Codex owner-continuation prompt should expose cache boundary");
+        let file_pos = payload.find("tasks/monsterrodholders.md").unwrap();
+        let head_pos = payload
+            .find("JB Run Agent Doc on monsterrodholders.md stalled.")
+            .unwrap();
+        assert!(
+            file_pos > boundary && head_pos > boundary,
+            "volatile file path and queue head must stay after cache boundary:\n{payload}"
+        );
         assert!(
             !payload
                 .trim_start()

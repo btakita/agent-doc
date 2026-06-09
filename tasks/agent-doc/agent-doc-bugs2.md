@@ -120,7 +120,30 @@ Done — `#pcpc3` (PCP-consol phase 3, realizes `#pcp3b`) is implemented and shi
 **SimWorld determinism (4 new tests, all green):** 50 concurrent read-modify-write cycles lose no increment (final == initial + N); a racing supervisor-write + agent-finalize never lets finalize observe a half-applied write (always a complete document); `serialized_atomic_write` persists; the three typed writer classes share one submission order.
 
 **Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:22); latest agent-doc CI run still in progress for the `#pcpc2` push (recorded pending, continuing from local evidence).
-<!-- agent:boundary:35e52122 -->
+
+### Re: do [#pcpc4] — Single controller-owned filesystem watcher — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#pcpc4]
+
+
+Done — `#pcpc4` (PCP-consol phase 4, realizes `#pcp4`) controller-side watcher is implemented and shipped in both binaries.
+
+**What landed** (`agent-doc-orchestration/src/document_watcher.rs`, new module): the single controller-owned filesystem watcher gate that replaces the per-process `notify` watchers with one owned event stream per document feeding the session actor (`#pcpc1`).
+
+- `WatcherRegistry` — **idempotent per document**: a second `register` for the same doc reuses the one gate (`Arc::ptr_eq`), so a document is never watched twice. This is the direct fix for the R1 duplicate-watcher reconcile race.
+- `DocumentWatchGate::observe` — coalesces event bursts (identical content → `Coalesced`, one `Change`) and suppresses agent-doc's own write echoes via the existing `debounce` write-provenance (`actor == "agent"` + matching hash → `SelfWriteEcho`), so the actor sees one settled change stream.
+- `route_event` — a settled `Change` routes a reconcile op into the document's session actor (`SessionOpKind::QueueHead`), so watcher-triggered reconciles serialize against in-flight writes (`#pcpc3`) on the one owner thread.
+
+**SimWorld determinism (7 new tests, all green):** idempotent one-watcher-per-document; distinct docs → distinct gates; burst coalesces to one change; distinct content → new change + generation bump; agent self-write echo suppressed (then a real user edit delivered); non-content events ignored; a settled change routes exactly one serialized reconcile through the actor (coalesced burst routes none).
+
+**Carved out as `#pcpc4b` (queued):** the editor-plugin side — demoting the JetBrains `WatchService` to a read-only buffer reporter (realizes `#pcp7`) — is a Kotlin change that needs **live IntelliJ verification**, so it pairs with `#pcpc5`'s live-tmux/editor cutover rather than landing blind. The controller-owned watcher (the Rust `#pcp4` realization) is the substantive, SimWorld-proven deliverable and is done.
+
+**Scope (mirrors `#pcpc1`–`#pcpc3`):** the gate lands behind the seam; the live `watch.rs` `notify` watcher is untouched. Wiring the production `notify` feed to this gate + removing the old watchers is `#pcpc5`'s 08b gate ladder.
+
+**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:35); latest agent-doc CI green.
+<!-- agent:boundary:be8c7d17 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -129,7 +152,7 @@ Done — `#pcpc3` (PCP-consol phase 3, realizes `#pcp3b`) is implemented and shi
 - ~~do [#pcpc1]~~
 - ~~do [#pcpc2]~~
 - ~~do [#pcpc3]~~
-- do [#pcpc4]
+- ~~do [#pcpc4]~~
 - do [#pcpc5]
 <!-- /agent:queue -->
 ###
@@ -158,7 +181,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#pcpc4] PCP-consol phase 4 — Single controller-owned filesystem watcher (realizes #pcp4) + demote plugin WatchService to read-only (realizes #pcp7; needs live verification). Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc5] PCP-consol phase 5 — Migration cutover via the 08b gate ladder (shadow -> dual-write -> read-switch -> authority -> removal), each with a rollback flag; remove the out-of-process supervisor + direct-disk writers only after SimWorld/CLI/live-tmux proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).

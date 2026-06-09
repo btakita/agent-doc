@@ -228,7 +228,25 @@ No genuinely-new data-loss bug class surfaced; the other high-volume signatures 
 **One new actionable captured:** `#partial-staging-guard-cross-doc-noise` — `partial_staging_closeout_guard_fired` logged 154× across the four sessions because, in a multi-session superproject, many unrelated task docs stay perpetually dirty and the guard's "overlapping changed string literal" heuristic matches incidental shared vocabulary (it tripped on my own closeouts this session too). WARN-only, low severity; queued to tighten the overlap signal.
 
 **Bottom line for the operator:** the highest-leverage cross-session fix remains landing `#ipc-crdt-response-drift` in a clean session with a live IntelliJ/Codex plugin — it's the common root of the drift/deadlock/exit-75 churn every session is hitting.
-<!-- agent:boundary:58cd91af -->
+
+### Re: do [#clear-opt-in-threshold] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#clear-opt-in-threshold]
+
+
+Shipped the binary foundation (Phase 1) and gated the editor behavior (Phase 2) on live IntelliJ — `make check` green (4124/4124, clippy clean), both binaries built + installed, pushed (submodule `c9944d30`).
+
+**Phase 1 (shipped) — the binary owns the configurable threshold (FFI-first):**
+- `agent_doc_clear_threshold` frontmatter field + project-config default, resolved by `session_accretion::clear_threshold_for_doc` (frontmatter > project config > built-in **50**, clamped `0..=100`) — mirrors the existing `queue_context_reset_opted_in` resolution.
+- Surfaced on `SessionAccretionReport.clear_threshold`, which preflight already emits, so the plugin reads the threshold straight from preflight output. This is the configurable companion to the existing on/off `agent_doc_queue_context_reset` opt-in.
+- Tests: default-50 / frontmatter-override / clamp-to-100 / report-surfacing. Config spec updated.
+
+**Phase 2 (gated → review) — the editor behavior needs live IntelliJ:** the JB plugin must read its live Claude Code context-usage **percentage** (a signal only the editor has), compare it to `report.clear_threshold`, and pre-emptively run `agent-doc session clear` before the next `Run Agent Doc` dispatch when exceeded (under the `agent_doc_queue_context_reset` opt-in). That's a JB UI-action behavior verifiable only in a live IDE, so I narrowed `#clear-opt-in-threshold` to Phase 2 and gated it (pairs with `#live-verify-batch`). This is the honest split: the threshold config is done and tested; the context-% trigger is genuinely blocked on live-editor verification, not effort.
+
+**CI:** cycles 1–6 are all **green**; this push kicked `27192480789` (pending). Closed from local evidence.
+<!-- agent:boundary:0eb67efe -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -241,11 +259,12 @@ No genuinely-new data-loss bug class surfaced; the other high-volume signatures 
 - ~~:round_pushpin: do [#queue-operator-pin-position-lock-dag]~~
 - ~~:round_pushpin: do [#stale-capture-captured-only-drift]~~
 - ~~:pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]~~
-- :pushpin: :round_pushpin: do [#clear-opt-in-threshold]
+- ~~:pushpin: :round_pushpin: do [#clear-opt-in-threshold]~~
 - :pushpin: :round_pushpin: do [#console-input-accumulation]
 - :round_pushpin: do [#nm1x-livebuf-content]
 - :round_pushpin: do [#vbk7]
 - do [#exit75-done-reap-not-atomic]
+- do [#partial-staging-guard-cross-doc-noise]
 <!-- /agent:queue -->
 ###
 <!--

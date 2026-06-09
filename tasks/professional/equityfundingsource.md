@@ -180,7 +180,27 @@ The Prequalification Lead dialog (the Deal Pipeline lead card modal) now shows *
 - Spec: `prds/investor-pipeline-admin.md` Phase 3a; tests extended in `tests/admin-pipeline.test.ts` (LeadModalBody fetch + full field set + loading/error states).
 
 **Full suite 489 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the queue head; next up (still queued): deal-pipeline search + Kanban-only, then the Deal-Pipeline menu reorder.
-<!-- agent:boundary:65f06d37 -->
+
+### Re: Deal Pipeline search + Kanban-only — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.
+
+
+> **Queue prompt:**
+>
+> Add a search to the deal pipeline... show the filtered results with the result count. Remove the Table view. Only Kanban view for now. Remove the Kanban|Table selector.
+
+Added in-board **search** to the Deal Pipeline and removed the Table view entirely — the board is **Kanban-only** now.
+
+**What shipped (committed + pushed, EFS `a05dfdc`; superproject pointer `d7d2e2ce7`):**
+- **Search box** in the board header filters cards in place across every column — matches name, loan #, holding entity, property (street/city/state), escrow, status, and amount — with a live **result count** ("N results"), a clear (×) button, and a "No pipeline cards match …" empty state. Filtering is client-side over the already-loaded `/api/admin/pipeline` data, so it composes with drag-to-update and the card detail modals.
+- **Table view + Kanban|Table selector removed**: the embedded `AdminLoans` table, the `?view=table` param, and `pipeline_view_mode_T` are gone. `/portal-admin/loans` and the dashboard "Active loans" + loan-detail "← All loans" links now point at the plain Kanban pipeline.
+- Spec: `prds/investor-pipeline-admin.md` Phase 3b; tests in `tests/admin-pipeline.test.ts` (search + Kanban-only) and `tests/application-status-ui.test.ts` (loans→pipeline redirect, no table view).
+
+**Full suite 490 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the queue head; one item remains: move Deal Pipeline above Loan Applications in the Admin menu.
+<!-- agent:boundary:7bc60193 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -190,7 +210,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~[#wir3]~~
 - ~~The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.~~
-- Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.
+- ~~Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.~~
 - Move Deal Pipeline above Loan Applications in the Admin menu.
 <!-- /agent:queue -->
 

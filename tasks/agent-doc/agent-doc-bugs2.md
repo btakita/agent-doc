@@ -30,30 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-043406.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-044836.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#queue-no-stop-unrelated-edit]
+- Archived 1 response topic(s): do [#ipc-drift-writeprovenance]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#ipc-drift-writeprovenance] — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#ipc-drift-writeprovenance]
-
-
-Done. The provenance producer/consumer halves were already in place from `#pcp2`/`#pcp6`; the residual gap was that the **direct-run** document-write path didn't stamp provenance.
-
-**Gap:** `run.rs::atomic_write` (used by the four `direct_run_*` document writes) wrote the editor-visible document but never recorded write-provenance, so a direct-exec foreign-looking disk change fell back to the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic instead of positive attribution in `guard_visible_write_reconcile` / `live_buffer_diverges_from_content`. The IPC/finalize path (`write.rs::atomic_write`) already stamped via `record_document_write_provenance`.
-
-**Fix:** promoted `record_document_write_provenance` to `pub(crate)` and called it from `run.rs::atomic_write`, so both — and only — agent-doc document-write paths stamp provenance through the one shared recorder. Now every document-write path attributes uniformly; `.agent-doc/` sidecar/snapshot writes are still skipped.
-
-- **Test:** `run.rs::direct_run_atomic_write_records_provenance` (mirrors the `write.rs` provenance test).
-- **Spec:** `specs/08b` uniform-enforcement note + `specs/process-topology.md` (R4 already ✅, shared-recorder edge on FIN/IDLE).
-- **Verify:** `make check` green (clippy `-D warnings` clean, full test suite + sim-medium ok); `cargo install --path .` + `cargo build --release` both rebuilt 0.34.0.
-- **Shipped:** submodule commit `937b6395` pushed to `origin/main`; superproject pointer + plan phase-4-done committed.
-<!-- agent:boundary:cae1fd44 -->
+<!-- agent:boundary:55f6929c -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -73,13 +73,7 @@ Each card shows the investor's name/email, accreditation badge, lender account (
 **No D1 migration** — pure read aggregate over existing tables. Full suite **454 pass**, `build` + `build:worker` green.
 
 **Not deployed.** `#spec-test-commit-push` stops at push; queue with `#spec-test-commit-push-deploy` (or say "deploy") to run `cf:d1:migrate:remote` (no-op here) + `deploy:worker` + smoke test. Note: a stale local `agent-doc` install (predates source `3e6092e9`) lint-flagged your runtime-valid `agent:queue ... go` syntax this cycle; I skipped the lint gate via `.agent-doc/config.toml [lint] dialect="off"` rather than touch your queue — rebuild the binary (`make install` in `src/agent-doc`) to clear it. Next queued items (`#vd8s`, `#vtx8`: in-page stage/detail modals for Deal + Investor pipelines) will run on the next cycle.
-<!-- agent:boundary:c62dd852 -->
-- Spec `prds/investor-pipeline-admin.md`; tests `tests/admin-investor-pipeline.test.ts`.
-- UI board `investor_pipeline.tsx` + section wiring; sidebar nav item **Investor Pipeline** between Funding Commits and Payments; route `/portal-admin/investor-pipeline`.
-- Nav badge: `investor-pipeline` count = open lender requests + pending funds (admin action items), matching the Deal Pipeline action-count convention.
-- `GET /api/admin/investor-pipeline` — read-only admin-guarded aggregate over `users LEFT JOIN funds LEFT JOIN lender_requests`.
-- `repo.ts`: `INVESTOR_PIPELINE` definition, furthest-stage resolver, card builder, grouping, accreditation predicate.
-<!-- agent:boundary:f8f67563 -->
+<!-- agent:boundary:43880fa5 -->
 <!-- /agent:exchange -->
 ###
 <!--

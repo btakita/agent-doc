@@ -140,7 +140,27 @@ Deployed to production. No new D1 migration (wire values reuse the existing `pla
 - Smoke test: `GET /` → **200**, `GET /funded-deals` → **200**, `GET` + `PUT /api/admin/settings` → **401** (auth-gated, correctly wired).
 
 This drains the queue.
-<!-- agent:boundary:34ce321e -->
+
+### Re: [#wir3] Secure wiring-instructions delivery — opus-4-8
+
+> **Queue prompt:**
+>
+> [#wir3]
+
+Built the secure delivery mechanism for the wire values from #ty2v — wire details are **never emailed in plaintext**. An admin issues a tokenized link; the recipient (title/escrow or borrower) clicks to reveal, with a mandatory verify-with-the-title-company reminder.
+
+**What shipped (committed + pushed, EFS `d3d73f7`; superproject pointer `253fb9d36`):**
+- **New `wire_instruction_links` table** (migration `0059`): single-use by default, expiring (72h), revocable. The raw token is shown to the issuer **once**; D1 stores only its SHA-256 hash.
+- **`lib/wire_link/repo.ts`** mirrors the upload-token lifecycle: generate/hash, status (active/expired/revoked/exhausted), create, lookup-by-token, list-for-loan, revoke, and an **atomic reveal-consume** that records `first_revealed_at` + IP and self-destructs once uses are exhausted.
+- **Endpoints** (`lib/wire_link/routes.ts`, mounted in both `worker.ts` and `index.server.ts`): `POST /api/admin/wire-links` (issue, admin-gated), `GET /api/admin/wire-links?loan_id=`, `POST /api/admin/wire-links/:id/revoke`, public `GET /w/:token` landing page, and `POST /api/wire-links/:token/reveal`.
+- **Reveal flow**: values are **never embedded in the landing HTML** — they stay hidden until the recipient clicks Reveal, which consumes a use, reads the **live** `wire_*` settings, and returns them plus the verify reminder. The page shows an amber verify-with-title warning before and after reveal.
+- **Admin UI**: a "Generate secure share link" action on the Platform Settings Wiring instructions card returns the one-time URL.
+- Spec updated in the lending-portal PRD; tests `tests/wire-instruction-links.test.ts` (token/hash, status matrix, full lifecycle + self-destruct + revoke via an in-memory D1 double, live-settings reveal, migration/routes/wiring/PRD contracts).
+
+**Full suite 488 pass**, `build` + `build:worker` green. **Not deployed** — `#spec-test-commit-push` stops at push, and this adds D1 migration `0059`; say "deploy" (or `#spec-test-commit-push-deploy`) to run `cf:d1:migrate:remote` + `deploy:worker` + smoke test.
+
+**Remaining (queued follow-up):** loan/borrower-scoped link issuance from the admin loan + wire-confirmation surfaces and the title/escrow → EFS → lender routing model. This drains the queue head; the next queued items (lead-dialog full data, deal-pipeline search/Kanban-only, menu reorder) run on the following cycles.
+<!-- agent:boundary:601ae632 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,13 +168,16 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#wir3]
+- ~~[#wir3]~~
+- The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.
+- Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.
+- Move Deal Pipeline above Loan Applications in the Admin menu.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#wir3] Secure wiring-instructions delivery (builds on the #ty2v admin-editable wire values): expiring/self-destructing-link or click-to-reveal (bank-style) delivery, the "verify wiring with the title company directly" reminder, and the title/escrow -> EFS -> lender routing. From 2026-06-03 call.
+- [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

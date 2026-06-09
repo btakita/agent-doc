@@ -277,15 +277,6 @@ This covers both the "save the process map" item and the "what runs in the PCP p
 - ~~:pushpin: [#pcp4]~~
 - ~~:round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.~~
 - ~~:pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.~~
-- Fix **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift. Can we replace the plugin's WatchService with a client for the supervisor's file-watcher? Would the IPC lag cause race conditions? Can the race condition be prevented in the overall system?
-- Fix **R2 — EDT/save lag vs ack budget.** The listener dispatches to the EDT, then `saveDocument` + the content sidecar land *after* the EDT runs — lagging the sender's poll budget → false ack-timeout / false degrade vote (partially fixed by `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
-- Fix **R3 — disk fallback** manufactures the foreign-write that IntelliJ flags as a cache conflict whenever the session is latched degraded.
-- Fix **R4 — mtime-heuristic drift.** `live_buffer_diverges_from_content` infers "foreign disk write vs genuine unsaved edit" from `LIVE_BUFFER_STALE_SKEW_MS` mtime only — no buffer content — so a real concurrent edit fails closed (`live_prompt_drift_after_preflight`).
-- Fix **R5 — TOCTOU** between the FFI socket handler and the WatchService for the same patch; today guarded best-effort by EDT re-checks (dedup + generation fence), but a window remains.
-- Fix **R6 — supervisor self-race.** A route-owned supervisor in Process 1 races the agent's own finalize writes on the same pane → "could not drain the active closeout" / exit 75.
-- `:pushpin:` should not be reprioritized by the `priority` attribute. It should remain exactly where I placed it. If I add an item to a certain position in the queue, it should remain there with a `:pushpin:`.
-- The responses are being intermixed with older responses in the document. We are also losing part of the response.
-- What part of the stack runs in the Project Control Pane process? What are separate processes? Does the Plugin IPC live in the editor process or can it be moved into the Project Control Pane process? Draw a #mermaid.
 ---
 After "I did not auto-loop: you're actively editing, which takes precedence over the queue drain.", I ran JB `Run Agent Doc` and got an error.
 ```

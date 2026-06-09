@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -99,7 +99,7 @@ Each list row links to its detail page (eye action), and both detail sections hi
 **Verification:** full suite **423 pass / 0 fail**, browser + worker bundles clean; added a test locking in both routes, sections, APIs, and row links.
 
 Queue drained — all admin list types now have individual-item routes.
-<!-- agent:boundary:76a221f3 -->
+<!-- agent:boundary:7736a297 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,6 +107,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

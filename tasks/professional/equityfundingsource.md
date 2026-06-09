@@ -32,51 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260605-081737.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-031025.md`*
 
 Compacted content:
-- Archived 5 response topic(s): [#zwws] Investor dashboard #rpzm phase 5; Can we ungate phases 4 & 6 with the TMO cache?; [#zwws-local-first] Phase 4 EFS-local; 2 more
+- Archived 2 response topic(s): [#67v2a] Admin loan pipeline Kanban; [#zwws-phase6-dashboard] Workflow-priority investor dashboard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: [#67v2a] Admin loan pipeline Kanban — Phase A (read-only) — opus-4-8
-
-> **Queue prompt:**
->
-> [#67v2a]
-
-
-Shipped Phase A of the TMO **All Loans** Kanban as a read-only admin **Pipeline** section, then `update spec + tests` and `commit + push` per `#spec-test-commit-push`. Committed to `equityfundingsource-dev` `main` (`bb98441..1ee9619`).
-
-**What landed**
-- **Pure board logic** in `app/equityfundingsource/lib/admin/repo.ts` (no D1, unit-tested): `PIPELINE_COLUMNS`, `pipeline_column_id_for_status_`, `pipeline_card_title_`, `pipeline_columns_group_`.
-- **Read-only endpoint** `GET /api/admin/pipeline` (`admin_pipeline_GET_`, registered behind `require_admin_`). Hydrates cards from `admin_loans_R_` + `tmo_cache_rows_by_source_R_`; TMO wins for reads via `tmo_field_` (LoanAmount, EscrowNumber, PropertyStreet, ShortName, NoteRate). No mutation.
-- **UI** `lib/ui--browser--efs/portal/admin/pipeline.tsx` (`AdminPipeline`) — horizontal lanes with per-column counts; cards show title (`{street} - {holding entity}`), loan #, amount, note rate, escrow, property street; each links to the loan detail. Wired into `index.tsx`, sidebar `layout.tsx`, and the server section route.
-
-**Status → column mapping**
-- `Application Received | Processing | Documents | Underwriting → Processing/Active`
-- `Funded`, `Closed`, `Unassigned`, `Denied` map 1:1 to their columns
-- `On Hold` column is reserved (no EFS status maps to it yet)
-- blank/missing → Unassigned; unknown non-empty → Processing/Active (default)
-
-**Verification** — full suite green: `bun test` 306 pass / 0 fail (14 new in `tests/admin-pipeline.test.ts`); `bun run build` + `build:worker` both bundle clean (worker 536kb).
-
-**Still open** (PRD Qs 1–2, needs Robert/April): the exact TMO label for the leftmost active column and the full ordered column list. The current set is a faithful model of the captured screenshots but not yet confirmed. Phase B (#67v2b drag-to-change + outbox writeback) stays gated on the TMO write field map (#7a4d) and sync direction (#dzmm/#k2xg).
-
-Next in the queue: `#zwws-phase6-dashboard`.
-
-### Re: [#zwws-phase6-dashboard] Workflow-priority investor dashboard — opus-4-8
-
-Shipped the **un-gated half** of #zwws phase 6, then `update spec + tests` and `commit + push` per `#spec-test-commit-push`. Committed to `equityfundingsource-dev` `main` (`1ee9619..31a9db5`). The new-deal *email* stays the gated half (#f4rq) and was out of scope for this item.
-
-**What landed**
-- **Pure derivation** in `lib/ui--browser--efs/portal/investor/data.ts`: `investor_action_items_(pipeline)` maps action-required pipeline stages → prioritized items (`Funding → wire` "Wire funds" rank 0; `Documents → docs` "Missing docs" rank 1; Reviewing/Committed/Active surface nothing), sorted most-urgent-first; `investor_has_urgent_()`. Unit-tested, no D1.
-- **Dashboard reorder** (`dashboard.tsx`): new `DashboardModules` — when any item is urgent it renders an **Action required** panel (red count badge, per-item urgency chip + concrete next step + Resolve link) above the deal pipeline and available deals; when calm, **Available Deals lead** with the pipeline following. In-app indicator only.
-- Derives from the same `INVESTOR_PIPELINE` the stage map uses, so it tracks the TMO single source of truth once the pipeline syncs from TMO in a later phase.
-
-**Verification** — full suite green: `bun test` 310 pass / 0 fail (+4 new in `tests/investor-portal-e2e.test.ts`); `bun run build` + `build:worker` both bundle clean.
-
-**Queue drained.** Both queued items are done: #67v2a (admin pipeline Kanban Phase A) and #zwws-phase6-dashboard. Remaining Phase 6 work is only the new-deal email, gated on the EFS Resend sending domain (#f4rq).
-<!-- agent:boundary:fa5ef972 -->
+<!-- agent:boundary:bbe9f4b1 -->
 <!-- /agent:exchange -->
 ###
 <!--

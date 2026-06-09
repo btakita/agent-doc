@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -91,17 +91,26 @@ The 8 blocked items stay in the **backlog** as the actionable completion list yo
 
 Note: the report landed in the now-inactive queue (`queue: stop`), so the binary flagged it `inactive_queue_residue` rather than an executable prompt — I triaged it anyway.
 **Queue note:** go-mode re-populated the inactive queue with the 8 blocked backlog ids (#saev…#xkpf) during this cycle. I am deliberately clearing them unrun — every one is blocked on a fresh non-degraded session and/or live IntelliJ/Codex verification (see each backlog item's blocker), so they are not runnable in this session. This is the same go-mode-auto-queues-blocked-work product bug noted above. <!-- no-queue-removal-guard -->
-<!-- agent:boundary:e3d60f16 -->
+<!-- agent:boundary:a42a9881 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ---
 agent-doc andreas-kovountzis.md JB `Claim for Tmux Pane` error:
 ```
 Claim failed (exit 1): Error: pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force
 ```
+- [#4wxr]
+- [#saev]
+- [#9adk]
+- [#s760]
+- [#f5d2]
+- [#bkx9]
+- [#pf15]
+- [#21w2]
+- [#xkpf]
 ---
 <!-- /agent:queue -->
 ###

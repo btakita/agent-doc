@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -126,12 +126,21 @@ Applied the preset to the **actionable** half of `#4wxr`. The cross-session guar
 `#4wxr` stays open for its **remaining gated half**: the JB "Claim for Tmux Pane" + VS Code claim command must parse the marker and render **Force claim / Switch project session / Cancel** — needs live IntelliJ/VS Code, funnels through `#xkpf`.
 
 **The other 8 queued ids are unchanged from last turn's triage** — `#saev` (fresh-session, modifies the closeout write path), `#9adk #s760 #f5d2` (live IntelliJ), `#bkx9` (blocked on `#ipc-crdt-response-drift`), `#pf15 #21w2` (supervisor-in-process / 08b cutover, fresh-session), `#xkpf` (live verify batch). I did not re-drain them; none is runnable in this degraded shared session.
-<!-- agent:boundary:edf962d7 -->
+<!-- agent:boundary:1c63b2ff -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#4wxr]
+- do [#saev]
+- do [#9adk]
+- do [#s760]
+- do [#f5d2]
+- do [#bkx9]
+- do [#pf15]
+- do [#21w2]
+- do [#xkpf]
 <!-- /agent:queue -->
 ###
 <!--

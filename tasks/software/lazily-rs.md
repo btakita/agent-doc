@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -267,8 +267,38 @@ Completed `#ms7x`: added cross-language IPC conformance test suite with canonica
 - `make test-ipc-conformance` — 9/9 passed
 - Pushed `btakita/lazily-rs` `3042701` and superproject `263ce6403`
 
+
+### Re: #9qce — Standalone protocol docs — glm-5.1
+
+> **Queue prompt:**
+>
+> [#9qce]
+
+
+Completed `#9qce`: added `PROTOCOL.md` — standalone language-agnostic wire protocol reference.
+
+**Changed paths** (in `src/lazily-rs`):
+- `PROTOCOL.md` (429 lines): extracted and reorganized from SPEC.md
+
+**Coverage:**
+- Wire types: NodeId, PeerId, OpKind, RemoteOp, IpcPayload, NodeState, ShmBlobRef, IpcValue
+- Snapshot schema with 3 examples (minimal, multi-node, shared-blob)
+- Delta schema with 3 examples (all-ops, non-sequential gap, shared-blob)
+- Epoch contract and consistency invariants
+- Permission boundary (default-deny, omission-not-redaction)
+- Serialization: JSON (default) and binary (postcard)
+- Transport contracts: FFI, IPC, WebSocket, WebRTC data channel
+- Capability negotiation handshake
+- Cross-language family rules
+- Conformance test vectors reference
+
+**Verification:**
+- `make check` (fmt, clippy, build, all test suites, benchmark check) — passed
+- Pushed `btakita/lazily-rs` `d8e003a` and superproject `212820801`
+
+Queue drained. Compact recommended.
 <!-- agent:boundary:0b320236 -->
-<!-- agent:boundary:34761eb9 -->
+<!-- agent:boundary:1fb061a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -277,13 +307,6 @@ Completed `#ms7x`: added cross-language IPC conformance test suite with canonica
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- ~~[#n994]~~
-- ~~[#w30b]~~
-- ~~[#pz3k]~~
-- ~~[#kavj]~~
-- ~~[#jpf1]~~
-- ~~[#ms7x]~~
-- [#9qce]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -291,7 +314,6 @@ Completed `#ms7x`: added cross-language IPC conformance test suite with canonica
 <!-- agent:backlog queue -->
 - [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
 - [ ] [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding
-- [ ] [#9qce] #ipc-docs=Standalone protocol docs page (not inside SPEC.md) with examples per transport
 <!-- /agent:backlog -->
 
 ## Review

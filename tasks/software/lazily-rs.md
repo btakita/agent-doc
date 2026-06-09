@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -63,7 +63,43 @@ Verification:
 Escalation: none.
 
 Confidence: high for the release/publish outcome; the crate is visible on crates.io and the full local suite passed.
-<!-- agent:boundary:33a5fd71 -->
+
+### Re: Next Steps — FFI, IPC, Network Communication — glm-5.1
+
+**Current state:** lazily-rs already has substantial infrastructure:
+
+| Surface | Feature Gate | File | Status |
+|---------|-------------|------|--------|
+| C ABI FFI | `ffi` | `src/ffi.rs` (333 lines) | Functional — opaque channel + JSON frames |
+| IPC Protocol | `ipc` | `src/ipc.rs` (763 lines) | Transport-agnostic snapshot/delta with ShmBlobArena |
+| WebSocket Signaling | `signaling-client` | `src/signaling_client.rs` (362 lines) | Async WebRTC signaling via Cloudflare Worker |
+| Protocol Docs | — | `SPEC.md` (1534 lines) | Authoritative — covers IPC, FFI, wire format, CRDT vs Raft, peer discovery |
+
+**Multi-language family exists** (all personal repos under `btakita`):
+- `lazily-rs` (Rust) → `github.com/btakita/lazily-rs`
+- `lazily-py` (Python) → `github.com/btakita/lazily-py`
+- `lazily-zig` (Zig) → `github.com/btakita/lazily-zig`
+- `lazily-signaling` (Cloudflare Worker / TS) → `@lazily/signaling` npm scope
+
+**Answers to your questions:**
+
+1. **Protocol docs?** Yes — `SPEC.md` is comprehensive (IPC wire format, FFI boundary, CRDT analysis, signaling protocol). The signaling server also has its own `README.md`.
+2. **Docs for lazily family to implement the protocol?** Partial — SPEC.md defines the protocol normatively, but each language binding would benefit from a standalone protocol spec (not embedded in the Rust crate).
+3. **Separate repo for the protocol?** Recommended. Extract the wire format spec (message schemas, delta ops, snapshot format) into a `lazily-spec` repo that all bindings reference. This avoids Rust-specific SPEC.md being the canonical source for Python/Zig implementations.
+4. **GH organization?** Recommended. You already use `@lazily` on npm. A `lazily-reactive` (or similar) org on GitHub would: consolidate the 4+ repos, enable org-level CI secrets, and align with the npm scope. The `btakita/` personal namespace works but doesn't scale for multi-language collaboration.
+
+**Priority backlog for FFI/IPC/network improvements:**
+
+| ID | Item | Priority |
+|----|------|----------|
+| `#proto-extract` | Extract wire protocol spec into standalone `lazily-spec` repo with language-agnostic schema (protobuf/flatbuffers/JSON Schema) | High |
+| `#gh-org` | Create GitHub org (`lazily-reactive` or `lazily`) and transfer repos | High |
+| `#ffi-derive` | Add `cdylib` crate type + build targets; consider `safer-ffi` or `diplomat` for auto-generated headers | Medium |
+| `#ipc-binary` | Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths | Medium |
+| `#webrtc-data` | WebRTC data channel transport for peer-to-peer IPC (beyond signaling) | Medium |
+| `#cross-lang-tests` | Shared conformance test suite against the spec repo — run in CI for each binding | Medium |
+| `#ipc-docs` | Standalone protocol docs page (not inside SPEC.md) with examples per transport | Low |
+<!-- agent:boundary:6cfad543 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,12 +108,18 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps to improve FFI, IPC, network communication? Do we have protocol docs? Do we have docs for lazily family to implement the protocol? Should we have a separate repo for the protocol and lazily family? Should we have a gh organization?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#n994] #proto-extract=Extract wire protocol spec into standalone lazily-spec repo with language-agnostic schema (protobuf/flatbuffers/JSON Schema)
+- [ ] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
+- [ ] [#pz3k] #ffi-derive=Add cdylib crate type + build targets; consider safer-ffi or diplomat for auto-generated headers
+- [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
+- [ ] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
+- [ ] [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding
+- [ ] [#9qce] #ipc-docs=Standalone protocol docs page (not inside SPEC.md) with examples per transport
 <!-- /agent:backlog -->
 
 ## Review

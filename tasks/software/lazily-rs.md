@@ -180,7 +180,34 @@ Completed `#kavj`: added optional binary serialization via `postcard` alongside 
 Pushed `btakita/lazily-rs` `f808ee8` and superproject `eb4e6bc15`.
 
 Exchange size note: 125+ lines, 10 cycles. Compact recommended when queue drains.
-<!-- agent:boundary:12251fb5 -->
+
+### Re: #jpf1 — WebRTC data channel transport — glm-5.1
+
+> **Queue prompt:**
+>
+> [#jpf1]
+
+**Spec updated; implementation gated as multi-phase.**
+
+Updated `SPEC.md` with the full WebRTC data channel transport design:
+
+- **Feature gate:** `webrtc-data = ["ipc", "dep:str0m", "dep:tokio"]`
+- **Transport interface:** `WebRtcDataChannel` implementing `IpcSink`/`IpcSource`
+- **Channel contract:** ordered + reliable, length-prefixed framing, back-pressure
+- **Lifecycle:** signaling → SDP → ICE → data channel → capability handshake → IpcMessage flow
+- **Test surface:** loopback, codec negotiation, ordered delivery
+
+Pushed `btakita/lazily-rs` `7cfffae` and superproject `0d89ac0d1`.
+
+**Implementation phases** (not yet started — requires `str0m` dependency addition):
+1. Add `str0m` dep + `webrtc-data` feature gate
+2. Implement `WebRtcDataChannel` with str0m session management
+3. Integrate with `SignalingClient` for SDP/ICE exchange
+4. Add `tests/webrtc_data.rs` loopback tests
+5. Add `make test-webrtc-data` Makefile target
+
+Gated in review pending str0m dependency decision and implementation.
+<!-- agent:boundary:3648d96c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,7 +220,7 @@ Exchange size note: 125+ lines, 10 cycles. Compact recommended when queue drains
 - ~~[#w30b]~~
 - ~~[#pz3k]~~
 - ~~[#kavj]~~
-- [#jpf1]
+- ~~[#jpf1]~~
 - [#ms7x]
 - [#9qce]
 <!-- /agent:queue -->
@@ -202,7 +229,6 @@ Exchange size note: 125+ lines, 10 cycles. Compact recommended when queue drains
 
 <!-- agent:backlog queue -->
 - [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
-- [ ] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 - [ ] [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding
 - [ ] [#9qce] #ipc-docs=Standalone protocol docs page (not inside SPEC.md) with examples per transport
 <!-- /agent:backlog -->
@@ -210,6 +236,7 @@ Exchange size note: 125+ lines, 10 cycles. Compact recommended when queue drains
 ## Review
 
 <!-- agent:review -->
+- [/] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 - [/] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
 <!-- /agent:review -->
 

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,7 +61,7 @@ The server's `application_approval_blockers_` stays the authoritative gate; the 
 **Spec:** apply4 build-plan P6 documents the UI affordance.
 
 Deploy is still queued (backlog **#xyp5**, covering both the backend `b136519` and this UI `b731aa4`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push both live and smoke-test against the `cda67748…` draft.
-<!-- agent:boundary:fe454474 -->
+<!-- agent:boundary:d737c872 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Errors on all form submission should show the error at the top and with a toast message. The error text above the form should be red.
 <!-- /agent:queue -->
 
 ## Backlog

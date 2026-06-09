@@ -35,7 +35,23 @@ complete
 Compacted content:
 - Archived 14 response topic(s): #pcp-consolidate; #pcp1; #pcp2; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:29e214c7 -->
+
+### Re: R1–R6 + remaining queue items — opus-4-8
+
+Addressing the remaining queue prompts together — all are now resolved or tracked, so I cleared them from the queue (nothing dropped silently; here's the disposition of each):
+
+- **R1 — two file-watchers / two writers / can we replace the plugin WatchService / would IPC lag race / can it be prevented:** answered in `specs/process-topology.md` (the "Can the Plugin IPC move into the PCP process?" section) — the plugin stays in the editor process but is demoted to a read-only reporter + apply/ack shim; the single controller-owned watcher (`#pcpc4`) + WatchService demotion (`#pcp7`) remove the two-watchers race; IPC lag stops mattering because the editor is no longer an independent writer.
+- **R2 — EDT/save lag vs ack budget:** `#pcp5` early-ack IPC (partially done via `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
+- **R3 — disk fallback manufactures the cache conflict when degraded:** `#pcp5` degraded-prefers-file-IPC.
+- **R4 — mtime-heuristic drift / `live_buffer_diverges_from_content` fails closed:** **fixed** — `#pcp2` (write-provenance) + `#pcp6` (editor-buffer content); your 0.2.155 install stopped the drift.
+- **R5 — TOCTOU between FFI socket handler and WatchService:** `#pcp7` thin apply+ack shim (closes the window).
+- **R6 — supervisor self-race / "could not drain the active closeout" / exit 75:** **mitigated** by `#pcp3a` (drain race-hardening, shipped); rooted out by `#pcpc3` (in-process write queue).
+- **`:pushpin:` should not be reprioritized by `priority`:** already implemented — operator-pin position-lock applies to the priority sort; extending it to the auto-DAG ready-set is tracked as `#queue-operator-pin-position-lock-dag`.
+- **responses intermixed / losing part of the response:** that was `#ipc-crdt-response-drift` — fixed by `#pcp2`+`#pcp6` (kept in `agent:review` for the live-repro signoff).
+- **What runs in the PCP process / draw a #mermaid:** the full answer + current and target mermaids are in `specs/process-topology.md`.
+
+The full R1–R6 race→fix table and both topology diagrams live in the evergreen `specs/process-topology.md`. With these dispositioned, the queue is drained — the only substantial open work is `#pcpc1`–`#pcpc5` (the consolidation, fresh session).
+<!-- agent:boundary:d3b989be -->
 <!-- /agent:exchange -->
 
 ## Queue

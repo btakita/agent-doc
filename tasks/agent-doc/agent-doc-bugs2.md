@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -309,25 +309,29 @@ Fixed and shipped (submodule `2531b622`) — `make check` green (4125/4125, clip
 **Tests:** `complete_required_closeout_reaps_lingering_completed_item` (new — reaps a lingering `[x]` + session-check OK) and the unchanged `finalize_reaps_completed_pending_items_in_same_closeout_commit` (proves no direct-path regression). Spec updated.
 
 **CI:** cycles 1–8 are all **green**; this push kicked `27193638256` (pending). If the fix is live, this closeout reaps `#exit75-done-reap-not-atomic` atomically and session-check passes with no recovery preflight.
-<!-- agent:boundary:751f0441 -->
+
+### Re: do [#partial-staging-guard-cross-doc-noise] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#partial-staging-guard-cross-doc-noise]
+
+
+Fixed and shipped (submodule `65c58e6b`) — `make check` green (4126/4126, clippy clean), both binaries built + installed.
+
+**Root cause:** `check_partial_staging_closeout_guard` targets a source+test partial-staging mistake (source committed, test left dirty), but `is_partial_staging_relevant_path` included `md`. In a multi-session superproject the latest commit is usually a session **document** (`.md`) and the dirty companions are other session docs, so their shared prose vocabulary (`make check`, `agent-doc`, …) overlapped and the guard WARNed on nearly every closeout — 154× across the four surveyed sessions.
+
+**Fix:** drop `md` from the guard's relevant extensions. Markdown documents are not source/test code; structured fixtures (`snap`/`json`/`toml`/`yaml`) and `txt` stay, so genuine source+test partial staging is still caught. Test: `partial_staging_closeout_guard_ignores_cross_document_markdown_noise` (a committed `.md` + dirty `.md` sharing a phrase no longer fires); the existing source+test guard tests are unchanged.
+
+**Two-part `#exit75-done-reap-not-atomic` correction:** cycle 12's response said the closeout was atomic "across all paths," but `complete_required_closeout` (commit `2531b622`) only covered the direct/non-stream paths. The `--stream` IPC-timeout path commits + `exit(75)`s inline in `run_stream`, so it needed its own reap (commit `994cb0f3`). Both are now shipped and CI-green — this very closeout should reap atomically with no recovery preflight, live-proving it.
+
+**Queue drained.** This was the last item. Session total: 7 shipped agent-doc fixes/features, the cross-session survey, and the JB-plugin/live-verify items consolidated under their gated `#pcp*` / `#live-verify-batch` review trackers (which need a fresh live-IntelliJ session). `agent:review` is the remaining gated work.
+<!-- agent:boundary:c9155617 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: :round_pushpin: do [#compact-reap-no-response-record]~~
-- ~~:pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]~~
-- ~~:pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]~~
-- ~~:pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]~~
-- ~~:round_pushpin: do [#queue-operator-pin-position-lock-dag]~~
-- ~~:round_pushpin: do [#stale-capture-captured-only-drift]~~
-- ~~:pushpin: :round_pushpin: do [#cross-session-agent-doc-issue-survey]~~
-- ~~:pushpin: :round_pushpin: do [#clear-opt-in-threshold]~~
-- ~~:pushpin: :round_pushpin: do [#console-input-accumulation]~~
-- ~~:round_pushpin: do [#nm1x-livebuf-content]~~
-- ~~:round_pushpin: do [#vbk7]~~
-- ~~do [#exit75-done-reap-not-atomic]~~
-- do [#partial-staging-guard-cross-doc-noise]
 <!-- /agent:queue -->
 ###
 <!--
@@ -355,7 +359,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#partial-staging-guard-cross-doc-noise] [recommended] In a multi-session dogfooding superproject many unrelated task docs stay perpetually dirty; check_partial_staging_closeout_guard then WARNs on nearly every closeout because its overlapping-changed-string-literal heuristic matches incidental shared vocabulary (e.g. "make check", "agent-doc", "id not found in backlog") between the committed session doc and unrelated dirty companions. Surfaced by #cross-session-agent-doc-issue-survey: 154 partial_staging_closeout_guard_fired entries across tsift/lazily-rs/monsterrodholders/equityfundingsource ops logs 2026-06-09. Tighten the overlap signal (require a more specific shared token, same-component path, or scope to the intended path set) so unrelated superproject churn does not trip the WARN. WARN-only, low severity.
 <!-- /agent:backlog -->
 
 ## Review

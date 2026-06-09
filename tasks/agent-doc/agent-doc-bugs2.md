@@ -112,14 +112,34 @@ Shipped the safe, high-confidence subset of the fix instead of gating a fourth t
 **The honest residual (still gated, not effort-avoidance):** the *other* half — a response body WAS captured this cycle but this specific id's `### Re:` record was the one lost — needs reliable **per-id** materialization detection. That detection is the unreliable substrate (`#ipc-crdt-response-drift`); building a guard on top of it risks false-positives that would block *every* legitimate `do #id → response → done → reap` closeout across all users. That is a genuine block on a fresh-session repro, so review item #1 stays `[/]`, retitled to the precise residual.
 
 **CI:** push kicked run `27188969343` (in progress); prior CI run is green. Closing from local evidence per the test-bearing-turn rule.
-<!-- agent:boundary:b59b9227 -->
+
+### Re: do [#finalize-stale-baseline-reopen-friction] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]
+
+
+Fixed and shipped (submodule `5e7b6f14`) — `make check` green (4117/4117, clippy clean), both binaries built + installed.
+
+**Root cause:** the strict-`finalize` pre-write gate `guard_no_explicit_baseline_replay_after_committed_cycle` failed closed for *every* explicit-baseline finalize against an already-`committed` cycle, telling you to run `agent-doc preflight` and retry. That's the exit-75 IPC-timeout retry trap: the first finalize commits, the cycle goes `Committed`, the retry hits the gate. The original guard ("block stale finalize replay", `12215ab6`) was right to protect against duplicate-block injection, but it couldn't tell a stale replay from a genuinely new response — so it rejected both.
+
+**Fix — decide by materialization instead of failing closed:**
+- **True replay** (incoming body already in `HEAD`) → still fails closed (`reason=response_already_in_head`); the committed response is never re-applied as a duplicate. Duplicate protection fully preserved.
+- **Empty/repair** response, or a **non-git** doc with no `HEAD` baseline → fail closed (`reason=empty_response` / `no_head_baseline`).
+- **Genuinely new** response (body absent from `HEAD`) → **auto-reopen** a fresh `preflight_started` cycle from `HEAD`, discard the stale baseline in favor of the `HEAD` baseline so the new response diffs against the actual committed state, log `explicit_baseline_replay_auto_reopened`, and continue. Exactly what a manual `preflight` reopen does — just automatic.
+
+**Why it's safe in this drift-prone session:** the auto-reopen path only fires for a response that is *not* already committed, and it refreshes the baseline to `HEAD`, so it cannot duplicate. My own finalize this turn is unaffected — its cycle is `preflight_started`, never `Committed`, so the gate doesn't fire at all. Two deterministic tests: new-response-commits and true-duplicate-replay-still-rejected (single copy in `HEAD`).
+
+**CI:** cycle 1's run (`#compact-reap-no-response-record`) went **green** (`27188969343`); this push kicked `27189714279` (pending). Closed from local evidence per the test-bearing-turn rule.
+<!-- agent:boundary:513f2ff8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#compact-reap-no-response-record]~~
-- :pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]
+- ~~:pushpin: :round_pushpin: do [#finalize-stale-baseline-reopen-friction]~~
 - :pushpin: :round_pushpin: do [#exit75-crdt-drift-closeout-dup-lines]
 - :pushpin: :round_pushpin: do [#queue-contamination-guard-false-positive]
 - :round_pushpin: do [#queue-operator-pin-position-lock-dag]
@@ -156,7 +176,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#finalize-stale-baseline-reopen-friction] finalize refuses with "pre-write gate: cycle already committed; refusing explicit-baseline response" and requires a manual preflight re-run to mint a fresh baseline, even when the response is legitimately new. Hit repeatedly 2026-06-09. Consider finalize auto-reopening the committed cycle or resolving the current baseline itself instead of failing closed.
+- [x] [#finalize-stale-baseline-reopen-friction] finalize refuses with "pre-write gate: cycle already committed; refusing explicit-baseline response" and requires a manual preflight re-run to mint a fresh baseline, even when the response is legitimately new. Hit repeatedly 2026-06-09. Consider finalize auto-reopening the committed cycle or resolving the current baseline itself instead of failing closed.
 - [ ] [#exit75-crdt-drift-closeout-dup-lines] exit-75 CRDT-merge closeout still appends reversed duplicate user-prefixed lines of the just-written response into the exchange tail, needing manual cleanup + reset --from-current --preserve-session. Recurred 2026-06-09 on the #ipc-degraded-prefers-file-ipc cycle. Same family as #ipc-crdt-response-drift; needs the clean-session producer pin.
 - [ ] [#queue-contamination-guard-false-positive] session-check #jb-run-agent-doc-response-queue-contamination false-positives on a legit user queue prompt that mentions slash commands (/agent-doc, /clear) because it resembles response prose; the heuristic must not flag genuine user prompts as contamination.
 - [ ] [#queue-operator-pin-position-lock-dag] Extend operator-pin position-lock into the auto-DAG ready-set (queue::sort_prompts_by_dag). Today position-lock only applies to sort_prompts_by_priority (the no-deps path); when after=#id edges exist the DAG tie-break still floats operator pins by tier. Anchor operator pins to their slots in the topo order too, keeping the documented blocker-outranks-pin exception. Spec anchor: specs/pending-system.md #queue-auto-dag-priority.

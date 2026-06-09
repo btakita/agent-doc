@@ -52,16 +52,46 @@ Done (EFS `909b866`, pushed). This was queue item 1 of 3; the auto-loop continue
 
 - open **Leads** (`new` / `contacted`) +
 - loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
+- **Paid Off** — nothing left owed
+- **Current** — next unpaid payment further out
+- **Due Soon** — next unpaid payment due within 30 days
+- **Overdue** — loan has ≥1 unpaid, past-due payment
+- open **Leads** (`new` / `contacted`) +
+- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
 
 Terminal/parked stages (Funded, Closed, On Hold, Unassigned, Application Denied) are excluded. The status sets are derived from the pipeline column definitions (`PIPELINE_ACTION_NEEDED_STATUSES`, `LEAD_ACTION_NEEDED_STATUSES` in `repo.ts`) so TMO status strings stay in sync, and the nav-counts query is one isolated, fail-closed subquery sum (a single section failure still yields 0, never a 500). No D1 migration.
 
 **Changed:** `repo.ts` (action-status constants), `nav_counts/index.ts` (count query), `layout.tsx` / `pipeline.tsx` / `application_lead_detail.tsx` (labels), `prds/67v2` Phase F, and the two pipeline/nav-counts test files.
 
 **Verification:** `make check` green — 426 pass / 0 fail, build + worker bundle OK. The EFS repo has no GitHub Actions CI workflow, so local `make check` is the gate.
-<!-- agent:boundary:bb79a2b5 -->
-- loans in **Applications** (`Application Received`), **Processing**, **Documents**, **Underwriting**
-- open **Leads** (`new` / `contacted`) +
-<!-- agent:boundary:9e62f8f0 -->
+
+### Re: Track borrower payments — Payments Pipeline board — opus-4-8
+
+> **Queue prompt:**
+>
+> We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.
+
+
+Done (EFS `d8eb783`, pushed). This was queue item 2 of 3; the auto-loop continues with `deploy`.
+
+The admin **Payments** section (`/portal-admin/payments`) now has a **Pipeline / Table** view toggle. Pipeline is the default — it's a borrower-payment tracking board, one card per loan, grouped by payment health:
+
+- **Overdue** — loan has ≥1 unpaid, past-due payment
+- **Due Soon** — next unpaid payment due within 30 days
+- **Current** — next unpaid payment further out
+- **Paid Off** — nothing left owed
+
+Each card shows exactly what was asked: **next payment due date, next amount, next principal, and overdue count + total** (with a red overdue footer when applicable). A payment is "owed" until confirmed `paid` — a `denied` submission still counts as owed. The existing Table view (filters, confirm/deny/hide actions, detail modal) is unchanged and still where mutations happen; the board is a read-only snapshot.
+
+**How it's built.** Pure board logic lives in `repo.ts` (`payment_is_owed_`, `payment_days_until_`, `loan_payment_pipeline_card_`, `payments_pipeline_columns_`, `PAYMENT_PIPELINE`) and is unit-tested with no D1. New read-only endpoint `GET /api/admin/payments/pipeline` groups `loan_payments` rows per loan; it's registered **before** `/api/admin/payments/:payment_id` so `pipeline` isn't captured as a payment id. No D1 migration.
+
+**Changed:** `repo.ts`, `payment_management/index.ts`, `routes.ts`, `payments.tsx`, the portal PRD (Admin Portal section), and a new `tests/admin-payments-pipeline.test.ts`.
+
+**Verification:** `make check` green — **437 pass / 0 fail**, build + worker bundle OK, including after rebasing onto an incoming `fix(applications)` commit. EFS has no GitHub Actions CI workflow, so local `make check` is the gate.
+
+**Note:** This board reads whatever is in `loan_payments`. Per the MVP servicing model (PRD §7), those rows come from TMO's payment schedule, and live data depends on the TMO sync being populated — the board is empty until loans have schedule rows.
+<!-- agent:boundary:c2dbc256 -->
+<!-- agent:boundary:59296dd8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +100,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.~~
-- We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.
+- ~~We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.~~
 - deploy
 <!-- /agent:queue -->
 

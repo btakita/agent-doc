@@ -489,6 +489,11 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
         && let Ok(disk) = std::fs::read_to_string(file)
         && *editor_text == disk
     {
+        // #f5d2/#pcp6 prove/disprove: record which suppression branch decided the
+        // editor holds no unsaved edit ahead of disk. Previously every suppression
+        // returned None silently, so a "agent-doc didn't detect my unsaved edit"
+        // bug report could not tell content-match from provenance from mtime-stale.
+        log_live_buffer_decision(file, "suppressed", "editor_content_equals_disk");
         return None;
     }
 
@@ -504,6 +509,7 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
     if let Some(prov) = write_provenance(file)
         && prov.timestamp_ms > snapshot.timestamp_ms
     {
+        log_live_buffer_decision(file, "suppressed", "write_provenance_newer_than_buffer");
         return None;
     }
 
@@ -512,12 +518,29 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
     // live unsaved buffer. Only suppress on a confident staleness margin so genuine
     // unsaved edits (editor newer than disk) are still protected.
     if let Some(disk_mtime_ms) = file_mtime_ms(file)
-        && disk_mtime_ms > snapshot.timestamp_ms.saturating_add(LIVE_BUFFER_STALE_SKEW_MS)
+        && disk_mtime_ms
+            > snapshot
+                .timestamp_ms
+                .saturating_add(LIVE_BUFFER_STALE_SKEW_MS)
     {
+        log_live_buffer_decision(file, "suppressed", "disk_mtime_stale_vs_buffer");
         return None;
     }
 
+    log_live_buffer_decision(file, "diverges", "unsaved_buffer_ahead_of_disk");
     Some(snapshot)
+}
+
+/// Best-effort prove/disprove diagnostic for the live-buffer divergence
+/// classifier (`#f5d2` / `#pcp6`). Records the final decision and the branch
+/// reason to `.agent-doc/logs/ops.log` so a live editor test can grep exactly
+/// why a buffer was (or was not) treated as a pending unsaved edit. Logging
+/// only; the return value of [`live_buffer_diverges_from_content`] is unchanged.
+fn log_live_buffer_decision(file: &str, decision: &str, reason: &str) {
+    crate::ops_log::log_op(
+        std::path::Path::new(file),
+        &format!("live_buffer_classify decision={decision} reason={reason} file={file}"),
+    );
 }
 
 /// Compute the typing indicator file path for a document.
@@ -578,7 +601,9 @@ fn write_provenance_path(file: &str) -> PathBuf {
     dir.pop();
     loop {
         if dir.join(".agent-doc").is_dir() {
-            return dir.join(WRITE_PROVENANCE_DIR).join(format!("{:016x}", hash));
+            return dir
+                .join(WRITE_PROVENANCE_DIR)
+                .join(format!("{:016x}", hash));
         }
         if !dir.pop() {
             let parent = PathBuf::from(file)
@@ -832,6 +857,33 @@ mod tests {
         assert!(live_buffer_diverges_from_content(&doc_str, visible).is_none());
     }
 
+    /// `#f5d2`/`#pcp6` prove/disprove: the divergence classifier records its
+    /// decision + branch reason to ops.log so a live editor test can grep exactly
+    /// why a buffer was treated as a pending unsaved edit. Drives the positive
+    /// `diverges` outcome and asserts the marker lands.
+    #[test]
+    fn live_buffer_classify_logs_diverges_decision() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("classify-log.md");
+        std::fs::write(&doc, "disk").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Editor reports a buffer ahead of disk (genuine unsaved edit).
+        let visible = "disk plus unsaved prompt";
+        document_changed_with_digest(&doc_str, visible.len(), &content_hash(visible));
+
+        // Compare against the on-disk content: buffer is ahead → diverges.
+        assert!(live_buffer_diverges_from_content(&doc_str, "disk").is_some());
+
+        let ops_log = tmp.path().join(".agent-doc").join("logs").join("ops.log");
+        let log = std::fs::read_to_string(&ops_log).expect("ops.log written");
+        assert!(
+            log.contains("live_buffer_classify decision=diverges reason=unsaved_buffer_ahead_of_disk"),
+            "ops.log missing diverges marker, got: {log}"
+        );
+    }
+
     /// Regression (#ipc-crdt-response-drift / visible-buffer false positives):
     /// when the file on disk is modified *after* the editor last reported its
     /// buffer (a concurrent foreign writer, or agent-doc's own machinery), the
@@ -1009,7 +1061,8 @@ mod tests {
         // The caller's expected/merge baseline differs (stale), so len/hash do not
         // match it — but the editor provably matches disk, so no live divergence.
         assert!(
-            live_buffer_diverges_from_content(&doc_str, "a stale expected merge baseline").is_none(),
+            live_buffer_diverges_from_content(&doc_str, "a stale expected merge baseline")
+                .is_none(),
             "editor buffer equal to disk must suppress divergence regardless of the caller baseline"
         );
     }

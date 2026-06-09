@@ -431,6 +431,13 @@ where
                                 eprintln!("[ipc-socket] early-ack write error: {}", e);
                             } else if let Err(e) = writer_half.flush() {
                                 eprintln!("[ipc-socket] early-ack flush error: {}", e);
+                            } else {
+                                // #saev prove/disprove: a successful early-ack emit was
+                                // previously silent (only failures logged), so a live
+                                // EARLY_ACK_ENABLED run had no grep-able proof the
+                                // `pending` ack actually went out before the blocking
+                                // apply. Emit a positive marker on the success path.
+                                eprintln!("[ipc-socket] early-ack pending emitted before apply");
                             }
                         }
                         if let Some(response) = handler(trimmed) {

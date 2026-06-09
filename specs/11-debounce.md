@@ -168,6 +168,27 @@ Files at **odd depths** from the project root (1, 3, 5 levels) failed to find `.
 
 **Test coverage:** `typing_indicator_found_for_file_one_level_deep`, `typing_indicator_found_for_file_two_levels_deep`, `status_found_for_file_one_level_deep`. See `src/debounce.rs`.
 
+## Live-buffer classifier diagnostics (`#f5d2` / `#pcp6`)
+
+`live_buffer_diverges_from_content(file, content)` decides whether the editor
+holds a genuine unsaved edit *ahead* of disk (returns the snapshot) or whether an
+apparent divergence is explained away (returns `None`). It has four
+prove/disprove-relevant outcomes, each now recorded best-effort to
+`.agent-doc/logs/ops.log` so a live editor test can grep exactly why a buffer was
+or was not treated as a pending edit:
+
+| ops.log line | Meaning |
+|--------------|---------|
+| `live_buffer_classify decision=diverges reason=unsaved_buffer_ahead_of_disk` | Genuine unsaved editor edit detected — divergence fails closed. |
+| `live_buffer_classify decision=suppressed reason=editor_content_equals_disk` | Editor's full buffer text equals disk (`#pcp6` content match) — no unsaved edit. |
+| `live_buffer_classify decision=suppressed reason=write_provenance_newer_than_buffer` | agent-doc's own recorded disk write postdates the editor digest (`#pcp2`). |
+| `live_buffer_classify decision=suppressed reason=disk_mtime_stale_vs_buffer` | Disk mtime is confidently newer than the editor digest — digest lags a disk write. |
+
+Logging only; the return value is unchanged. The trivial "snapshot already equals
+expected content" early return is intentionally not logged to avoid per-check
+noise. Pairs with the write-path outcome logs in `write.rs`
+(`visible_write_live_buffer_matches_disk` / `visible_write_deferred_current_changed`).
+
 ## Recommended Improvements
 
 1. **Expose remaining timing constants to frontmatter** — Allow per-document control via:

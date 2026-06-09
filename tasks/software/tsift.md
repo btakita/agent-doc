@@ -67,7 +67,59 @@ Verification:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:ca05a0c8 -->
+
+### Re: qszc — gpt-5
+
+> **Queue prompt:**
+>
+> do [#qszc]
+
+
+Implemented indexed MemGraphRAG memory candidate retrieval and persisted it in git.
+
+Changed paths:
+- `src/tsift/packages/tsift-memory/src/lib.rs`
+- `src/tsift/packages/tsift-memgraphrag/src/lib.rs`
+- `src/tsift/packages/tsift-cli/src/commands/memory.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- `src/tsift/specs/memgraphrag-direction.md`
+- `src/tsift/VERSIONS.md`
+- parent submodule pointer `src/tsift`
+
+What changed:
+- Bumped `tsift-memory` schema to v2 and added observed/create-time indexes, `memory_internal_state`, and an FTS5 `memory_events_fts` table with insert/update/delete sync triggers.
+- Added one-time FTS rebuild/backfill on `MemoryStore::open_or_create` so existing memory DB rows become queryable after schema initialization.
+- Added `read_memory_event_candidates(memory_db, query, limit)`, which returns a deduplicated, caller-bounded set from FTS matches plus recent fallback rows instead of forcing callers to rank every memory event.
+- Added `rank_memory_event_candidates` and `memory_rank_candidate_limit` in `tsift-memgraphrag`; `MemoryQueryPlan` now reports `candidate_limit` and documents the indexed candidate-set contract.
+- Updated memory CLI status/query-plan surfaces and compiled CLI coverage for the new `candidate_limit` field.
+- Updated MemGraphRAG direction docs and `VERSIONS.md`.
+
+Verification:
+- `cargo test -p tsift-memory memory_event_candidates` passed.
+- `cargo test -p tsift-memory memory_schema_creates_candidate_indexes_and_fts_table` passed.
+- `cargo test -p tsift-memgraphrag rank_memory_event_candidates` passed.
+- `cargo test -p tsift-memgraphrag plan_memory_query_carries_default_decay_config` passed.
+- `cargo test -p tsift-cli --test exit_code memory_query_plan_uses_graph_db_related_with_parent_json_flag` passed.
+- `cargo test -p tsift-cli --test exit_code memory_status_prefers_graph_db_related_with_claude_mem_fallback` passed.
+- `cargo test -p tsift-memory` passed.
+- `cargo test -p tsift-memgraphrag` passed.
+- `make check` passed.
+- `cargo install --path .` passed and replaced the local `tsift` binary.
+- Installed smoke: `tsift memory query-plan "memory retrieval" --json` reports `candidate_limit: 80` and the indexed candidate output contract.
+- Installed smoke: fresh `tsift memory init/status` reports `schema_version: 2`, `memory_events_fts`, `memory_internal_state`, and `query_api.candidate_limit: 80`.
+- `git diff --check` passed.
+- `cargo fmt --check` was probed and still reports broad pre-existing workspace formatting drift in unrelated files; I did not run a workspace formatter. The required project gate is `make check`, which passed.
+
+CI:
+- `src/tsift`: `gh run list --workflow CI --limit 1` reports run `27184774293` in progress for commit `56ca910` (`memgraphrag: index memory candidates`) as of 2026-06-09 04:56:15Z.
+- Parent repo: `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+
+Commits pushed:
+- `src/tsift`: `56ca910` `memgraphrag: index memory candidates`, pushed to `origin/main`.
+- Parent `agent-loop`: `8fced3a8b` `tsift: advance indexed memory candidates`, pushed to `origin/main`.
+
+Confidence: high. Local clippy/tests/build/install/smokes passed, and the only unresolved external signal is the in-progress GitHub Actions run.
+<!-- agent:boundary:53a8e80d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +130,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kx6s]~~
-- do [#qszc]
+- ~~do [#qszc]~~
 - do [#qs5v]
 - do [#zkft]
 - do [#58p8]
@@ -89,7 +141,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qszc] Make memory candidate retrieval indexed with observed-at/create-time indexes plus FTS5 or a materialized token table, and rank a bounded candidate set instead of all memory events.
 - [ ] [#qs5v] Materialize semantic vectors in a typed table/blob and add a GraphStore top-candidate query so semantic related does not scan and parse every semantic node property.
 - [ ] [#zkft] Make memory graph projection incremental with memory watermarks/content hashes and explicit recent-first, oldest-first, and query-relevant read policies.
 - [ ] [#58p8] Fold observed-at decay and memory node signals into shared GraphStore ranked_neighborhood scoring so memory and code prune through one graph-ranking path.

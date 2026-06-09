@@ -2073,6 +2073,81 @@ mod tests {
     }
 
     #[test]
+    fn prompt_cache_boundary_contract_separates_durable_and_volatile_blocks() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1,4 +1,6 @@\n\
+old status\n\
++new status\n\
++do [#pcache-boundary-contract]\n";
+        let doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "new status\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older topic - gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#pcache-boundary-contract]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let report = crate::session_accretion::SessionAccretionReport {
+            level: crate::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document closed 7 cycles in the last 30 minutes".to_string()],
+            recent_noop_closeouts: 5,
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("session.md"),
+            RunMode::Template,
+            &fm,
+            diff,
+            doc,
+            Some(&report),
+        );
+        let boundary = crate::prompt_cache::PROMPT_CACHE_BOUNDARY;
+        let (stable, volatile) = prompt
+            .split_once(boundary)
+            .expect("direct-run prompt should expose cache boundary");
+
+        for durable in [
+            "<agent_doc_prompt_stable_prefix>",
+            "<response_contract>",
+            "<turn_payload_contract>",
+            "Format your response as patch blocks",
+            "Read the volatile turn payload after the cache boundary",
+        ] {
+            assert!(
+                stable.contains(durable),
+                "stable prefix must keep durable fragment {durable:?}:\n{prompt}"
+            );
+        }
+
+        for volatile_fragment in [
+            "<diff>",
+            "new status",
+            "do [#pcache-boundary-contract]",
+            "<response_context level=\"warn\">",
+            "Accretion reason: document closed 7 cycles in the last 30 minutes.",
+        ] {
+            assert!(
+                !stable.contains(volatile_fragment),
+                "volatile fragment {volatile_fragment:?} must not enter stable prefix:\n{prompt}"
+            );
+            assert!(
+                volatile.contains(volatile_fragment),
+                "volatile suffix must contain {volatile_fragment:?}:\n{prompt}"
+            );
+        }
+    }
+
+    #[test]
     fn prompt_cache_replay_key_survives_session_churn_and_invalidates_on_durable_contract() {
         let fm = frontmatter::Frontmatter {
             resume: Some("sess-123".to_string()),

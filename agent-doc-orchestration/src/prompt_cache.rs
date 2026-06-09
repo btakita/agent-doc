@@ -4,6 +4,15 @@
 //! Keep durable instructions above [`PROMPT_CACHE_BOUNDARY`] and move
 //! turn-specific data such as diffs, queue heads, status, and compaction
 //! diagnostics below it.
+//!
+//! Boundary contract:
+//! - stable prefix: response contract, harness-neutral behavior instructions,
+//!   and provider cache metadata that should replay across turns.
+//! - volatile suffix: file paths, queue heads, diffs, current document excerpts,
+//!   status, prompt targets, session-accretion/context packs, and any other
+//!   turn-local facts.
+//! - provider key: version + routing-affinity hash + stable-prefix hash. The
+//!   volatile suffix never contributes to the replay key.
 
 use sha2::{Digest, Sha256};
 
@@ -318,6 +327,26 @@ mod tests {
             changed_stable.stable_prefix_sha256
         );
         assert_ne!(first.provider_cache_key, changed_stable.provider_cache_key);
+    }
+
+    #[test]
+    fn boundary_contract_exposes_provider_breakpoint_and_key_material() {
+        assert!(PROMPT_CACHE_BOUNDARY.contains("cache_control=\"ephemeral\""));
+        assert!(PROMPT_CACHE_BOUNDARY.contains("volatile_suffix=\"follows\""));
+
+        let blocks = PromptCacheBlocks::new("stable instructions", "volatile queue head");
+        let rendered = blocks.render();
+        assert_eq!(rendered.matches(PROMPT_CACHE_BOUNDARY).count(), 1);
+
+        let replay_key = blocks.replay_key("agent=codex;model=gpt-5;mode=template");
+        let key_parts: Vec<&str> = replay_key.provider_cache_key.split(':').collect();
+        assert_eq!(key_parts.len(), 3);
+        assert_eq!(key_parts[0], PROVIDER_CACHE_KEY_VERSION);
+        assert_eq!(replay_key.cache_control, PROMPT_CACHE_CONTROL);
+        assert_eq!(
+            replay_key.stable_prefix_sha256,
+            content_sha256(blocks.stable_prefix())
+        );
     }
 
     #[test]

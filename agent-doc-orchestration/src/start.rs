@@ -5859,6 +5859,9 @@ Done.
         let boundary = payload
             .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
             .expect("Codex owner-continuation prompt should expose cache boundary");
+        let (stable, volatile) = payload
+            .split_once(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .expect("Codex owner-continuation prompt should split at cache boundary");
         let file_pos = payload.find("tasks/monsterrodholders.md").unwrap();
         let head_pos = payload
             .find("JB Run Agent Doc on monsterrodholders.md stalled.")
@@ -5867,6 +5870,11 @@ Done.
             file_pos > boundary && head_pos > boundary,
             "volatile file path and queue head must stay after cache boundary:\n{payload}"
         );
+        assert!(stable.contains("Stable instructions:"));
+        assert!(!stable.contains("tasks/monsterrodholders.md"));
+        assert!(!stable.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
+        assert!(volatile.contains("tasks/monsterrodholders.md"));
+        assert!(volatile.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
         assert!(
             !payload
                 .trim_start()

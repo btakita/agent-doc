@@ -52,6 +52,29 @@ That section must preserve the diff encounter order across mixed kinds. If a `co
 
 Prompt context must keep remote host evidence project-scoped. Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to the current document's project. A prompt may identify a named remote host only when the current user prompt, document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbook explicitly names it; otherwise the agent should ask or record a follow-up to confirm the intended host.
 
+## Prompt Cache Boundary
+
+Direct-run prompts and Codex owner-continuation prompts are assembled as:
+
+1. Stable prefix
+2. `PROMPT_CACHE_BOUNDARY`
+3. Volatile suffix
+
+Only durable instructions may live above the boundary: response format contracts,
+harness-neutral behavior instructions, turn-payload reading rules, cache-control
+metadata, and the provider replay-key material derived from those durable
+instructions. Turn-local facts must stay below the boundary: file paths, queue
+heads, diffs, current document excerpts, status text, prompt-bearing change
+sections, compaction/accretion diagnostics, bounded context packs, session ids,
+and recovery markers.
+
+Provider-specific cache requirements are represented explicitly instead of
+being inferred from raw prompt text. The boundary carries the ephemeral
+cache-control breakpoint, and the provider cache key is
+`agent-doc-prompt-cache-v1:<routing-affinity-sha256>:<stable-prefix-sha256>`.
+Routing affinity includes the agent, model, and prompt mode. The volatile suffix
+never contributes to the stable-prefix fingerprint or provider cache key.
+
 ## Streaming Checkpoints
 
 - Streaming agent paths save the first non-empty partial response immediately, then save changed partial output at most once every 30 seconds.

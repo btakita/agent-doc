@@ -204,12 +204,14 @@ Commits pushed:
 - `btakita/tagpath@3f894a1` (`feat: exercise project session via mcp`) to `origin/main`.
 
 Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
-Rejected lazily-rs for the default tagpath runtime for now; the `project-session` prototype stays feature-gated as an internal experiment.
+
+### Re: tglazydecide — gpt-5
 
 > **Queue prompt:**
 >
 > [#tglazydecide]
 
+Rejected lazily-rs for the default tagpath runtime for now; the `project-session` prototype stays feature-gated as an internal experiment.
 
 Decision basis:
 - Default sidecar and no-op index paths do not regress because the prototype is opt-in and the default index/watch/MCP path remains unchanged.
@@ -239,7 +241,7 @@ Commits pushed:
 - `btakita/agent-loop@58ad10e78` (`chore: record tagpath project session decision`).
 
 Escalation: none. Residual working tree note: the unrelated unstaged instruction-refresh diffs and other pane changes remain outside this task and were not staged or committed.
-<!-- agent:boundary:5cdf75e1 -->
+<!-- agent:boundary:0075266b -->
 <!-- /agent:exchange -->
 
 ###

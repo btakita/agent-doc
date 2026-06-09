@@ -229,7 +229,16 @@ This session's ledger stands: `#pcp1` spec, `#pcp2` write-provenance, `#pcp3a` R
 **The only genuinely-actionable next step is `#pcpc1`** (`tasks/agent-doc/plan-supervisor-in-process.md`) — a controller concurrency refactor that needs a fresh, unsaturated session. After this cycle the queue is empty, so the auto-drain stops cleanly. Start a new `/agent-doc` session and queue `#pcpc1` to make real progress.
 
 Session ledger: `#pcp1`, `#pcp2`, `#pcp3a`, `#pcp6` shipped + verified; `#pcp-consol` decomposed into `#pcpc1`–`#pcpc5`; queue contamination + dead pins cleared.
-<!-- agent:boundary:46d37b04 -->
+
+### Re: Fix duplicate ids — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.
+
+
+Already resolved — no change needed, no follow-up items. The backlog item this refers to (`#stale-capture-captured-only-drift`) currently reads `- [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending…` — a single id in the correct form. The duplicated `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` pattern only appears in this queue prompt's own example text (describing what the bug *was*); it's not present in the live backlog. So the duplicate has already been cleaned up. Consuming this item with no edit.
+<!-- agent:boundary:e7722df5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,7 +254,7 @@ Session ledger: `#pcp1`, `#pcp2`, `#pcp3a`, `#pcp6` shipped + verified; `#pcp-co
 - ~~:pushpin: [#pcp-consol]~~
 - ~~:pushpin: [#pcp3]~~
 - ~~:pushpin: [#pcp4]~~
-- :round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.
+- ~~:round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.~~
 - :pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.
 - Fix **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift. Can we replace the plugin's WatchService with a client for the supervisor's file-watcher? Would the IPC lag cause race conditions? Can the race condition be prevented in the overall system?
 - Fix **R2 — EDT/save lag vs ack budget.** The listener dispatches to the EDT, then `saveDocument` + the content sidecar land *after* the EDT runs — lagging the sender's poll budget → false ack-timeout / false degrade vote (partially fixed by `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).

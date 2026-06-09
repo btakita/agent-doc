@@ -1403,7 +1403,8 @@ fn non_exchange_change_is_turn_independent(
     // agent's committed output already lives in the snapshot).
     events.iter().all(|event| {
         let address = Address::from_component_node_key(&event.component, &event.node_key);
-        !classify_op(OpActor::User, event.kind.as_str(), &address, scope).affects_turn()
+        let node_index = event.after_index.or(event.before_index);
+        !classify_op(OpActor::User, event.kind.as_str(), &address, node_index, scope).affects_turn()
     })
 }
 

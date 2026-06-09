@@ -103,6 +103,10 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> Result<DocumentOp> {
         document_path: row.get(0)?,
         component: row.get(1)?,
         node_key: row.get(2)?,
+        // The durable store does not persist the within-component node index;
+        // it is only needed by the live preflight affectedness classifier, never
+        // by a replayed op (`#loop-guard-exchange-node-granularity`).
+        node_index: None,
         item_id: row.get(3)?,
         op_kind: row.get(4)?,
         actor,
@@ -238,6 +242,7 @@ mod tests {
             document_path: doc.to_string(),
             component: "queue".to_string(),
             node_key: node_key.to_string(),
+            node_index: None,
             item_id: node_key.to_string(),
             op_kind: op_kind.to_string(),
             actor: OpActor::User,

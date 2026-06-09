@@ -524,6 +524,10 @@ fn build_ops_from_semantic_diff(
             document_path: document_path.to_string(),
             component: event.component.clone(),
             node_key: event.node_key.clone(),
+            // Within-component node index: after-index for inserts/replaces,
+            // before-index for removes. Feeds the exchange-tail narrowing in the
+            // affectedness classifier (`#loop-guard-exchange-node-granularity`).
+            node_index: event.after_index.or(event.before_index),
             item_id: event.item_id.clone(),
             op_kind: event.op.clone(),
             actor,
@@ -621,7 +625,26 @@ fn derive_turn_scope(
         return None;
     }
     let driver = resolve_driver_address(content, prompt_targets);
-    Some(agent_doc_core::turn_scope::TurnScope::for_driver(driver))
+    let exchange_tail_floor = exchange_node_count(content);
+    Some(
+        agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            driver,
+            exchange_tail_floor,
+        ),
+    )
+}
+
+/// Count of `exchange` item nodes present at turn start — the tail floor for the
+/// affectedness classifier (`#loop-guard-exchange-node-granularity`). An op at an
+/// index at or above this count is a tail append/edit (affects the turn); below it
+/// is committed history. Returns `None` when there are no exchange nodes so the
+/// classifier keeps its coarse whole-component behavior.
+fn exchange_node_count(content: &str) -> Option<usize> {
+    let count = agent_doc_markdown_ast::mutations::all_item_nodes(content)
+        .iter()
+        .filter(|node| node.component == "exchange")
+        .count();
+    (count > 0).then_some(count)
 }
 
 /// Find the queue item node a prompt target refers to and address it.
@@ -12685,6 +12708,59 @@ mod tests {
                 .classified
                 .iter()
                 .all(|op| op.class == agent_doc_core::turn_scope::AffectednessClass::Independent)
+        );
+    }
+
+    #[test]
+    fn exchange_old_block_edit_is_independent_but_tail_append_affects() {
+        // #loop-guard-exchange-node-granularity end-to-end: while the turn answers
+        // a queue driver, an edit to an OLD bulleted exchange block must classify
+        // Independent (must not preempt the auto-loop drain), while a genuine new
+        // bulleted prompt appended at the exchange tail must still affect the turn.
+        let base = "\
+<!-- agent:exchange -->
+### Re: prior topic
+
+- old context bullet one
+- old context bullet two
+<!-- agent:boundary:b1 -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue go -->
+- do [#driver]
+<!-- /agent:queue -->
+";
+        let targets = vec!["do [#driver]".to_string()];
+        let scope = derive_turn_scope(base, &targets).expect("scope derived");
+        assert_eq!(
+            scope.exchange_tail_floor,
+            Some(2),
+            "two committed exchange bullets => tail floor 2"
+        );
+
+        // Old-block edit: change the FIRST (index 0) exchange bullet.
+        let old_edit = base.replace("- old context bullet one", "- old context bullet one EDITED");
+        let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+        assert!(
+            !affectedness.turn_affected,
+            "editing an old exchange block must not affect the turn: {:?}",
+            affectedness.classified
+        );
+
+        // Tail append: a new bulleted prompt after the last committed bullet.
+        let tail_append = base.replace(
+            "- old context bullet two\n",
+            "- old context bullet two\n- please also cover the retry path\n",
+        );
+        let summary2 = semantic_diff_summary(base, &tail_append, &[]).unwrap();
+        let ops2 = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary2);
+        let affectedness2 = agent_doc_core::turn_scope::classify_cycle(&ops2, &scope);
+        assert!(
+            affectedness2.turn_affected,
+            "a new tail-appended exchange prompt must still affect the turn: {:?}",
+            affectedness2.classified
         );
     }
 

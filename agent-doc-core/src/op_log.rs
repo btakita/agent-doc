@@ -111,6 +111,14 @@ pub struct DocumentOp {
     pub component: String,
     /// Stable node key (`component:occurrence:item-id:dup`).
     pub node_key: String,
+    /// Position of the node within its component (after-index for inserts/
+    /// replaces, before-index for removes). Carries the tail-vs-old-block signal
+    /// the affectedness classifier needs to narrow `exchange` to its active tail
+    /// (`#loop-guard-exchange-node-granularity`). `None` when the source did not
+    /// supply an index (e.g. an op replayed from the durable store, which never
+    /// feeds the live classifier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_index: Option<usize>,
     /// Backlog/queue item id, when the node carries one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub item_id: String,
@@ -184,6 +192,7 @@ mod tests {
             document_path: "plan.md".to_string(),
             component: "queue".to_string(),
             node_key: "queue:0:beta:0".to_string(),
+            node_index: Some(1),
             item_id: "beta".to_string(),
             op_kind: "insert".to_string(),
             actor: OpActor::User,
@@ -208,6 +217,7 @@ mod tests {
             document_path: "plan.md".to_string(),
             component: "queue".to_string(),
             node_key: "queue:0:beta:0".to_string(),
+            node_index: None,
             item_id: "beta".to_string(),
             op_kind: "insert".to_string(),
             actor: OpActor::User,

@@ -109,15 +109,37 @@ pub struct TurnScope {
     /// Addresses the turn will mutate (output).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub write_set: Vec<Address>,
+    /// Exchange node-index floor for the turn's active tail
+    /// (`#loop-guard-exchange-node-granularity`). The `exchange` component is
+    /// whole-component in `read_set`/`write_set`, but only its *tail* — nodes at
+    /// or after this index (the active turn's appends and edits) — affects the
+    /// turn. An edit to an OLD exchange block (index below the floor) is
+    /// `Independent` and must not preempt the auto-loop drain. `None` keeps the
+    /// coarse whole-component behavior (no exchange nodes / unknown tail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exchange_tail_floor: Option<usize>,
 }
 
 impl TurnScope {
-    /// Build the canonical turn scope for an optional driver queue node.
+    /// Build the canonical turn scope for an optional driver queue node, with no
+    /// exchange-tail narrowing (whole-component exchange affectedness).
+    pub fn for_driver(driver: Option<Address>) -> Self {
+        Self::for_driver_with_exchange_tail(driver, None)
+    }
+
+    /// Build the canonical turn scope for an optional driver queue node, narrowing
+    /// the `exchange` component to its active tail at `exchange_tail_floor`.
     ///
     /// read_set = `{driver, exchange tail}`; write_set = `{exchange append,
     /// driver strike, backlog, status, review}`. Addresses are deduped while
-    /// preserving first-seen order so the manifest is stable.
-    pub fn for_driver(driver: Option<Address>) -> Self {
+    /// preserving first-seen order so the manifest is stable. `exchange_tail_floor`
+    /// is the count of exchange nodes present at turn start: a later op at an index
+    /// at or above it is a tail append/edit (affects the turn); an op below it
+    /// edits committed history and is independent.
+    pub fn for_driver_with_exchange_tail(
+        driver: Option<Address>,
+        exchange_tail_floor: Option<usize>,
+    ) -> Self {
         let exchange = Address::component("exchange", 0);
         let mut read_set = Vec::new();
         if let Some(driver) = &driver {
@@ -140,6 +162,7 @@ impl TurnScope {
             driver,
             read_set: dedupe_addresses(read_set),
             write_set: dedupe_addresses(write_set),
+            exchange_tail_floor,
         }
     }
 }
@@ -185,6 +208,29 @@ impl AffectednessClass {
     }
 }
 
+/// Resolve `(in_read, in_write)` membership for an op against the scope.
+///
+/// `#loop-guard-exchange-node-granularity`: when the scope carries an
+/// `exchange_tail_floor`, an `exchange` op is in scope only if it targets the
+/// active tail — its node index is at or above the floor (a tail append or tail
+/// edit). An op below the floor edits committed exchange history and is out of
+/// scope (→ `Independent`), so it never preempts the auto-loop drain. The
+/// `exchange` component is canonically in both the read set (tail) and the write
+/// set (append), so a tail op is in both. Without a floor, or for non-`exchange`
+/// components, fall back to whole-component / node-key overlap.
+fn scope_membership(op_address: &Address, op_index: Option<usize>, scope: &TurnScope) -> (bool, bool) {
+    if op_address.component == "exchange"
+        && let Some(floor) = scope.exchange_tail_floor
+    {
+        let is_tail = op_index.is_some_and(|index| index >= floor);
+        return (is_tail, is_tail);
+    }
+    (
+        scope.read_set.iter().any(|a| op_address.overlaps(a)),
+        scope.write_set.iter().any(|a| op_address.overlaps(a)),
+    )
+}
+
 /// Classify a single operation against the current turn scope.
 ///
 /// `affects(O,S) = conflict(O.target, read_set) ∨ conflict(O.target, write_set)`.
@@ -193,14 +239,18 @@ impl AffectednessClass {
 /// real edit), a `remove`/`move` is `StructuralDependency`, a read-set
 /// intersection is `InputAffecting`, and a write-set-only intersection is
 /// `OutputContended`.
+///
+/// `op_index` is the op's within-component node index (after-index for
+/// inserts/replaces, before-index for removes); it narrows `exchange`
+/// affectedness to the active tail (`#loop-guard-exchange-node-granularity`).
 pub fn classify_op(
     actor: crate::op_log::OpActor,
     op_kind: &str,
     op_address: &Address,
+    op_index: Option<usize>,
     scope: &TurnScope,
 ) -> AffectednessClass {
-    let in_read = scope.read_set.iter().any(|a| op_address.overlaps(a));
-    let in_write = scope.write_set.iter().any(|a| op_address.overlaps(a));
+    let (in_read, in_write) = scope_membership(op_address, op_index, scope);
     if !in_read && !in_write {
         return AffectednessClass::Independent;
     }
@@ -249,7 +299,7 @@ pub fn classify_cycle(ops: &[crate::op_log::DocumentOp], scope: &TurnScope) -> C
         .iter()
         .map(|op| {
             let address = op_address(op);
-            let class = classify_op(op.actor, &op.op_kind, &address, scope);
+            let class = classify_op(op.actor, &op.op_kind, &address, op.node_index, scope);
             ClassifiedOp {
                 component: op.component.clone(),
                 node_key: op.node_key.clone(),
@@ -364,13 +414,13 @@ mod tests {
         // An insert into the icebox (not in any scope set) is independent.
         let addr = Address::node("icebox", 0, "icebox:0:note:0");
         assert_eq!(
-            classify_op(OpActor::User, "insert", &addr, &scope),
+            classify_op(OpActor::User, "insert", &addr, None, &scope),
             AffectednessClass::Independent
         );
         // A *different* queue node beside the running one is also independent.
         let sibling = Address::node("queue", 0, "queue:0:other:0");
         assert_eq!(
-            classify_op(OpActor::User, "insert", &sibling, &scope),
+            classify_op(OpActor::User, "insert", &sibling, None, &scope),
             AffectednessClass::Independent
         );
     }
@@ -381,7 +431,7 @@ mod tests {
         let scope = scope_for("queue:0:driver:0");
         let driver = Address::node("queue", 0, "queue:0:driver:0");
         assert_eq!(
-            classify_op(OpActor::User, "replace", &driver, &scope),
+            classify_op(OpActor::User, "replace", &driver, None, &scope),
             AffectednessClass::InputAffecting
         );
     }
@@ -392,7 +442,7 @@ mod tests {
         let scope = scope_for("queue:0:driver:0");
         let driver = Address::node("queue", 0, "queue:0:driver:0");
         assert_eq!(
-            classify_op(OpActor::User, "remove", &driver, &scope),
+            classify_op(OpActor::User, "remove", &driver, None, &scope),
             AffectednessClass::StructuralDependency
         );
     }
@@ -404,7 +454,7 @@ mod tests {
         // backlog is in the write set but not the read set.
         let backlog = Address::node("backlog", 0, "backlog:0:item:0");
         assert_eq!(
-            classify_op(OpActor::ForeignSupervisor, "replace", &backlog, &scope),
+            classify_op(OpActor::ForeignSupervisor, "replace", &backlog, None, &scope),
             AffectednessClass::OutputContended
         );
     }
@@ -416,14 +466,120 @@ mod tests {
         // A live-buffer actor touching an in-scope address is spoofed, not contended.
         let exchange = Address::component("exchange", 0);
         assert_eq!(
-            classify_op(OpActor::LiveBuffer, "replace", &exchange, &scope),
+            classify_op(OpActor::LiveBuffer, "replace", &exchange, None, &scope),
             AffectednessClass::ProvenanceSpoofed
         );
         // ...but a live-buffer op outside scope is still just independent.
         let icebox = Address::node("icebox", 0, "icebox:0:n:0");
         assert_eq!(
-            classify_op(OpActor::LiveBuffer, "replace", &icebox, &scope),
+            classify_op(OpActor::LiveBuffer, "replace", &icebox, None, &scope),
             AffectednessClass::Independent
+        );
+    }
+
+    fn exchange_tail_scope(floor: usize) -> TurnScope {
+        TurnScope::for_driver_with_exchange_tail(
+            Some(Address::node("queue", 0, "queue:0:driver:0")),
+            Some(floor),
+        )
+    }
+
+    #[test]
+    fn exchange_tail_floor_makes_old_block_edit_independent() {
+        // #loop-guard-exchange-node-granularity: with a tail floor of 2 (two
+        // committed exchange nodes), an edit to an OLD exchange block (index 0)
+        // must NOT affect the turn — it is committed history, not the active tail.
+        use crate::op_log::OpActor;
+        let scope = exchange_tail_scope(2);
+        let old_block = Address::node("exchange", 0, "exchange:0:ft-old:0");
+        assert_eq!(
+            classify_op(OpActor::User, "replace", &old_block, Some(0), &scope),
+            AffectednessClass::Independent
+        );
+        // The paired remove of the same old block is likewise independent.
+        assert_eq!(
+            classify_op(OpActor::User, "remove", &old_block, Some(0), &scope),
+            AffectednessClass::Independent
+        );
+    }
+
+    #[test]
+    fn exchange_tail_floor_keeps_tail_append_affecting() {
+        // A genuine mid-loop user prompt appended at the tail (index == floor)
+        // still affects the turn and must preempt the drain — no false negative.
+        use crate::op_log::OpActor;
+        let scope = exchange_tail_scope(2);
+        let tail_append = Address::node("exchange", 0, "exchange:0:ft-new:0");
+        assert_eq!(
+            classify_op(OpActor::User, "insert", &tail_append, Some(2), &scope),
+            AffectednessClass::InputAffecting
+        );
+        // An index beyond the floor (a second appended node) is also tail.
+        assert_eq!(
+            classify_op(OpActor::User, "insert", &tail_append, Some(5), &scope),
+            AffectednessClass::InputAffecting
+        );
+    }
+
+    #[test]
+    fn exchange_tail_floor_suppresses_live_buffer_tail_drift() {
+        // A live-buffer actor touching the tail is still ProvenanceSpoofed (a
+        // lagging sidecar), not a real contended edit.
+        use crate::op_log::OpActor;
+        let scope = exchange_tail_scope(2);
+        let tail = Address::node("exchange", 0, "exchange:0:ft-x:0");
+        assert_eq!(
+            classify_op(OpActor::LiveBuffer, "insert", &tail, Some(2), &scope),
+            AffectednessClass::ProvenanceSpoofed
+        );
+    }
+
+    #[test]
+    fn exchange_without_floor_keeps_whole_component_behavior() {
+        // No floor (None): any exchange op overlaps the whole-component address,
+        // preserving the conservative pre-narrowing behavior. Exchange is in the
+        // read set, so an exchange edit is InputAffecting regardless of index.
+        use crate::op_log::OpActor;
+        let scope = scope_for("queue:0:driver:0");
+        assert!(scope.exchange_tail_floor.is_none());
+        let old_block = Address::node("exchange", 0, "exchange:0:ft-old:0");
+        assert_eq!(
+            classify_op(OpActor::User, "replace", &old_block, Some(0), &scope),
+            AffectednessClass::InputAffecting
+        );
+    }
+
+    #[test]
+    fn classify_cycle_narrows_exchange_old_edit_but_keeps_tail() {
+        // End-to-end through classify_cycle: an old-block exchange edit plus a
+        // tail append. Only the tail append affects the turn.
+        use crate::op_log::{CausalClock, DocumentOp, OpActor};
+        let scope = exchange_tail_scope(2);
+        let mk = |node_key: &str, op_kind: &str, idx: Option<usize>| DocumentOp {
+            document_path: "plan.md".to_string(),
+            component: "exchange".to_string(),
+            node_key: node_key.to_string(),
+            node_index: idx,
+            item_id: String::new(),
+            op_kind: op_kind.to_string(),
+            actor: OpActor::User,
+            clock: CausalClock::default(),
+            before_preview: None,
+            after_preview: None,
+            recorded_at: None,
+        };
+        let old_only = vec![mk("exchange:0:ft-old:0", "replace", Some(0))];
+        assert!(
+            !classify_cycle(&old_only, &scope).turn_affected,
+            "an old-block exchange edit alone must not affect the turn"
+        );
+        let with_tail = vec![
+            mk("exchange:0:ft-old:0", "replace", Some(0)),
+            mk("exchange:0:ft-new:0", "insert", Some(2)),
+        ];
+        assert!(
+            classify_cycle(&with_tail, &scope).turn_affected,
+            "a tail append must still affect the turn"
         );
     }
 
@@ -435,6 +591,7 @@ mod tests {
             document_path: "plan.md".to_string(),
             component: component.to_string(),
             node_key: node_key.to_string(),
+            node_index: None,
             item_id: String::new(),
             op_kind: op_kind.to_string(),
             actor,

@@ -75,6 +75,13 @@ cache-control breakpoint, and the provider cache key is
 Routing affinity includes the agent, model, and prompt mode. The volatile suffix
 never contributes to the stable-prefix fingerprint or provider cache key.
 
+The token/performance gate persists prompt-cache effectiveness history as JSONL
+samples keyed by provider, harness, and real transcript id. Current Codex/OpenAI
+and Claude/Anthropic transcript samples are compared against the latest matching
+workload history. A missing history match reports `baseline_required`; a
+regression fails with cached-input delta, creation-token spike, thresholds, and
+the same ranked miss causes used by session-cost diagnostics.
+
 ## Streaming Checkpoints
 
 - Streaming agent paths save the first non-empty partial response immediately, then save changed partial output at most once every 30 seconds.

@@ -14,7 +14,12 @@
 //! - provider key: version + routing-affinity hash + stable-prefix hash. The
 //!   volatile suffix never contributes to the replay key.
 
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 
 pub const PROMPT_CACHE_BOUNDARY: &str =
     "<agent_doc_prompt_cache_boundary cache_control=\"ephemeral\" volatile_suffix=\"follows\" />";
@@ -35,7 +40,7 @@ pub struct PromptCacheReplayKey {
     pub routing_affinity: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptCacheSessionCostSample {
     pub stable_prefix_sha256: String,
     pub adapter_state: String,
@@ -44,11 +49,41 @@ pub struct PromptCacheSessionCostSample {
     pub creation_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCacheEffectivenessSample {
+    pub schema_version: u8,
+    pub provider: String,
+    pub harness: String,
+    pub transcript_id: String,
+    pub observed_at_unix_ms: Option<u64>,
+    pub cost: PromptCacheSessionCostSample,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptCacheMissCause {
     pub cause: &'static str,
     pub impact: u64,
     pub detail: String,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PromptCacheTrendThresholds {
+    pub min_cached_input_loss_tokens: u64,
+    pub min_creation_token_spike_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptCacheTrendStatus {
+    BaselineRequired,
+    Pass,
+    Fail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptCacheTrendCheck {
+    pub status: PromptCacheTrendStatus,
+    pub summary: String,
+    pub causes: Vec<PromptCacheMissCause>,
 }
 
 impl PromptCacheBlocks {
@@ -118,6 +153,44 @@ impl PromptCacheSessionCostSample {
     }
 }
 
+impl PromptCacheEffectivenessSample {
+    pub fn new(
+        provider: impl AsRef<str>,
+        harness: impl AsRef<str>,
+        transcript_id: impl Into<String>,
+        cost: PromptCacheSessionCostSample,
+    ) -> Self {
+        PromptCacheEffectivenessSample {
+            schema_version: 1,
+            provider: normalize_history_key(provider.as_ref()),
+            harness: normalize_history_key(harness.as_ref()),
+            transcript_id: transcript_id.into(),
+            observed_at_unix_ms: None,
+            cost,
+        }
+    }
+
+    pub fn observed_at_unix_ms(mut self, observed_at_unix_ms: u64) -> Self {
+        self.observed_at_unix_ms = Some(observed_at_unix_ms);
+        self
+    }
+
+    fn same_workload_as(&self, other: &PromptCacheEffectivenessSample) -> bool {
+        self.provider == other.provider
+            && self.harness == other.harness
+            && self.transcript_id == other.transcript_id
+    }
+}
+
+impl Default for PromptCacheTrendThresholds {
+    fn default() -> Self {
+        PromptCacheTrendThresholds {
+            min_cached_input_loss_tokens: 10_000,
+            min_creation_token_spike_tokens: 10_000,
+        }
+    }
+}
+
 pub fn render_prompt_cache_blocks(stable_prefix: &str, volatile_suffix: &str) -> String {
     let stable = stable_prefix.trim_end();
     let volatile = volatile_suffix.trim_start();
@@ -129,6 +202,63 @@ pub fn render_prompt_cache_blocks(stable_prefix: &str, volatile_suffix: &str) ->
     rendered.push_str("\n\n");
     rendered.push_str(volatile);
     rendered
+}
+
+pub fn append_prompt_cache_effectiveness_sample(
+    path: impl AsRef<Path>,
+    sample: &PromptCacheEffectivenessSample,
+) -> Result<()> {
+    let path = path.as_ref();
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create prompt-cache history dir {}", parent.display()))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("open prompt-cache history {}", path.display()))?;
+    serde_json::to_writer(&mut file, sample)
+        .with_context(|| format!("serialize prompt-cache sample for {}", path.display()))?;
+    file.write_all(b"\n")
+        .with_context(|| format!("write prompt-cache history newline to {}", path.display()))?;
+    Ok(())
+}
+
+pub fn load_prompt_cache_effectiveness_history(
+    path: impl AsRef<Path>,
+) -> Result<Vec<PromptCacheEffectivenessSample>> {
+    let path = path.as_ref();
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!("open prompt-cache effectiveness history {}", path.display())
+            });
+        }
+    };
+    let mut samples = Vec::new();
+    for (line_number, line) in BufReader::new(file).lines().enumerate() {
+        let line =
+            line.with_context(|| format!("read prompt-cache history line {}", line_number + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let sample: PromptCacheEffectivenessSample =
+            serde_json::from_str(&line).with_context(|| {
+                format!(
+                    "parse prompt-cache effectiveness sample {}:{}",
+                    path.display(),
+                    line_number + 1
+                )
+            })?;
+        samples.push(sample);
+    }
+    Ok(samples)
 }
 
 pub fn rank_cache_miss_causes(
@@ -208,6 +338,74 @@ pub fn rank_cache_miss_causes(
     causes
 }
 
+pub fn check_prompt_cache_effectiveness_trend(
+    history: &[PromptCacheEffectivenessSample],
+    current: &PromptCacheEffectivenessSample,
+    thresholds: PromptCacheTrendThresholds,
+) -> PromptCacheTrendCheck {
+    let Some(previous) = history
+        .iter()
+        .rev()
+        .find(|sample| sample.same_workload_as(current))
+    else {
+        return PromptCacheTrendCheck {
+            status: PromptCacheTrendStatus::BaselineRequired,
+            summary: format!(
+                "status=baseline_required provider={} harness={} transcript={} fingerprint={} adapter_state={} routing_affinity={}",
+                current.provider,
+                current.harness,
+                current.transcript_id,
+                current.cost.stable_prefix_sha256,
+                current.cost.adapter_state,
+                current.cost.routing_affinity
+            ),
+            causes: Vec::new(),
+        };
+    };
+
+    let causes = rank_cache_miss_causes(&previous.cost, &current.cost);
+    let cached_loss = cached_input_loss(&previous.cost, &current.cost).unwrap_or(0);
+    let creation_spike = creation_token_spike(&previous.cost, &current.cost).unwrap_or(0);
+    let key_regression = causes.iter().any(|cause| {
+        matches!(
+            cause.cause,
+            "fingerprint" | "adapter_state" | "routing_affinity"
+        )
+    });
+    let token_regression = cached_loss >= thresholds.min_cached_input_loss_tokens
+        || creation_spike >= thresholds.min_creation_token_spike_tokens;
+    let status = if key_regression || token_regression {
+        PromptCacheTrendStatus::Fail
+    } else {
+        PromptCacheTrendStatus::Pass
+    };
+    let status_label = match status {
+        PromptCacheTrendStatus::BaselineRequired => "baseline_required",
+        PromptCacheTrendStatus::Pass => "pass",
+        PromptCacheTrendStatus::Fail => "fail",
+    };
+    let previous_observed = previous
+        .observed_at_unix_ms
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    PromptCacheTrendCheck {
+        status,
+        summary: format!(
+            "status={} provider={} harness={} transcript={} previous_observed_at_unix_ms={} thresholds=cached_loss>={};creation_spike>={} {}",
+            status_label,
+            current.provider,
+            current.harness,
+            current.transcript_id,
+            previous_observed,
+            thresholds.min_cached_input_loss_tokens,
+            thresholds.min_creation_token_spike_tokens,
+            render_cache_miss_ranking(Some(&previous.cost), &current.cost)
+        ),
+        causes,
+    }
+}
+
 pub fn render_cache_miss_ranking(
     previous: Option<&PromptCacheSessionCostSample>,
     current: &PromptCacheSessionCostSample,
@@ -282,6 +480,10 @@ fn signed_positive_delta(previous: Option<u64>, current: Option<u64>) -> String 
         (Some(_), Some(_)) => "0".to_string(),
         _ => "unknown".to_string(),
     }
+}
+
+fn normalize_history_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 fn content_sha256(content: &str) -> String {
@@ -451,5 +653,224 @@ mod tests {
         assert!(rendered.contains("cached_input_delta=unknown"));
         assert!(rendered.contains("creation_token_spike=unknown"));
         assert!(rendered.contains("miss_rank=baseline_required"));
+    }
+
+    #[test]
+    fn prompt_cache_history_persists_real_provider_pairs_as_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        let history_path = dir.path().join("prompt-cache-history.jsonl");
+        let codex_openai = effectiveness_sample(
+            "OpenAI",
+            "Codex",
+            "codex-openai-real-transcript",
+            "stable",
+            "resume:codex-session",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(120_000),
+            Some(1_000),
+        )
+        .observed_at_unix_ms(1_700_000_001);
+        let claude_anthropic = effectiveness_sample(
+            "Anthropic",
+            "Claude",
+            "claude-anthropic-real-transcript",
+            "stable",
+            "resume:claude-session",
+            "agent=claude;model=opus;mode=template",
+            Some(90_000),
+            Some(2_000),
+        )
+        .observed_at_unix_ms(1_700_000_002);
+
+        append_prompt_cache_effectiveness_sample(&history_path, &codex_openai).unwrap();
+        append_prompt_cache_effectiveness_sample(&history_path, &claude_anthropic).unwrap();
+
+        let loaded = load_prompt_cache_effectiveness_history(&history_path).unwrap();
+
+        assert_eq!(loaded, vec![codex_openai, claude_anthropic]);
+        assert_eq!(loaded[0].provider, "openai");
+        assert_eq!(loaded[0].harness, "codex");
+        assert_eq!(loaded[1].provider, "anthropic");
+        assert_eq!(loaded[1].harness, "claude");
+    }
+
+    #[test]
+    fn trend_gate_fails_codex_openai_cache_regression_with_actionable_deltas() {
+        let previous = effectiveness_sample(
+            "openai",
+            "codex",
+            "codex-openai-real-transcript",
+            "stable",
+            "resume:codex-session",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(120_000),
+            Some(1_000),
+        )
+        .observed_at_unix_ms(1_700_000_001);
+        let current = effectiveness_sample(
+            "openai",
+            "codex",
+            "codex-openai-real-transcript",
+            "stable",
+            "resume:codex-session",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(2_000),
+            Some(90_000),
+        );
+
+        let check = check_prompt_cache_effectiveness_trend(
+            &[previous],
+            &current,
+            PromptCacheTrendThresholds {
+                min_cached_input_loss_tokens: 10_000,
+                min_creation_token_spike_tokens: 10_000,
+            },
+        );
+
+        assert_eq!(check.status, PromptCacheTrendStatus::Fail);
+        assert!(check.summary.contains("status=fail"));
+        assert!(check.summary.contains("provider=openai harness=codex"));
+        assert!(
+            check
+                .summary
+                .contains("transcript=codex-openai-real-transcript")
+        );
+        assert!(
+            check
+                .summary
+                .contains("previous_observed_at_unix_ms=1700000001")
+        );
+        assert!(check.summary.contains("cached_input_delta=-118000"));
+        assert!(check.summary.contains("creation_token_spike=+89000"));
+        assert!(check.summary.contains("miss_rank=1:cached_input_delta"));
+        assert!(
+            check
+                .causes
+                .iter()
+                .any(|cause| cause.cause == "creation_token_spike")
+        );
+    }
+
+    #[test]
+    fn trend_gate_fails_claude_anthropic_fingerprint_regression() {
+        let previous = effectiveness_sample(
+            "anthropic",
+            "claude",
+            "claude-anthropic-real-transcript",
+            "stable-a",
+            "resume:claude-session",
+            "agent=claude;model=opus;mode=template",
+            Some(90_000),
+            Some(2_000),
+        );
+        let current = effectiveness_sample(
+            "anthropic",
+            "claude",
+            "claude-anthropic-real-transcript",
+            "stable-b",
+            "resume:claude-session",
+            "agent=claude;model=opus;mode=template",
+            Some(89_000),
+            Some(2_200),
+        );
+
+        let check = check_prompt_cache_effectiveness_trend(
+            &[previous],
+            &current,
+            PromptCacheTrendThresholds::default(),
+        );
+
+        assert_eq!(check.status, PromptCacheTrendStatus::Fail);
+        assert!(check.summary.contains("provider=anthropic harness=claude"));
+        assert!(check.summary.contains("miss_rank=1:fingerprint"));
+        assert_eq!(check.causes[0].cause, "fingerprint");
+    }
+
+    #[test]
+    fn trend_gate_passes_small_token_noise_below_thresholds() {
+        let previous = effectiveness_sample(
+            "openai",
+            "codex",
+            "codex-openai-real-transcript",
+            "stable",
+            "resume:codex-session",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(120_000),
+            Some(1_000),
+        );
+        let current = effectiveness_sample(
+            "openai",
+            "codex",
+            "codex-openai-real-transcript",
+            "stable",
+            "resume:codex-session",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(119_500),
+            Some(1_100),
+        );
+
+        let check = check_prompt_cache_effectiveness_trend(
+            &[previous],
+            &current,
+            PromptCacheTrendThresholds {
+                min_cached_input_loss_tokens: 10_000,
+                min_creation_token_spike_tokens: 10_000,
+            },
+        );
+
+        assert_eq!(check.status, PromptCacheTrendStatus::Pass);
+        assert!(check.summary.contains("status=pass"));
+        assert!(check.summary.contains("cached_input_delta=-500"));
+        assert!(check.summary.contains("creation_token_spike=+100"));
+    }
+
+    #[test]
+    fn trend_gate_requires_baseline_for_new_transcript_workload() {
+        let current = effectiveness_sample(
+            "openai",
+            "codex",
+            "new-real-transcript",
+            "stable",
+            "fresh",
+            "agent=codex;model=gpt-5;mode=template",
+            Some(2_000),
+            Some(90_000),
+        );
+
+        let check = check_prompt_cache_effectiveness_trend(
+            &[],
+            &current,
+            PromptCacheTrendThresholds::default(),
+        );
+
+        assert_eq!(check.status, PromptCacheTrendStatus::BaselineRequired);
+        assert!(check.summary.contains("status=baseline_required"));
+        assert!(check.summary.contains("provider=openai harness=codex"));
+        assert!(check.summary.contains("transcript=new-real-transcript"));
+        assert!(check.causes.is_empty());
+    }
+
+    fn effectiveness_sample(
+        provider: &str,
+        harness: &str,
+        transcript_id: &str,
+        stable_prefix_sha256: &str,
+        adapter_state: &str,
+        routing_affinity: &str,
+        cached_input_tokens: Option<u64>,
+        creation_tokens: Option<u64>,
+    ) -> PromptCacheEffectivenessSample {
+        PromptCacheEffectivenessSample::new(
+            provider,
+            harness,
+            transcript_id,
+            PromptCacheSessionCostSample {
+                stable_prefix_sha256: stable_prefix_sha256.to_string(),
+                adapter_state: adapter_state.to_string(),
+                routing_affinity: routing_affinity.to_string(),
+                cached_input_tokens,
+                creation_tokens,
+            },
+        )
     }
 }

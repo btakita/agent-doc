@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -61,7 +61,35 @@ The server's `application_approval_blockers_` stays the authoritative gate; the 
 **Spec:** apply4 build-plan P6 documents the UI affordance.
 
 Deploy is still queued (backlog **#xyp5**, covering both the backend `b136519` and this UI `b731aa4`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push both live and smoke-test against the `cda67748…` draft.
-<!-- agent:boundary:d737c872 -->
+
+### Re: All form-submission errors should show at the top + a toast, in red — opus-4-8
+
+> **Queue prompt:**
+>
+> Errors on all form submission should show the error at the top and with a toast message. The error text above the form should be red.
+
+
+Done. Standardized form-submission error UX across the portal. Committed + pushed to EFS `main` (`39a60c0`); **not deployed** (preset was `#spec-test-commit-push`).
+
+The errors were inconsistent — some shown below the submit button, some in a mid-page card, some only as a toast, and broker "Submit a deal" rendered a *failure* in the green success-note style (the same green-error class of bug you flagged on the loan-application screen).
+
+New shared module `portal/shared/form_error.tsx`:
+- **`FormError`** — a red `role="alert"` banner rendered at the **top** of a form.
+- **`report_form_error_(set_error, message)`** — sets the inline banner **and** fires an error toast (the Toaster is mounted once in `portal/index.tsx`, so all roles can toast).
+- **`form_error_message_`** — normalizes an unknown error/`Error`/`{error}` payload into a clean message.
+
+Applied to the portal submission forms:
+- **broker** submit-deal + pre-qual, **borrower** make-payment + messages (send), **investor** accreditation upload: error moved to the **top in red + toast**.
+- **admin** blog-posts + funded-deals: already toasted on save failure; added the top red banner so the error also shows at the top.
+
+**Public/auth forms** (apply, contact, login, signup) already render a red error alert at the top — but they're full-page-reload with no client JS runtime, so a toast isn't available there without shipping a bundle. They satisfy the visible "red error at the top" requirement; the toast is a portal-only capability. (Documented in the spec.)
+
+**Verification:** `bun run check` green — 393 tests pass (added behavioral coverage of the helper + source assertions that each form renders the top banner and reports through it).
+
+**Spec:** `prds/form-error-standard.md` documents the convention and where it's applied.
+
+Deploy is still queued (backlog **#xyp5**, now also covering this `39a60c0`) — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to push all the pending UI/backend fixes live.
+<!-- agent:boundary:b3a0ad8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,13 +97,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Errors on all form submission should show the error at the top and with a toast message. The error text above the form should be red.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xyp5] Deploy the approval-gate fix (#approve-requires-full-app, efs b136519) to production: cf:d1:migrate:remote not needed (no schema change) + deploy:worker + smoke-test that /api/admin/full-applications/:id/status rejects accepted and /approve fails closed on an incomplete app. Held pending deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
+- [ ] [#xyp5] Deploy pending EFS production fixes to prod (deploy:worker; no remote D1 migration needed): (a) #approve-requires-full-app — efs b136519 backend + b731aa4 admin UI; (b) #form-error-standard — efs 39a60c0 top-of-form red error banner + toast across portal submission forms. Smoke-test: status endpoint rejects accepted; /approve fails closed + Accept button disabled with missing-list on draft cda67748; a failed form submission shows a red top-of-form error AND a toast. Held pending deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

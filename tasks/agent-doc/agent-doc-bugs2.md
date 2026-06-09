@@ -82,13 +82,41 @@ The backlog is now six concrete actionable ids, already in dependency order (top
 **On "100% actionable without gates":** items 1–5 are pure-Rust + SimWorld — zero gates, do them in any focused session. Item 6 (`#xkpf`) is kept **open and actionable**, not gated — its only "blocker" is the operator being at a live IDE, which is an action, not a code dependency. That's the one thing decomposition genuinely can't remove: verifying editor-plugin behavior requires an editor. Every other gate I was hitting has been converted into one of items 1–5.
 
 Two things stay in `agent:review` rather than backlog because they are **not** purely actionable: `#pcpc5` (08b authority cutover — spec-08b forbids landing it in a response cycle, and it depends on 2–5) and the `#pcp7` plugin WatchService demote (live-gated, part of `#z2jy`). Those are correctly review items, not actionable-now backlog. Everything else is queued and unblocked, ordered by dependency.
-<!-- agent:boundary:4bc6bd20 -->
+
+### Re: do #dj14 (pcpc4-single-watcher) — opus-4-8
+
+> **Queue prompt:**
+>
+> do #dj14
+
+
+Already complete and committed — no new implementation needed.
+
+**#dj14 = pcpc4-single-watcher** is realized by commit `038f0165` ("pcpc4: single controller-owned filesystem watcher (realizes #pcp4)"), an ancestor of submodule HEAD. The actionable CORE is in `agent-doc-orchestration/src/document_watcher.rs`:
+
+- `WatcherRegistry` — idempotent per document; a second register reuses the one gate, so a document is never watched twice (kills the R1 duplicate-watcher reconcile race).
+- `DocumentWatchGate::observe` — coalesces event bursts; suppresses agent self-write echoes via debounce write-provenance.
+- `route_event` — a settled change routes a reconcile op through the session actor (`QueueHead`), serialized with writes (`#pcpc3`).
+
+**Verification:** the 7 shipped SimWorld tests pass green:
+```
+cargo test -p agent-doc-orchestration --lib document_watcher
+→ 7 passed; 0 failed (idempotent registry, distinct-doc gates, burst coalesce,
+  self-write echo suppression, serialized actor routing, content/non-content events)
+```
+
+**What stays gated (correctly, not part of #dj14's core):** the paired plugin WatchService read-only demotion (`#pcp7`) is carved out as `#pcpc4b` — it needs a plugin change + live IntelliJ verification and remains gated under `#xkpf`. The notify-feed wiring + old-watcher removal is the `#pcpc5` cutover.
+
+**Scope note:** the agent-doc submodule has a broader uncommitted working tree (23 files of in-flight supervisor-migration work). That is outside #dj14's scope, so I left it untouched and did not fold it into this closeout.
+
+Closing #dj14 as done.
+<!-- agent:boundary:37537103 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do #dj14
+- ~~do #dj14~~
 - do #0pke
 - do #v7m3
 - do #2bhm
@@ -121,7 +149,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#dj14] pcpc4-single-watcher: Replace per-process notify watchers with one controller-owned watcher per document feeding the session actor (realizes #pcp4). SimWorld: one watcher event stream, no duplicate-watcher reconcile race. CORE is ACTIONABLE NOW (SimWorld, no live editor); the paired plugin WatchService read-only demotion (#pcp7) needs a plugin change + live verification (stays gated under #xkpf). Depends on #pcpc1-3. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#0pke] pcpc3-write-queue: Route all write/stream/finalize/repair disk writes AND supervisor idle/file-watch writes through the session actor single ordered write queue (realizes #pcp3b); flock becomes a cross-process backstop only. Kills the R6 self-race / exit-75 at the root. SimWorld: concurrent supervisor-write + agent-finalize serialize; finalize never observes a half-applied write. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1+#pcpc2. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#v7m3] pcpc2-supervisor-adapter: Replace the out-of-process agent-doc start supervisor with an in-process supervisor adapter hosted by the controller (owns harness child PTY/stdin, readiness, restart/clear, heartbeat as a controller task); preserve the Unix-socket external boundary for CLI/editor callers. SimWorld: heartbeat loss + reattach, restart/clear in-process. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#2bhm] pcpc1-actor-runtime: Turn session_actor.rs from a data struct into a real in-process actor — per-document mailbox processed on one owning thread; SQLite CAS stays the durable backstop. SimWorld: concurrent commands to one document actor serialize deterministically. ACTIONABLE NOW (SimWorld-verifiable, NO live editor). First phase of #pf15/#pcp-consol; unblocks #pcpc2-4. Plan: tasks/agent-doc/plan-supervisor-in-process.md

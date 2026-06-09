@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 5 response topic(s): "Accept and send to TMO" error shown in green; should be disabled when incomplete; All form-submission errors should show at the top + a toast, in red; Did you deploy? Deploy.; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:519721db -->
+<!-- agent:boundary:071ba747 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +44,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In the /admin pages, the Management links should have the number of items in the page ![img_2.png](img_2.png).
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

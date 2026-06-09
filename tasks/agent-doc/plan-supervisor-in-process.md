@@ -90,3 +90,22 @@ Multi-day, multi-surface (orchestration + supervisor + controller + plugins). Do
 saturated session. Each phase: `make check` + fresh `cargo install` + `cargo build --release`, and
 the watcher/plugin-demotion phases need live IntelliJ/Codex verification. Follow the gate ladder with
 rollback flags so a regression never strands committed controller rows.
+
+## Actionability (2026-06-09): what is NOT blocked by a live editor
+
+The "fresh, unsaturated session" requirement is a **focus/size** constraint, not a hard block. Most
+of this work is pure-Rust + SimWorld and can be picked up in any focused (non-degraded) session
+without a live IDE:
+
+- **`#pcpc1` (session-actor message runtime), `#pcpc2` (in-process supervisor adapter), `#pcpc3`
+  (ordered write queue), `#pcpc4` (single controller-owned watcher core)** — all SimWorld-verifiable
+  with deterministic coverage (concurrent serialization, heartbeat loss/reattach, single event
+  stream). **No live editor needed.** These are queued as actionable `agent:backlog` ids. Dependency
+  order: `#pcpc1 → #pcpc2 → #pcpc3 → #pcpc4`.
+- **Genuinely live-gated (stay in review, run under `#xkpf`):** the `#pcpc4` plugin WatchService
+  read-only demotion (`#pcp7`) and `#pcpc5` migration cutover authority/removal gates — these need a
+  live IntelliJ/Codex pane to prove the external editor boundary, and `#pcpc5` is additionally
+  spec-08b-gated against landing in a response cycle.
+
+So the architecture is **not** blocked end-to-end: phases 1–4 (minus the plugin demote) are
+actionable now; only the cutover + plugin demote await a live session.

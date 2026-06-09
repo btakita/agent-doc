@@ -32,47 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260608-231705.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260609-030135.md`*
 
 Compacted content:
-- Archived 2 response topic(s): model provider layer and MemGraphRAG boundaries; extract MemGraphRAG crate
+- Archived 1 response topic(s): release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: release + publish — gpt-5
-
-> **Queue prompt:**
->
-> release + publish
-
-
-Released and published tsift v0.1.66.
-
-Changed paths:
-- `src/tsift`: version metadata, Cargo.lock local package versions, OpenCode package markers/version, AGENTS/spec marker, and `VERSIONS.md` release heading.
-- Parent repo: `src/tsift` submodule pointer updated to `00e8ace`.
-
-Verification:
-- `make check` passed in `src/tsift`.
-- Dependency-ordered `cargo package -p ... --locked --allow-dirty --list` passed for every release crate.
-- `cargo metadata --locked --format-version 1 --no-deps` passed.
-- `cargo install --path .` installed `tsift 0.1.66`; `tsift --version` reports `tsift 0.1.66`; `tsift status` reports instructions current `v0.1.66`.
-- GitHub CI run `27173441345` completed successfully.
-- Release run `27173443289` completed successfully: GitHub release, crates.io publish, and OpenCode npm publish all succeeded.
-
-Published artifacts:
-- GitHub release: https://github.com/btakita/tsift/releases/tag/v0.1.66
-- crates.io: `cargo info tsift@0.1.66` resolves.
-- npm: `opencode-tsift@0.1.66` is published.
-
-Commits:
-- `src/tsift`: `00e8ace chore: release v0.1.66`, tagged and pushed as `v0.1.66`.
-- Parent repo: `7e53fedf1 chore: update tsift to v0.1.66`, pushed by explicit refspec to avoid publishing unrelated local commits.
-
-Unrelated dirty parent-repo files were left unstaged.
-
-Confidence: high; local verification, CI, Release, crates.io, npm, and GitHub release checks all passed.
-Escalation: none.
-<!-- agent:boundary:377cb18f -->
+<!-- agent:boundary:976dd7f1 -->
 <!-- /agent:exchange -->
 ###
 <!--

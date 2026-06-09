@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Ops-proof auto-completion no longer false-positives on cited dependency
+  work or same-cycle adds (`#opsproof-falsepos`).** Preflight pending
+  maintenance previously reaped an open backlog/review item as done whenever its
+  text held a completion marker (`DONE`/`SHIPPED`/…) plus a commit hash and no
+  blocker word — even when the marker only described already-landed *dependency*
+  work and the item itself was still actionable. A freshly-added backlog item
+  citing a prior commit could be auto-archived on the same cycle it was created.
+  `classify_ops_proof_completion` now requires the marker to be an open item's
+  own *leading status verb* (the status prefix before the first clause break);
+  gated `[/]` items keep the marker-anywhere behavior. Pending maintenance also
+  refuses to reap any item absent from the cycle-start snapshot (a brand-new
+  same-cycle add). `preflight.rs`; SimWorld/unit coverage added.
+
 - **08b document write-authority cutover gate ladder (`#pcpc5cut`, rungs
   `pcpc5a`–`pcpc5c`).** New `AGENT_DOC_WRITE_AUTHORITY` env gate routes the
   central `write::atomic_write` for editor-visible session documents up the 08b

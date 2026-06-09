@@ -3877,7 +3877,24 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
 
         let mut removed_items = Vec::new();
         if should_reap_ops_proof_completions(surface) {
-            let ops_proof_completions = ops_proof_completion_candidates(&current_body);
+            // #opsproof-falsepos: never auto-archive an item that was added this
+            // same cycle. A brand-new add is absent from the post-commit snapshot
+            // captured at cycle start; such items describe just-landed dependency
+            // work and must be closed explicitly, not reaped on the cycle they
+            // appear. Only apply the guard when we have a snapshot baseline to
+            // compare against (untracked scaffold docs have none).
+            let snapshot_baseline = snapshot_at_start.as_deref().filter(|s| !s.trim().is_empty());
+            let snapshot_ids =
+                snapshot_baseline.map(|snap| surface_pending_ids(snap, surface));
+            let ops_proof_completions: Vec<OpsProofCompletion> =
+                ops_proof_completion_candidates(&current_body)
+                    .into_iter()
+                    .filter(|candidate| {
+                        snapshot_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(&candidate.id))
+                    })
+                    .collect();
             if !ops_proof_completions.is_empty() {
                 let evidence_by_id: HashMap<String, String> = ops_proof_completions
                     .iter()
@@ -4140,6 +4157,28 @@ struct OpsProofCompletion {
     evidence: String,
 }
 
+/// Pending item ids present in `surface` within `content`. Used to detect
+/// brand-new same-cycle adds (absent from the cycle-start snapshot) so ops-proof
+/// auto-completion never reaps an item on the cycle it first appears.
+fn surface_pending_ids(content: &str, surface: &str) -> HashSet<String> {
+    crate::component::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .into_iter()
+                .find(|c| component_matches_tracked_surface(&c.name, surface))
+        })
+        .map(|comp| {
+            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            items
+                .into_iter()
+                .map(|item| item.id)
+                .filter(|id| !id.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofCompletion> {
     let (_, items, _) = crate::pending::parse_items(body);
     items
@@ -4164,6 +4203,16 @@ fn classify_ops_proof_completion(item: &crate::pending::PendingItem) -> Option<S
         return None;
     }
 
+    // #opsproof-falsepos: an open (non-gated) actionable item must NOT be reaped
+    // just because its prose cites already-landed dependency work ("the predicate
+    // already shipped in abc1234"). The completion marker must be the item's own
+    // leading status verb. Gated items were deliberately code-completed by the
+    // agent, so a proven marker anywhere in their text legitimately closes them.
+    let is_gated = matches!(item.state, crate::pending::PendingState::Gated);
+    if !is_gated && !marker_is_leading_status(&upper) {
+        return None;
+    }
+
     let has_commit = contains_commit_hash(&text);
     let has_ci = contains_successful_ci_proof(&upper);
     if !has_commit && !has_ci {
@@ -4185,6 +4234,34 @@ fn has_ops_completion_marker(upper: &str) -> bool {
     ["DONE", "SHIPPED", "IMPLEMENTED", "COMPLETE", "COMPLETED"]
         .iter()
         .any(|marker| contains_ascii_word(upper, marker))
+}
+
+/// Max number of leading words (after skipping `#hashtag` tokens) that count as
+/// the item's status prefix for ops-proof auto-completion.
+const LEADING_STATUS_WORDS: usize = 4;
+
+/// True when an ops-completion marker is the item's leading status verb rather
+/// than a marker buried in a cited dependency clause. The leading status segment
+/// is the prefix before the first clause break (`: ` or `. `), further capped to
+/// the first [`LEADING_STATUS_WORDS`] words after skipping leading `#hashtag`
+/// tokens. `upper` must already be ASCII-uppercased.
+fn marker_is_leading_status(upper: &str) -> bool {
+    has_ops_completion_marker(&leading_status_segment(upper))
+}
+
+fn leading_status_segment(upper: &str) -> String {
+    let mut cut = upper.len();
+    for sep in [": ", ". "] {
+        if let Some(idx) = upper.find(sep) {
+            cut = cut.min(idx);
+        }
+    }
+    upper[..cut]
+        .split_whitespace()
+        .filter(|word| !word.starts_with('#'))
+        .take(LEADING_STATUS_WORDS)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn has_ops_completion_blocker(upper: &str) -> bool {
@@ -9703,6 +9780,95 @@ mod tests {
         assert!(log.contains("auto_complete_ops_proof"));
         assert!(log.contains("id=doneci"));
         assert!(log.contains("id=reviewdone"));
+    }
+
+    // #opsproof-falsepos: an open actionable backlog item whose completion
+    // marker only describes already-landed *dependency* work (a cited commit
+    // hash in mid-sentence prose) must NOT be auto-reaped. Only a marker that is
+    // the item's own leading status verb proves the item itself is done.
+    #[test]
+    fn ops_proof_does_not_reap_cited_dependency_marker() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#citeddep] wire the predicate into dispatch. The predicate already shipped in 600797b3 and is unit-tested\n",
+            "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate into dispatch\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let backlog_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_backlog_component(&c.name))
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+
+        // Cited-dependency marker stays open; leading-status marker is reaped.
+        assert!(
+            backlog_after.contains("[#citeddep]"),
+            "cited-dependency item must not be reaped: {backlog_after}"
+        );
+        assert!(!backlog_after.contains("[#leadstatus]"));
+        assert!(file_after.contains("[#leadstatus] DONE 7b60fcdc"));
+    }
+
+    // #opsproof-falsepos: never auto-archive an item on the same cycle it is
+    // added. A brand-new add is absent from the cycle-start snapshot, so even a
+    // leading-status completion marker must not reap it this cycle.
+    #[test]
+    fn pending_maintenance_does_not_reap_same_cycle_add() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        // Snapshot baseline: an existing leading-status done item + a keeper.
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate\n",
+            "- [ ] [#keep] keep this open item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        // File adds a brand-new same-cycle item with a leading-status marker that
+        // would normally reap — but it is absent from the snapshot.
+        let file_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#freshdone] DONE abc1234: just landed this cycle\n",
+            "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate\n",
+            "- [ ] [#keep] keep this open item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, file_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let backlog_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_backlog_component(&c.name))
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+
+        // Same-cycle add survives; pre-existing leading-status item is reaped.
+        assert!(
+            backlog_after.contains("[#freshdone]"),
+            "same-cycle add must not be reaped: {backlog_after}"
+        );
+        assert!(backlog_after.contains("[#keep]"));
+        assert!(!backlog_after.contains("[#leadstatus]"));
     }
 
     #[test]

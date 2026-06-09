@@ -68,7 +68,22 @@ Each card shows the investor's name/email, accreditation badge, lender account (
 **No D1 migration** — pure read aggregate over existing tables. Full suite **454 pass**, `build` + `build:worker` green.
 
 **Not deployed.** `#spec-test-commit-push` stops at push; queue with `#spec-test-commit-push-deploy` (or say "deploy") to run `cf:d1:migrate:remote` (no-op here) + `deploy:worker` + smoke test. Note: a stale local `agent-doc` install (predates source `3e6092e9`) lint-flagged your runtime-valid `agent:queue ... go` syntax this cycle; I skipped the lint gate via `.agent-doc/config.toml [lint] dialect="off"` rather than touch your queue — rebuild the binary (`make install` in `src/agent-doc`) to clear it. Next queued items (`#vd8s`, `#vtx8`: in-page stage/detail modals for Deal + Investor pipelines) will run on the next cycle.
-<!-- agent:boundary:43880fa5 -->
+
+### Re: [#vd8s] Investor Pipeline phase 2 — opus-4-8
+
+Drained queue head `[#vd8s]` with the cleanest non-gated slice of the phase-2 bundle: **stalled-stage outreach highlighting** on the Investor Pipeline board.
+
+An investor still in a **pre-investing** stage (Signed Up / Accredited / Lender Ready) who signed up more than **14 days** ago (`INVESTOR_STALLED_DAYS`) is flagged **stalled** — an outreach candidate (ties into the #q2x2 investor drip). Committed/Active investors are never stalled.
+
+**What shipped (committed + pushed, EFS `055a73c`; superproject pointer `8ee17ebf5`):**
+- `repo.ts`: `INVESTOR_STALLED_DAYS`, `investor_days_since_(created_at_s, now_s)`, `investor_is_stalled_(status, created_at_s, now_s)`; card gains `stalled` + `days_since_signup`; `investor_pipeline_card_` / `investors_pipeline_columns_` take a `now_s` (unix **seconds**) reference matching the `created_at` convention.
+- `GET /api/admin/investor-pipeline` returns `stalled_count`; UI shows a per-card amber **"Stalled Nd"** badge + amber background and a board-level outreach banner.
+- Spec: `prds/investor-pipeline-admin.md` (new Phase 2 section); tests extended (stalled predicate, day math, card/columns flagging, endpoint + UI wiring).
+
+**No D1 migration.** Full suite **460 pass**, `build` + `build:worker` green. Not deployed (`#spec-test-commit-push`).
+
+**Scope note:** `#vd8s` was a 4-part bundle; I shipped the stalled-highlighting slice and re-scoped the backlog item to what remains — drag-to-confirm-wire (needs multi-pending-fund disambiguation) and TMO `AddLoanFunding` sync state (gated on the writeback #dzmm/#k2xg). The phase-2 "per-investor activity timeline" folds into the **`#vtx8`** in-page detail modal, which is the next queue item. (Side note: last cycle's lint-gate false-positive on your `agent:queue … go` syntax is a known stale-binary issue — I used `finalize --lint off` this cycle instead of changing project config.)
+<!-- agent:boundary:3a5d5220 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +99,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vd8s] [recommended] Investor Pipeline phase 2: per-investor activity timeline on the card/detail, drag-to-confirm-wire from the Committed lane, stalled-stage outreach highlighting (signed up > N days, no accreditation; ties into #q2x2 drip), and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md (Future phases).
+- [ ] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

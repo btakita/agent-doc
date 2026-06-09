@@ -97,14 +97,26 @@ Done and deployed. All three admin pipeline dialogs now have a top-right **×** 
 - The **loan dialog previously had no explicit close affordance at all** (backdrop click only) — it now has the × plus the existing action row. The lead and investor dialogs keep their bottom "Close" text button as well.
 
 **Verification:** `bun test` 495 pass / 0 fail; `bun run build` + `build:worker` clean. Deployed Worker version **`99826cca-635d-49a7-9e38-952b2a5b4e79`**. Smoke test green: `/` → 200, `/apply` → 200, `/portal-admin/pipeline` → 303→login.
-<!-- agent:boundary:9726a7f8 -->
+
+### Re: Close button on all dialogs + Esc-to-close (spec + tests, commit + push, deploy) — opus-4-8
+
+Done, tested, pushed, and deployed.
+
+**What changed (EFS `1854dbd`, pointer `2d2fb2410`):**
+- **Esc closes every dialog.** `PortalModal` (the shared base for all portal dialogs) now closes on the `Esc` key, wired centrally so all ~16 dialog usages inherit it for free. A module-level modal stack ensures only the **topmost** dialog closes when modals are stacked (e.g. a confirm over a form), instead of collapsing the whole stack.
+- **Close × on the payment dialog.** I audited all PortalModal dialogs: every one already had a visible dismiss (× / Close / Cancel) **except** the admin Payment detail dialog, which had only Confirm/Deny/Hide action buttons. It now has the standard header × (`ModalCloseButton`) beside the status pill. The three pipeline dialogs got their × last cycle (`56d45ac`).
+- **Spec + tests** (`#spec-test-commit-push`): added three contract tests to `tests/portal-table-dialog.test.ts` — Esc-to-close wiring + topmost-only stack, the shared `ModalCloseButton` primitive, and a guard that **every** PortalModal dialog exposes a visible close affordance (so a future dialog can't ship without one).
+
+**Verification:** `bun test` **498 pass / 0 fail** (3 new); `build` + `build:worker` clean. Pushed to `btakita/equityfundingsource-dev@1854dbd` and superproject pointer `2d2fb2410`. Deployed Worker version **`2bf66430-b229-469c-ae59-25f0ac274817`**. Smoke test green: `/` → 200, `/apply` → 200, `/portal-admin/pipeline` → 303→login, `/portal-admin/payments` → 303→login.
+<!-- agent:boundary:3fc9e564 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- In all dialogs, including pipeline dialogs, ensure there is a close button. Make the `Esc` key close the dialog. deploy 
 <!-- /agent:queue -->
 
 ## Backlog

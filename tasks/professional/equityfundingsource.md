@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -127,7 +127,7 @@ So the board now reads: **Leads → Applications → Processing → Documents �
 **Verification:** `bun run check` green — 398 tests pass (Leads column model + card builder + handler/UI wiring; the existing label assertion was updated to "Applications").
 
 **Spec:** `prds/67v2-admin-loan-pipeline-kanban.md` Phase E. Queued the deploy as a backlog item (#pipeline-leads). Exchange is getting large (≈80 lines) — flagging per the size warning; no action needed.
-<!-- agent:boundary:e0a92530 -->
+<!-- agent:boundary:fe742a99 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +135,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#r76a]
 <!-- /agent:queue -->
 
 ## Backlog

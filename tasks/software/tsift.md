@@ -37,7 +37,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps - gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e8a90c44 -->
+
+### Re: kx6s — gpt-5
+
+> **Queue prompt:**
+>
+> do [#kx6s]
+
+
+Implemented `#kx6s`.
+
+Changed paths:
+- `src/tsift/packages/tsift-digest/src/metric_digest.rs`: added `memgraphrag_performance_gate` detection/evaluation for `memory_query`, `memory_project_graph`, `graph_db_related`, and `semantic_seeded_neighborhood` latency metrics.
+- `src/tsift/fixtures/memgraphrag-performance-history.json`: added the canonical baseline/current four-surface fixture.
+- `src/tsift/packages/tsift-cli/src/commands/digests.rs`, `src/tsift/packages/tsift-cli/src/lib.rs`, `src/tsift/packages/tsift-cli/tests/exit_code.rs`: added CLI compact/human output and fixture integration coverage.
+- `src/tsift/specs/digests-sessions.md`, `src/tsift/specs/memgraphrag-direction.md`, `src/tsift/VERSIONS.md`: documented the fixture/gate.
+
+Commits:
+- `src/tsift`: `0a3757a` (`metric-digest: add MemGraphRAG performance gate`), pushed to `origin/main`.
+- `agent-loop`: `dfc10eb12` (`tsift: advance MemGraphRAG performance gate`), pushed to `origin/main`.
+
+Verification:
+- `cargo test -p tsift-digest memgraphrag_performance_gate` passed.
+- `cargo test -p tsift-cli --test exit_code metric_digest_reports_memgraphrag_performance_gate_fixture` passed.
+- `make check` passed after the final scoped diff cleanup: workspace clippy, workspace tests, doctests, OpenCode package tests, and npm pack dry-run.
+- `cargo install --path .` completed and replaced the local `tsift` binary.
+- Installed-binary smoke check `tsift metric-digest --input fixtures/memgraphrag-performance-history.json --json` emitted `memgraphrag_performance_gate.decision=pass`.
+- Latest tsift GitHub Actions `CI` run for commit `0a3757a` was `in_progress` at `2026-06-09T04:36:52Z`; local verification is green. The parent `agent-loop` repo reported no workflow named `CI`.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:ca05a0c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,18 +77,18 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kx6s]
+- ~~do [#kx6s]~~
 - do [#qszc]
 - do [#qs5v]
 - do [#zkft]
 - do [#58p8]
 - do [#kn0d]
+- What are #next-steps to improve prompt caching?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kx6s] Add a MemGraphRAG performance baseline fixture and gate covering memory query, memory project-graph, graph-db related, and semantic seeded neighborhood latency.
 - [ ] [#qszc] Make memory candidate retrieval indexed with observed-at/create-time indexes plus FTS5 or a materialized token table, and rank a bounded candidate set instead of all memory events.
 - [ ] [#qs5v] Materialize semantic vectors in a typed table/blob and add a GraphStore top-candidate query so semantic related does not scan and parse every semantic node property.
 - [ ] [#zkft] Make memory graph projection incremental with memory watermarks/content hashes and explicit recent-first, oldest-first, and query-relevant read policies.

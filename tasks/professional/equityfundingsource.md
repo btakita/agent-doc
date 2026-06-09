@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -151,7 +151,21 @@ All three done. Committed + pushed to `equityfundingsource-dev` main (`9da578e`)
 **3. Linked from AGENTS.md.** New `## Runbooks` section points to `runbooks/deployment.md` and notes that `wrangler deploy` alone doesn't migrate, so always deploy via `make deploy`.
 
 **Verification:** package.json is valid; full suite **423 pass / 0 fail**. This closes the loop on the migration-gap outage — the next deploy will apply pending migrations automatically.
-<!-- agent:boundary:69341f4e -->
+
+### Re: do #my09 — already shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#my09]
+
+
+`#my09` was completed last cycle in `9da578e` — nothing to redo, marking it done. Verified the deliverables are live on `main`:
+
+- **`deploy:worker`** = `build:worker → cf:d1:migrate:remote → cf-deploy` (the migration step is in place; `make deploy` applies pending migrations before activating the Worker).
+- **`runbooks/deployment.md`** exists (3.6K) and is linked from **AGENTS.md** under the `## Runbooks` section.
+
+`#my09` was the `[recommended]` backlog note I filed when fixing the "Failed to load applications" outage; the follow-up "make the deployment script include migrations + add runbooks" task then implemented it directly. Closing the loop — no further action needed.
+<!-- agent:boundary:24092f78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,13 +173,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#my09]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#my09] [recommended] Make deploy apply pending D1 migrations (or fail-closed when migrations are pending): the 2026-06-09 "Failed to load applications" outage happened because cf-deploy shipped code ahead of migrations 0055/0056. Add a `bun run cf:d1:migrate:remote` step (or a pending-migration gate) to the deploy:worker flow.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

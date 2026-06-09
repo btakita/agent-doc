@@ -90,7 +90,57 @@ Commits pushed:
 - `btakita/agent-loop@5b8c76e5b` (`chore: update tagpath benchmark baseline`) to `origin/main`, updating the `src/tagpath` submodule pointer.
 
 Escalation: none. Residual working tree note: `src/tagpath/AGENTS.md` and root `AGENTS.md` still contain unstaged tsift instruction-refresh diffs from the session start; I did not stage or commit them because they are unrelated to `#tglazymeasure`.
-<!-- agent:boundary:80cd3137 -->
+
+### Re: tglazyproto — gpt-5
+
+> **Queue prompt:**
+>
+> [#tglazyproto]
+
+
+Implemented and pushed the feature-gated lazily-rs `ProjectSession` prototype in the root `tagpath` facade crate. `tagpath-core` was not changed.
+
+Changed paths in `src/tagpath`:
+- `Cargo.toml` / `Cargo.lock`: added optional `project-session` feature with optional `lazily = 0.10.2` dependency.
+- `src/lib.rs`: exposes `tagpath::project_session` only under `all(feature = "project-session", not(target_arch = "wasm32"))`.
+- `src/project_session.rs`: adds `ProjectSession` with lazily cells for project root, resolved config, source list with path/mtime/size fingerprint, ontology state, sidecar state, and query; slots for extraction, family map, search hits, and lint findings.
+- `tests/test_project_session.rs`: covers family/search invalidation after same-path file edits, lint findings, and sidecar state refresh after index write.
+- `SPEC.md` §17.8 and `README.md`: document the prototype boundary, state graph, and feature test command.
+
+Important design choices:
+- The prototype is opt-in, so default tagpath builds and the benchmark paths do not pull lazily into normal runtime behavior yet.
+- Existing extraction/parser/core types were not forced to become `Clone`; lazily slots are read with `get_rc` where needed.
+- The same-path edit case is covered by the source-list metadata fingerprint, not just path membership.
+
+Verification:
+- `cargo test --features project-session --test test_project_session` passed.
+- `cargo test --workspace` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets --features project-session -- -D warnings` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed via `tsift rewrite`.
+- `cargo build --workspace` passed via `tsift rewrite`.
+- `cargo install --path . --force` succeeded.
+- `bash scripts/benchmark-current-performance.sh` passed under default features after the optional prototype remained disabled by default:
+
+```csv
+case,budget_ms,runs,min_ms,median_ms,max_ms,status
+noop_sidecar_update,10,5,6,6,8,pass
+one_changed_file_update,125,5,110,114,121,pass
+full_reindex,450,5,371,374,379,pass
+watch_save_burst,500,5,369,371,373,pass
+mcp_indexed_project_query,150,5,101,103,106,pass
+mcp_family_by_path_read,150,5,60,61,65,pass
+```
+
+- Top-level `make check` passed.
+- Tagpath GitHub Actions `CI` for the pushed commit is in progress, not waited on per closeout policy: run `27234866384`, `feat: prototype lazily project session`, started `2026-06-09T20:48:09Z`.
+- `agent-loop` has no workflow named `CI` (`gh run list --workflow CI --limit 1` returned that no such workflow exists).
+
+Commits pushed:
+- `btakita/tagpath@440070f` (`feat: prototype lazily project session`) to `origin/main`.
+- `btakita/agent-loop@cae1db80b` (`chore: update tagpath project session prototype`) to `origin/main`, updating the `src/tagpath` submodule pointer.
+
+Escalation: none. Residual working tree note: the unstaged `AGENTS.md` tsift instruction-refresh diffs remain outside this task and were not committed.
+<!-- agent:boundary:f43efe52 -->
 <!-- /agent:exchange -->
 
 ###
@@ -99,7 +149,7 @@ Escalation: none. Residual working tree note: `src/tagpath/AGENTS.md` and root `
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#tglazymeasure]~~
-- [#tglazyproto]
+- ~~[#tglazyproto]~~
 - [#tglazywatch]
 - [#tglazydecide]
 <!-- /agent:queue -->
@@ -107,7 +157,6 @@ Escalation: none. Residual working tree note: `src/tagpath/AGENTS.md` and root `
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tglazyproto] Prototype a root-crate ProjectSession using lazily-rs behind a feature flag or internal module: model config, source list, ontology, and sidecar state as cells; model extraction, family maps, search, and lint findings as slots; keep tagpath-core unchanged.
 - [ ] [#tglazywatch] Exercise the ProjectSession prototype in one narrow runtime path, preferably tagpath watch or request-scoped MCP reads, and compare invalidation behavior, debounce/save-burst cost, and sidecar no-op latency against the baseline.
 - [ ] [#tglazydecide] Adopt or reject lazily-rs for tagpath based on measured results: require no regression in sidecar/no-op index paths, clearer invalidation code, bounded single-thread ownership, and documented SPEC/README guidance.
 <!-- /agent:backlog -->

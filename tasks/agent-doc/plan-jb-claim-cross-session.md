@@ -24,11 +24,20 @@ The guard itself is correct — it prevents silently registering a pane that liv
 3. **VS Code parity** — mirror the same branch in the VS Code claim command.
 4. Verify the UX end-to-end in a live IntelliJ with a genuinely cross-session pane (pairs with the live-verify batch `#xkpf`).
 
+## Status (2026-06-09)
+
+- **Step 1 — DONE** (submodule 6c0ae573): `claim` emits `[claim] cross-session-reject pane_id=.. pane_session=.. configured=..` (`CROSS_SESSION_REJECT_MARKER` + `cross_session_reject_marker`) before the human bail; unit test + spec 07.
+- **Step 2 — CODE-COMPLETE** (this turn): `ClaimAction` parses the marker (`parseCrossSessionReject`) and shows a `Messages.showDialog` choice — **Force Claim** (`claim --force`) / **Switch Project Session** (`session set <pane_session>` then claim) / **Cancel**. JB unit test `ClaimActionTest`; full JB suite green.
+- **Step 3 — CODE-COMPLETE** (this turn): VS Code mirror — `crossSession.parseCrossSessionReject` + a modal `showWarningMessage` in `claimActionInternal` with the same three branches. Unit test `crossSession.test.ts`; `npm test` green.
+- **Step 4 — GATED** on live IntelliJ/VS Code: click-through each branch against a genuinely cross-session pane. Pairs with `#xkpf`.
+
 ## Tests
 
-- Unit: `cross_session_decision` table already covers Accept/AcceptStale/AcceptForce/Reject — add a case asserting the structured-reject payload carries `pane_session`/`configured`/`pane_id`.
-- Plugin UX: live IntelliJ verification only (gated).
+- Rust unit: `cross_session_reject_marker_carries_stable_fields` (claim.rs) asserts the stable marker shape.
+- JB unit: `ClaimActionTest` (marker parse: ordered/unordered/missing-field/no-marker).
+- VS Code unit: `crossSession.test.ts` (same matrix).
+- Plugin UX: live IntelliJ/VS Code verification only (gated, step 4).
 
 ## Spec
 
-Update `specs/07-session-tmux-commands.md` (claim cross-session contract) with the structured-reject result shape.
+`specs/07-session-tmux-commands.md` (claim cross-session contract) documents the structured-reject marker shape AND the plugin dialog branches; live verification gated.

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -106,7 +106,28 @@ Deployed now. You were right — the previous three cycles were `#spec-test-comm
 **Smoke tests (unauthenticated):** homepage `200`, `/apply` `200`, the admin loan-application route `303` (redirects to login — route resolves), the status endpoint `401` (auth-gated, not a 500), and the homepage now serves the freshly-deployed bundle `index.browser-6KUZXKHY.js`. The admin/borrower-gated behaviors (button disabled, `accepted` rejected, error toast) need a logged-in session to see visually — they're covered by the 393 passing tests; load `/loan-applications/cda67748…` while signed in as admin and the Accept button should now be disabled with the missing-parts reason.
 
 Marked the deploy item **#xyp5** done and updated the Status block with the new Worker version and the now-live gates.
-<!-- agent:boundary:cfb1f046 -->
+
+### Re: Pipeline — add Leads, rename Applications, Processing vs Approved — opus-4-8
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline: Add "Leads" to the pipeline. Rename "Applications Received" to "Applications". Is there a difference between "Processing" and "Approved"? If yes, add "Approved". If no, Approved applications move straight to "Processing".
+
+
+Done. Committed + pushed to EFS `main` (`877c3eb`); **not deployed** (preset was `#spec-test-commit-push`) — say "deploy" to push it live.
+
+**Your question — is there a difference between "Processing" and "Approved"?** In this system there's no separate "Approved" stage, so I did **not** add an "Approved" column. The reason: the pipeline is TMO-aligned, and TMO has no `Approved` loan status. A loan only exists in the pipeline *because* its full application was Approved (accepted → TMO writeback). So the entry column — "Applications" — **is** the approved-applications bucket. It's already distinct from "Processing" (active work). Adding a separate "Approved" column would just duplicate "Applications". So: an approved application lands in **Applications** and you move it to **Processing**. (If TMO actually exposes a distinct "Approved" status you want surfaced, tell me and I'll add it as a real column.)
+
+**What I changed:**
+- **Added a "Leads" column** as the leftmost funnel entry — open prequalification leads (`application_leads` with status new/contacted). Converted leads already show as loans further right; archived leads are excluded. Leads are **read-only** here (a lead isn't a loan, so no drag-to-status and loans can't be dropped into Leads); clicking a lead card opens the application-leads admin.
+- **Renamed "Application Received" → "Applications".** Only the label changed — the underlying TMO loan status stays `Application Received`, so drag-to-status writes and TMO alignment are untouched.
+
+So the board now reads: **Leads → Applications → Processing → Documents → Underwriting → Funded** (+ Closed / On Hold / Unassigned / Application Denied).
+
+**Verification:** `bun run check` green — 398 tests pass (Leads column model + card builder + handler/UI wiring; the existing label assertion was updated to "Applications").
+
+**Spec:** `prds/67v2-admin-loan-pipeline-kanban.md` Phase E. Queued the deploy as a backlog item (#pipeline-leads). Exchange is getting large (≈80 lines) — flagging per the size warning; no action needed.
+<!-- agent:boundary:e0a92530 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,12 +135,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- In https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications: Add "Leads" to the pipeline. Rename "Applications Received" to "Applications". Is there a difference between "Processing" and "Approved"? If yes, add "Approved". If no, Approved applications move straight to "Processing".
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#r76a] Deploy the pipeline Leads-column + 'Applications' rename (#pipeline-leads, efs 877c3eb) to production: deploy:worker (no D1 migration). Smoke-test /portal-admin/pipeline shows a leftmost read-only 'Leads' column from open application_leads, the entry column reads 'Applications', and no separate 'Approved' column. Held pending deploy authorization (say 'deploy' or re-queue with #spec-test-commit-push-deploy).
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

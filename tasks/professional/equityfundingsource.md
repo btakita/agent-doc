@@ -160,7 +160,27 @@ Built the secure delivery mechanism for the wire values from #ty2v — wire deta
 **Full suite 488 pass**, `build` + `build:worker` green. **Not deployed** — `#spec-test-commit-push` stops at push, and this adds D1 migration `0059`; say "deploy" (or `#spec-test-commit-push-deploy`) to run `cf:d1:migrate:remote` + `deploy:worker` + smoke test.
 
 **Remaining (queued follow-up):** loan/borrower-scoped link issuance from the admin loan + wire-confirmation surfaces and the title/escrow → EFS → lender routing model. This drains the queue head; the next queued items (lead-dialog full data, deal-pipeline search/Kanban-only, menu reorder) run on the following cycles.
-<!-- agent:boundary:601ae632 -->
+
+### Re: Deal Pipeline lead dialog — full lead data — opus-4-8
+
+> **Queue prompt:**
+>
+> The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.
+
+
+> **Queue prompt:**
+>
+> The Prequalification Lead dialog in /portal-admin/pipeline should contain all lead data. Same with the other steps.
+
+The Prequalification Lead dialog (the Deal Pipeline lead card modal) now shows **all** lead data instead of just amount + property.
+
+**What shipped (committed + pushed, EFS `5b75e3a`; superproject pointer `f1b810ebc`):**
+- New `LeadModalBody` component fetches the full `application_leads` record on open (`GET /api/admin/application-leads/:id`) and renders the complete field set: **name, email, phone, requested amount, estimated value, loan purpose, lien position, timeline, property address/location/type/occupancy, staff-notification + borrower-invite status, created timestamp, and the free-text message** — with a loading state, an error state, and a card-summary fallback. Still read-only with the "Open lead" deep-link.
+- **"Same with the other steps":** the loan-card modal already renders every field carried on the loan card (number, amount, note rate, escrow, property, holding entity, investor-deal status) plus its Publish/Close/Delete actions and "Open full loan", so the other pipeline steps already surface their available data inline. No new endpoint was needed — both modals reuse existing admin reads.
+- Spec: `prds/investor-pipeline-admin.md` Phase 3a; tests extended in `tests/admin-pipeline.test.ts` (LeadModalBody fetch + full field set + loading/error states).
+
+**Full suite 489 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the queue head; next up (still queued): deal-pipeline search + Kanban-only, then the Deal-Pipeline menu reorder.
+<!-- agent:boundary:65f06d37 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,7 +189,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~[#wir3]~~
-- The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.
+- ~~The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.~~
 - Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.
 - Move Deal Pipeline above Loan Applications in the Admin menu.
 <!-- /agent:queue -->

@@ -213,7 +213,62 @@ Gated in review pending str0m dependency decision and implementation.
 Acknowledged content reorganization. All queue items consolidated under the `#pz3k` response. Safer-ffi/diplomat noted as deferred.
 
 Queue remaining: `#ms7x` (cross-lang conformance tests), `#9qce` (standalone docs). Exchange at 153 lines, 11 cycles — compact recommended after queue drains.
+
+
+### Re: Exchange reorganization — glm-5.1
+
+Acknowledged content reorganization. Consolidated `#kavj`, `#jpf1` content into `#pz3k` response body.
+
+### Re: #ms7x — Cross-language conformance test suite — glm-5.1
+
+> **Queue prompt:**
+>
+> [#ms7x]
+
+
+Completed `#ms7x`: added cross-language IPC conformance test suite with canonical JSON fixtures.
+
+**Changed paths** (in `src/lazily-rs`):
+- `tests/conformance/`: 6 canonical JSON fixtures covering all IPC protocol surfaces
+- `tests/conformance.rs`: 9 conformance tests (6 fixture-based + 3 behavioral)
+- `Makefile`: added `test-ipc-conformance` target, included in `check`
+
+**Fixture coverage:**
+
+| Fixture | Surface | Assertions |
+|---------|---------|------------|
+| `snapshot_minimal.json` | Single payload node snapshot | epoch, node count, type tag, round-trip |
+| `snapshot_multi_node.json` | Multi-node with opaque + edges | opaque state, edge count, root filtering |
+| `snapshot_shared_blob.json` | Shared-memory blob reference | blob offset/len/epoch, SharedBlob state |
+| `delta_sequential.json` | All 7 DeltaOp variants | op count, variant coverage, sequential check |
+| `delta_non_sequential.json` | Gap delta requiring resync | ResyncRequired status, epoch gap |
+| `delta_shared_blob.json` | Delta with shared-blob payload | SharedBlob payload, blob descriptor |
+
+**Test coverage (9 tests + 3 binary):**
+- 6 fixture-based tests: parse wire JSON, validate assertions, verify round-trip fidelity
+- `conformance_permission_filter_omits_unreadable_nodes`: default-deny + omission-not-redaction
+- `conformance_permission_delta_filter_omits_without_redaction`: delta filtering preserves only readable ops
+- `conformance_ipc_message_transport_agnostic_bytes`: same bytes parsed as WebSocket text, WebRTC data, FFI buffer
+- Binary conformance tests (under `ipc-binary` feature): snapshot/delta round-trip, size comparison
+
+**Fixture schema** (language-agnostic, for lazily-py/lazily-zig adoption):
+```json
+{
+  "description": "...",
+  "protocol_version": 1,
+  "kind": "Snapshot" | "Delta",
+  "assertions": { ... field checks ... },
+  "wire": { <IpcMessage as serde_json> }
+}
+```
+
+**Verification:**
+- `make check` (fmt, clippy, build, all test suites, benchmark check) — passed
+- `make test-ipc-conformance` — 9/9 passed
+- Pushed `btakita/lazily-rs` `3042701` and superproject `263ce6403`
+
 <!-- agent:boundary:0b320236 -->
+<!-- agent:boundary:34761eb9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -227,7 +282,7 @@ Queue remaining: `#ms7x` (cross-lang conformance tests), `#9qce` (standalone doc
 - ~~[#pz3k]~~
 - ~~[#kavj]~~
 - ~~[#jpf1]~~
-- [#ms7x]
+- ~~[#ms7x]~~
 - [#9qce]
 <!-- /agent:queue -->
 

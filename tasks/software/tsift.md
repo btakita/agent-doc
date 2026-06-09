@@ -226,7 +226,54 @@ Commits:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:32a02ddb -->
+
+### Re: 58p8 - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#58p8]
+
+
+Implemented `#58p8`.
+
+Summary:
+- Folded `observed_at` decay and memory-node signals into the shared `GraphStore::ranked_neighborhood` scoring path.
+- Added public `RankedNeighborhoodOptions` controls for observed-at reference time, half-life, observed-at weight, and memory-node boost.
+- Added shared core scoring helpers and mirrored the scoring in the SQLite recursive neighborhood query so in-memory and SQLite pruning use the same ranking model.
+- Changed sibling expansion pruning to score/sort candidates before applying `max_nodes`, so recent/high-signal memory nodes survive same-depth pruning.
+- Documented the scoring contract in `specs/graph.md` and moved the MemGraphRAG `#rankdefault/#58p8` note from pending to implemented.
+
+Changed paths:
+- `src/tsift/packages/tsift-core/src/lib.rs`
+- `src/tsift/packages/tsift-core/src/store.rs`
+- `src/tsift/packages/tsift-core/src/types.rs`
+- `src/tsift/packages/tsift-sqlite/src/lib.rs`
+- `src/tsift/specs/graph.md`
+- `src/tsift/specs/memgraphrag-direction.md`
+- `src/tsift/VERSIONS.md`
+
+Verification:
+- `tsift status`
+- `cargo test -p tsift-core ranked_neighborhood_prefers_recent_memory_nodes_when_pruning -- --nocapture`
+- `cargo test -p tsift-core compute_ranked_neighborhood_score_applies_decay_and_memory_signal -- --nocapture`
+- `cargo test -p tsift-sqlite sqlite_ranked_neighborhood_prefers_recent_memory_nodes_when_pruning -- --nocapture`
+- `cargo test -p tsift-core`
+- `cargo test -p tsift-sqlite`
+- `cargo test -p tsift-cli`
+- `cargo test -p tsift-memgraphrag`
+- `git diff --check`
+- `make check`
+- `gh run watch 27187123858 --exit-status` passed for `src/tsift` main CI (`clippy + test` and `live Convex graph acceptance`).
+- Parent repo `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Commits:
+- `src/tsift`: `8f74f0b graph: rank memory nodes in neighborhoods` pushed to `origin/main`.
+- Parent repo: `0a5e25225 tsift: advance memory-aware graph ranking` pushed to `origin/main`; the current parent `HEAD` has a later unrelated commit, and the `src/tsift` pointer remains at `8f74f0b`.
+
+Escalation: none.
+
+Confidence: high; local workspace checks, package tests, full `make check`, and pushed CI are green.
+<!-- agent:boundary:04a9e4b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -239,7 +286,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~~do [#kx6s]~~
 - ~~do [#qszc]~~
 - ~~:pushpin: :round_pushpin: do [#zkft]~~
-- :pushpin: :round_pushpin: do [#58p8]
+- ~~:pushpin: :round_pushpin: do [#58p8]~~
 - :pushpin: :round_pushpin: do [#kn0d]
 - ~~do [#qs5v]~~
 - :pushpin: What are #next-steps to improve prompt caching?
@@ -248,7 +295,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#58p8] Fold observed-at decay and memory node signals into shared GraphStore ranked_neighborhood scoring so memory and code prune through one graph-ranking path.
 - [ ] [#kn0d] Push semantic seeded neighborhood caps into GraphStore/SQLite with SQL-side edge ranking limits and batched node lookup.
 <!-- /agent:backlog -->
 

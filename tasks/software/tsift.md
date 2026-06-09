@@ -37,7 +37,13 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): pcache-measure - gpt-5; pcache-fingerprint - gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:48119e96 -->
+
+### Re: prompt caching backlog — gpt-5
+
+Added prompt-caching follow-up backlog items in priority order. Top backlog item: `#pcache-replaygate`.
+
+No code/test run was needed because this cycle only mutates the session backlog.
+<!-- agent:boundary:5b8ab757 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,11 +53,16 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+ - Add backlog items to improve prompt caching.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pcache-replaygate] Prompt caching: add a real consecutive-turn replay gate for agent-doc sessions that proves stable-prefix fingerprints, provider cache keys/cache_control, and routing affinity stay constant across no-op/status/queue churn, then intentionally invalidates on durable instruction changes.
+- [ ] [#pcache-missrank] Prompt caching: add cache-miss ranking to session-cost output by fingerprint, adapter state, routing affinity, cached-input delta, and creation-token spike so the highest-impact invalidation cause is visible without JSON analysis.
+- [ ] [#pcache-boundary-contract] Prompt caching: document and test the cache-boundary contract for agent-doc prompt assembly: which blocks may live above the boundary, which must stay in the volatile suffix, and provider-specific breakpoint/key requirements.
+- [ ] [#pcache-ci-history] Prompt caching: persist prompt-cache effectiveness history and trend checks in the token/performance gate so regressions across real Codex/OpenAI and Claude/Anthropic transcripts fail with actionable deltas.
 <!-- /agent:backlog -->
 
 ## Review

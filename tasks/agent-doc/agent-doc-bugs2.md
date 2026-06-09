@@ -35,7 +35,23 @@ complete
 Compacted content:
 - Archived 1 response topic(s): do #install-stale-guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:afba1ecb -->
+
+### Re: queue continues — captured the #exch-intermix repro, deferring the fix to a fresh session — opus-4-8
+
+You cleared the completed `#install-stale-guard` / `#lvb-run` strikes; the active head is now `#exch-intermix`. I'm **not** implementing it in this session, and here's the honest reasoning:
+
+- **The binary isn't dispatching it** — `agent-doc plan` returns `prompt_targets: null` this cycle (the diff was struck-item cleanup, not a new `do` directive).
+- **It's high-stakes, fresh-session work.** `#exch-intermix` is *automatic data-mutation recovery* — on a `live_prompt_drift_after_preflight` it would auto-run `git checkout HEAD` / `reset --from-current` / `finalize --force-disk`. Get the guard wrong and it silently destroys real user content for **every** user. That deserves a focused session with careful negative-case test design, exactly as the item says — not the tail of this long session (a fmt commit, the install-stale-guard feature, and three drift recoveries deep), on the very path that's actively drifting.
+
+**What I did instead (low-risk, high-value prep):** captured the reliable repro into `tasks/agent-doc/plan-ipc-crdt-response-drift.md` (committed `4c5b3e22f`) while it's fresh — it reproduced ~4× today. The new section records the exact `finalize` signature, the **IPC-listener-active trigger** (`skipping working-tree boundary reposition — IPC listener active`), the proven manual recovery order, and a **guarded** auto-recover approach with SimWorld coverage including the negative fail-closed case. The fresh session can implement straight from that.
+
+**Recommendation:** the entire remaining queue is fresh-session / live-pane / root-fix gated:
+- `#exch-intermix` → fresh session, implement from the enriched plan (start here — it's the recurring pain).
+- `#pcpconsol` → its own multi-day fresh session (root-fixes this whole drift class via the single ordered write queue).
+- `#pcpc5cut` (depends on `#pcpconsol`), `#s760wire` / `#saevon` (live IntelliJ pane), `#bkx9perid` (needs a repro), `#tmux-switch-lag` (fresh code session).
+
+Draining these here would mean rushing high-stakes work in a saturated session. Start a fresh `/agent-doc` session for `#exch-intermix` and I'll implement it properly. Not auto-looping.
+<!-- agent:boundary:dc98e13b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,8 +64,6 @@ Compacted content:
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
 - :pushpin: :round_pushpin: do [#tmux-switch-lag]
-- ~~do [#install-stale-guard]~~
-- ~~do [#lvb-run]~~
 <!-- /agent:queue -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,7 +134,7 @@ Fixed. Root cause was a **schema/code mismatch in production**, not a code bug.
 **Fix:** applied the two pending migrations to the production D1 (`equityfundingsource`, `280e1539…`). Both are additive only (CREATE TABLE/INDEX, ADD COLUMN, INSERT OR IGNORE) — no destructive statements. Verified afterward: zero pending migrations; `application_broker_info` and `documents` tables exist; `full_applications.broker_user_id` is present.
 
 Please re-load `/portal-admin/full-applications` (behind your admin auth) to confirm — the schema it needs is now in place. Queued a process fix so deploys apply migrations (or fail closed) and this class of outage can't recur.
-<!-- agent:boundary:43ae3b45 -->
+<!-- agent:boundary:9516d334 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +142,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Make the deployment script include migrations. Add runbooks for deployments. Link runbooks to AGENTS.md
 <!-- /agent:queue -->
 
 ## Backlog

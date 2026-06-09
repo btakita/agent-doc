@@ -35,7 +35,7 @@ complete
 Compacted content:
 - Archived 2 response topic(s): do [#vbk7]; do [#pcpc5]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:87dd5d1f -->
+<!-- agent:boundary:87c4a484 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -81,8 +81,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#loop-guard-exchange-node-granularity] [recommended] The #queue-no-stop-unrelated-edit loop-guard fix scopes turn-affectedness at whole-component exchange granularity (TurnScope write_set holds exchange:0), so an edit to an OLD/unrelated response block inside exchange still classifies as turn-affecting and preempts the drain. Narrow the exchange address in TurnScope to the active turn response node(s) so only edits to the in-scope exchange tail preempt. Overlaps op-scoped-drift node granularity.
 - [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
-- [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.
 - [ ] [#clear-opt-in-threshold] JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded; default 50%, configurable per-doc (frontmatter) and via a project-config default (user request, relocated from queue).
 - [ ] [#console-input-accumulation] /agent-doc + /clear console inputs accumulate as the queue runs; ensure the console is idle before sending, send one command at a time, and never schedule a duplicate /agent-doc or /clear when one is already pending (user request, relocated from queue).
 - [ ] [#queue-contamination-guard-false-positive] session-check #jb-run-agent-doc-response-queue-contamination false-positives on a legit user queue prompt that mentions slash commands (/agent-doc, /clear) because it resembles response prose; the heuristic must not flag genuine user prompts as contamination.

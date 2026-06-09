@@ -187,7 +187,41 @@ cargo test -p agent-doc-orchestration --lib session_actor
 **Note (drift recovered this turn):** the prior `#v7m3` closeout hit `#ipc-crdt-response-drift` — its committed HEAD response was correct, but a post-commit CRDT merge corrupted the working-tree copy (wedged the `#v7m3` bullets into the `#0pke` section and dropped the standalone `#v7m3` heading). Recovered by restoring the document from HEAD (`git checkout HEAD -- <doc>`); snapshot already matched HEAD, so no response was lost.
 
 Closing #2bhm as done.
-<!-- agent:boundary:5cd74adc -->
+
+### Re: do #z2jy (bkx9-pure-detector) — opus-4-8
+
+> **Queue prompt:**
+>
+> do #z2jy
+
+Implemented and committed (submodule `8a029647`, pushed to `origin/main`). This one was genuine new work — unlike `#v7m3`/`#2bhm`/`#dj14`/`#0pke`, no prior commit realized it.
+
+**What shipped — a DORMANT pure per-id loss detector:**
+
+`reaped_directive_ids_without_response(ReapedResponseLossInput)` in `agent-doc-orchestration/src/session_check.rs` — the side-effect-free core of the reaped-no-response detection. Given the directive ids, the reaped ids, the live exchange `content`, and the HEAD compact-`archives` bodies, it returns the reaped `do #id` ids whose `### Re: ... #id` heading did not materialize. It performs no I/O (caller resolves content + archives up front), so it is deterministically unit-testable.
+
+The key difference from the live `check_reaped_queue_head_without_response` guard: it **ignores capture state**, so it also surfaces the `#bkx9` residual — a response body *was* captured this cycle but a specific id lost its `### Re:` in a CRDT merge (the captured-but-id-lost case the live guard early-returns past).
+
+**Tests (5, deterministic, all green):**
+```
+cargo test -p agent-doc-orchestration --lib pure_detector → 5 passed; 0 failed
+```
+- reap-only loss → flagged
+- captured-but-id-lost (`#kept` materialized, `#lost` not) → flags `#lost`
+- materialized-in-HEAD-archive → not a loss
+- unreaped directive → not a loss
+- **multi-directive-single-heading FALSE POSITIVE** — one `### Re: do #a` heading answering both `#a` + `#b` flags `#b` (the known limitation, pinned), and the grouped `### Re: do #a, #b` heading correctly flags neither.
+
+The 3 existing live-guard tests still pass (`reaped_queue_head_*`) — the live guard is byte-for-byte unchanged.
+
+**Why DORMANT (not wired):** this guard runs at every `write --commit` closeout, so a false positive would wedge *all* closeouts. Wiring it + validating against a reproduced `#ipc-crdt-response-drift` stays gated as `#bkx9`. The pure fn is `#[allow(dead_code)]` behind the seam until then; the false-positive class above is exactly what `#bkx9` must resolve before going live. Spec `07-closeout-commands.md #compact-reap-no-response-record` updated to document the staged detector.
+
+**Verification:** `make check` green (the one `unused import` warning is pre-existing in `agent-doc-core/src/frontmatter.rs`, unrelated). `cargo build --release` + `cargo install --path .` done (v0.34.0). CI run `27223915948` is pending after the push (prior runs green) — recorded, continuing from local evidence per the test-bearing-turn rule. Build/install are a no-op for runtime behavior here since the detector is dormant, but run to honor the queue's `#spec-test-build-install-commit-push` preset and validate release compilation.
+
+**Scope note:** the submodule has a large pre-existing in-flight working tree (supervisor-migration drift across ~22 files); I staged only my two files (`session_check.rs` hunks + the spec line), excluding an incidental cosmetic reformat in `session_check.rs` that belongs to that in-flight work.
+
+Closing #z2jy as done.
+<!-- agent:boundary:3d840d7c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -197,7 +231,7 @@ Closing #2bhm as done.
 - ~~do #0pke~~
 - ~~do #v7m3~~
 - ~~do #2bhm~~
-- do #z2jy
+- ~~do #z2jy~~
 - do #xkpf
 <!-- /agent:queue -->
 ###
@@ -226,7 +260,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#z2jy] bkx9-pure-detector: Extract per-id response-loss detection as a PURE function (cycle_state + committed content + HEAD archives -> reaped do#id directive heads whose ### Re: did not materialize) with deterministic unit/SimWorld tests for reap-only loss, captured-but-id-lost, AND the multi-directive-single-heading FALSE-POSITIVE case. DORMANT: do NOT wire into the live check_reaped_queue_head_without_response guard. ACTIONABLE NOW (pure fn + tests, no live editor); the wiring + drift-repro validation stays gated as #bkx9. Spec: specs/07-closeout-commands.md
 <!-- /agent:backlog -->
 
 ## Review

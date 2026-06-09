@@ -55,7 +55,26 @@ Best candidates, ranked:
 The others are weaker: `lazily-org` is redundant (GitHub already denotes orgs), `lazily-root` and `lazily-super` don't convey clear meaning.
 
 **Recommendation:** try `lazily` first, fall back to `lazily-rs`. Updated review item #w30b to reflect this.
-<!-- agent:boundary:bab25a33 -->
+
+### Re: #kavj ipc-binary — opus
+
+> **Queue prompt:**
+>
+> do [#kavj]
+
+
+Already implemented. The `ipc-binary` feature is complete:
+
+- **Feature flag:** `ipc-binary = ["ipc", "dep:postcard"]` in `Cargo.toml`
+- **API:** `IpcMessage::encode_binary()` / `decode_binary()` via postcard (`src/ipc.rs:646-654`)
+- **Error types:** `EncodeError::Binary` / `DecodeError::Binary` variants
+- **FFI:** `lazily_ffi_channel_send_binary`, `recv_binary`, `validate_binary`, `kind_binary`, `clone_binary` (`src/ffi.rs`)
+- **Tests:** 7 binary-specific tests across `tests/ipc.rs`, `tests/conformance.rs`, `tests/ffi.rs` — round-trip, garbage rejection, size comparison
+- **Spec:** Documented in `SPEC.md` under "Binary serialization (`ipc-binary` feature)"
+- **Build:** `cargo build --features ipc-binary` passes; all 105 tests pass
+
+No work needed — marking `#kavj` as done.
+<!-- agent:boundary:dba8c523 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,14 +84,13 @@ The others are weaker: `lazily-org` is redundant (GitHub already denotes orgs), 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~lazily-reactive is a bit long and difficult to remember. lazily-org is better. Is there an ever better name? lazily-root? lazily-super? lazily-hub? ~~
-- do [#kavj]
+- ~~do [#kavj]~~
 - do [#ms7x]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
 - [ ] [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding
 <!-- /agent:backlog -->
 

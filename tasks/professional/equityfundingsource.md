@@ -17,13 +17,13 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) are live in Worker version `2319bce6-b3ae-4efe-b1b5-423b31900437` as of 2026-06-09 (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). As of Worker version `e66abd2e` (deployed 2026-06-09, EFS `39a60c0`): loan-application Approval is gated on a complete full application — `POST /api/admin/full-applications/:id/status` no longer accepts `accepted` (in_review/declined only) and `/approve` fails closed unless the submitted application is complete (#approve-requires-full-app, EFS `b136519`); the admin "Accept and send to TMO" button is disabled with a missing-parts list on incomplete apps (EFS `b731aa4`). Portal form-submission errors now render a red banner at the top of the form plus an error toast via `portal/shared/form_error.tsx` (#form-error-standard). The admin pipeline (`/portal-admin/pipeline`) adds a read-only "Leads" funnel column from open prequalification leads and renames the entry column to "Applications" (#pipeline-leads, EFS `877c3eb`, deployed in `320e794e`); there is no separate "Approved" column (TMO has no such loan status). Admin Management sidebar links show item-count badges loaded from `GET /api/admin/nav-counts` (#admin-nav-counts, EFS `0d9708a`, deployed in `1f1b4241`). Individual application leads have a detail page at `/portal-admin/application-leads/:lead_id` (`GET /api/admin/application-leads/:id`), linked from the leads list and the pipeline Leads column (#lead-detail, EFS `ef3b76e`, deployed in `2319bce6`). No new D1 migration was required for these deploys. Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from the `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` sender via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent with no error (test row deleted). NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af4e8a44` (deployed 2026-06-09): the admin loan board is renamed **Deal Pipeline** (nav item, board page, lead-detail card; section id/route/endpoint unchanged) and its sidebar nav badge now counts **action-needed** items — open Leads (`new`/`contacted`) + loans in Applications/Processing/Documents/Underwriting — instead of `COUNT(*) FROM loans`, excluding terminal/parked stages (#pipeline-action-count, EFS `909b866`). The admin **Payments** section (`/portal-admin/payments`) adds a **Pipeline** board as the default view (with a Table toggle via `?view=table`) tracking borrower payments one-card-per-loan grouped Overdue/Due Soon/Current/Paid Off, each card showing next payment due date, amount, principal, and overdue count + total; read-only snapshot served by `GET /api/admin/payments/pipeline` (registered before `/:payment_id`), mutations stay on the Table view (#payments-pipeline, EFS `d8eb783`). Neither feature required a D1 migration. `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) remain live (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Loan-application Approval is gated on a complete full application — `POST /api/admin/full-applications/:id/status` no longer accepts `accepted` (in_review/declined only) and `/approve` fails closed unless the submitted application is complete (#approve-requires-full-app, EFS `b136519`); the admin "Accept and send to TMO" button is disabled with a missing-parts list on incomplete apps (EFS `b731aa4`). Portal form-submission errors render a red banner at the top of the form plus an error toast via `portal/shared/form_error.tsx` (#form-error-standard). The admin Deal Pipeline (`/portal-admin/pipeline`) has a read-only "Leads" funnel column from open prequalification leads and the entry column is "Applications" (#pipeline-leads, EFS `877c3eb`); there is no separate "Approved" column (TMO has no such loan status). Admin Management sidebar links show item-count badges loaded from `GET /api/admin/nav-counts` (#admin-nav-counts, EFS `0d9708a`). Individual application leads have a detail page at `/portal-admin/application-leads/:lead_id` (`GET /api/admin/application-leads/:id`), linked from the leads list and the pipeline Leads column (#lead-detail, EFS `ef3b76e`). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent. NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -90,8 +90,25 @@ Each card shows exactly what was asked: **next payment due date, next amount, ne
 **Verification:** `make check` green — **437 pass / 0 fail**, build + worker bundle OK, including after rebasing onto an incoming `fix(applications)` commit. EFS has no GitHub Actions CI workflow, so local `make check` is the gate.
 
 **Note:** This board reads whatever is in `loan_payments`. Per the MVP servicing model (PRD §7), those rows come from TMO's payment schedule, and live data depends on the TMO sync being populated — the board is empty until loans have schedule rows.
-<!-- agent:boundary:c2dbc256 -->
-<!-- agent:boundary:59296dd8 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed to production. Worker version **`ff80afcd-c969-4377-bedd-ac33af4e8a44`** is live at 100%, shipping both queue items from this drain (Deal Pipeline rename + action-needed count `909b866`, and the Payments Pipeline board `d8eb783`).
+
+**Procedure (per `runbooks/deployment.md`):** pre-deploy checks clean — working tree clean, on `main` synced with origin, `make check` green (437 pass / 0 fail), no pending D1 migrations. Then `make deploy` (build → migrate → deploy); migration step was a no-op (neither feature needed a migration).
+
+**Post-deploy verification:**
+- Public `/` → **200**
+- Admin `/portal-admin/payments` → **303** (Cloudflare Access redirect — expected for admin routes)
+- D1 migrations remaining: **none**
+
+That drains the queue (3/3 done). The Status block above is updated to record the new production version and both features. The Payments Pipeline reads `loan_payments`, which under the MVP servicing model is sourced from TMO's payment schedule — so the board populates as loans gain synced schedule rows.
+<!-- agent:boundary:1498bf6c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,9 +116,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~The pipeline count in the admin should count all items that need action in the pipeline steps. Interpret needing action as Leads, Applications, Processing, Documents, Underwriting. Rename Pipeline to Deal Pipeline.~~
-- ~~We need a way to track borrower payments. Show a pipeline of payments including next payment due date, amount, principle, and overdue payments.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

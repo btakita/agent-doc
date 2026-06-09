@@ -58,10 +58,6 @@ Done — Phase 3 of `plan-ipc-transport-reliability.md`. A degraded session now 
 **Shipped:** `cargo install` + `cargo build --release` both rebuilt 0.34.0. Submodule pushed (`0b931d04`); superproject pointer + plan advanced. CI in progress for the pushed commit — local suite is green.
 
 Note: this is the file-IPC-routing half of review item `#pcp5`; the early-ack Kotlin half (`#ipc-early-ack`, Phase 2) is still its gated remainder and needs live IntelliJ verification.
-❯ - Raw disk write stays the **true last resort** — reached only on the existing IPC-timeout (`exit 75`) path when file IPC *also* fails to deliver. The fire-and-forget `reposition_boundary` signal keeps its direct-disk-skip (no response body).
-❯ - `run_stream` always calls `try_ipc` when the plugin is installed (dropped the `!ipc_direct_disk_degraded` gate + its dead direct-disk branch), so the stream/finalize path inherits the routing.
-❯ - The socket-ack-timeout arm that *newly* latches degraded also falls through to file IPC instead of returning.
-❯ - `try_ipc` no longer early-returns to disk on degrade. It skips only the wedged socket attempt and falls through to the file-IPC patch queue (`write_ipc_and_poll`), where the plugin applies via the Document API.
 <!-- agent:boundary:46cad401 -->
 <!-- /agent:exchange -->
 

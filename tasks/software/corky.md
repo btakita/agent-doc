@@ -135,7 +135,11 @@ Confidence: high.
 ❯ - `src/corky/AGENTS.md`, `src/corky/DEV.md`, `src/corky/README.md`, `src/corky/SPEC.md`, and the build/install docs now point local agents at GPU-required build/install commands and document the no-CPU-fallback rule.
 ❯ - `src/corky/install.sh` now requires the CUDA/Metal release artifact when the local platform selects one instead of falling back to CPU.
 ❯ - `src/corky/Makefile` now requires `CORKY_LOCAL_GPU_FEATURE` for local build, check, release, install, and wheel targets; on this Linux workstation it resolves to `transcribe-cuda`, and the targets fail closed if no GPU feature is selected.
-<!-- agent:boundary:6f62e12e -->
+
+### Re: Closeout repair — gpt-5
+
+The GPU-build response above is the authoritative closeout for this queue item. The prompt-prefixed duplicate lines immediately above were a terminal echo artifact from the failed finalize attempt; no additional repo work was performed in this repair step.
+<!-- agent:boundary:5080a99a -->
 <!-- /agent:exchange -->
 ###
 <!--

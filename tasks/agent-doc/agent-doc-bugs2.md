@@ -30,65 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-034628.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-040644.md`*
 
 Compacted content:
-- Archived 5 response topic(s): R1–R6 + remaining queue items; do [#pcpc1]; do [#pcpc2]; 2 more
+- Archived 2 response topic(s): do [#vbk7]; do [#pcpc5]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#vbk7] — blocked on #pcpc5 + live verification, not redundant — opus-4-8
-
-> **Queue prompt:**
->
-> do [#vbk7]
-
-
-**Investigated, not executed — and the "already resolved" flag is a false positive.**
-
-Preflight/plan flagged #vbk7 as possibly already resolved by the completed #pcpc4 (semantic score 1.989). That is wrong. Verified:
-
-- `git show --stat 038f0165` (the #pcpc4 commit) touched **only** `agent-doc-orchestration/src/document_watcher.rs` + `lib.rs`. Its message says verbatim: *"Plugin WatchService read-only demotion (#pcp7) carved out as #pcpc4b (needs live IntelliJ verification)."* #vbk7 **is** #pcpc4b — the carved-out plugin work, still unbuilt.
-- The #pcpc4 controller-owned watcher is **unwired**: `document_watcher` appears only as `pub mod document_watcher;` in lib.rs with zero call sites repo-wide. It is not yet an event source; its notify-feed wiring + old-watcher removal is gated in **#pcpc5**.
-
-**Why I did not ship it this turn (correctness, not effort):**
-
-1. The plugin's *only* editor↔disk reconcile authority today is `PromptPoller.kt::mergeOrReload` (VFS `BulkFileListener` → `NativePatching.mergeCrdt` → `doc.setText`). Demoting it to read-only now removes that authority with **no replacement** — #pcpc4's watcher will not feed reconciles until #pcpc5 wires the controller-watcher → IPC patch path. That is a functional gap, independent of verification.
-2. #vbk7 needs **live IntelliJ verification**; this is a headless tmux session.
-3. This dogfooding session itself runs through the JB plugin's IPC write-back — rebuilding/reinstalling a half-cutover plugin mid-session risks breaking the path this turn depends on.
-
-The plan's Safety section says exactly this: the watcher/plugin-demotion phases "need live IntelliJ/Codex verification" and must not be attempted in a saturated session.
-
-**Action:** gated #vbk7 into `agent:review` with the proven blocker + a hard dependency on #pcpc5 (must sequence after it). Added a low-priority backlog item to discount the semantic-match false positive that sent me chasing this.
-
-### Re: do [#pcpc5] — cutover is spec-fenced from this cycle, gated not dodged — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#pcpc5]
-
-
-You re-invoked to keep the queue draining, so I picked up the pinned `do [#pcpc5]`. I did **not** attempt it, and this is a spec constraint, not effort-avoidance.
-
-**The decisive blocker** is in #pcpc5's own contract, `specs/08b-single-process-control-plane.md` (Document write/watch authority):
-
-> "Behavior changes here must never be landed in the same cycle that persists a live session response through the write path being changed."
-
-#pcpc5 *is* the cutover of the write/watch authority. Every agent-doc turn — including this one — persists its response **through** that write path via `finalize`. So landing any #pcpc5 gate in a normal response cycle violates the spec by construction. Three independent reasons reinforce it:
-
-1. **Spec invariant** (above) — hard, code-review-enforced.
-2. **Plan Safety section** — "Do NOT attempt in a saturated session"; the watcher/cutover phases "need live IntelliJ/Codex verification." This session is saturated and demonstrably fighting `#ipc-crdt-response-drift` on closeout (last turn's finalize hit the reversed-residue bug; I recovered via `git checkout HEAD` + `reset --from-current`). This very turn I closed out with `--force-disk` to dodge the IPC merge.
-3. **Gate ladder** (shadow → dual-write → read-switch → authority → removal) needs SimWorld + CLI + live-tmux proof per gate, and the final gate removes the supervisor + direct-disk writers this session runs on.
-
-**Action:** gated #pcpc5 into `agent:review` with the spec citation and a note to decompose it one actionable id per gate (`pcpc5a..e`) in a fresh session.
-
-**The bigger problem with the queue right now:** the next four items — #pcpc5 (done), then `#ipc-drift-writeprovenance`, `#ipc-early-ack`, `#ipc-degraded-prefers-file-ipc` — are all part of this same IPC/cutover cluster (realized by the already-gated review items `#pcp5`/`#pcp7`), and all want live verification this headless session can't give. The genuinely **shippable-here** bugfixes are stacked *behind* them: `#queue-operator-pin-position-lock-dag`, `#queue-contamination-guard-false-positive`, `#queue-completed-items-escape-below-component`, `#stale-capture-captured-only-drift` — pure-Rust, SimWorld-testable, no live editor needed.
-
-**Your call (pick one and I'll run it):**
-- **Reorder** the queue to bring those four headless bugfixes to the front — I'll drain them here and now.
-- **Fresh session** for the whole PCP/IPC cutover cluster (#pcpc5, #vbk7, #pcp5/6/7, #live-verify-batch) with IntelliJ open.
-
-I'm holding the auto-loop rather than gating my way down a row of cutover items that all bounce off the same spec fence.
-<!-- agent:boundary:05e63de3 -->
+<!-- agent:boundary:87dd5d1f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -97,11 +44,11 @@ I'm holding the auto-loop rather than gating my way down a row of cutover items 
 - ~~do [#vbk7]~~
 - ~~:pushpin: do [#pcpc5]~~
 - do [#queue-no-stop-unrelated-edit]
-- do [#queue-completed-items-escape-below-component]
-- do [#queue-operator-pin-position-lock-dag]
 - do [#ipc-drift-writeprovenance]
 - do [#ipc-early-ack]
 - do [#ipc-degraded-prefers-file-ipc]
+- do [#queue-completed-items-escape-below-component]
+- do [#queue-operator-pin-position-lock-dag]
 - do [#stale-capture-captured-only-drift]
 - do [#queue-contamination-guard-false-positive]
 - do [#nm1x-livebuf-content]

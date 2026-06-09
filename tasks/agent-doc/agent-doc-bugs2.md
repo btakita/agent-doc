@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -211,7 +211,7 @@ Stopping here by your call ("Stop & restart for `#lvbatch`"). The queue can't au
 **`#tmux-switch-lag` is scoped for the fresh session.** I located the exact culprit: `safe_passive_focus_actor_after_sync_lock` (`sync.rs:700`) calls `tmux.select_pane()` on the actor pane, which raises the stash frame when that pane is still stashed at select time — before reconcile moves it into `0:agent-doc`. Fix is the move-before-select reorder the backlog already describes + SimWorld ordering coverage. Noted so the fresh session starts from the line, not a search.
 
 **Clean handoff:** restart (clears the `#postcommit-ipc-worktree-corruption` churn), then drive `#lvbatch` under real typing load — I'll check logs and close `#saevon`, `#exch-intermix-verify`, and `#pcpc5live` step 3. Everything committed this turn (`dual-write routed` proof, narrowed `#s760wire`/`#pcpc5live`, this finding) is correct on `main`. The go-mode queue stays as-is so the fresh session resumes the drain.
-<!-- agent:boundary:d84a2e27 -->
+<!-- agent:boundary:602a08a4 -->
 <!-- /agent:exchange -->
 
 ## Queue

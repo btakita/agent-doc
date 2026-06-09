@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -99,7 +99,25 @@ Each list row links to its detail page (eye action), and both detail sections hi
 **Verification:** full suite **423 pass / 0 fail**, browser + worker bundles clean; added a test locking in both routes, sections, APIs, and row links.
 
 Queue drained — all admin list types now have individual-item routes.
-<!-- agent:boundary:7736a297 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed to production. Version `e390c01c-90d8-49a3-bea0-4e4c6549cbba` at https://equityfundingsource.brian-takita.workers.dev.
+
+Before deploying I synced EFS to latest `main` (it was behind by 2 — a remote refactor of the documents/uploads view to a grouped `/api/admin/documents` table). The merge was clean: my `#f632` upload/request detail links survived, build is clean, full suite **423 pass / 0 fail**.
+
+**Smoke test (all live):** home `200`; the session's new routes all return `303` (auth redirect), same as existing detail routes:
+- `/portal-admin/public-contents/{about,contact}` (#pzj5)
+- `/portal-admin/documents/{uploads,requests}/:id` (#f632)
+- `/portal-admin/users?status=active` (URL filter sync)
+
+This ships everything from this queue: the four admin detail routes, the per-key Public Contents editor, the Documents detail routes, and the URL-filter-sync across the admin lists. Queue drained.
+<!-- agent:boundary:6a720c0f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,7 +125,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

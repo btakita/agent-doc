@@ -31,83 +31,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-055402.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260609-172720.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Management links should show item counts + deploy; deploy
+- Archived 4 response topic(s): Individual application-lead route + messaging sync question; deploy; Individual-item admin routes; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Individual application-lead route + messaging sync question — opus-4-8
-
-> **Queue prompt:**
->
-> In the admin area: Create a route for individual application leads. Format nicely. Can we sync our messaging + emails with the borrower portal? Create links to the individual application leads where appropriate, such as in the admin pipeline.
-
-
-Done and deployed (Worker `2319bce6-b3ae-4efe-b1b5-423b31900437`).
-
-**Individual lead detail page** — new route `/portal-admin/application-leads/:lead_id` (`ApplicationLeadDetail`, served by `GET /api/admin/application-leads/:id`). It lays the lead out in clean cards — Contact (email/phone links), Property, Loan request, and a Pipeline card with the status selector + "Send borrower invite" — plus the borrower's message if any. It's linked from:
-- the **Leads list** (the borrower's name is now a link), and
-- the **pipeline "Leads" column** (cards now open the specific lead instead of the list).
-
-**Your question — can we sync messaging + emails with the borrower portal?** Partly, and here's the boundary: an application lead is *pre-account* (no borrower user yet), so the borrower portal's secure messaging (`chat_sessions`) only kicks in once the lead accepts the invite and converts to a borrower. At the lead stage the channel is email — the staff notification + the borrower-invite email. The two-way email↔borrower-chat round-trip (inbound email appends to the chat; admin replies email the borrower) is already tracked as **#xcvg**, and it's gated on the Resend EFS sending domain (**#f4rq**) and Google Workspace SMTP (**#m6ch/#p40t**). So the lead detail page is the right home for that once those land; nothing new to build there until the email infra is in place.
-
-**Verification:** `bun run check` green — 408 tests pass. Smoke tests: leads detail route `303`, `GET /api/admin/application-leads/:id` `401` (gated), and the deployed bundle contains the detail code. **Spec:** `docs/current_progress.md` → Admin Portal → Application Leads.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Already deployed this cycle — the lead-detail work shipped in Worker version **`2319bce6-b3ae-4efe-b1b5-423b31900437`** (EFS `ef3b76e` = `origin/main`, no unpushed commits). The served bundle already contains the detail-page code, so there's nothing new to push; draining the queue.
-
-### Re: Individual-item admin routes — opus-4-8
-
-> **Queue prompt:**
->
-> Create admin routes for individual items the other types of list items including. Add links to the individual item route where appropriate:
-> - Loan Applications
-> - Contact Messages
-> - Investor Deals
-> - Funding Commits
-> - Payments
-> - Documents
-> - Public Contents
-> - Messages
-> - Lender Management
-> - User Management
-
-
-Done for the four list types that fit the existing detail-page pattern (loans/deals/users/leads already had it). Shipped, tested, committed, and pushed to `equityfundingsource-dev` main (`dae5d5f`).
-
-**New individual-item routes (each list row now links to it; parent nav highlights):**
-- **Contact Messages** → `/portal-admin/contact-messages/:id`
-- **Funding Commits** → `/portal-admin/funding/:id`
-- **Payments** → `/portal-admin/payments/:payment_id`
-- **Lender Management** → `/portal-admin/lenders/:id`
-
-Each is backed by a new by-id D1 API (`GET /api/admin/{contact-messages,funds,payments,lender-requests}/:id`), a Preact detail component (reads the id from the URL, fetches, renders info cards + the existing status/confirm/deny/done actions), a server portal route registered before the generic `/:section` catch-all, and a section added to `admin_section_T` in all three places.
-
-**Already had detail routes (no work needed):** Loan Applications, Investor Deals, Messages, User Management.
-
-**Deferred — queued as actionable backlog** (`#pzj5` + Documents item), because they aren't discrete-row lists and need a design call:
-- **Documents** has *multiple* sub-lists (uploads + document-requests) — needs a decision on whether each gets its own detail section.
-- **Public Contents** is a *singleton key-editor* (about/contact), not a row list — the natural route is `/portal-admin/public-contents/:key` deep-linking the editor.
-
-**Verification:** full suite **412 pass / 0 fail**, browser + worker bundles build clean. Added a test locking in the four new routes/sections/APIs. The rebase from remote main also surfaced a pre-existing red test (`#form-error-standard`) — unrelated to this work: broker `submit_deal` was refactored to reuse `FullApplication`, which keeps its own top red error banner but not the shared helper; I updated that stale test to match (`dae5d5f`).
-
-Not deployed — that's the next queued item.
-
-### Re: deploy (admin detail routes) — opus-4-8
-
-Deployed to production. Version `f33df1f6-08f9-47b7-8163-655c9b1bf4b9` at https://equityfundingsource.brian-takita.workers.dev (built fresh from the pushed `dae5d5f`).
-
-**Smoke test:** home `200`; all four new individual-item detail routes — `/portal-admin/{contact-messages,funding,payments,lenders}/:id` — return `303` (auth redirect), identical to the existing `deals/:id` and `loans/:id` detail routes, confirming they're registered and auth-gated in production.
-
-Queue drained.
-<!-- agent:boundary:31ea5518 -->
+<!-- agent:boundary:9bf70520 -->
 <!-- /agent:exchange -->
 ###
 <!--

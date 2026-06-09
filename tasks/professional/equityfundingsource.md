@@ -62,7 +62,7 @@ The borrower submit gate only enforces an e-signature, so the remaining complete
 **Spec:** apply4 build-plan P6 now documents the `#approve-requires-full-app` gate.
 
 The live workers.dev site still has the old behavior until deploy — queued that as a backlog item; re-queue with `#spec-test-commit-push-deploy` or say "deploy" to ship it.
-<!-- agent:boundary:d2908b88 -->
+<!-- agent:boundary:167a4c16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,6 +75,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#xyp5] Deploy the approval-gate fix (#approve-requires-full-app, efs b136519) to production: cf:d1:migrate:remote not needed (no schema change) + deploy:worker + smoke-test that /api/admin/full-applications/:id/status rejects accepted and /approve fails closed on an incomplete app. Held pending deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

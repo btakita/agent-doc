@@ -15,7 +15,7 @@ agent_doc_write: crdt
 Please create a contact for andreas-kovountzis https://www.linkedin.com/in/andreas-kavountzis-88a87310/
 
 Use corky gpu to transcribe + diarize [2026-06-02 13-00-37-compressed.mp4](../../../../../Videos/2026-06-02%2013-00-37-compressed.mp4)
-<!-- agent:boundary:c7673973 -->
+<!-- agent:boundary:e8ea28e3 -->
 <!-- /agent:exchange -->
 
 ## Queue

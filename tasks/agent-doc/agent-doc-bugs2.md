@@ -121,7 +121,18 @@ Checked the logs — and you've already got `AGENT_DOC_WRITE_AUTHORITY=shadow` s
 - **Step (3) pcpc5d/e** — deleting the out-of-process supervisor direct-disk writers and demoting the editor WatchService to read-only require live IntelliJ/Codex editor-boundary proof; those stay operator-driven per spec.
 
 I updated the `#pcpc5live` backlog item to record shadow as proven and narrow it to just steps (2) and (3) — kept it as an actionable backlog item, not a review gate. Whenever you flip the env to `dual-write` and run a cycle, I'll verify the routed-path logs.
-<!-- agent:boundary:ea76a608 -->
+
+### Re: do [#s760wire] — opus-4-8
+
+
+I didn't process `#s760wire` this turn — preflight surfaced something more urgent that I've filed as a bug. `#s760wire` stays open (it needs a live IntelliJ pane to complete).
+
+**Post-commit working-tree corruption (`#postcommit-ipc-worktree-corruption`, just filed).** Last turn's `#pcpc5live` closeout committed cleanly (`session-check` OK, HEAD `a0a54aee2` correct with all five responses). But this turn's preflight showed the **working tree** had drifted *after* that commit: the live IPC listener deleted the `### Re: do [#pcpc5live]` response from the visible file and spliced its Step 2/3 bullets into the earlier `### Re: do [#opsproof-falsepos]` block, with duplicated queue-prompt blockquotes. I verified `git show HEAD` is clean and restored the working tree from it (`git checkout HEAD --` — standard git, not a recovery dance; the committed content is authoritative). No content was lost.
+
+**Why this matters:** the next preflight misreads that corruption as user `content_edit` prompt_targets, so a response could get built on a corrupted exchange. It's the `#adoc-queue-ipc-buffer-divergence` / supervisor-self-race family — the root fix is the supervisor-in-process migration, not a per-cycle patch.
+
+**Recommendation: halt this session rather than re-invoking.** The live IPC listener corrupts the working tree on every commit here — each cycle I have to restore from HEAD. The remaining queue (`#s760wire`, `#saevon`, `#lvbatch`, `#exch-intermix-verify`, `#bkx9perid`, `#tmux-switch-lag`) all need a live IntelliJ pane or a fresh non-degraded session anyway. Start fresh; the committed history is clean and all this round's fixes are on `origin/main`.
+<!-- agent:boundary:41dfa4b6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -131,6 +142,7 @@ I updated the `#pcpc5live` backlog item to record shadow as proven and narrow it
 - ~~:pushpin: Do not use memory to recover. File a bug in the backlog or fix the issue instead.~~
 - ~~:pushpin: do [#pcpc5live]~~
 - :pushpin: :round_pushpin: do [#s760wire]
+- add AGENT_DOC_WRITE_AUTHORITY=dual-write. Automatically add the env vars so I can test. I can restart.
 - :pushpin: :round_pushpin: do [#saevon]
 - :round_pushpin: do [#lvbatch]
 - :round_pushpin: do [#bkx9perid]
@@ -166,6 +178,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

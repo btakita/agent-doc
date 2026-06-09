@@ -601,6 +601,108 @@ fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
     );
 }
 
+/// `#exch-intermix`: a long `### Re:` response, big enough that adopting it over
+/// a fragmented (response-lost) visible file is a real stale-snapshot wedge.
+fn long_response_body() -> String {
+    concat!(
+        "### Re: live prompt drift recovery - gpt-5\n\n",
+        "Implemented and verified the auto-recovery for the live_prompt_drift wedge.\n",
+        "This response body is intentionally long so the adopted content_ours snapshot\n",
+        "is well over the stale-snapshot-reset-drift threshold relative to the\n",
+        "fragmented visible file that lost the response. That makes the commit-time\n",
+        "guard a genuine wedge instead of a benign small delta.\n"
+    )
+    .to_string()
+}
+
+fn wedge_content_ours(original: &str) -> String {
+    apply_patch_at_boundary(original, &long_response_body())
+}
+
+/// Set up the closeout wedge: snapshot adopted `content_ours` (baseline + the long
+/// response) while the visible file lost the response, and the cycle carries the
+/// `ipc_snapshot_adoption_blocked` flag from the drift guard.
+fn wedge_cycle_state(doc: &Path, content_ours: &str, fragmented: &str) {
+    agent_doc_orchestration::cycle_state::start_preflight(doc, Some(content_ours), Some(fragmented))
+        .unwrap();
+    agent_doc_orchestration::cycle_state::record_ipc_snapshot_adoption_blocked(doc).unwrap();
+}
+
+#[test]
+fn commit_auto_recovers_live_prompt_drift_wedge() {
+    // The benign wedge: response safe in the adopted snapshot, visible file
+    // fragmented, no disk-only user prompt. The commit must auto-recover (write
+    // the snapshot to disk + commit the response) instead of failing closed as a
+    // "manual cleanup".
+    let (tmp, doc, _baseline, original) = setup_project(false);
+    let root = tmp.path();
+
+    let content_ours = wedge_content_ours(&original);
+    // Visible file lost the response (only the committed baseline remains).
+    fs::write(&doc, &original).unwrap();
+    fs::write(snapshot_path(root, &doc), &content_ours).unwrap();
+    wedge_cycle_state(&doc, &content_ours, &original);
+
+    agent_doc()
+        .current_dir(root)
+        .args(["commit", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let head = head_blob(root);
+    assert!(
+        head.contains("Implemented and verified the auto-recovery"),
+        "auto-recovered commit must land the response in HEAD:\n{head}"
+    );
+    let visible = fs::read_to_string(&doc).unwrap();
+    assert!(
+        visible.contains("Implemented and verified the auto-recovery"),
+        "auto-recovery must restore the response to the visible working tree:\n{visible}"
+    );
+    let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("live_prompt_drift_auto_recovered"),
+        "auto-recovery must leave an observable ops.log marker:\n{ops_log}"
+    );
+}
+
+#[test]
+fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
+    // Negative case: the same wedge shape, but the visible file also carries a
+    // genuine new user prompt the snapshot never saw. Auto-recovery must NOT fire
+    // (it would silently drop the user prompt); the commit fails closed instead.
+    let (tmp, doc, _baseline, original) = setup_project(false);
+    let root = tmp.path();
+
+    let content_ours = wedge_content_ours(&original);
+    // Visible file lost the response but gained a real user prompt typed after
+    // preflight, inside the exchange component (not a comment region).
+    let fragmented = original.replace(
+        "\u{276f} Please reply\n",
+        "\u{276f} Please reply\n\u{276f} do #typed-after-preflight\n",
+    );
+    fs::write(&doc, &fragmented).unwrap();
+    fs::write(snapshot_path(root, &doc), &content_ours).unwrap();
+    wedge_cycle_state(&doc, &content_ours, &fragmented);
+
+    agent_doc()
+        .current_dir(root)
+        .args(["commit", doc.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        !ops_log.contains("live_prompt_drift_auto_recovered"),
+        "a disk-only user prompt must block auto-recovery (fail closed):\n{ops_log}"
+    );
+    let visible = fs::read_to_string(&doc).unwrap();
+    assert!(
+        visible.contains("do #typed-after-preflight"),
+        "the genuine user prompt must remain on disk for the next cycle:\n{visible}"
+    );
+}
+
 #[test]
 fn file_ipc_timeout_claims_stale_patch_before_commit() {
     let (tmp, doc, baseline, _original) = setup_project(true);

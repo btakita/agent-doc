@@ -768,7 +768,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test: a live-buffer divergence whose editor digest equals the
         // current disk content is reconcilable, not a fail-closed user edit — it
         // reuses the existing visible-write guard, no new flow token.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 85,
+        // +2 (#exch-intermix) for the two doc-comment cross-references in the
+        // `live_prompt_drift_auto_recovery_safe` / `try_auto_recover_live_prompt_drift`
+        // auto-recovery helpers: they name the existing `guard_ipc_snapshot_adoption_against_live_prompt_drift`
+        // and `guard_no_stale_snapshot_reset_drift` guards to explain the wedge
+        // they recover. No new guard flow token — the recovery reuses the existing
+        // commit-time `guard_no_stale_snapshot_reset_drift` boundary.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 87,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

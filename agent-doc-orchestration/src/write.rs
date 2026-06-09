@@ -6765,6 +6765,124 @@ pub fn guard_no_stale_snapshot_reset_drift(
     );
 }
 
+/// `#exch-intermix`: discriminator for the benign `live_prompt_drift_after_preflight`
+/// closeout wedge. After the IPC drift guard adopts `content_ours` as the snapshot
+/// (`guard_ipc_snapshot_adoption_against_live_prompt_drift`), that snapshot
+/// (baseline + the `### Re:` response) is LARGER than the fragmented visible file,
+/// so the next commit fails closed via `guard_no_stale_snapshot_reset_drift`
+/// ("looks like a manual cleanup"). The response is not lost — it is intact in the
+/// adopted snapshot — but the cycle is wedged and the operator must hand-recover.
+///
+/// This returns true only when that drift is provably the benign IPC/boundary
+/// pattern: every prompt-bearing user line on disk is already owned by the
+/// snapshot, so adopting the snapshot drops NO user content. It returns false
+/// (fail closed) the instant the visible file carries a prompt target or a queue
+/// `do [#id]` the snapshot lacks — genuine post-preflight user typing must never
+/// be auto-recovered away. This is the airtight safety gate for automatic data
+/// mutation, so it is intentionally conservative: it is baseline-free and only
+/// trusts direct snapshot↔disk containment.
+pub fn live_prompt_drift_auto_recovery_safe(snapshot: &str, file_content: &str) -> bool {
+    // Must be the wedge shape: snapshot meaningfully larger than the visible file.
+    // (Boundary markers are stripped before the length comparison, so `(HEAD)` /
+    // guard annotations cannot manufacture or mask the wedge.)
+    if stale_snapshot_reset_drift(snapshot, file_content).is_none() {
+        return false;
+    }
+    // Any prompt-bearing PromptTarget present on disk but absent from the snapshot
+    // is a genuine user prompt that adopting `content_ours` would drop — fail closed.
+    let disk_only_changes = prompt_bearing_user_changes_between(snapshot, file_content);
+    if disk_only_changes
+        .iter()
+        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+    {
+        return false;
+    }
+    // Same containment check for the queue component: a user-added `do [#id]` on
+    // disk that the snapshot does not contain must not be silently dropped.
+    let snapshot_queue_counts =
+        queue_prompt_counts(&queue_prompt_texts(&queue_component_text(snapshot)));
+    let file_queue_prompts = queue_prompt_texts(&queue_component_text(file_content));
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for prompt in file_queue_prompts {
+        let count = seen.entry(prompt.clone()).or_insert(0);
+        *count += 1;
+        if *count > queue_prompt_count(&snapshot_queue_counts, &prompt) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `#exch-intermix`: auto-recover the benign `live_prompt_drift_after_preflight`
+/// closeout wedge instead of stranding the response and forcing a manual
+/// `git checkout HEAD` / `reset --from-current --preserve-session` / `finalize
+/// --force-disk` recovery. When the IPC drift guard fired this cycle
+/// (`content_ours` adopted as snapshot) and the snapshot is provably a superset of
+/// the visible file's user content, write the snapshot to the working-tree file
+/// (the `--force-disk` half of the manual recovery, with agent write-provenance)
+/// so the commit boundary can stage the full response. Returns the recovered file
+/// content on success (the caller must refresh its `file_content`), or `None` when
+/// no recovery applies — leaving the existing fail-closed guard to handle it.
+///
+/// Because this is automatic data mutation it is intentionally narrow and fails
+/// closed on any doubt:
+/// - the cycle must carry the `ipc_snapshot_adoption_blocked` flag (the drift
+///   guard ran this cycle and adopted `content_ours`),
+/// - no dropped exchange/queue prompts may have been recorded this cycle (those
+///   are the genuine-user-content-loss class `session-check` fails closed on),
+/// - the current on-disk file must pass `live_prompt_drift_auto_recovery_safe`
+///   (no disk-only user prompt the snapshot lacks).
+pub fn try_auto_recover_live_prompt_drift(
+    file: &Path,
+    snapshot: &str,
+    file_content: &str,
+) -> Result<Option<String>> {
+    let Some(cycle) = crate::cycle_state::load(file)? else {
+        return Ok(None);
+    };
+    if !cycle.ipc_snapshot_adoption_blocked {
+        return Ok(None);
+    }
+    if !cycle.dropped_exchange_prompts.is_empty() || !cycle.dropped_queue_prompts.is_empty() {
+        return Ok(None);
+    }
+    if !live_prompt_drift_auto_recovery_safe(snapshot, file_content) {
+        return Ok(None);
+    }
+
+    atomic_write(file, snapshot).with_context(|| {
+        format!(
+            "live_prompt_drift auto-recover write for {}",
+            file.display()
+        )
+    })?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={}",
+            file.display(),
+            snapshot.len(),
+            file_content.len(),
+            crate::ops_log::content_hash(snapshot)
+        ),
+    );
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::types::FlowEvent::new(
+            crate::flow::types::FlowName::DocumentMutation,
+            crate::flow::types::FlowStage::IpcSnapshotAdoption,
+            crate::flow::types::FlowOutcome::Completed,
+        )
+        .with_reason("live_prompt_drift_auto_recovered"),
+    );
+    eprintln!(
+        "[commit] auto-recovered live_prompt_drift wedge for {} — wrote adopted snapshot ({} bytes) to disk so the response lands instead of failing closed as a manual cleanup",
+        file.display(),
+        snapshot.len()
+    );
+    Ok(Some(snapshot.to_string()))
+}
+
 /// Guard against accidental exchange content truncation.
 ///
 /// Compares the exchange component content in the current file against the
@@ -16633,6 +16751,182 @@ scratch
                 && log.contains("invariant=live_prompt_drift_after_preflight")
                 && log.contains("recovery=content_ours_snapshot_next_cycle"),
             "live prompt drift should name its failed invariant and recovery:\n{log}"
+        );
+    }
+
+    // #exch-intermix fixtures: a wedge requires the adopted `content_ours`
+    // snapshot (baseline + response) to be meaningfully larger than the
+    // fragmented visible file that lost the response.
+    fn drift_baseline() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    fn drift_content_ours() -> String {
+        // baseline + a substantial `### Re:` response (well over the 100-byte
+        // stale-drift threshold) so adopting it is a real wedge.
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "### Re: do #fix — opus-4-8\n\n",
+            "Implemented the fix and verified it end to end. The response body is long\n",
+            "enough to clear the stale-snapshot-reset-drift threshold so the wedge shape\n",
+            "is genuinely detected by the recovery discriminator under test here.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {
+        // Snapshot owns the response the fragmented disk file lost; no disk-only
+        // user prompt → safe to auto-recover.
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+        assert!(
+            live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "benign live-prompt-drift wedge should be recoverable"
+        );
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_no_wedge() {
+        // Snapshot == file: no wedge, nothing to recover, must not fire.
+        let snapshot = drift_content_ours();
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &snapshot),
+            "no drift means no auto-recovery"
+        );
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
+        // The visible file carries a NEW user prompt the snapshot never saw —
+        // adopting content_ours would silently drop it. Fail closed.
+        let snapshot = drift_content_ours();
+        let mut fragmented = drift_baseline();
+        fragmented = fragmented.replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "a disk-only user prompt must block auto-recovery"
+        );
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_queue_item() {
+        // A user-added `do [#id]` queue line on disk the snapshot lacks must
+        // block auto-recovery (the silent-queue-deletion class).
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline().replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
+        );
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "a disk-only queue item must block auto-recovery"
+        );
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_writes_snapshot_when_blocked_and_safe() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        // The drift guard fired this cycle and adopted content_ours.
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert_eq!(
+            recovered.as_deref(),
+            Some(snapshot.as_str()),
+            "recovery should return the adopted snapshot content"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "the working-tree file should now carry the full response"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("live_prompt_drift_auto_recovered"),
+            "auto-recovery must leave an observable ops.log marker:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_skips_without_blocked_flag() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        // A cycle exists but the drift guard never fired (flag stays false) →
+        // not the wedge we own.
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_none(),
+            "without the drift flag this is not the auto-recovery case"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fragmented,
+            "the working tree must be untouched when recovery does not apply"
+        );
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_skips_when_dropped_prompts_recorded() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        // A genuine dropped user prompt was recorded this cycle → session-check
+        // owns the fail-closed; auto-recovery must NOT paper over it.
+        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["do #dropped".to_string()])
+            .unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_none(),
+            "recorded dropped prompts must block auto-recovery (fail closed)"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fragmented,
+            "the working tree must be untouched when a dropped prompt was recorded"
         );
     }
 

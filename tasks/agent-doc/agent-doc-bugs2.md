@@ -35,7 +35,27 @@ complete
 Compacted content:
 - Archived 12 response topic(s): Add backlog items to complete the review items; [#saev] execute queued backlog; JB "Claim for Tmux Pane" cross-session error (andreas-kovountzis.md); 9 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5dc1ffcc -->
+
+### Re: Add actionable backlog for the gated items; make the plan unblocked — opus-4-8
+
+> **Prompt:** Add backlog to complete the gated items. Make the plan actionable without being blocked by [a live editor / fresh session].
+
+Done. The key insight behind your ask: the gated items split into **two genuinely different kinds**, and only one kind has non-blocked work left.
+
+**Kind A — code complete, only live verification remains** (`#4wxr` dialog, `#9adk` coalesce, `#f5d2` content-classify, `#saev` early-ack activation, `#s760` wiring). There is **no "actionable without a live editor" slice** for these — the code shipped; what remains is literally clicking/observing in a live IDE, which is `#xkpf` by definition. Adding fake non-live backlog for them would be busywork.
+
+**Kind B — has real non-live, SimWorld-verifiable slices.** These I decomposed into 5 actionable backlog ids (no live editor, no spec-08b same-cycle block — just a focused non-degraded session):
+
+1. **`#bkx9p` bkx9-pure-detector** — extract the per-id loss detector as a pure function + deterministic tests (incl. the multi-directive false-positive case), dormant. Unblocks the `#bkx9` wiring later.
+2. **`#pcpc1` actor-runtime** — `session_actor.rs` → real mailbox actor. SimWorld-verifiable. Unblocks 2–4.
+3. **`#pcpc2` supervisor-adapter** — out-of-process supervisor → in-process controller task. SimWorld.
+4. **`#pcpc3` write-queue** — single ordered write queue (kills the R6 self-race / exit-75 *this very session keeps hitting* at the root). SimWorld.
+5. **`#pcpc4` single-watcher** core — one controller-owned watcher. SimWorld (the `#pcp7` plugin demote stays live-gated).
+
+**Plan made actionable:** added an "Actionability" section to `plan-supervisor-in-process.md` (committed `e073642f0`) spelling out that the "fresh unsaturated session" line is a *focus/size* constraint, not a hard block — `#pcpc1`-`#pcpc4` (minus the plugin demote) are doable now without a live IDE; only `#pcpc5` cutover + the plugin demote await live.
+
+**Net:** what's truly blocked shrinks to (a) `#xkpf` — the one live IntelliJ/Codex session that verifies all of Kind A — and (b) `#pcpc5` + `#pcp7` plugin-demote (live + spec-08b). Everything else is now a queued, non-blocked backlog id. `#xkpf` stays as the live batch; I did not drain it.
+<!-- agent:boundary:4b23c2c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -78,6 +98,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#dj14] pcpc4-single-watcher: Replace per-process notify watchers with one controller-owned watcher per document feeding the session actor (realizes #pcp4). SimWorld: one watcher event stream, no duplicate-watcher reconcile race. CORE is ACTIONABLE NOW (SimWorld, no live editor); the paired plugin WatchService read-only demotion (#pcp7) needs a plugin change + live verification (stays gated under #xkpf). Depends on #pcpc1-3. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#0pke] pcpc3-write-queue: Route all write/stream/finalize/repair disk writes AND supervisor idle/file-watch writes through the session actor single ordered write queue (realizes #pcp3b); flock becomes a cross-process backstop only. Kills the R6 self-race / exit-75 at the root. SimWorld: concurrent supervisor-write + agent-finalize serialize; finalize never observes a half-applied write. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1+#pcpc2. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#v7m3] pcpc2-supervisor-adapter: Replace the out-of-process agent-doc start supervisor with an in-process supervisor adapter hosted by the controller (owns harness child PTY/stdin, readiness, restart/clear, heartbeat as a controller task); preserve the Unix-socket external boundary for CLI/editor callers. SimWorld: heartbeat loss + reattach, restart/clear in-process. ACTIONABLE NOW (SimWorld, no live editor). Depends on #pcpc1. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#2bhm] pcpc1-actor-runtime: Turn session_actor.rs from a data struct into a real in-process actor — per-document mailbox processed on one owning thread; SQLite CAS stays the durable backstop. SimWorld: concurrent commands to one document actor serialize deterministically. ACTIONABLE NOW (SimWorld-verifiable, NO live editor). First phase of #pf15/#pcp-consol; unblocks #pcpc2-4. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#z2jy] bkx9-pure-detector: Extract per-id response-loss detection as a PURE function (cycle_state + committed content + HEAD archives -> reaped do#id directive heads whose ### Re: did not materialize) with deterministic unit/SimWorld tests for reap-only loss, captured-but-id-lost, AND the multi-directive-single-heading FALSE-POSITIVE case. DORMANT: do NOT wire into the live check_reaped_queue_head_without_response guard. ACTIONABLE NOW (pure fn + tests, no live editor); the wiring + drift-repro validation stays gated as #bkx9. Spec: specs/07-closeout-commands.md
 - [ ] [#xkpf] lvb-run: Run the consolidated live busy-pane + IPC-timeout verification session — install signed JB plugin + binary, drive one mid-active-turn Codex/IntelliJ pane through the batch, capture route/idea logs. BLOCKED on live IntelliJ/Codex panes. Completes review #live-verify-batch and verifies #console-input-accumulation, #clear-opt-in-threshold, #pcp6; reproduces #ipc-crdt-response-drift.
 <!-- /agent:backlog -->
 

@@ -30,41 +30,29 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-040644.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-043406.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#vbk7]; do [#pcpc5]
+- Archived 1 response topic(s): do [#queue-no-stop-unrelated-edit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#queue-no-stop-unrelated-edit] — opus-4-8
-
-Fixed + shipped. The Claude Code auto-loop guard halted an active drain whenever `preflight.user_intent_prompt_changes` was non-empty, and that set included *every* non-managed prompt-bearing change — so editing content unrelated to the current turn stopped the queue, when only a real user prompt should preempt.
-
-**Fix** (`agent-doc-orchestration/src/preflight.rs`): wired the `#op-scoped-drift` affectedness classifier into the loop guard — the loop-guard analog of #nm1x on the finalize path. When `op_affectedness.turn_affected == false`, every user op this cycle was scoped `Independent`/`ProvenanceSpoofed` of the turn, so `user_intent_prompt_changes` is empty and the drain continues. A genuine new prompt edits the in-scope `exchange` tail, classifies as turn-affecting, and still preempts. Conservative fallback (managed-state filter only) when the classifier did not run.
-
-- Extracted testable `compute_user_intent_prompt_changes(changes, queue_head_only, op_affectedness)`.
-- 5 unit tests green: synthetic continuation, independent-edit drop, turn-affecting keep, managed-state filter, no-classifier fallback.
-- `src/skill.rs` + regenerated Claude `SKILL.md` aligned; `audit-docs` clean; `make check` green.
-- Built + installed both binaries; committed `583ca3f9`, pushed to agent-doc `origin/main`.
-
-**Known edge (filed as #loop-guard-exchange-node-granularity):** TurnScope's write_set scopes the *whole* `exchange` component, so an edit to an OLD response block inside exchange still classifies as turn-affecting and preempts. Per-node exchange granularity is op-scoped-drift follow-up; the common case (edits to unrelated non-exchange content) is fixed.
-<!-- agent:boundary:f23139d0 -->
+<!-- agent:boundary:15841f88 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#queue-no-stop-unrelated-edit]
-- do [#ipc-drift-writeprovenance]
-- do [#ipc-early-ack]
-- do [#ipc-degraded-prefers-file-ipc]
-- do [#queue-completed-items-escape-below-component]
-- do [#queue-operator-pin-position-lock-dag]
-- do [#stale-capture-captured-only-drift]
-- do [#queue-contamination-guard-false-positive]
-- do [#nm1x-livebuf-content]
-- do [#clear-opt-in-threshold]
-- do [#console-input-accumulation]
+- :round_pushpin: do [#ipc-drift-writeprovenance]
+- :round_pushpin: do [#ipc-early-ack]
+- :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
+- :round_pushpin: do [#loop-guard-exchange-node-granularity]
+- :round_pushpin: do [#queue-completed-items-escape-below-component]
+- :round_pushpin: do [#queue-operator-pin-position-lock-dag]
+- :round_pushpin: do [#stale-capture-captured-only-drift]
+- :round_pushpin: do [#queue-contamination-guard-false-positive]
+- :round_pushpin: do [#nm1x-livebuf-content]
+- :round_pushpin: do [#clear-opt-in-threshold]
+- :round_pushpin: do [#console-input-accumulation]
+- :round_pushpin: do [#vbk7]
 <!-- /agent:queue -->
 ###
 <!--

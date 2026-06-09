@@ -99,7 +99,35 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 | `#webrtc-data` | WebRTC data channel transport for peer-to-peer IPC (beyond signaling) | Medium |
 | `#cross-lang-tests` | Shared conformance test suite against the spec repo — run in CI for each binding | Medium |
 | `#ipc-docs` | Standalone protocol docs page (not inside SPEC.md) with examples per transport | Low |
-<!-- agent:boundary:807ab72b -->
+
+### Re: #n994 — Protocol spec extraction — glm-5.1
+
+> **Queue prompt:**
+>
+> [#n994]
+
+
+Completed `#n994`: extracted the wire protocol specification into a standalone `lazily-spec` repo.
+
+**Created:** `btakita/lazily-spec` — https://github.com/btakita/lazily-spec
+
+**Contents:**
+- `protocol.md` — standalone language-agnostic protocol spec covering all wire surfaces (IPC Snapshot/Delta, FFI, signaling, CRDT distributed, capability negotiation, permission boundary)
+- `schemas/snapshot.json` — JSON Schema (Draft 2020-12) for Snapshot + NodeSnapshot + EdgeSnapshot
+- `schemas/delta.json` — JSON Schema for Delta + all 7 DeltaOp variants
+- `schemas/signaling.json` — JSON Schema for all client→server and server→client signaling frames
+- `schemas/ffi.json` — JSON Schema for FFI boundary types (LazilyFfiBytes, LazilyFfiStatus, LazilyFfiMessageKind)
+- `schemas/distributed.json` — JSON Schema for distributed types (PeerId, NodeId, RemoteOp, OpKind, HLCStamp)
+- `examples/` — snapshot, delta, and signaling session example messages
+
+**Submodule:** added `src/lazily-spec` to the superproject (pending superproject commit).
+
+**Schema format:** JSON Schema Draft 2020-12, matching the existing JSON wire format. Binary codecs (protobuf/flatbuffers) can encode the same schemas in future.
+
+**Note:** Created under `btakita/` for now. Transfer to a lazily org (`#w30b`) when that item is resolved.
+
+Changed paths: `src/lazily-spec/` (new submodule), `.gitmodules`.
+<!-- agent:boundary:8b0fc948 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,7 +136,7 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#n994]
+- ~~[#n994]~~
 - [#w30b]
 - [#pz3k]
 - [#kavj]
@@ -120,7 +148,6 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#n994] #proto-extract=Extract wire protocol spec into standalone lazily-spec repo with language-agnostic schema (protobuf/flatbuffers/JSON Schema)
 - [ ] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
 - [ ] [#pz3k] #ffi-derive=Add cdylib crate type + build targets; consider safer-ffi or diplomat for auto-generated headers
 - [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths

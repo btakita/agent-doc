@@ -119,7 +119,57 @@ Commits pushed:
 - Parent `agent-loop`: `8fced3a8b` `tsift: advance indexed memory candidates`, pushed to `origin/main`.
 
 Confidence: high. Local clippy/tests/build/install/smokes passed, and the only unresolved external signal is the in-progress GitHub Actions run.
-<!-- agent:boundary:9fbaa693 -->
+
+### Re: qs5v — gpt-5
+
+Implemented the semantic-vector materialization path and committed it.
+
+changed_paths:
+- `src/tsift/VERSIONS.md`
+- `src/tsift/packages/tsift-core/src/lib.rs`
+- `src/tsift/packages/tsift-core/src/store.rs`
+- `src/tsift/packages/tsift-core/src/types.rs`
+- `src/tsift/packages/tsift-sqlite/src/lib.rs`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift/specs/graph.md`
+- `src/tsift/specs/memgraphrag-direction.md`
+
+commits:
+- `src/tsift`: `de09326 graph-db: materialize semantic vectors`
+- superproject: `18754108e tsift: advance semantic vector materialization`
+
+summary:
+- Added SQLite graph schema v6 with `graph_node_semantic_vectors`, typed little-endian `f64` vector blobs, model/kind/dimension metadata, an indexed kind/dimension lookup path, and migration backfill from legacy `properties_json.embedding`.
+- Added write-path maintenance for direct node upserts, projection upserts, and full projection replacement so the typed table stays in sync with semantic node properties.
+- Added `GraphStore::semantic_top_candidates` with a core property-scan fallback and a SQLite override that scores top candidates from the materialized vector table, so semantic related no longer parses every semantic node property.
+- Updated the semantic-related CLI path, graph specs, direction notes, and release notes.
+
+commands:
+- `cargo test -p tsift-sqlite sqlite_semantic_top_candidates_use_materialized_vector_table -- --nocapture`
+- `cargo test -p tsift-sqlite sqlite_schema_migration_backfills_materialized_node_properties -- --nocapture`
+- `cargo test -p tsift-cli semantic_related_query_uses_persisted_graph_embeddings -- --nocapture`
+- `cargo test -p tsift-cli graph_db_related_query_uses_semantic_seeds_and_incident_neighborhoods -- --nocapture`
+- `cargo test -p tsift-sqlite`
+- `cargo test -p tsift-core`
+- `git diff --check`
+- `make check`
+- `cargo install --path .`
+- `tsift graph-db --path . --json related "semantic vector" --limit 2`
+- `gh run watch 27185579881 --exit-status`
+
+verification:
+- Targeted and package tests passed.
+- `make check` passed for the workspace.
+- `cargo install --path .` passed.
+- Installed smoke command exited 0; the current repo has no semantic summary rows, so it reported the expected `summary_cache_empty` readiness warning rather than semantic matches.
+- `src/tsift` GitHub Actions CI run `27185579881` passed: `live Convex graph acceptance` and `clippy + test` were both green.
+- Parent repo `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `cargo fmt --check --package tsift-core --package tsift-sqlite --package tsift-cli` still fails on broad pre-existing formatting drift outside the touched change; touched sections were kept formatted and `git diff --check` passed.
+
+confidence: high
+
+escalation: none
+<!-- agent:boundary:3ed18ad7 -->
 <!-- /agent:exchange -->
 ###
 <!--

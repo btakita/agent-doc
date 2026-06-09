@@ -8054,7 +8054,13 @@ pub fn run_stream(
         let project_root = resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
 
-        if patches_dir.exists() && !ipc_direct_disk_degraded(&project_root, file)? {
+        // `#ipc-degraded-prefers-file-ipc`: always route through `try_ipc` when
+        // the plugin is installed, even if the socket is latched degraded.
+        // `try_ipc` skips the wedged socket internally and prefers the file-IPC
+        // patch queue (plugin applies via Document API) so a degraded stream
+        // write never manufactures a raw-disk File Cache Conflict; the disk
+        // write happens only as the last-resort IPC-timeout path below.
+        if patches_dir.exists() {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
@@ -8510,12 +8516,6 @@ pub fn run_stream(
                 }
             }
             std::process::exit(75); // EX_TEMPFAIL
-        } else if patches_dir.exists() {
-            eprintln!(
-                "[write] IPC listener degraded for {} — using direct disk write",
-                file.display()
-            );
-            log_ipc_dewedge_direct_disk_skip(file, "run_stream");
         }
     }
 
@@ -9420,6 +9420,24 @@ fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
         file,
         &format!(
             "ipc_listener_degraded_direct_disk file={} transport={} reason=repeated_ack_timeout",
+            file.display(),
+            transport
+        ),
+    );
+}
+
+/// `#ipc-degraded-prefers-file-ipc`: a latched-degraded socket means only the
+/// plugin's *socket* listener is wedged. The file-IPC patch queue uses a
+/// separate plugin file watcher that is very likely still alive, so a degraded
+/// write routes through it (the plugin applies via the Document API) instead of
+/// a raw disk write that manufactures an IDEA "File Cache Conflict". A direct
+/// disk write becomes the true last resort, reached only when file IPC also
+/// fails to deliver.
+fn log_ipc_dewedge_prefer_file_ipc(file: &Path, transport: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=last_resort",
             file.display(),
             transport
         ),
@@ -11252,21 +11270,26 @@ pub fn try_ipc(
     // Clean up any legacy degraded marker from older versions
     cleanup_legacy_ipc_degraded(&project_root);
 
-    if ipc_direct_disk_degraded(&project_root, file)? {
+    // `#ipc-degraded-prefers-file-ipc`: when the socket listener is latched
+    // degraded, do NOT jump straight to a raw disk write. Skip only the (wedged)
+    // socket attempt and let the write fall through to the file-IPC patch queue
+    // below — the plugin's file watcher still applies it via the Document API,
+    // so a degraded session never manufactures an IDEA "File Cache Conflict".
+    // The disk write becomes the true last resort, reached by the caller only
+    // when file IPC also fails to deliver (`success: false`).
+    let socket_degraded = ipc_direct_disk_degraded(&project_root, file)?;
+    if socket_degraded {
         eprintln!(
-            "[write] IPC listener degraded for {} — using direct disk write",
+            "[write] IPC socket degraded for {} — preferring file-IPC patch queue (disk write is last resort)",
             file.display()
         );
-        log_ipc_dewedge_direct_disk_skip(file, "try_ipc");
-        return Ok(IpcResult {
-            success: false,
-            patch_id,
-            skipped_committed_cycle: false,
-        });
+        log_ipc_dewedge_prefer_file_ipc(file, "try_ipc");
     }
 
-    // Try socket IPC first (lower latency, no inotify)
-    if crate::ipc_socket::is_listener_active(&project_root) {
+    // Try socket IPC first (lower latency, no inotify) unless the socket is
+    // latched degraded — in that case the file-IPC patch queue below is the
+    // reliable plugin path.
+    if !socket_degraded && crate::ipc_socket::is_listener_active(&project_root) {
         // Seed the boundary from patch_id so the socket patch and any later file /
         // run_stream fallback rebuild share an IDENTICAL boundary — otherwise a
         // late socket apply + file apply land the response twice
@@ -11689,16 +11712,19 @@ pub fn try_ipc(
                         "socket_ipc",
                     )?;
                     if degraded {
+                        // `#ipc-degraded-prefers-file-ipc`: the socket just
+                        // latched degraded, but the plugin's file watcher is a
+                        // separate transport that is very likely still alive.
+                        // Fall through to the file-IPC patch queue below instead
+                        // of skipping straight to a raw disk write — the plugin
+                        // applies the queued patch via the Document API, so this
+                        // degraded write never manufactures a File Cache Conflict.
+                        // Disk write stays the true last resort (file-IPC timeout).
                         eprintln!(
-                            "[write] IPC listener degraded for {} after repeated socket ack timeouts — skipping file IPC fallback",
+                            "[write] IPC socket degraded for {} after repeated socket ack timeouts — falling back to file-IPC patch queue (disk write is last resort)",
                             file.display()
                         );
-                        log_ipc_dewedge_direct_disk_skip(file, "socket_ipc_timeout");
-                        return Ok(IpcResult {
-                            success: false,
-                            patch_id,
-                            skipped_committed_cycle: false,
-                        });
+                        log_ipc_dewedge_prefer_file_ipc(file, "socket_ipc_timeout");
                     }
                 }
             }
@@ -15943,7 +15969,13 @@ scratch
     }
 
     #[test]
-    fn try_ipc_skips_socket_and_file_fallback_when_listener_degraded() {
+    fn try_ipc_prefers_file_ipc_when_socket_degraded() {
+        // `#ipc-degraded-prefers-file-ipc`: a latched-degraded socket must NOT
+        // jump straight to a raw disk write. The write routes through the
+        // file-IPC patch queue (plugin file watcher applies via Document API).
+        // With no plugin consuming the patch, file IPC times out and returns
+        // `false` so the caller can fall back to disk as the LAST resort — but
+        // the degraded write still attempted file IPC first.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -15961,28 +15993,94 @@ scratch
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
 
         let patch = crate::template::PatchBlock::new("exchange", "new content");
-        let started = std::time::Instant::now();
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        let elapsed = started.elapsed();
 
-        assert!(!result.success, "degraded IPC should report not consumed");
         assert!(
-            elapsed < std::time::Duration::from_millis(250),
-            "degraded bypass must not wait for the 2s IPC timeout: elapsed={elapsed:?}"
+            !result.success,
+            "degraded file-IPC with no plugin should report not consumed (disk is last resort)"
         );
+        // The file-IPC poll cleans up the unconsumed patch on timeout.
         let leftover: Vec<_> = fs::read_dir(agent_doc_dir.join("patches"))
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
         assert!(
             leftover.is_empty(),
-            "degraded bypass must not leave a file-IPC fallback patch"
+            "file-IPC timeout must clean up the unconsumed patch"
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("ipc_listener_degraded_direct_disk")
+            ops_log.contains("ipc_socket_degraded_prefer_file_ipc")
                 && ops_log.contains("transport=try_ipc"),
-            "direct-disk bypass should be logged:\n{ops_log}"
+            "degraded socket should log the prefer-file-IPC routing decision:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("ipc_write_attempt"),
+            "degraded write must still attempt the file-IPC patch queue, not bypass it:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("ipc_listener_degraded_direct_disk"),
+            "degraded write must NOT take the old direct-disk bypass:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn try_ipc_degraded_succeeds_via_file_ipc_when_plugin_consumes() {
+        // `#ipc-degraded-prefers-file-ipc`: even with the socket latched
+        // degraded, a live plugin file watcher consuming the file-IPC patch
+        // makes the degraded write succeed through the plugin (Document API) —
+        // no raw disk write, so no manufactured File Cache Conflict.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "two timeouts with no live listener should latch degraded"
+        );
+
+        // Simulate the plugin file watcher applying then deleting the patch.
+        let watcher_dir = agent_doc_dir.join("patches");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            let _ = fs::write(
+                                &doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
+                            );
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            result.success,
+            "degraded write must succeed through the file-IPC patch queue when the plugin consumes it"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_socket_degraded_prefer_file_ipc"),
+            "degraded socket should log the prefer-file-IPC routing decision:\n{ops_log}"
         );
     }
 

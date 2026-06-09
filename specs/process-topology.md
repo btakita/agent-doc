@@ -59,7 +59,7 @@ flowchart TB
 |---|------|------|-----|
 | R1 | Two file-watchers / two writers (plugin WatchService + binary disk fallback) → File Cache Conflict | separate processes, no single writer | `#pcpc4` single controller-owned watcher + `#pcp7` demote WatchService to read-only |
 | R2 | EDT/save lag vs ack budget → false ack-timeout / degrade vote | apply latency coupled to sender liveness | `#pcp5` early-ack IPC (`#ipc-ack-timeout-align`/`#ipc-degrade-false-vote` partial) |
-| R3 | Disk fallback manufactures the foreign write IntelliJ flags as a cache conflict when degraded | raw disk write on degrade | `#pcp5` degraded-prefers-file-IPC |
+| R3 | Disk fallback manufactures the foreign write IntelliJ flags as a cache conflict when degraded | raw disk write on degrade | **`#ipc-degraded-prefers-file-ipc` ✅** (degraded socket routes through the file-IPC patch queue; plugin applies via Document API; raw disk write is last resort only) |
 | R4 | mtime-heuristic drift: `live_buffer_diverges_from_content` infers foreign-vs-unsaved from `LIVE_BUFFER_STALE_SKEW_MS` only → real edit fails closed | no provenance / no buffer content | **`#pcp2` write-provenance ✅** + **`#pcp6` editor-buffer content ✅** (fixed) |
 | R5 | TOCTOU between FFI socket handler and WatchService for the same patch | two appliers | `#pcp7` thin apply+ack shim |
 | R6 | Supervisor self-race: route-owned supervisor races the agent's own finalize → "could not drain the active closeout" / exit 75 | separate-process writers, no in-process queue | **`#pcp3a` drain race-hardening ✅** (mitigation) + `#pcpc3` in-process write queue (root) |

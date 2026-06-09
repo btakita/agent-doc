@@ -755,7 +755,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +2 for the audited `ipc_listener_degraded_direct_disk ... reason=repeated_ack_timeout`
         // diagnostics: repeated socket IPC ack timeouts de-wedge the current
         // document/session away from socket/file IPC and onto the direct-disk path.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 29,
+        // +1 for the audited `ipc_socket_degraded_prefer_file_ipc ... reason=repeated_ack_timeout`
+        // diagnostic (#ipc-degraded-prefers-file-ipc): a latched-degraded socket
+        // routes the write through the file-IPC patch queue (plugin applies via
+        // Document API) instead of a raw disk write; disk write is last resort.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 30,
         _ => 0,
     }
 }

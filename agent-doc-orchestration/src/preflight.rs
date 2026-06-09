@@ -1308,6 +1308,159 @@ fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
     })
 }
 
+/// Grace window (seconds) so an artifact built moments before the source commit
+/// — the normal build → install → commit ordering — is not flagged. The real
+/// `#install-stale-guard` failure had an ~11-minute install/commit gap; the
+/// same-cycle gap is seconds, so 60s cleanly separates them.
+const STALE_INSTALL_GRACE_SECS: u64 = 60;
+
+/// Pure classifier for `#install-stale-guard`: given the unix timestamp of the
+/// latest source commit and a set of `(label, mtime)` installed artifacts
+/// (`None` mtime = artifact absent), return the labels whose mtime predates the
+/// source commit by more than `grace_secs`. Extracted so the staleness rule is
+/// deterministically unit-testable without touching git or the filesystem.
+fn classify_stale_install_artifacts(
+    source_commit_ts: u64,
+    artifacts: &[(&'static str, Option<u64>)],
+    grace_secs: u64,
+) -> Vec<&'static str> {
+    artifacts
+        .iter()
+        .filter_map(|(label, mtime)| match mtime {
+            Some(m) if m.saturating_add(grace_secs) < source_commit_ts => Some(*label),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Unix mtime (seconds) of `path`, following symlinks (installed cdylibs are
+/// symlinks into `target/release`). `None` when missing/unreadable.
+fn artifact_mtime_secs(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+}
+
+/// `~/.cargo/bin` (honoring `CARGO_HOME`), or `None` when unresolvable.
+fn cargo_bin_dir() -> Option<PathBuf> {
+    if let Ok(cargo_home) = std::env::var("CARGO_HOME")
+        && !cargo_home.is_empty()
+    {
+        return Some(PathBuf::from(cargo_home).join("bin"));
+    }
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    Some(PathBuf::from(home).join(".cargo/bin"))
+}
+
+/// Newest mtime among `<bin_dir>/libagent_doc-*.so` (the lib-installed cdylib
+/// the JetBrains plugin hot-reloads). Version-globbed because the cdylib is
+/// named after the `agent-doc` binary crate version, not this crate's.
+fn installed_cdylib_mtime(bin_dir: &Path) -> Option<u64> {
+    std::fs::read_dir(bin_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            (name.starts_with("libagent_doc-") && name.ends_with(".so"))
+                .then(|| artifact_mtime_secs(&entry.path()))
+                .flatten()
+        })
+        .max()
+}
+
+/// Locate the `agent-doc` source repo relative to the document's git root: the
+/// root itself (standalone checkout) or `<root>/src/agent-doc` (the dogfood
+/// submodule layout), identified by a `Cargo.toml` declaring the binary crate.
+fn locate_agent_doc_source_repo(doc_git_root: &Path) -> Option<PathBuf> {
+    [
+        doc_git_root.to_path_buf(),
+        doc_git_root.join("src/agent-doc"),
+    ]
+    .into_iter()
+    .find(|candidate| {
+        std::fs::read_to_string(candidate.join("Cargo.toml"))
+            .map(|toml| toml.lines().any(|l| l.trim() == "name = \"agent-doc\""))
+            .unwrap_or(false)
+    })
+}
+
+/// `git log -1 <fmt>` over buildable source paths in `repo`. Restricting to
+/// source pathspecs keeps doc-only commits from tripping the staleness check.
+fn source_head_git_field(repo: &Path, fmt: &str) -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args([
+            "log", "-1", fmt, "--", "*.rs", "Cargo.toml", "Cargo.lock", "build.rs",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+/// Warn when the installed/built `agent-doc` artifacts predate the latest source
+/// commit, so live sessions (tmux, JetBrains) do not silently run stale code at
+/// an unchanged version string (`#install-stale-guard`). Best-effort: only fires
+/// when an `agent-doc` source repo is locatable (development / dogfooding) and
+/// silently no-ops otherwise (for example a crates.io install with no source).
+fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
+    let repo = locate_agent_doc_source_repo(doc_git_root)?;
+    let commit_ts = source_head_git_field(&repo, "--format=%ct")?
+        .parse::<u64>()
+        .ok()?;
+
+    let bin_dir = cargo_bin_dir();
+    let release_dir = repo.join("target/release");
+    let artifacts: Vec<(&'static str, Option<u64>)> = vec![
+        (
+            "~/.cargo/bin/agent-doc",
+            bin_dir
+                .as_deref()
+                .and_then(|d| artifact_mtime_secs(&d.join("agent-doc"))),
+        ),
+        (
+            "~/.cargo/bin cdylib",
+            bin_dir.as_deref().and_then(installed_cdylib_mtime),
+        ),
+        (
+            "target/release/agent-doc",
+            artifact_mtime_secs(&release_dir.join("agent-doc")),
+        ),
+        (
+            "target/release cdylib",
+            artifact_mtime_secs(&release_dir.join("libagent_doc.so")),
+        ),
+    ];
+
+    let stale = classify_stale_install_artifacts(commit_ts, &artifacts, STALE_INSTALL_GRACE_SECS);
+    if stale.is_empty() {
+        return None;
+    }
+
+    let short_hash =
+        source_head_git_field(&repo, "--format=%h").unwrap_or_else(|| "HEAD".to_string());
+    Some(PreflightWarning {
+        code: "stale_install".to_string(),
+        message: format!(
+            "stale agent-doc install: {} predate(s) source commit {} — live sessions (tmux / JetBrains) may run pre-{} code at an unchanged version. Run `make install` in {} to rebuild the binary + cdylib.",
+            stale.join(", "),
+            short_hash,
+            short_hash,
+            repo.display()
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
+
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
 const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "preset", "start", "go", "stop"];
@@ -3337,6 +3490,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
+    }
+    if let Ok((git_root, _)) = git::resolve_to_git_root(file)
+        && let Some(warning) = stale_install_warning(&git_root)
+    {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
     }
     let backlog_capture_required = crate::prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
@@ -6079,6 +6238,85 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    // #install-stale-guard: the staleness rule flags only artifacts whose mtime
+    // predates the source commit by more than the grace window; absent artifacts
+    // (`None`) and artifacts within grace never fire, so the normal
+    // build → install → commit ordering does not self-trip the guard.
+    #[test]
+    fn stale_install_classifier_flags_only_artifacts_older_than_source_commit() {
+        let commit = 10_000u64;
+        let grace = 60u64;
+
+        // All artifacts newer than the commit → nothing stale.
+        assert!(
+            classify_stale_install_artifacts(
+                commit,
+                &[("bin", Some(commit + 5)), ("cdylib", Some(commit + 1))],
+                grace,
+            )
+            .is_empty()
+        );
+
+        // One artifact older than the commit by more than the grace → flagged.
+        let stale = classify_stale_install_artifacts(
+            commit,
+            &[("bin", Some(commit - 600)), ("cdylib", Some(commit + 1))],
+            grace,
+        );
+        assert_eq!(stale, vec!["bin"]);
+
+        // Built just inside the grace window (install-then-commit seconds apart)
+        // → not flagged; older than grace → flagged.
+        assert!(
+            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 30))], grace).is_empty()
+        );
+        assert_eq!(
+            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 61))], grace),
+            vec!["bin"]
+        );
+
+        // Absent artifacts (not installed) never fire.
+        assert!(
+            classify_stale_install_artifacts(commit, &[("bin", None), ("cdylib", None)], grace)
+                .is_empty()
+        );
+    }
+
+    // The source-repo locator accepts the document's git root when it is the
+    // `agent-doc` crate, the `src/agent-doc` dogfood submodule layout, and
+    // returns `None` (silent no-op) when no `agent-doc` Cargo.toml is present.
+    #[test]
+    fn locate_agent_doc_source_repo_matches_root_and_dogfood_layout() {
+        let agent_doc_manifest = "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n";
+
+        // Standalone checkout: the git root itself is the crate.
+        let root = TempDir::new().unwrap();
+        std::fs::write(root.path().join("Cargo.toml"), agent_doc_manifest).unwrap();
+        assert_eq!(
+            locate_agent_doc_source_repo(root.path()).as_deref(),
+            Some(root.path())
+        );
+
+        // Dogfood superproject: source lives under src/agent-doc.
+        let superproject = TempDir::new().unwrap();
+        let src = superproject.path().join("src/agent-doc");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("Cargo.toml"), agent_doc_manifest).unwrap();
+        assert_eq!(
+            locate_agent_doc_source_repo(superproject.path()),
+            Some(src)
+        );
+
+        // Unrelated repo (no agent-doc crate) → no warning source.
+        let other = TempDir::new().unwrap();
+        std::fs::write(
+            other.path().join("Cargo.toml"),
+            "[package]\nname = \"something-else\"\n",
+        )
+        .unwrap();
+        assert!(locate_agent_doc_source_repo(other.path()).is_none());
+    }
 
     // #per-cycle-protocol-output-overhead: empty Vec fields must not spend
     // per-cycle context bytes. A healthy/default PreflightOutput omits the empty

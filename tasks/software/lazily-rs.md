@@ -113,6 +113,13 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 - `schemas/delta.json` — JSON Schema for Delta + all 7 DeltaOp variants
 - `schemas/snapshot.json` — JSON Schema (Draft 2020-12) for Snapshot + NodeSnapshot + EdgeSnapshot
 - `protocol.md` — standalone language-agnostic protocol spec covering all wire surfaces (IPC Snapshot/Delta, FFI, signaling, CRDT distributed, capability negotiation, permission boundary)
+- Pushed `btakita/lazily-rs` `a64b49f` and superproject `d2e81d4bc`
+- `liblazily.so` produced at `target/debug/liblazily.so`
+- `make check` (fmt, clippy, build, all test suites, benchmark check) — passed
+- `SPEC.md`: documented shared library build section
+- `cbindgen.toml`: C header generation config (exports `LazilyFfiStatus`, `LazilyFfiMessageKind`, `LazilyFfiBytes`, prefixed `lazily_` functions)
+- `Makefile`: added `build-ffi` and `ffi-headers` targets
+- `Cargo.toml`: added `[lib] crate-type = ["lib", "cdylib"]` — produces `liblazily.so` (28.7MB debug) alongside the rlib
 
 **Priority backlog for FFI/IPC/network improvements:**
 
@@ -125,7 +132,30 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 | `#webrtc-data` | WebRTC data channel transport for peer-to-peer IPC (beyond signaling) | Medium |
 | `#cross-lang-tests` | Shared conformance test suite against the spec repo — run in CI for each binding | Medium |
 | `#ipc-docs` | Standalone protocol docs page (not inside SPEC.md) with examples per transport | Low |
-<!-- agent:boundary:f71c98b8 -->
+
+### Re: #pz3k — cdylib crate type + build targets — glm-5.1
+
+> **Queue prompt:**
+>
+> [#pz3k]
+
+
+Completed `#pz3k`: added `cdylib` crate type, build targets, and `cbindgen` config.
+
+**Changed paths** (in `src/lazily-rs`):
+- `Cargo.toml`: added `[lib] crate-type = ["lib", "cdylib"]` — produces `liblazily.so` (28.7MB debug) alongside the rlib
+- `Makefile`: added `build-ffi` and `ffi-headers` targets
+- `cbindgen.toml`: C header generation config (exports `LazilyFfiStatus`, `LazilyFfiMessageKind`, `LazilyFfiBytes`, prefixed `lazily_` functions)
+- `SPEC.md`: documented shared library build section
+
+**Verification:**
+- `make check` (fmt, clippy, build, all test suites, benchmark check) — passed
+- `liblazily.so` produced at `target/debug/liblazily.so`
+- Pushed `btakita/lazily-rs` `a64b49f` and superproject `d2e81d4bc`
+
+**Note on safer-ffi / diplomat:** deferred as future options. The current `cbindgen` approach is sufficient for C ABI consumers. `safer-ffi` would require rewriting the FFI surface; `diplomat` would add multi-language binding generation. Both can be adopted incrementally.
+<!-- agent:boundary:fa0f5d8c -->
+<!-- agent:boundary:ffc8e9ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +166,7 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~[#n994]~~
 - ~~[#w30b]~~
-- [#pz3k]
+- ~~[#pz3k]~~
 - [#kavj]
 - [#jpf1]
 - [#ms7x]
@@ -146,7 +176,6 @@ Confidence: high for the release/publish outcome; the crate is visible on crates
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#pz3k] #ffi-derive=Add cdylib crate type + build targets; consider safer-ffi or diplomat for auto-generated headers
 - [ ] [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
 - [ ] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 - [ ] [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding

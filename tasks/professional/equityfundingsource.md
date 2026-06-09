@@ -140,7 +140,7 @@ Deployed to production. No new D1 migration (wire values reuse the existing `pla
 - Smoke test: `GET /` → **200**, `GET /funded-deals` → **200**, `GET` + `PUT /api/admin/settings` → **401** (auth-gated, correctly wired).
 
 This drains the queue.
-<!-- agent:boundary:53fd733d -->
+<!-- agent:boundary:eeeff37a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -155,7 +155,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ty2v] Secure wiring-instructions delivery — foundation shipped + deployed (EFS 39c1607, worker 0ad54c0a): admin-editable wire_* values (bank name/address, ABA routing, account number/name, optional SWIFT, reference, special instructions) with placeholder defaults in Platform Settings. Remaining: secure expiring/self-destructing-link or click-to-reveal (bank-style) delivery, the "verify wiring with the title company directly" reminder, and the title/escrow -> EFS -> lender routing. From 2026-06-03 call.
+- [ ] [#wir3] Secure wiring-instructions delivery (builds on the #ty2v admin-editable wire values): expiring/self-destructing-link or click-to-reveal (bank-style) delivery, the "verify wiring with the title company directly" reminder, and the title/escrow -> EFS -> lender routing. From 2026-06-03 call.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

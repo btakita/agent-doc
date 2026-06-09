@@ -49,6 +49,24 @@ const SOCKET_FILENAME: &str = "ipc.sock";
 /// so only a genuinely wedged listener times out.
 const IPC_ACK_TIMEOUT_SECS: u64 = 6;
 
+/// Early-ack opt-in for the sender (`#ipc-early-ack` / `#saev`, Phase 2).
+///
+/// When `true`, [`send_message`] tags outgoing `patch` messages with
+/// `early_ack: true`, which makes an early-ack-aware [`start_listener`] emit a
+/// `pending` ack the instant it receives the patch (before the blocking apply),
+/// then the terminal ack as usual. The sender's [`send_message`] read loop
+/// already understands the two-phase sequence regardless of this flag, so the
+/// protocol is fully wired and unit-tested; only the auto-injection of the
+/// opt-in flag onto live closeout patches is gated here.
+///
+/// Kept `false` (dormant) until the two-phase flow is verified end-to-end in a
+/// live IntelliJ/Codex session under real typing load (`#xkpf`): with the flag
+/// off, no patch carries `early_ack`, no listener emits a `pending` ack, and the
+/// read loop runs exactly once — byte-for-byte the pre-existing single-ack
+/// behavior. Flipping this to `true` (plus that live verification) activates the
+/// decoupling of the sender liveness probe from plugin apply latency.
+const EARLY_ACK_ENABLED: bool = false;
+
 /// Get the socket path for a project.
 pub fn socket_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(SOCKET_FILENAME)
@@ -90,43 +108,115 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     // interprocess Stream implements Read + Write via halves
     let (reader_half, mut writer_half) = stream.split();
 
-    // Send NDJSON message
-    let mut msg = serde_json::to_string(message)?;
+    // Send NDJSON message. When early-ack is enabled, tag outgoing `patch`
+    // messages so an early-ack-aware listener emits a `pending` ack on receipt;
+    // older listeners ignore the unknown field (skew-safe). Non-patch messages
+    // (queue convergence, etc.) are sent verbatim.
+    let outgoing = early_ack_tagged_message(message);
+    let mut msg = serde_json::to_string(&outgoing)?;
     msg.push('\n');
     writer_half.write_all(msg.as_bytes())?;
     writer_half.flush()?;
 
-    // Read ack (with manual timeout via thread)
+    // Read ack(s) (with manual timeout via thread). The listener may send an
+    // early `pending` ack (liveness only) before the terminal ack, so the reader
+    // thread loops until it yields a non-pending line (terminal ack / EOF /
+    // error). For a single terminal ack — every current plugin — the loop runs
+    // exactly once, identical to the prior single-read behavior.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reader_half);
-        let mut ack_line = String::new();
-        let result = reader.read_line(&mut ack_line);
-        let _ = tx.send((result, ack_line));
-    });
-
-    match rx.recv_timeout(Duration::from_secs(IPC_ACK_TIMEOUT_SECS)) {
-        Ok((Ok(0), _)) => Err(anyhow::anyhow!(
-            "IPC ack: plugin closed connection without responding"
-        )),
-        Ok((Ok(_), line)) => {
-            let ack = line.trim().to_string();
-            match classify_ack(&ack) {
-                AckClassification::Ok => Ok(Some(ack)),
-                AckClassification::AlreadyApplied => {
-                    Err(anyhow::anyhow!("IPC ack already_applied: {}", ack))
-                }
-                AckClassification::Failed => Err(anyhow::anyhow!("IPC ack status error: {}", ack)),
+        loop {
+            let mut ack_line = String::new();
+            let result = reader.read_line(&mut ack_line);
+            let stop = match &result {
+                Ok(0) => true,
+                Ok(_) => classify_ack(ack_line.trim()) != AckClassification::Pending,
+                Err(_) => true,
+            };
+            if tx.send((result, ack_line)).is_err() {
+                break;
+            }
+            if stop {
+                break;
             }
         }
-        Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
-            "IPC ack timeout ({IPC_ACK_TIMEOUT_SECS}s)"
-        )),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(anyhow::anyhow!("IPC reader thread disconnected"))
+    });
+
+    // Each phase gets its own ack-timeout budget: an early `pending` ack proves
+    // liveness and lets the binary keep waiting for the terminal ack instead of
+    // declaring a false timeout while the plugin is still applying.
+    loop {
+        match rx.recv_timeout(Duration::from_secs(IPC_ACK_TIMEOUT_SECS)) {
+            Ok((Ok(0), _)) => {
+                return Err(anyhow::anyhow!(
+                    "IPC ack: plugin closed connection without responding"
+                ));
+            }
+            Ok((Ok(_), line)) => {
+                let ack = line.trim().to_string();
+                match classify_ack(&ack) {
+                    // Liveness-only: listener received the patch but has not yet
+                    // applied it. Keep waiting for the terminal ack.
+                    AckClassification::Pending => continue,
+                    AckClassification::Ok => return Ok(Some(ack)),
+                    AckClassification::AlreadyApplied => {
+                        return Err(anyhow::anyhow!("IPC ack already_applied: {}", ack));
+                    }
+                    AckClassification::Failed => {
+                        return Err(anyhow::anyhow!("IPC ack status error: {}", ack));
+                    }
+                }
+            }
+            Ok((Err(e), _)) => return Err(anyhow::anyhow!("IPC ack read error: {}", e)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return Err(anyhow::anyhow!("IPC ack timeout ({IPC_ACK_TIMEOUT_SECS}s)"));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(anyhow::anyhow!("IPC reader thread disconnected"));
+            }
         }
     }
+}
+
+/// Tag a `patch` message with the `early_ack` opt-in when [`EARLY_ACK_ENABLED`]
+/// is set. Returns the message unchanged for non-patch types or when the flag is
+/// off (the dormant default), so production wire traffic is byte-identical until
+/// early-ack is activated. Separated out for unit testing.
+fn early_ack_tagged_message(message: &serde_json::Value) -> serde_json::Value {
+    if !EARLY_ACK_ENABLED {
+        return message.clone();
+    }
+    let is_patch = message
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|t| t == "patch")
+        .unwrap_or(false);
+    if !is_patch {
+        return message.clone();
+    }
+    let mut tagged = message.clone();
+    if let Some(obj) = tagged.as_object_mut() {
+        obj.insert("early_ack".to_string(), serde_json::Value::Bool(true));
+    }
+    tagged
+}
+
+/// True when an incoming listener message opts into early-ack
+/// (`"early_ack": true`). Used by [`start_listener`] to decide whether to emit a
+/// `pending` ack before the blocking apply handler runs.
+pub fn message_requests_early_ack(message: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(message)
+        .ok()
+        .and_then(|v| v.get("early_ack").and_then(|e| e.as_bool()))
+        .unwrap_or(false)
+}
+
+/// The early `pending` ack line emitted by an early-ack-aware listener on patch
+/// receipt, before the patch is applied. Classified as
+/// [`AckClassification::Pending`] by the sender (liveness only — not success).
+pub fn early_ack_line() -> &'static str {
+    r#"{"type":"ack","status":"pending"}"#
 }
 
 /// Classification of a plugin-sent IPC ack line.
@@ -146,6 +236,10 @@ pub enum AckClassification {
     Ok,
     AlreadyApplied,
     Failed,
+    /// Early `pending`/`accepted` ack: the listener received the patch but has
+    /// not applied it yet. Liveness only — the sender must keep waiting for a
+    /// terminal ack (`#ipc-early-ack`).
+    Pending,
 }
 
 /// Classify a plugin-sent IPC ack line. See [`AckClassification`].
@@ -153,9 +247,15 @@ pub fn classify_ack(ack: &str) -> AckClassification {
     let Some(value) = serde_json::from_str::<serde_json::Value>(ack).ok() else {
         return AckClassification::Ok;
     };
-    let status_is_error = value
-        .get("status")
-        .and_then(|s| s.as_str())
+    let status = value.get("status").and_then(|s| s.as_str());
+    // Early-ack: a `pending`/`accepted` status proves listener liveness but is
+    // not a terminal result — the sender keeps waiting for the apply ack.
+    if let Some(s) = status
+        && (s.eq_ignore_ascii_case("pending") || s.eq_ignore_ascii_case("accepted"))
+    {
+        return AckClassification::Pending;
+    }
+    let status_is_error = status
         .map(|s| s.eq_ignore_ascii_case("error"))
         .unwrap_or(false);
     if !status_is_error {
@@ -317,16 +417,31 @@ where
 
                 while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     let trimmed = line.trim();
-                    if !trimmed.is_empty()
-                        && let Some(response) = handler(trimmed)
-                    {
-                        let mut resp = response;
-                        resp.push('\n');
-                        if let Err(e) = writer_half.write_all(resp.as_bytes()) {
-                            eprintln!("[ipc-socket] handler write error: {}", e);
+                    if !trimmed.is_empty() {
+                        // Early-ack: if the sender opted in, emit a `pending` ack
+                        // the instant we receive the patch — before the blocking
+                        // apply handler runs — so the sender's liveness probe is
+                        // decoupled from apply latency. The terminal ack still
+                        // follows. Senders that do not opt in get only the
+                        // terminal ack, exactly as before.
+                        if message_requests_early_ack(trimmed) {
+                            let mut early = early_ack_line().to_string();
+                            early.push('\n');
+                            if let Err(e) = writer_half.write_all(early.as_bytes()) {
+                                eprintln!("[ipc-socket] early-ack write error: {}", e);
+                            } else if let Err(e) = writer_half.flush() {
+                                eprintln!("[ipc-socket] early-ack flush error: {}", e);
+                            }
                         }
-                        if let Err(e) = writer_half.flush() {
-                            eprintln!("[ipc-socket] handler flush error: {}", e);
+                        if let Some(response) = handler(trimmed) {
+                            let mut resp = response;
+                            resp.push('\n');
+                            if let Err(e) = writer_half.write_all(resp.as_bytes()) {
+                                eprintln!("[ipc-socket] handler write error: {}", e);
+                            }
+                            if let Err(e) = writer_half.flush() {
+                                eprintln!("[ipc-socket] handler flush error: {}", e);
+                            }
                         }
                     }
                     line.clear();
@@ -397,6 +512,75 @@ mod tests {
             err.contains("IPC ack status error"),
             "error ack should fail the socket IPC send, got: {err}"
         );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn classify_ack_treats_pending_status_as_pending() {
+        assert_eq!(
+            classify_ack(r#"{"type":"ack","status":"pending"}"#),
+            AckClassification::Pending
+        );
+        assert_eq!(
+            classify_ack(r#"{"type":"ack","status":"accepted"}"#),
+            AckClassification::Pending
+        );
+        // The canonical early-ack line classifies as Pending.
+        assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
+    }
+
+    #[test]
+    fn message_requests_early_ack_reads_flag() {
+        assert!(message_requests_early_ack(
+            r#"{"type":"patch","early_ack":true}"#
+        ));
+        assert!(!message_requests_early_ack(r#"{"type":"patch"}"#));
+        assert!(!message_requests_early_ack(
+            r#"{"type":"patch","early_ack":false}"#
+        ));
+        assert!(!message_requests_early_ack("not json"));
+    }
+
+    #[test]
+    fn early_ack_tagging_is_dormant_by_default() {
+        // With EARLY_ACK_ENABLED off (the dormant default), the sender must not
+        // add the flag — wire traffic stays byte-identical to pre-early-ack.
+        let patch = serde_json::json!({"type": "patch", "file": "x.md"});
+        assert_eq!(early_ack_tagged_message(&patch), patch);
+        let other = serde_json::json!({"type": "vcs_refresh"});
+        assert_eq!(early_ack_tagged_message(&other), other);
+    }
+
+    #[test]
+    fn send_message_handles_early_then_terminal_ack() {
+        // Full two-phase roundtrip: a flagged patch makes the listener emit a
+        // `pending` ack on receipt, then the terminal ack after the handler runs.
+        // send_message must skip the pending ack and return the terminal result.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, |msg| {
+                // Prove the early ack already went out before this (apply) runs.
+                assert!(message_requests_early_ack(msg));
+                thread::sleep(Duration::from_millis(50));
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        // Manually flagged so the listener early-acks even though the sender
+        // auto-injection gate (EARLY_ACK_ENABLED) is off.
+        let msg = serde_json::json!({"type": "patch", "early_ack": true});
+        let result = send_message(&root, &msg).unwrap();
+        let ack: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(ack["status"], "ok", "terminal ack must be returned, not pending");
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);

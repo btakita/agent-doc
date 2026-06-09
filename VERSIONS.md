@@ -6,6 +6,26 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Early-ack IPC protocol landed (dormant) (`#ipc-early-ack` / `#saev`,
+  Phase 2).** The socket IPC handshake now supports a two-phase ack:
+  `ipc_socket::start_listener` emits a `pending` ack the instant it receives a
+  patch that opted in (`"early_ack": true`) — before the blocking apply — and
+  `send_message` reads acks in a loop, treating a `pending` ack as liveness-only
+  (it keeps waiting for the terminal ack and never returns a false success).
+  This decouples the sender's liveness probe from plugin apply latency (the R2
+  false-timeout / degrade-vote race). New `AckClassification::Pending`;
+  `message_requests_early_ack` / `early_ack_line` / `early_ack_tagged_message`
+  helpers; the early ack is owned by the Rust transport, so no plugin/callback
+  change is needed (ffi listener inherits it). Backward/skew-safe: senders that
+  do not set `early_ack` get a single terminal ack exactly as before, and the
+  read loop runs once. Activation is gated by `EARLY_ACK_ENABLED` (off — the
+  sender does not yet tag patches) pending end-to-end verification under live
+  typing load (`#xkpf`). Tests in `ipc_socket.rs`
+  (`classify_ack_treats_pending_status_as_pending`,
+  `send_message_handles_early_then_terminal_ack`, dormancy + flag-parse);
+  spec `specs/process-topology.md` R2. Plan:
+  `tasks/agent-doc/plan-ipc-transport-reliability.md`.
+
 - **Editor plugins render a choice dialog on a cross-session claim reject
   (`#jb-claim-cross-session`, plugin half).** Building on the binary
   `cross-session-reject` marker, the JetBrains "Claim for Tmux Pane" action

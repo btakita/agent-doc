@@ -58,7 +58,7 @@ flowchart TB
 | # | Race | Root | Fix |
 |---|------|------|-----|
 | R1 | Two file-watchers / two writers (plugin WatchService + binary disk fallback) → File Cache Conflict | separate processes, no single writer | `#pcpc4` single controller-owned watcher + `#pcp7` demote WatchService to read-only |
-| R2 | EDT/save lag vs ack budget → false ack-timeout / degrade vote | apply latency coupled to sender liveness | `#pcp5` early-ack IPC (`#ipc-ack-timeout-align`/`#ipc-degrade-false-vote` partial) |
+| R2 | EDT/save lag vs ack budget → false ack-timeout / degrade vote | apply latency coupled to sender liveness | `#pcp5` early-ack IPC (`#ipc-ack-timeout-align`/`#ipc-degrade-false-vote` partial) + **`#ipc-early-ack` protocol landed, dormant**: listener emits a `pending` ack on patch receipt (before apply) when the sender opts in; `send_message` skips it and waits for the terminal ack (liveness-only, never a false success). Backward/skew-safe via the `early_ack` message flag. `EARLY_ACK_ENABLED` gates auto-activation (off until live-verified, `#xkpf`) |
 | R3 | Disk fallback manufactures the foreign write IntelliJ flags as a cache conflict when degraded | raw disk write on degrade | **`#ipc-degraded-prefers-file-ipc` ✅** (degraded socket routes through the file-IPC patch queue; plugin applies via Document API; raw disk write is last resort only) |
 | R4 | mtime-heuristic drift: `live_buffer_diverges_from_content` infers foreign-vs-unsaved from `LIVE_BUFFER_STALE_SKEW_MS` only → real edit fails closed | no provenance / no buffer content | **`#pcp2` write-provenance ✅** + **`#pcp6` editor-buffer content ✅** (fixed) |
 | R5 | TOCTOU between FFI socket handler and WatchService for the same patch | two appliers | `#pcp7` thin apply+ack shim |

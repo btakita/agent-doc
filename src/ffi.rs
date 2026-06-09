@@ -726,6 +726,13 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 /// Plugins should prefer v2 when available. Existing plugins built against
 /// [`agent_doc_start_ipc_listener`] keep working unchanged.
 ///
+/// Early-ack (`#ipc-early-ack`): the underlying `ipc_socket::start_listener`
+/// transport emits a `pending` ack the instant it receives a patch that opted
+/// in (`"early_ack": true`), before this callback's blocking apply runs, then
+/// this callback's terminal ack as usual. No plugin/callback change is needed —
+/// the early ack is owned by the Rust transport. Senders that do not opt in get
+/// only the terminal ack.
+///
 /// Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 /// `[#ipcpluginalready]`.
 ///

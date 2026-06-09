@@ -54,7 +54,25 @@ Shipped and deployed. The interactive **Deal Pipeline controls** from `img_3.png
 - **loan / payment / lender / funding / document / contact** detail modals aren't leads — a borrower-invite/lead-status block doesn't apply.
 
 If by "all dialog types" you meant each dialog should get an **editable status dropdown for its own entity** (e.g. change a loan's pipeline stage from the loan dialog), that's a real but separate feature — each needs its own status-write endpoint. Tracked as **#pipeline-dialog-controls-scope**; tell me which dialogs + which actions and I'll build them.
-<!-- agent:boundary:9084b55f -->
+
+### Re: Wider/shorter Deal Pipeline dialog + mobile scroll — opus-4-8
+
+> **Queue prompt:**
+>
+> Make the dialog wider and shorter. ![img_4.png](img_4.png) Use a scrollbar for short monitors. Make sure this works on mobile.
+
+
+Done and deployed. The root issue: `PortalModal` had `overflow:hidden` with **no max-height**, so the tall lead dialog (`img_4.png`) could clip or run off the bottom of short monitors with no way to scroll.
+
+**What changed (EFS `3d90502`, pointer `658df787e`):**
+- **Viewport-fit + scrollbar (all dialogs)** — `PortalModal` now caps at `max-height:calc(100dvh - 40px)` and scrolls internally (`overflow-y:auto`, `overscroll-behavior:contain`, touch scrolling). `dvh` accounts for mobile browser chrome, so it fits short screens and phones instead of clipping. This fixes every dialog, not just the lead one.
+- **Wider** — the pipeline lead + loan dialogs go `max-w-lg` → `max-w-2xl` (32rem → 42rem).
+- **Shorter** — the lead dialog body is now a responsive 2-column grid (`auto-fit, minmax(240px,1fr))`): two columns on desktop (roughly half the height), collapsing to one column on mobile.
+
+**Verification:** `bun run check` green — full suite passes (added 2 layout tests), `build` + `build:worker` clean. **Deployed** to production (Version `4298b450-3a7d-480d-92ef-1030fcf7d875`, no DB migrations). Smoke test: `/`, `/apply` → 200; `/portal-admin/pipeline` → 303→login.
+
+To see it: open `/portal-admin/pipeline`, click a lead card — the dialog is wider, the data sits in two columns, and on a short window it scrolls inside the dialog instead of overflowing.
+<!-- agent:boundary:f84ee065 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +80,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Make the dialog wider and shorter. ![img_4.png](img_4.png) Use a scrollbar for short monitors. Make sure this works on mobile.
+- ~~Make the dialog wider and shorter. ![img_4.png](img_4.png) Use a scrollbar for short monitors. Make sure this works on mobile.~~
 - deploy
 <!-- /agent:queue -->
 

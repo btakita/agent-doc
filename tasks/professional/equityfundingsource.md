@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -200,7 +200,21 @@ Added in-board **search** to the Deal Pipeline and removed the Table view entire
 - Spec: `prds/investor-pipeline-admin.md` Phase 3b; tests in `tests/admin-pipeline.test.ts` (search + Kanban-only) and `tests/application-status-ui.test.ts` (loans→pipeline redirect, no table view).
 
 **Full suite 490 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the queue head; one item remains: move Deal Pipeline above Loan Applications in the Admin menu.
-<!-- agent:boundary:7bc60193 -->
+
+### Re: Move Deal Pipeline above Loan Applications — opus-4-8
+
+> **Queue prompt:**
+>
+> Move Deal Pipeline above Loan Applications in the Admin menu.
+
+Reordered the admin sidebar: **Deal Pipeline** now sits directly under Dashboard, above **Loan Applications**.
+
+**What shipped (committed + pushed, EFS `6dac30d`; superproject pointer `edc2c09e7`):**
+- `layout.tsx` `NAV_ITEMS`: swapped the `pipeline` and `full-applications` entries so the order is Dashboard → Deal Pipeline → Loan Applications → Application Leads → …
+- Test in `tests/admin-pipeline.test.ts` asserts Deal Pipeline is ordered before Loan Applications.
+
+**Full suite 491 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the final queued item — the queue is now empty.
+<!-- agent:boundary:e8bc649d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,10 +222,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~[#wir3]~~
-- ~~The Prequalification Lead dialog in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline should contain all lead data. Same with the other steps.~~
-- ~~Add a search to the deal pipeline. When the search is performed, show the filtered results in the pipeline with the result count. Remove the Table view. Only Kanban view for now. The Kanban|Table selector can be removed since we don't have Table view anymore.~~
-- Move Deal Pipeline above Loan Applications in the Admin menu.
 <!-- /agent:queue -->
 
 ## Backlog

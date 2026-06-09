@@ -35,13 +35,32 @@ complete
 Compacted content:
 - Archived 3 response topic(s): queue continues; do #exch-intermix; do #tagpath-queue-lint-falsepos
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:81a2d2ff -->
+
+### Re: queue head — stopping before a degraded drain — opus-4-8
+
+Acknowledged the strike of `#tagpath-queue-lint-falsepos` — that one was resolved earlier today by publishing tagpath 0.12.2 (the agent-doc dialect lint-gate now accepts spec-valid `go`/`preset` queue tokens), so striking it is correct.
+
+I am **not** draining the rest of the go-mode queue in this session, and I'm not auto-looping. Two reasons:
+
+1. **This session is degraded.** Preflight `session_accretion` is at `warn` — 2 restart-heavy events in the last 30 min — with guidance to "restart cleanly from the current committed boundary before continuing."
+2. **Every remaining queue item is fresh-session or operator-live-gated work**, per its own record in `agent-doc-bugs2.done.md`:
+   - `#pcpconsol` — supervisor-in-process consolidation (spec 08b). Phase 1 (`#2bhm`/`#pcpc1`) already shipped; the parent is large/multi-day and explicitly "run as a FRESH focused session, NOT a saturated queue-drain."
+   - `#pcpc5cut` (`#21w2`) — BLOCKED, depends on `#pcpconsol`, needs fresh non-saturated session + live IntelliJ proof.
+   - `#s760wire` (`#s760`) — decision predicate shipped; remaining SubmitAction wiring is gated on a live IntelliJ pane.
+   - `#saevon` (`#saev`) — early-ack protocol shipped dormant; flip + end-to-end verification gated on live IntelliJ typing load.
+   - `#bkx9perid` (`#bkx9`) — genuinely gated; the closeout-governing guard change must be tested against a real `#ipc-crdt-response-drift` repro in a fresh non-degraded session (a false positive wedges all closeouts).
+   - `#tmux-switch-lag` — the one SimWorld-actionable item (no live editor), but it sits behind the gated batch.
+   - review `#lvb-run` / `#exch-intermix-verify` — the operator-run live-verification batch; no agent gate, you run it and I check the logs.
+
+**Recommended next move:** restart cleanly and open a fresh focused session for the supervisor-in-process migration (`tasks/agent-doc/plan-supervisor-in-process.md`), starting at the next undone phase after `#pcpc1`. The live-gated items (`#s760wire`, `#saevon`, `#lvb-run`, `#exch-intermix-verify`) need you at a live IntelliJ/Codex pane — say the word and I'll prep the JB plugin install + log markers for that batch.
+
+Nothing was marked done this cycle because no implementation work was safe to perform here.
+<!-- agent:boundary:8a55d88d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: :round_pushpin: do [#tagpath-queue-lint-falsepos]~~
 - :pushpin: :round_pushpin: do [#pcpconsol]
 - :pushpin: :round_pushpin: do [#pcpc5cut]
 - :pushpin: :round_pushpin: do [#s760wire]

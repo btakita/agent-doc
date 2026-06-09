@@ -30,120 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-024137.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260609-034628.md`*
 
 Compacted content:
-- Archived 14 response topic(s): #pcp-consolidate; #pcp1; #pcp2; 11 more
+- Archived 5 response topic(s): R1–R6 + remaining queue items; do [#pcpc1]; do [#pcpc2]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: R1–R6 + remaining queue items — opus-4-8
-
-Addressing the remaining queue prompts together — all are now resolved or tracked, so I cleared them from the queue (nothing dropped silently; here's the disposition of each):
-
-- **R1 — two file-watchers / two writers / can we replace the plugin WatchService / would IPC lag race / can it be prevented:** answered in `specs/process-topology.md` (the "Can the Plugin IPC move into the PCP process?" section) — the plugin stays in the editor process but is demoted to a read-only reporter + apply/ack shim; the single controller-owned watcher (`#pcpc4`) + WatchService demotion (`#pcp7`) remove the two-watchers race; IPC lag stops mattering because the editor is no longer an independent writer.
-- **R2 — EDT/save lag vs ack budget:** `#pcp5` early-ack IPC (partially done via `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
-- **R3 — disk fallback manufactures the cache conflict when degraded:** `#pcp5` degraded-prefers-file-IPC.
-- **R4 — mtime-heuristic drift / `live_buffer_diverges_from_content` fails closed:** **fixed** — `#pcp2` (write-provenance) + `#pcp6` (editor-buffer content); your 0.2.155 install stopped the drift.
-- **R5 — TOCTOU between FFI socket handler and WatchService:** `#pcp7` thin apply+ack shim (closes the window).
-- **R6 — supervisor self-race / "could not drain the active closeout" / exit 75:** **mitigated** by `#pcp3a` (drain race-hardening, shipped); rooted out by `#pcpc3` (in-process write queue).
-- **`:pushpin:` should not be reprioritized by `priority`:** already implemented — operator-pin position-lock applies to the priority sort; extending it to the auto-DAG ready-set is tracked as `#queue-operator-pin-position-lock-dag`.
-- **responses intermixed / losing part of the response:** that was `#ipc-crdt-response-drift` — fixed by `#pcp2`+`#pcp6` (kept in `agent:review` for the live-repro signoff).
-- **What runs in the PCP process / draw a #mermaid:** the full answer + current and target mermaids are in `specs/process-topology.md`.
-
-The full R1–R6 race→fix table and both topology diagrams live in the evergreen `specs/process-topology.md`. With these dispositioned, the queue is drained — the only substantial open work is `#pcpc1`–`#pcpc5` (the consolidation, fresh session).
-
-### Re: do [#pcpc1] — Session-actor message runtime — opus-4-8
-
-> **Queue prompt:**
->
-> do [#pcpc1]
-
-
-Done — `#pcpc1` (PCP-consol phase 1) is implemented and shipped in both binaries.
-
-**What landed** (`agent-doc-orchestration/src/session_actor.rs`): turned the session actor from a pure data/CAS struct into a real in-process actor runtime.
-
-- `DocumentActor::spawn` — a per-document mailbox (`mpsc` channel) drained on a single owning thread, named `session-actor:<doc-id>`. All document-scoped ops for one document now run in one serialized order.
-- `submit` / `enqueue` — typed `submit::<R>(kind, job)` runs a closure on the owner thread and returns its result; `enqueue` is the non-blocking pipeline variant. `SessionOpKind` (`WriteSubmit`, `Closeout`, `QueueHead`, `Lifecycle`) carries the `08b` op taxonomy and is surfaced via `ActorContext::last_op()` as a #pcpc3 branch hook.
-- `SessionActorRuntime` + `runtime()` singleton + `document_actor_in(base_dir, file)` — a process-wide registry that funnels every caller for one canonical document id into the same mailbox, so serialization holds across call sites, not just within one. Clean `Drop` drops the sender then joins the owner thread.
-- SQLite CAS stays the durable cross-process backstop; the mailbox serializes the same-process writers it could not order before.
-
-**Scope:** phase 1 is the runtime only — existing call sites are unchanged so it lands independently shippable. `#pcpc3` (already queued) routes the concrete `write`/`stream`/`finalize`/repair + supervisor idle/file-watch disk writes through `DocumentActor::submit`.
-
-**SimWorld determinism (3 new tests, all green):**
-- `..._serializes_single_producer_in_fifo_order` — N pipelined ops drain in FIFO submission order; `processed` counter strictly increases.
-- `..._serializes_concurrent_producers_without_overlap` — 32 producer threads hit one actor at a barrier; a re-entrancy guard proves no two ops overlap and each runs exactly once.
-- `..._registry_funnels_one_document_to_one_mailbox` — same doc id → one shared actor (`Arc::ptr_eq`), distinct docs → distinct actors, ordered ops via either handle.
-
-**Verification:** `make check` green (clippy `-D warnings` + full test suite); `cargo build --release` + `cargo install --path .` both refreshed; latest agent-doc CI run green pre-push.
-
-### Re: do [#pcpc2] — In-process supervisor adapter — opus-4-8
-
-> **Queue prompt:**
->
-> do [#pcpc2]
-
-
-Done — `#pcpc2` (PCP-consol phase 2) is implemented and shipped in both binaries.
-
-**What landed** (`agent-doc-orchestration/src/supervisor/in_process.rs`, new module): the in-process supervisor adapter — the harness child PTY/stdin/restart/heartbeat as a *controller-managed task* instead of a separate OS process (per `08b` §"In-process actors").
-
-- `InProcessSupervisor` — owns one live child, drives lifecycle via a single controller-step `tick_at(now)` that advances the heartbeat and, on child exit, applies the existing `state::CrashPolicy` (restart / prompt / halt). Exposes `restart`/`inject`/`stop`/`state`/`pid`/`generation` mirroring the `IpcMethod` boundary.
-- `SupervisedChild` trait decouples the adapter from any specific child: `PtySupervisedChild` is the production wrapper over `supervisor::pty`; SimWorld tests use a deterministic fake child (no real PTY / wall-clock).
-- **Heartbeat loss + reattach** — `heartbeat_lost(prev, cur, min_advance)` lets the controller detect a wedged task; `reattach()` rebinds to a still-alive child **without** a restart (a stale heartbeat is never proof the child died). `generation()` distinguishes reattach (unchanged) from restart (incremented).
-
-**Scope (mirrors `#pcpc1`):** the adapter + SimWorld coverage land behind the seam; the live `agent-doc start` socket cutover (wiring the Unix-socket handler + controller task to this adapter) is gated in `#pcpc5`'s 08b ladder. So the out-of-process supervisor running *this* session is untouched — `cargo install` was safe. The Unix-socket external boundary for CLI/editor callers is preserved by design (callers still hit the controller, which forwards to these methods).
-
-**SimWorld determinism (7 new tests, all green):** heartbeat advances per tick; reattach of a live child performs no restart; transient exit → restart (fresh generation, Healthy); flap storm → Halted + Stopped; clean exit → PromptOperator; `inject` reaches child stdin; explicit `restart` resets policy and `stop` refuses further ticks.
-
-**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:11); latest agent-doc CI green.
-
-### Re: do [#pcpc3] — In-process ordered write queue — opus-4-8
-
-> **Queue prompt:**
->
-> do [#pcpc3]
-
-
-Done — `#pcpc3` (PCP-consol phase 3, realizes `#pcp3b`) is implemented and shipped in both binaries.
-
-**What landed** (`agent-doc-orchestration/src/write_queue.rs`, new module): the in-process ordered write queue, built on `#pcpc1`'s session actor. All same-process writers of a document — agent `write`/`stream`/`finalize`, repair, and supervisor idle/file-watch writes — route through the document's single mailbox, executing in one serialized order on one owner thread. The `flock` stays a cross-process backstop only.
-
-- `run_serialized(base_dir, file, kind, job)` — the queue primitive: runs a write critical section (read-modify-write included) on the document's actor owner thread. Two concurrent critical sections for one document never overlap.
-- `serialized_atomic_write(...)` — disk-write convenience routing `write::atomic_write_pub` through the queue.
-- `DocumentWriteQueue` — typed facade (`agent_write` / `repair_write` / `supervisor_write`) tagging the writer classes the spec enumerates, all sharing one ordered queue.
-
-**Why this kills R6/exit-75 at the root:** today a single process can interleave a supervisor idle-write and an agent finalize between `flock` acquisitions, so finalize observes a document the supervisor half-rewrote (lost-update / torn logical state). With the supervisor in-process (`#pcpc2`), funneling every writer through the actor queue removes that interleave entirely — not just the `#pcp3a` drain-retry mitigation.
-
-**Scope (mirrors `#pcpc1`/`#pcpc2`):** the queue lands behind the seam; the live `write.rs`/`stream.rs`/finalize/repair/supervisor call sites still call `atomic_write` directly. The cutover that points them at the queue is `#pcpc5`'s 08b gate ladder (shadow → dual-write → read-switch → authority → removal) — which is also why this session's own finalize stayed safe on the existing path.
-
-**SimWorld determinism (4 new tests, all green):** 50 concurrent read-modify-write cycles lose no increment (final == initial + N); a racing supervisor-write + agent-finalize never lets finalize observe a half-applied write (always a complete document); `serialized_atomic_write` persists; the three typed writer classes share one submission order.
-
-**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:22); latest agent-doc CI run still in progress for the `#pcpc2` push (recorded pending, continuing from local evidence).
-
-### Re: do [#pcpc4] — Single controller-owned filesystem watcher — opus-4-8
-
-> **Queue prompt:**
->
-> do [#pcpc4]
-
-
-Done — `#pcpc4` (PCP-consol phase 4, realizes `#pcp4`) controller-side watcher is implemented and shipped in both binaries.
-
-**What landed** (`agent-doc-orchestration/src/document_watcher.rs`, new module): the single controller-owned filesystem watcher gate that replaces the per-process `notify` watchers with one owned event stream per document feeding the session actor (`#pcpc1`).
-
-- `WatcherRegistry` — **idempotent per document**: a second `register` for the same doc reuses the one gate (`Arc::ptr_eq`), so a document is never watched twice. This is the direct fix for the R1 duplicate-watcher reconcile race.
-- `DocumentWatchGate::observe` — coalesces event bursts (identical content → `Coalesced`, one `Change`) and suppresses agent-doc's own write echoes via the existing `debounce` write-provenance (`actor == "agent"` + matching hash → `SelfWriteEcho`), so the actor sees one settled change stream.
-- `route_event` — a settled `Change` routes a reconcile op into the document's session actor (`SessionOpKind::QueueHead`), so watcher-triggered reconciles serialize against in-flight writes (`#pcpc3`) on the one owner thread.
-
-**SimWorld determinism (7 new tests, all green):** idempotent one-watcher-per-document; distinct docs → distinct gates; burst coalesces to one change; distinct content → new change + generation bump; agent self-write echo suppressed (then a real user edit delivered); non-content events ignored; a settled change routes exactly one serialized reconcile through the actor (coalesced burst routes none).
-
-**Carved out as `#pcpc4b` (queued):** the editor-plugin side — demoting the JetBrains `WatchService` to a read-only buffer reporter (realizes `#pcp7`) — is a Kotlin change that needs **live IntelliJ verification**, so it pairs with `#pcpc5`'s live-tmux/editor cutover rather than landing blind. The controller-owned watcher (the Rust `#pcp4` realization) is the substantive, SimWorld-proven deliverable and is done.
-
-**Scope (mirrors `#pcpc1`–`#pcpc3`):** the gate lands behind the seam; the live `watch.rs` `notify` watcher is untouched. Wiring the production `notify` feed to this gate + removing the old watchers is `#pcpc5`'s 08b gate ladder.
-
-**Verification:** `make check` green (clippy `-D warnings` + suite); `cargo build --release` + `cargo install --path .` refreshed (23:35); latest agent-doc CI green.
-<!-- agent:boundary:be8c7d17 -->
+<!-- agent:boundary:f36c9ef6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -153,7 +45,19 @@ Done — `#pcpc4` (PCP-consol phase 4, realizes `#pcp4`) controller-side watcher
 - ~~do [#pcpc2]~~
 - ~~do [#pcpc3]~~
 - ~~do [#pcpc4]~~
+- do [#vbk7]
+- do [#queue-no-stop-unrelated-edit]
+- do [#queue-completed-items-escape-below-component]
+- do [#queue-operator-pin-position-lock-dag]
+- do [#ipc-drift-writeprovenance]
+- do [#ipc-early-ack]
+- do [#ipc-degraded-prefers-file-ipc]
 - do [#pcpc5]
+- do [#clear-opt-in-threshold]
+- do [#console-input-accumulation]
+- do [#queue-contamination-guard-false-positive]
+- do [#stale-capture-captured-only-drift]
+- do [#nm1x-livebuf-content]
 <!-- /agent:queue -->
 ###
 <!--
@@ -180,7 +84,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority --> 
+<!-- agent:backlog priority queue --> 
 - [ ] [#vbk7] #pcpc4b plugin WatchService read-only demotion (realizes #pcp7) — change editors/jetbrains WatchService to a read-only buffer reporter (no independent reconcile), so the single controller-owned watcher (#pcpc4) is the only event source. Needs live IntelliJ verification; pairs with #pcpc5 live-tmux/editor cutover. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#pcpc5] PCP-consol phase 5 — Migration cutover via the 08b gate ladder (shadow -> dual-write -> read-switch -> authority -> removal), each with a rollback flag; remove the out-of-process supervisor + direct-disk writers only after SimWorld/CLI/live-tmux proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#queue-no-stop-unrelated-edit] Queue should not stop when the user edits content unrelated to the current turn (user request, relocated from queue). Don't halt the drain on independent edits; only a real user prompt mid-loop should preempt.

@@ -225,6 +225,10 @@ This session's ledger stands: `#pcp1` spec, `#pcp2` write-provenance, `#pcp3a` R
 - R1–R6 — mapped onto the `#pcp` phases (R6=`#pcp3a` ✅, R4=`#pcp6` ✅, R1/R2/R3/R5 → `#pcpc3`/`#pcpc4`/`#pcp7`).
 - "responses intermixed / losing response" — that was `#ipc-crdt-response-drift`, now fixed by `#pcp2`+`#pcp6` (this very closeout ran clean); it stays in `agent:review` for the live-repro signoff.
 - The PCP-process question, the historical error reports, and "fix the stale-capture deadlock" — answered/addressed earlier this session.
+- **Target single-process topology** (mermaid) after `#pcpc1`–`#pcpc5`.
+- **"Can the Plugin IPC move into the PCP process?"** — the answer to the other queued question: the plugin must stay in the editor process (needs the Document API/EDT), but the write/watch *authority* moves to the controller's session actor; the plugin becomes a thin read-only reporter + apply/ack shim, so IPC lag no longer creates a race because the editor stops being an independent writer.
+- **R1–R6 race table** mapping each race to its root and fix (`#pcp2`/`#pcp6`/`#pcp3a` done ✅; `#pcpc3`/`#pcpc4`/`#pcp5`/`#pcp7` pending).
+- **Current 3-process topology** (mermaid): editor/plugin process, supervisor process (`agent-doc start`), agent-doc CLI/controller — all touching the same `.md` with only `flock` + SQLite CAS between them, with the R1/R6 race edges annotated.
 
 **The only genuinely-actionable next step is `#pcpc1`** (`tasks/agent-doc/plan-supervisor-in-process.md`) — a controller concurrency refactor that needs a fresh, unsaturated session. After this cycle the queue is empty, so the auto-drain stops cleanly. Start a new `/agent-doc` session and queue `#pcpc1` to make real progress.
 
@@ -238,7 +242,24 @@ Session ledger: `#pcp1`, `#pcp2`, `#pcp3a`, `#pcp6` shipped + verified; `#pcp-co
 
 
 Already resolved — no change needed, no follow-up items. The backlog item this refers to (`#stale-capture-captured-only-drift`) currently reads `- [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending…` — a single id in the correct form. The duplicated `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` pattern only appears in this queue prompt's own example text (describing what the bug *was*); it's not present in the live backlog. So the duplicate has already been cleaned up. Consuming this item with no edit.
-<!-- agent:boundary:e7722df5 -->
+
+### Re: Save Process & race-condition map — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.
+
+
+Done — saved as an evergreen spec: **`src/agent-doc/specs/process-topology.md`** (committed `9c9de982`, pointer `b5396311d`). It's a living architecture doc (companion to `08b`), so it updates as the consolidation lands rather than living only in an ephemeral response. It contains:
+
+- **Current 3-process topology** (mermaid): editor/plugin process, supervisor process (`agent-doc start`), agent-doc CLI/controller — all touching the same `.md` with only `flock` + SQLite CAS between them, with the R1/R6 race edges annotated.
+- **R1–R6 race table** mapping each race to its root and fix (`#pcp2`/`#pcp6`/`#pcp3a` done ✅; `#pcpc3`/`#pcpc4`/`#pcp5`/`#pcp7` pending).
+- **"Can the Plugin IPC move into the PCP process?"** — the answer to the other queued question: the plugin must stay in the editor process (needs the Document API/EDT), but the write/watch *authority* moves to the controller's session actor; the plugin becomes a thin read-only reporter + apply/ack shim, so IPC lag no longer creates a race because the editor stops being an independent writer.
+- **Target single-process topology** (mermaid) after `#pcpc1`–`#pcpc5`.
+
+This covers both the "save the process map" item and the "what runs in the PCP process, draw a #mermaid" question. `make check` green; doc-only, no behavior change.
+<!-- agent:boundary:2782edff -->
+<!-- agent:boundary:50eab7b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -255,7 +276,7 @@ Already resolved — no change needed, no follow-up items. The backlog item this
 - ~~:pushpin: [#pcp3]~~
 - ~~:pushpin: [#pcp4]~~
 - ~~:round_pushpin: Fix duplicate ids that originated from the item content. `[#stale-capture-captured-only-drift] [recommended] [#stale-capture-captured-only-drift]` should be `[#stale-capture-captured-only-drift] [recommended]`.~~
-- :pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.
+- ~~:pushpin: Save "Process & race-condition map" content into document. The #mermaid is nice and should be document. Make this evergreen content so updates to the architecture are reflected.~~
 - Fix **R1 — two file-watchers / two writers.** The plugin's WatchService *and* the supervisor's file-watcher both observe the doc; the plugin's `saveDocument` *and* the binary's disk fallback both write it → "File Cache Conflict" + drift. Can we replace the plugin's WatchService with a client for the supervisor's file-watcher? Would the IPC lag cause race conditions? Can the race condition be prevented in the overall system?
 - Fix **R2 — EDT/save lag vs ack budget.** The listener dispatches to the EDT, then `saveDocument` + the content sidecar land *after* the EDT runs — lagging the sender's poll budget → false ack-timeout / false degrade vote (partially fixed by `#ipc-ack-timeout-align` + `#ipc-degrade-false-vote`).
 - Fix **R3 — disk fallback** manufactures the foreign-write that IntelliJ flags as a cache conflict whenever the session is latched degraded.

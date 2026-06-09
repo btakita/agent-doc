@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -74,7 +74,7 @@ CI status:
 - agent-loop has no workflow named `CI`; its `Agent Doc` workflow for `1ff176fdb` failed before runner startup. GitHub reports: “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Both jobs had zero steps and `runner_id: 0`, so this is an external billing/spending-limit blocker rather than a code/test failure.
 
 One unrelated local change remains intentionally unstaged: `src/lazily-rs/AGENTS.md` has only the tsift code-navigation marker bump from `v0.1.64` to `v0.1.66`. I left that out of the commits.
-<!-- agent:boundary:7f38ac75 -->
+<!-- agent:boundary:07839e48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,6 +83,7 @@ One unrelated local change remains intentionally unstaged: `src/lazily-rs/AGENTS
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Plan & Implement FFI channel for lazily-rs.
 <!-- /agent:queue -->
 
 ## Backlog

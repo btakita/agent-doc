@@ -728,7 +728,16 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // changed string literals after a partial manual commit.
         // +2 (#lr-queue-patchback-miss): two regression test names for free-text
         // queue-head provenance after binary consume without exchange history.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 90,
+        // +1 (#compact-reap-no-response-record): the
+        // `resolve_pending_done_guard_mode_with_context` reuse in
+        // `check_reaped_queue_head_without_response` (substring `guard_` in
+        // `..._guard_mode_...`). The guard fails closed when a no-response reap-only
+        // closeout reaped a `do`-directive head whose `### Re:` never landed in the
+        // exchange or a HEAD compact archive; it reuses the same guard-mode
+        // resolution as the sibling no-response-active-head guard. Its own ops_log
+        // diagnostic (`reaped_queue_head_without_response_fired`) carries no
+        // `guard_` substring.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 91,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

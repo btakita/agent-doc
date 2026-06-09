@@ -334,6 +334,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_reaped_queue_head_without_response(file, &rc)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         match check_prompt_only_exchange_tail_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
@@ -1024,6 +1032,173 @@ fn check_no_response_active_queue_head(
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
+/// `#compact-reap-no-response-record`: a reap-only / no-response-body closeout
+/// that reaps a `do #id` queue-directive head this cycle, where that id's
+/// `### Re:` response is absent from both the live exchange and any
+/// HEAD-referenced compact archive, has silently lost the response record.
+///
+/// This is the gap left by [`check_no_response_active_queue_head`], which only
+/// fires while the head is still queued *and* open in `agent:backlog`. Once a
+/// maintenance / compaction reap removes the id from `agent:backlog` (and strikes
+/// it from the queue), that guard's `current_head_ids ∧ open_backlog` condition is
+/// false, so the silent loss goes undetected and `finalize --done` later fails
+/// with "id not found in backlog".
+///
+/// The precondition `capture_id.is_none() && response_sha256.is_none()` scopes the
+/// guard to reap-only / bookkeeping closeouts: a real response cycle records a
+/// capture, so its reaps are answered (not lost) and never reach this guard. A
+/// legitimate prior-cycle reap (the id was answered in an earlier cycle and only
+/// reaped now) is filtered out by [`directive_response_materialized`], which finds
+/// the `### Re: ... #id` heading in the live exchange or a HEAD compact archive.
+fn check_reaped_queue_head_without_response(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+        return Ok(GuardResult::None);
+    }
+    // A response was captured this cycle → its reaps are answered, not lost.
+    if state.capture_id.is_some() || state.response_sha256.is_some() {
+        return Ok(GuardResult::None);
+    }
+    if state.reaped_pending_ids.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let directive_ids: std::collections::HashSet<String> =
+        do_directive_target_ids(&state.active_queue_heads)
+            .into_iter()
+            .map(|id| crate::pending::normalize_pending_id(&id))
+            .filter(|id| !id.is_empty())
+            .collect();
+    if directive_ids.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let reaped: std::collections::HashSet<String> = state
+        .reaped_pending_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let content = rc.doc_content();
+    let head = crate::git::show_head(file).ok().flatten();
+    let mut lost: Vec<String> = Vec::new();
+    for id in directive_ids {
+        if !reaped.contains(&id) {
+            continue;
+        }
+        if directive_response_materialized(file, &content, head.as_deref(), &id) {
+            continue;
+        }
+        if !lost.iter().any(|existing| existing == &id) {
+            lost.push(id);
+        }
+    }
+    if lost.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = lost
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "reaped_queue_head_without_response_fired file={} cycle_id={} last_event={} ids={}",
+            file.display(),
+            state.cycle_id,
+            state.last_event,
+            lost.join(",")
+        ),
+    );
+    let warn_line = format!(
+        "[session-check] warn: cycle `{}` reaped `do` queue-directive head(s) {} into agent:done without an assistant response landing in agent:exchange (no response body this cycle and no `### Re:` for the id in the exchange or a HEAD compact archive); the response record was silently lost",
+        state.cycle_id, ids
+    );
+    let repair = format!(
+        "recover the lost response by re-running `agent-doc {}` so the directive id is answered, or restore the missing `### Re:` block through `agent-doc write --commit {}` before closing",
+        file.display(),
+        file.display()
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #compact-reap-no-response-record)"),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #compact-reap-no-response-record)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
+/// True when a `### Re:` response heading targeting `id` (normalized, no `#`)
+/// exists in the live exchange `content` or in any HEAD-referenced compact
+/// archive. Used by [`check_reaped_queue_head_without_response`] to distinguish a
+/// legitimate prior-cycle reap (response durably recorded, possibly archived) from
+/// a silent loss.
+fn directive_response_materialized(
+    file: &Path,
+    content: &str,
+    head: Option<&str>,
+    id: &str,
+) -> bool {
+    if content_has_re_heading_for_id(content, id) {
+        return true;
+    }
+    let Some(head) = head else {
+        return false;
+    };
+    crate::flow::closeout::compact_archive_pointers(head)
+        .into_iter()
+        .any(|pointer| {
+            crate::flow::closeout::read_head_compact_archive(file, pointer)
+                .map(|archive| content_has_re_heading_for_id(&archive, id))
+                .unwrap_or(false)
+        })
+}
+
+/// True when any `### Re:` heading line in `content` references `#id` / `[#id]`.
+/// `do #id` responses always render under a `### Re: ... #id` heading, so a
+/// heading-scoped match avoids false matches against queue-prompt echoes or
+/// backlog lines that merely mention the id.
+fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
+    if id.is_empty() {
+        return false;
+    }
+    let needle = format!("#{}", id.to_ascii_lowercase());
+    content.lines().any(|line| {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("### Re:") && !trimmed.starts_with("###Re") {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        match lower.find(&needle) {
+            None => false,
+            Some(pos) => {
+                // Reject a longer-id prefix collision (`#ab` must not match `#abc`).
+                let after = &lower[pos + needle.len()..];
+                !after
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            }
+        }
     })
 }
 
@@ -6041,6 +6216,108 @@ Body\n\
             }
             other => panic!("expected no-response active-head interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reaped_queue_head_without_response_fails_on_silent_loss() {
+        // #compact-reap-no-response-record: a maintenance/compaction reap can
+        // remove a `do #id` head from agent:backlog AND strike it from the queue
+        // without the id's `### Re:` ever landing in agent:exchange. The
+        // no-response-active-head guard returns None (the head is no longer
+        // queued+open), so this guard must catch the silent loss instead.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered something else.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#other] An unrelated open item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_active_queue_heads(&doc, &["do [#lostresp]".to_string()])
+            .unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["lostresp".to_string()]).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("without an assistant response landing"),
+                    "{message}"
+                );
+                assert!(message.contains("#lostresp"), "{message}");
+                assert!(
+                    message.contains("#compact-reap-no-response-record"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected silent-loss reap interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reaped_queue_head_without_response_passes_when_response_materialized() {
+        // A legitimate prior-cycle reap: the id was answered in an earlier cycle
+        // (its `### Re: ... #id` heading is durably in agent:exchange) and only
+        // reaped now. The response is not lost, so the guard must stay quiet.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do [#answered] — gpt-5\n\nShipped the fix.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#other] An unrelated open item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_active_queue_heads(&doc, &["do [#answered]".to_string()])
+            .unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["answered".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "a reaped id whose response is materialized in the exchange is not a loss"
+        );
+    }
+
+    #[test]
+    fn reaped_queue_head_without_response_passes_for_non_directive_reap() {
+        // A normal `--done` backlog item reaped this cycle was never a `do #id`
+        // queue-directive head, so its reap carries no response-landing
+        // expectation. The guard keys off active_queue_heads and must not fire.
+        // No live queue directive head, so the sibling no-response-active-head
+        // guard stays quiet too.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#other] An unrelated open item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["normaldone".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "a non-directive reaped id is not a queue-head response loss"
+        );
     }
 
     #[test]

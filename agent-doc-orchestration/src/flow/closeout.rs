@@ -341,7 +341,7 @@ fn response_materialized_in_head_compact_archive(
     })
 }
 
-fn compact_archive_pointers(content: &str) -> Vec<&str> {
+pub(crate) fn compact_archive_pointers(content: &str) -> Vec<&str> {
     content
         .split("archived to `")
         .skip(1)
@@ -350,7 +350,7 @@ fn compact_archive_pointers(content: &str) -> Vec<&str> {
         .collect()
 }
 
-fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<String> {
+pub(crate) fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<String> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let project_root = crate::snapshot::find_project_root(&canonical)?;
     let archive_root = project_root

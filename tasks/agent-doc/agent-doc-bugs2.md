@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -91,27 +91,47 @@ The 8 blocked items stay in the **backlog** as the actionable completion list yo
 
 Note: the report landed in the now-inactive queue (`queue: stop`), so the binary flagged it `inactive_queue_residue` rather than an executable prompt — I triaged it anyway.
 **Queue note:** go-mode re-populated the inactive queue with the 8 blocked backlog ids (#saev…#xkpf) during this cycle. I am deliberately clearing them unrun — every one is blocked on a fresh non-degraded session and/or live IntelliJ/Codex verification (see each backlog item's blocker), so they are not runnable in this session. This is the same go-mode-auto-queues-blocked-work product bug noted above. <!-- no-queue-removal-guard -->
-<!-- agent:boundary:a42a9881 -->
+
+### Re: JB "Claim for Tmux Pane" cross-session error — binary half shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> agent-doc andreas-kovountzis.md JB `Claim for Tmux Pane` error:
+> ```
+> Claim failed (exit 1): Error: pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force
+> ```
+> - [#4wxr]
+> - [#saev]
+> - [#9adk]
+> - [#s760]
+> - [#f5d2]
+> - [#bkx9]
+> - [#pf15]
+> - [#21w2]
+> - [#xkpf]
+
+
+> **Queue prompt** (preset `#spec-test-build-install-commit-push`):
+>
+> `agent-doc andreas-kovountzis.md` JB "Claim for Tmux Pane" → `Claim failed (exit 1): pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force` — `[#4wxr] [#saev] [#9adk] [#s760] [#f5d2] [#bkx9] [#pf15] [#21w2] [#xkpf]`
+
+Applied the preset to the **actionable** half of `#4wxr`. The cross-session guard itself is correct (it's the same drift this session keeps resyncing); the defect was ergonomic — the JB button shelled `agent-doc claim` and rendered the raw exit-1 with no in-plugin path to force or switch. Step 1 of the plan (the structured signal the plugin can branch on) needs **no live editor**, so I shipped it end-to-end:
+
+- **Code** — `claim` now emits a stable machine-readable line to stderr *before* the human bail on a cross-session `Reject`: `[claim] cross-session-reject pane_id=%43 pane_session=5 configured=0` (`CROSS_SESSION_REJECT_MARKER` + `cross_session_reject_marker`, stable field order). The human bail text is unchanged for terminal use.
+- **Test** — `cross_session_reject_marker_carries_stable_fields` asserts the exact line shape so plugins can key/value-parse it. `make check` green (no FAILED, no errors).
+- **Spec** — `specs/07-session-tmux-commands.md` claim contract documents the marker shape + that the plugin dialog stays live-gated.
+- **Build + install** — `cargo build --release` + `cargo install --path .` (binary replaced, 0.34.0).
+- **Commit + push** — submodule `6c0ae573` → origin/main; superproject pointer + plan committed → origin/main. Staged **only** my three files; the shared `src/agent-doc` checkout has heavy concurrent in-flight work from other sessions that I left untouched.
+
+`#4wxr` stays open for its **remaining gated half**: the JB "Claim for Tmux Pane" + VS Code claim command must parse the marker and render **Force claim / Switch project session / Cancel** — needs live IntelliJ/VS Code, funnels through `#xkpf`.
+
+**The other 8 queued ids are unchanged from last turn's triage** — `#saev` (fresh-session, modifies the closeout write path), `#9adk #s760 #f5d2` (live IntelliJ), `#bkx9` (blocked on `#ipc-crdt-response-drift`), `#pf15 #21w2` (supervisor-in-process / 08b cutover, fresh-session), `#xkpf` (live verify batch). I did not re-drain them; none is runnable in this degraded shared session.
+<!-- agent:boundary:edf962d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
-agent-doc andreas-kovountzis.md JB `Claim for Tmux Pane` error:
-```
-Claim failed (exit 1): Error: pane %43 is in tmux session '5' but project session is '0'; switch to the configured session or pass --force
-```
-- [#4wxr]
-- [#saev]
-- [#9adk]
-- [#s760]
-- [#f5d2]
-- [#bkx9]
-- [#pf15]
-- [#21w2]
-- [#xkpf]
----
 <!-- /agent:queue -->
 ###
 <!--
@@ -139,7 +159,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#4wxr] jb-claim-cross-session: JB "Claim for Tmux Pane" surfaces a raw exit-1 when the target pane is in a non-configured tmux session (claim.rs cross_session_decision Reject, claim.rs:161). Give claim a structured cross-session-reject result + a JB plugin choice dialog (Force claim / Switch project session / Cancel); mirror in VS Code. BLOCKED on live IntelliJ verification (pairs with #xkpf). Plan: tasks/agent-doc/plan-jb-claim-cross-session.md
+- [ ] [#4wxr] jb-claim-cross-session: BINARY HALF SHIPPED (submodule 6c0ae573): claim emits a structured CROSS_SESSION_REJECT_MARKER line ([claim] cross-session-reject pane_id=.. pane_session=.. configured=..) to stderr before the human bail on a cross-session Reject, so editor plugins can branch on it; unit test + spec 07 + VERSIONS. REMAINING (gated on live IntelliJ/VS Code, verify in #xkpf): JB "Claim for Tmux Pane" + VS Code claim command must parse the marker and render a Force claim / Switch project session / Cancel dialog instead of the raw exit-1. Plan: tasks/agent-doc/plan-jb-claim-cross-session.md
 - [ ] [#saev] earlyack-impl: Implement early-ack IPC protocol — ipc_socket accepted/pending ack on patch receipt + terminal ack/sidecar; ffi.rs listener contract then PatchWatcher.handleSocketMessageV2. BLOCKED (fresh focused session): the Rust core modifies send_message (ipc_socket.rs) = THIS session closeout write path; spec-08b forbids landing write/ack-path changes in the same cycle that persists a response through that path, and review #pcp5 flags it as delicate state-machine work. Unblocked by a fresh non-degraded session with live IntelliJ/Codex (#xkpf). Completes review #ipc-early-ack + early-ack half of #pcp5. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#9adk] consacc-guard: Add JB plugin per-doc in-flight-invocation guard + console-idle pre-send check so Run Agent Doc / Clear Session Context coalesce when one invocation is already pending. BLOCKED on live IntelliJ verification. Completes review #console-input-accumulation (verify in #xkpf).
 - [ ] [#s760] clearthr2: Implement JB plugin phase-2 pre-emptive clear — read live Claude Code context-usage %, compare against report.clear_threshold, trigger session clear before the next Run Agent Doc dispatch when exceeded (gated by agent_doc_queue_context_reset). BLOCKED on live IntelliJ verification. Completes review #clear-opt-in-threshold (verify in #xkpf).

@@ -46,7 +46,51 @@ The order is deliberately measurement first, prototype second. `lazily-rs` is on
 I would keep `tagpath-core` out of this until there is strong evidence. The core crate should stay small and deterministic; the likely win is in derived project state, watcher invalidation, ontology/index sidecars, and MCP query freshness.
 
 Proof notes: changed paths are limited to this session document. No code was changed and no build/tests were run because this cycle only captured backlog next steps. Escalation: none.
-<!-- agent:boundary:1fa83f22 -->
+
+### Re: tglazymeasure — gpt-5
+
+> **Queue prompt:**
+>
+> [#tglazymeasure]
+
+
+Implemented and pushed the current tagpath performance baseline for the lazily-rs decision path.
+
+Changed paths in `src/tagpath`:
+- `scripts/benchmark-current-performance.sh` adds a reproducible benchmark harness for no-op sidecar updates, one-file incremental updates, full reindexing, watch save bursts, MCP indexed queries, and MCP family-by-path reads.
+- `SPEC.md` §17.7 records the command matrix and target median budgets.
+- `README.md` documents the benchmark entrypoint.
+- `tests/test_performance_benchmark.rs` keeps the script `--plan` cases and SPEC budget table synchronized.
+
+Baseline run on the default 1000-file fixture, 5 iterations, debug binary:
+
+```csv
+case,budget_ms,runs,min_ms,median_ms,max_ms,status
+noop_sidecar_update,10,5,6,6,8,pass
+one_changed_file_update,125,5,108,109,110,pass
+full_reindex,450,5,365,366,374,pass
+watch_save_burst,500,5,369,371,372,pass
+mcp_indexed_project_query,150,5,98,101,158,pass
+mcp_family_by_path_read,150,5,59,59,61,pass
+```
+
+Verification:
+- `cargo test --test test_performance_benchmark` passed.
+- `bash scripts/benchmark-current-performance.sh --plan` passed.
+- `bash scripts/benchmark-current-performance.sh` passed with all target medians under budget.
+- `cargo test --workspace` passed via `tsift rewrite`.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed via `tsift rewrite`.
+- `cargo build --workspace` passed via `tsift rewrite`.
+- `cargo install --path . --force` succeeded and installed tagpath 0.12.2 from this checkout.
+- Top-level `make check` passed.
+- Latest tagpath GitHub Actions `CI` run was already green: run `27233800608`, completed success on `main` at `2026-06-09T20:28:54Z`.
+
+Commits pushed:
+- `btakita/tagpath@22ae88c` (`perf: add current benchmark baseline`) to `origin/main`.
+- `btakita/agent-loop@5b8c76e5b` (`chore: update tagpath benchmark baseline`) to `origin/main`, updating the `src/tagpath` submodule pointer.
+
+Escalation: none. Residual working tree note: `src/tagpath/AGENTS.md` and root `AGENTS.md` still contain unstaged tsift instruction-refresh diffs from the session start; I did not stage or commit them because they are unrelated to `#tglazymeasure`.
+<!-- agent:boundary:80cd3137 -->
 <!-- /agent:exchange -->
 
 ###
@@ -54,7 +98,7 @@ Proof notes: changed paths are limited to this session document. No code was cha
 -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#tglazymeasure]
+- ~~[#tglazymeasure]~~
 - [#tglazyproto]
 - [#tglazywatch]
 - [#tglazydecide]
@@ -63,7 +107,6 @@ Proof notes: changed paths are limited to this session document. No code was cha
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tglazymeasure] Benchmark the current tagpath performance envelope before lazily-rs changes: measure no-op sidecar reads, index --update with one changed file, full reindex, watch save bursts, and MCP query/read paths, then record the command matrix and target budgets.
 - [ ] [#tglazyproto] Prototype a root-crate ProjectSession using lazily-rs behind a feature flag or internal module: model config, source list, ontology, and sidecar state as cells; model extraction, family maps, search, and lint findings as slots; keep tagpath-core unchanged.
 - [ ] [#tglazywatch] Exercise the ProjectSession prototype in one narrow runtime path, preferably tagpath watch or request-scoped MCP reads, and compare invalidation behavior, debounce/save-burst cost, and sidecar no-op latency against the baseline.
 - [ ] [#tglazydecide] Adopt or reject lazily-rs for tagpath based on measured results: require no regression in sidecar/no-op index paths, clearer invalidation code, bounded single-thread ownership, and documented SPEC/README guidance.

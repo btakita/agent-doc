@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -55,7 +55,22 @@ Reordered the admin sidebar: **Deal Pipeline** now sits directly under Dashboard
 - Test in `tests/admin-pipeline.test.ts` asserts Deal Pipeline is ordered before Loan Applications.
 
 **Full suite 491 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the final queued item — the queue is now empty.
-<!-- agent:boundary:be6559bb -->
+
+### Re: deploy — opus-4-8
+
+Deployed EFS to production. `deploy:worker` ran build → remote D1 migrate → worker deploy in one chain.
+
+**What shipped (Version ID `85aa0222-f02d-4ab1-9d72-0f39a434e028`):**
+- **Remote D1 migration `0059_wire_instruction_links.sql`** applied (✅) — the #wir3 secure wiring-instructions link tables. It was the only pending remote migration.
+- **Worker deployed** to `https://equityfundingsource.brian-takita.workers.dev` (828 KiB / 193 KiB gzip, 19ms startup). All bindings intact: D1, three R2 buckets, BorrowerChatRoom DO, rate limiter, Cloudflare Access env vars.
+- Ships everything committed-but-undeployed at EFS HEAD `6dac30d`: apply4 wizard (#zr5z), Deal Pipeline reorder + search/Kanban + lead modal, admin-editable wiring instructions (#ty2v), secure wire-link delivery (#wir3).
+
+**Smoke test (prod, all 200):** `/`, `/funded-deals`, `/apply` (apply4 wizard), `/login`.
+
+Closed **#zr5z** — the apply4 re-deploy was held pending explicit deploy authorization; that gate is now satisfied (migrate + deploy:worker + prod smoke-test all green). Queue drained.
+
+Note: cf-whoami flagged wrangler 4.87.0 → 4.99.0 update available (non-blocking).
+<!-- agent:boundary:23a10c28 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +78,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog
@@ -105,7 +119,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [/] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
-- [/] [#zr5z] Re-deploy equityfundingsource full apply4 wizard to production. P1–P6 implemented, 24 apply4 tests green, build-plan spec updated, all committed+pushed (efs 071d8fe). Remaining: cf:d1:migrate:remote + deploy:worker + smoke-test against prod — held pending explicit deploy authorization (re-queue with #spec-test-commit-push-deploy or say 'deploy').
 - [/] [#cm3e] [recommended] Borrower online payment collection (Stripe) + TMO sync: add ACH/card payment in the borrower portal make-payment section; on Stripe payment_intent.succeeded webhook, verify signature, record the receipt in a new EFS D1 loan_payment_transactions table, reconcile the matching loan_payments schedule row, and push the payment to TMO. GATE: confirm ABS/TMO exposes a borrower-payment/receipt WRITE endpoint (current docs/TMO cover loan/application writes, investor AddLoanFunding, and schedule/funding reads only) — ties into the TMO-writeback gate (dzmm/k2xg). Deferred non-MVP collection path from e245; handle KYC, partial payments, NSF reversals, fees.
 - [/] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.

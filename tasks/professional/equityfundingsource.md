@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -81,7 +81,23 @@ To see it: open `/portal-admin/pipeline`, click a lead card — the dialog is wi
 
 
 Already live. The wider/shorter dialog change was deployed earlier this turn as part of completing it — production is running **Version `4298b450-3a7d-480d-92ef-1030fcf7d875`** (EFS `3d90502`, pointer `658df787e`), with no commits since, so this `deploy` is already satisfied. No redundant redeploy. Smoke test was green (`/`, `/apply` → 200; `/portal-admin/pipeline` → 303→login). Queue drained.
-<!-- agent:boundary:ec1bfc63 -->
+
+### Re: Add a close button to the pipeline dialogs + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a close button to the pipeline dialogs. deploy
+
+
+Done and deployed. All three admin pipeline dialogs now have a top-right **×** close button.
+
+**What changed (EFS `56d45ac`, pointer `9765131ba`):**
+- **New shared component** `lib/ui--browser--efs/portal/shared/ModalCloseButton` (in `portal/shared/ui.tsx`) — an accessible (`aria-label="Close dialog"`) × button carrying `data-modal-close`, so it works through both its `on_close` handler and `PortalModal`'s backdrop-close path.
+- Wired into the **Deal Pipeline** lead dialog and loan dialog (`portal/admin/pipeline.tsx`) and the **Investor Pipeline** card dialog (`portal/admin/investor_pipeline.tsx`), placed next to the status pill in each header.
+- The **loan dialog previously had no explicit close affordance at all** (backdrop click only) — it now has the × plus the existing action row. The lead and investor dialogs keep their bottom "Close" text button as well.
+
+**Verification:** `bun test` 495 pass / 0 fail; `bun run build` + `build:worker` clean. Deployed Worker version **`99826cca-635d-49a7-9e38-952b2a5b4e79`**. Smoke test green: `/` → 200, `/apply` → 200, `/portal-admin/pipeline` → 303→login.
+<!-- agent:boundary:9726a7f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,7 +105,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Add a close button to the pipeline dialogs. deploy
 <!-- /agent:queue -->
 
 ## Backlog

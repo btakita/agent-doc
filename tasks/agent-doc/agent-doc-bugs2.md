@@ -73,19 +73,41 @@ The one phase left is the cutover, `#pcpc5` (tracked as `#pcpc5cut`), and it is 
 On `#spec-test-build-install-commit-push`: nothing new to spec, build, or commit — the migration is already committed and pushed. I did not run a blind "commit all" because the only uncommitted tree in the submodule is a concurrent prompt-cache effort (423 lines in `prompt_cache.rs`, authored 16:29 today), which is not part of this task.
 
 When you want the cutover, it needs its own fresh session with no live response persisting through the write path mid-gate. Say the word and I will lay out the gate-by-gate plan with the log markers to watch while you test.
-<!-- agent:boundary:9eae9cbb -->
+
+### Re: do [#pcpc5cut] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#pcpc5cut]
+
+
+I can't run `#pcpc5cut` here, and not as a chosen gate — it's structural. It's the 08b cutover, and spec 08b (lines 131-133) says the write/watch-authority change "must never be landed in the same cycle that persists a live session response through the write path being changed." Every agent-doc turn, including this one, persists its reply through exactly that `write.rs` path, so no `do [#pcpc5cut]` response cycle can ever land it — even the shadow gate. It is an operator-driven, out-of-cycle task, not a queue prompt. I gated it.
+
+That is the whole remaining queue, though. It auto-syncs from the backlog (the `queue` attribute), and every item there needs something a response cycle cannot provide:
+
+- `#pcpc5cut` — spec-blocked from any response cycle (above).
+- `#s760wire`, `#saevon`, `#exch-intermix-verify` — need a live IntelliJ/Codex pane. These are your "I test, you check logs" items, not agent auto-drain.
+- `#bkx9perid` — the closeout-governing guard; it must be tested against a real drift repro in a fresh non-degraded session, because a false positive wedges every closeout. A degraded session is the worst place to touch it.
+- `#tmux-switch-lag` — the one pure-SimWorld item (sync.rs, no live editor). Doable, but it needs `make check` + a clean closeout, and this session keeps drifting on closeout.
+
+This session is degraded: preflight `session_accretion` is at `warn` (3 restart-heavy events in 30 min, guidance "restart cleanly before continuing"), and last turn's `do [#pcpconsol]` closeout had to be hand-recovered from a CRDT intermix. So I am not auto-looping.
+
+Recommended next move: restart cleanly, then either a fresh focused session for the two pure-Rust items (`#tmux-switch-lag`, then `#bkx9perid` carefully), or you drive the live batch at an IntelliJ/Codex pane (`#s760wire`, `#saevon`, `#exch-intermix-verify`, review `#lvb-run`) and I check the logs.
+
+To stop the agent queue from re-serving operator-driven work, drop the `queue` attribute from the backlog (or split the live/cutover items into a separate "operator-runs" list). Right now the backlog and the auto-drain queue are the same list, so it keeps presenting work only you or a fresh session can do.
+<!-- agent:boundary:da72f84d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- :pushpin: :round_pushpin: do [#pcpc5cut]
+- ~~:pushpin: :round_pushpin: do [#pcpc5cut]~~
 - :pushpin: :round_pushpin: do [#s760wire]
 - :pushpin: :round_pushpin: do [#saevon]
 - :pushpin: :round_pushpin: do [#bkx9perid]
 - :pushpin: :round_pushpin: do [#tmux-switch-lag]
 - :pushpin: do [#exch-intermix-verify]
-- do [#pcpconsol]
+- ~~do [#pcpconsol]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -116,7 +138,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
-- [ ] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
 - [ ] [#s760wire] Wire the pre-emptive /clear feature (predicate ContextResetDecision.shouldClearBeforeDispatch + binary agent_doc_clear_threshold already shipped). Remaining actionable work, fresh session at a live IntelliJ pane: (1) read the live Claude Code context-usage percent from the pane, (2) acquire threshold (preflight session_accretion.clear_threshold) + the agent_doc_queue_context_reset opt-in, (3) call the predicate in SubmitAction pre-dispatch and emit an idea.log decision line "[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..", (4) trigger session clear when true, verify live. Absorbs review #s760/#clear-opt-in-threshold.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
@@ -126,6 +147,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#pcpc5cut] 08b migration cutover, decomposed one actionable id per gate (pcpc5a..e: shadow -> dual-write -> read-switch -> authority -> remove out-of-process supervisor + direct-disk writers). DEPENDS ON #pcpconsol. Run in a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof. Plan: tasks/agent-doc/plan-supervisor-in-process.md. Absorbs review #21w2/#pcpc5.
 - [/] [#lvb-run] OPERATOR live-verification session (no agent gate; user runs, files bugs, agent checks logs). All five fixes are code-complete + installed (binary 0.34.0, cdylib lib-installed, JB plugin 0.2.158 unchanged). Install signed JB plugin 0.2.158 + binary, drive ONE mid-active-turn Codex/IntelliJ pane through the batch, capture logs. Grep markers: #4wxr claim stderr "[claim] cross-session-reject pane_id=.. pane_session=.. configured=.."; #9adk idea.log "[run]/[clear] coalesced duplicate"; #f5d2/#pcp6 ops.log "live_buffer_classify decision=.. reason=.." + write.rs "visible_write_live_buffer_matches_disk"/"visible_write_deferred_current_changed"; #saev (after #saevon flips the flag) session-log "[ipc-socket] early-ack pending emitted before apply". Reproduces #ipc-crdt-response-drift on closeout (watch for emptied backlog / orphaned ids / duplicated review / split boundary). Supersedes review #xkpf + #live-verify-batch + the live legs of #f5d2/#pcp6.
 <!-- /agent:review -->
 

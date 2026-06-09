@@ -33,96 +33,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260609-053211.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260609-062200.md`*
 
 Compacted content:
-- Archived 1 response topic(s): queue closeout (#yxjw, #ipc3, #vd5v)
+- Archived 2 response topic(s): cross-language lazily compatibility; FFI channel for lazily-rs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: cross-language lazily compatibility — gpt-5
-
-> **Queue prompt:**
->
-> Does lazily-rs have a viable FFI strategy? Can we design the cross-language lazily family for compatibality across all supported channels...FFI, IPC, Websockets, WebRTC data?
-
-
-Yes. The viable strategy is to make Rust FFI an ABI adapter around the same transport-agnostic state plane, not a separate semantic path. A live Rust `Context`, closures, typed handles, and references should stay local; FFI, IPC, WebSocket, and WebRTC should all carry the same permission-filtered `IpcMessage::{Snapshot, Delta}` payloads.
-
-I made that contract explicit and tested it:
-
-- `src/lazily-rs/SPEC.md`: added the cross-language channel compatibility design, including the FFI boundary shape, canonical message plane, channel matrix, capability negotiation, reliability/resync requirements, and cross-language rules.
-- `src/lazily-rs/README.md`: added a public summary of the cross-channel strategy.
-- `src/lazily-rs/src/ipc.rs`: documented FFI adapters as owned-byte-buffer carriers for encoded `IpcMessage`s.
-- `src/lazily-rs/tests/ipc.rs`: added a runtime test proving one serialized `IpcMessage` payload round-trips through WebSocket text, WebRTC-style bytes, and FFI-owned-buffer bytes.
-- `src/lazily-rs/tests/spec_compliance.rs`: added spec/README guard tests for the FFI strategy, one-message-plane rule, negotiation, and reliability requirements.
-
-Verification passed locally:
-
-- `cargo test --features ipc --test ipc`
-- `cargo test --test spec_compliance cross_language_channel_compatibility_spec`
-- `make check` in `src/lazily-rs` passed, including the long Loom target and benchmark-result check.
-- `python3 scripts/update-benchmark-results.py --check` passed directly after the `make check` session closed.
-
-Commit/push status:
-
-- lazily-rs commit `43ed76b docs: define cross-channel compatibility` pushed to `btakita/lazily-rs main`.
-- agent-loop submodule pointer commit `1ff176fdb chore: update lazily-rs submodule` pushed to `btakita/agent-loop main`.
-
-CI status:
-
-- lazily-rs `CI` for `43ed76b` is currently `in_progress` (`27186610820`), so I did not wait on it as a closeout gate.
-- agent-loop has no workflow named `CI`; its `Agent Doc` workflow for `1ff176fdb` failed before runner startup. GitHub reports: “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Both jobs had zero steps and `runner_id: 0`, so this is an external billing/spending-limit blocker rather than a code/test failure.
-
-One unrelated local change remains intentionally unstaged: `src/lazily-rs/AGENTS.md` has only the tsift code-navigation marker bump from `v0.1.64` to `v0.1.66`. I left that out of the commits.
-
-### Re: FFI channel for lazily-rs — gpt-5
-
-> **Queue prompt:**
->
-> Plan & Implement FFI channel for lazily-rs.
-
-
-Implemented and pushed the lazily-rs FFI channel.
-
-What changed:
-
-- Added `ffi = ["ipc", "dep:serde_json"]` to `src/lazily-rs/Cargo.toml`.
-- Added `src/lazily-rs/src/ffi.rs` with a C ABI adapter around the existing `IpcMessage` plane:
-  - opaque `LazilyFfiChannel` handle
-  - `LazilyFfiBytes`, `LazilyFfiStatus`, and `LazilyFfiMessageKind`
-  - JSON `IpcMessage` validate/classify/clone helpers
-  - channel send/recv that decodes accepted frames and re-encodes canonical JSON bytes
-  - explicit Rust-owned buffer free function
-  - panic-to-status guard before crossing the ABI
-- Exported the FFI API from `src/lazily-rs/src/lib.rs` behind the `ffi` feature.
-- Added `src/lazily-rs/tests/ffi.rs` covering message validation/classification/cloning, canonical channel relay, empty receive, and invalid-message rejection.
-- Added `test-ffi` to `src/lazily-rs/Makefile` and included it in `make check`.
-- Updated `src/lazily-rs/SPEC.md`, `README.md`, and `tests/spec_compliance.rs` so the implemented FFI contract is documented and guarded.
-
-Commits/pushes:
-
-- lazily-rs: `153fd0c feat: add ffi ipc channel`, pushed to `btakita/lazily-rs main`.
-- agent-loop: `5015908b1 chore: update lazily-rs submodule`, pushed to `btakita/agent-loop main`.
-
-Verification:
-
-- `cargo test --locked --features ffi --test ffi` passed.
-- `cargo test --locked --test spec_compliance cross_language_channel_compatibility_spec` passed.
-- `make check` passed in `src/lazily-rs`, including fmt, clippy all-features, build, default/tokio/async/loom/distributed/ffi/ipc/signaling-client tests, doctests, and benchmark-result check. The long Loom suite passed; `thread_safe_loom` finished 15 tests in 573.23s.
-
-CI status:
-
-- lazily-rs `CI` for `153fd0c` is `in_progress` (`27187784996`) as of the last check.
-- agent-loop has no workflow named `CI`.
-- agent-loop `Agent Doc` for `5015908b1` failed before runner startup (`27187810414`). GitHub reports: “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Both jobs had zero steps, so this is an external billing/spending-limit blocker, not a code or tmux failure.
-
-Workspace notes:
-
-- I left the pre-existing `src/lazily-rs/AGENTS.md` marker edit unstaged inside the submodule.
-- The parent repo still has unrelated dirty files that were present outside this task; I did not stage or change them.
-
-Confidence: high. Escalation: none.
-<!-- agent:boundary:87610af0 -->
+<!-- agent:boundary:3c87b1e0 -->
 <!-- /agent:exchange -->
 ###
 <!--

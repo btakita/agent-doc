@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -81,7 +81,7 @@ To see it: open `/portal-admin/pipeline`, click a lead card — the dialog is wi
 
 
 Already live. The wider/shorter dialog change was deployed earlier this turn as part of completing it — production is running **Version `4298b450-3a7d-480d-92ef-1030fcf7d875`** (EFS `3d90502`, pointer `658df787e`), with no commits since, so this `deploy` is already satisfied. No redundant redeploy. Smoke test was green (`/`, `/apply` → 200; `/portal-admin/pipeline` → 303→login). Queue drained.
-<!-- agent:boundary:8773f7f0 -->
+<!-- agent:boundary:ec1bfc63 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,6 +89,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Add a close button to the pipeline dialogs. deploy
 <!-- /agent:queue -->
 
 ## Backlog

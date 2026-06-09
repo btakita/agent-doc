@@ -36,7 +36,30 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 4 response topic(s): Individual application-lead route + messaging sync question; deploy; Individual-item admin routes; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:1fc646e5 -->
+
+### Re: URL reflects selected filters without a refresh — opus-4-8
+
+> **Queue prompt:**
+>
+> The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.
+
+
+Done across the admin portal. Committed + pushed to `equityfundingsource-dev` main (`7d9c235`).
+
+**Root cause:** the filtered admin lists *read* their filters from the URL on load but never *wrote* them back, so changing a filter (e.g. the users `status` dropdown) left the URL stale.
+
+**Fix:** added a shared `sync_url_query_` helper (`shared/url.ts`) that updates the query string via `history.replaceState` (no reload, no back-button spam, drops empty values), and called it from every filtered admin list as filters change:
+- **Users** (`?q&role&status`) — the reported example
+- Application Leads, Contact Messages, Funding Commits, Lender Management (`?status`)
+- Documents (`?kind` tab + `?window`/`?status`)
+- Loans (`?borrower&application_status&order`)
+
+Read/write stay symmetric — each page only syncs the params it already reads on load, so a refresh restores the same view. Pages that already synced (pipeline, payments modal, tmo-loans, messages) were left as-is.
+
+**Verification:** unit-tested the pure URL builder + asserted every filtered list uses the helper; full suite **421 pass / 0 fail**, worker bundle clean. (This rebased on top of a remote pagination refactor that touched the same files — conflicts resolved keeping both the new pagination and the URL sync.)
+
+Continuing the queue: `#pzj5` (Public Contents detail) and `#f632` (Documents detail) next.
+<!-- agent:boundary:c564c507 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +67,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.
+- ~~The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.~~
 - [#pzj5]
 - [#f632]
 <!-- /agent:queue -->

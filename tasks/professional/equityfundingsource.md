@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,8 +80,26 @@ Public Contents is a key-based singleton editor (not a discrete-row list), so th
 **Verification:** full suite **422 pass / 0 fail**, browser + worker bundles clean; added a test locking in the route + focused-editor logic.
 
 Last queue item next: `#f632` (Documents detail routes).
-<!-- agent:boundary:3d15af6c -->
-<!-- agent:boundary:b4944352 -->
+
+### Re: #f632 — Documents detail routes — opus-4-8
+
+> **Queue prompt:**
+>
+> [#f632]
+
+
+Done. Committed + pushed to `equityfundingsource-dev` main (`e6de69c`).
+
+**Decision on the sub-list question:** Documents has two distinct sub-lists, so each item type gets its **own** detail route + by-id API (rather than one shared route):
+- **Uploads** → `/portal-admin/documents/uploads/:id` (`GET /api/admin/uploads/:id`) — file metadata, borrower, loan, download link.
+- **Document Requests** → `/portal-admin/documents/requests/:id` (`GET /api/admin/investor-document-requests/:id`) — request, status, investor, description/admin notes.
+
+Each list row links to its detail page (eye action), and both detail sections highlight the Documents nav item. Added an `investor_document_request_admin_R_` single-read repo helper (re-exported via `admin/shared`).
+
+**Verification:** full suite **423 pass / 0 fail**, browser + worker bundles clean; added a test locking in both routes, sections, APIs, and row links.
+
+Queue drained — all admin list types now have individual-item routes.
+<!-- agent:boundary:9acadea4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,9 +107,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~The url of https://equityfundingsource.brian-takita.workers.dev/portal-admin/users?status=active should update without a page refresh to reflect the selected filters.~~
-- ~~[#pzj5]~~
-- [#f632]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -150,8 +165,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Completed / Reaped
 
 <!-- agent:icebox -->
-
 - [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
+
 <!-- /agent:icebox -->
 
 <!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->

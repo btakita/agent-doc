@@ -35,13 +35,31 @@ complete
 Compacted content:
 - Archived 1 response topic(s): do [#queue-no-stop-unrelated-edit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:15841f88 -->
+
+### Re: do [#ipc-drift-writeprovenance] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#ipc-drift-writeprovenance]
+
+
+Done. The provenance producer/consumer halves were already in place from `#pcp2`/`#pcp6`; the residual gap was that the **direct-run** document-write path didn't stamp provenance.
+
+**Gap:** `run.rs::atomic_write` (used by the four `direct_run_*` document writes) wrote the editor-visible document but never recorded write-provenance, so a direct-exec foreign-looking disk change fell back to the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic instead of positive attribution in `guard_visible_write_reconcile` / `live_buffer_diverges_from_content`. The IPC/finalize path (`write.rs::atomic_write`) already stamped via `record_document_write_provenance`.
+
+**Fix:** promoted `record_document_write_provenance` to `pub(crate)` and called it from `run.rs::atomic_write`, so both — and only — agent-doc document-write paths stamp provenance through the one shared recorder. Now every document-write path attributes uniformly; `.agent-doc/` sidecar/snapshot writes are still skipped.
+
+- **Test:** `run.rs::direct_run_atomic_write_records_provenance` (mirrors the `write.rs` provenance test).
+- **Spec:** `specs/08b` uniform-enforcement note + `specs/process-topology.md` (R4 already ✅, shared-recorder edge on FIN/IDLE).
+- **Verify:** `make check` green (clippy `-D warnings` clean, full test suite + sim-medium ok); `cargo install --path .` + `cargo build --release` both rebuilt 0.34.0.
+- **Shipped:** submodule commit `937b6395` pushed to `origin/main`; superproject pointer + plan phase-4-done committed.
+<!-- agent:boundary:cae1fd44 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#ipc-drift-writeprovenance]
+- ~~:round_pushpin: do [#ipc-drift-writeprovenance]~~
 - :round_pushpin: do [#ipc-early-ack]
 - :round_pushpin: do [#ipc-degraded-prefers-file-ipc]
 - :round_pushpin: do [#loop-guard-exchange-node-granularity]
@@ -90,7 +108,6 @@ What are #next-steps to fix bugs?
 - [ ] [#stale-capture-captured-only-drift] [recommended] Evaluate extending the #stale-capture-deadlock-autoretire retire path to Captured-only orphans (write never attempted) whose baseline drifted. Today only WriteApplied captures auto-retire; a Captured-only orphan + drift still fail-closes on validate_replay and needs a manual reset --from-current --preserve-session. Gate on positive superseding-turn evidence before retiring. Lower priority than upstream #ipc-drift-writeprovenance.
 - [ ] [#ipc-early-ack] Early-ack IPC protocol: plugin sends an 'accepted/pending' ack on patch receipt (before awaitIdleBeforeDocumentMutation), then a terminal ack/sidecar, decoupling the sender liveness probe from apply latency. FFI-first (ipc_socket protocol + ffi.rs listener contract, then PatchWatcher.handleSocketMessageV2). Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#ipc-degraded-prefers-file-ipc] When genuinely degraded, route writes through the file-IPC patch queue (plugin still applies via Document API) instead of a raw disk write, so a degraded session never manufactures IDEA File Cache Conflicts. Disk write becomes true last resort. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
-- [ ] [#ipc-drift-writeprovenance] Tag agent-doc's own disk writes with a write-provenance/generation id so guard_visible_write_reconcile / live_buffer_diverges_from_content positively attribute a foreign disk change to the supervisor instead of inferring from the LIVE_BUFFER_STALE_SKEW_MS mtime heuristic. Builds on #op-scoped-drift-* provenance. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md
 - [ ] [#nm1x-livebuf-content] [recommended] Capture editor-buffer CONTENT (not just len/hash) in the .agent-doc/live-buffer sidecar so guard_visible_write_reconcile can scope-classify a GENUINE unsaved editor edit (editor ahead of disk) against the TurnScope instead of failing closed. Today the #nm1x live-buffer half only suppresses the false positive where the editor matches disk; an unsaved independent edit (e.g. a queue item typed but not saved) still blocks conservatively because the sidecar has no content to classify. Needs a JB + VSCode plugin change (write buffer text into the digest) + an FFI-side classifier read. Plan: tasks/agent-doc/plan-operation-scoped-drift.md
 <!-- /agent:backlog -->
 

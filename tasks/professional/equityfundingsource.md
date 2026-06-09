@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -57,7 +57,16 @@ Each admin **Management** sidebar link now shows a right-aligned count badge of 
 **Verification:** `bun run check` green — 402 tests pass. **Spec:** `docs/current_progress.md` (Admin Portal → Navigation). Committed + pushed (`0d9708a`) + deployed.
 
 Note: the counts are total table rows per section — if you'd rather a badge reflect a filtered view (e.g. only *new* leads, or *unread* messages), tell me which sections and I'll scope them.
-<!-- agent:boundary:c4189d54 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Already deployed — this was the same cycle as the nav-counts work, so the deploy already happened. Production is live at Worker version **`1f1b4241-2ed9-41cd-806d-caa6d7e0c3af`**, built from EFS `0d9708a` (= `origin/main`, no unpushed commits). The served bundle `index.browser-A4M6U3MM.js` already contains the nav-counts code, so there's nothing new to push — re-running `deploy:worker` would only mint an identical version. Nothing to do; draining the queue.
+<!-- agent:boundary:1df9ed52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,8 +74,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~In the /admin pages, the Management links should have the number of items in the page ![img_2.png](img_2.png).~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

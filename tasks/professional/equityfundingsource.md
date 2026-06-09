@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -117,7 +117,7 @@ Before deploying I synced EFS to latest `main` (it was behind by 2 — a remote 
 - `/portal-admin/users?status=active` (URL filter sync)
 
 This ships everything from this queue: the four admin detail routes, the per-key Public Contents editor, the Documents detail routes, and the URL-filter-sync across the admin lists. Queue drained.
-<!-- agent:boundary:6a720c0f -->
+<!-- agent:boundary:3f3ff256 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,6 +125,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications has a "Failed to load applications" error.
 <!-- /agent:queue -->
 
 ## Backlog

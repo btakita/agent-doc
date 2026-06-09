@@ -21,9 +21,13 @@ The keystone is the **IPC degrade/timeout state machine** in `agent-doc-orchestr
 - Degrade latch is now a self-healing circuit breaker: `ipc_direct_disk_degraded` re-probes `is_listener_active` and clears the marker the moment the plugin socket accepts connections again.
 - Tests: `degraded_latch_self_heals_when_listener_recovers`, `is_socket_ack_timeout_error_is_duration_agnostic`; existing degrade tests still green.
 
-## Phase 2 — early-ack protocol (`#ipc-early-ack`) [follow-up]
+## Phase 2 — early-ack protocol (`#ipc-early-ack` / `#saev`) — RUST HALF LANDED (dormant), 2026-06-09
 
 Decouple the sender's liveness probe from the plugin's apply latency. The plugin should send an early `accepted`/`pending` ack the moment it receives the patch (before `awaitIdleBeforeDocumentMutation`), then a terminal ack/sidecar. FFI-first: define the early-ack message in the `ipc_socket` protocol + `ffi.rs` listener contract, then emit it from `PatchWatcher.handleSocketMessageV2`. Removes the timeout/apply-window coupling entirely.
+
+**Landed (Rust transport, dormant):** The whole two-phase handshake lives in the Rust transport, so **no Kotlin change is required** — `ipc_socket::start_listener` emits the early `pending` ack on patch receipt (before the blocking apply callback) whenever the incoming patch carries `"early_ack": true`, and `send_message` reads acks in a loop where `AckClassification::Pending` means "listener alive, keep waiting for the terminal ack" (never a false success — the terminal ack is still required). New helpers `message_requests_early_ack` / `early_ack_line` / `early_ack_tagged_message`. Backward/skew-safe across cdylib/CLI version drift via the opt-in `early_ack` message flag: an un-opted sender gets a single terminal ack and the loop runs exactly once (byte-identical to before). Tests: `classify_ack_treats_pending_status_as_pending`, `message_requests_early_ack_reads_flag`, `early_ack_tagging_is_dormant_by_default`, `send_message_handles_early_then_terminal_ack`. Spec `specs/process-topology.md` R2; ffi doc note.
+
+**Gated remainder (`#xkpf`):** flip `EARLY_ACK_ENABLED` to `true` (auto-tags closeout patches) and verify end-to-end in a live IntelliJ/Codex session under real typing load that the early ack eliminates the false ack-timeout / degrade vote without regressing the terminal-ack path. Optionally `lib-install` the cdylib so the live plugin's listener emits early acks. Activating it is strictly safer (liveness-only), so this is verification, not redesign.
 
 ## Phase 3 — prefer file-IPC over raw disk when degraded (`#ipc-degraded-prefers-file-ipc`) — DONE 2026-06-09
 

@@ -151,7 +151,7 @@ All three done. Committed + pushed to `equityfundingsource-dev` main (`9da578e`)
 **3. Linked from AGENTS.md.** New `## Runbooks` section points to `runbooks/deployment.md` and notes that `wrangler deploy` alone doesn't migrate, so always deploy via `make deploy`.
 
 **Verification:** package.json is valid; full suite **423 pass / 0 fail**. This closes the loop on the migration-gap outage — the next deploy will apply pending migrations automatically.
-<!-- agent:boundary:5f554baa -->
+<!-- agent:boundary:69341f4e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -168,7 +168,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [ ] [#my09] [recommended] Make deploy apply pending D1 migrations (or fail-closed when migrations are pending): the 2026-06-09 "Failed to load applications" outage happened because cf-deploy shipped code ahead of migrations 0055/0056. Add a `bun run cf:d1:migrate:remote` step (or a pending-migration gate) to the deploy:worker flow.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
-- [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
@@ -219,7 +218,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:icebox -->
 - [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
-
+- [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.
 <!-- /agent:icebox -->
 
 <!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->

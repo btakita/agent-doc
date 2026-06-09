@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,23 +80,6 @@ The 8 blocked items stay in the **backlog** as the actionable completion list yo
 **Two agent-doc product bugs surfaced this turn (each worth its own fix session):**
 1. Go-mode auto-queued genuinely-blocked backlog work — gated/blocked ids should be excluded from the auto-drain set.
 2. The exit-75 CRDT closeout path mangled document structure (emptied the backlog, orphaned ids into the queue, duplicated review items, split the boundary marker) — the `#ipc-crdt-response-drift` family, reproduced here in degraded mode.
-
-### Re: [#saev] execute queued backlog — gated, not auto-drained here — opus-4-8
-
-The go-mode `queue` attribute auto-populated the queue with all 9 backlog ids I filed last turn (head `#saev`). I reconciled them instead of blindly draining, because **every one is either already done or genuinely blocked from this session** — and this degraded/saturated session corrupted its own response last turn (manual git recovery).
-
-**Resolved 9/9:**
-
-- **`#71f1` → DONE (duplicate):** degraded-prefers-file-IPC already landed 2026-06-09 (`#ipc-degraded-prefers-file-ipc`, `write.rs` `try_ipc` fall-through; tests `try_ipc_prefers_file_ipc_when_socket_degraded`). Closed.
-- **`#saev` → GATED:** its Rust core modifies `send_message` (`ipc_socket.rs`) — **this session's exact closeout write path**. Spec-08b forbids landing a write/ack-path change in the same cycle that persists a response through it, and review #pcp5 explicitly flags this as delicate state-machine work for a *fresh focused session*. Implementing + committing untested-against-live two-phase-ack code into the shared binary here would be a latent hazard for every session.
-- **`#9adk #s760 #f5d2` → GATED:** JB/VSCode plugin changes requiring live IntelliJ verification.
-- **`#bkx9` → GATED:** blocked on `#ipc-crdt-response-drift`.
-- **`#pf15 #21w2` → GATED:** supervisor-in-process consolidation / 08b cutover — large, hard-blocked from any normal cycle, fresh-session work.
-- **`#xkpf` → GATED:** the consolidated live-verification session; blocked on live IntelliJ/Codex panes.
-
-All 8 gated items keep their concrete unblock condition in-text and stay as the actionable completion list you asked for last turn — they just no longer auto-drain.
-
-**Product note (packagable, not done here):** go-mode's `queue`-attr backlog auto-queued genuinely-gated work for execution. A blocked/gated backlog item should be excluded from the auto-drain set rather than re-presented each cycle. Worth a follow-up to filter gated ids out of the go-mode queue population.
 <!-- agent:boundary:fda01685 -->
 <!-- /agent:exchange -->
 

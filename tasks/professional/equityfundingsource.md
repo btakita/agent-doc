@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Reordered the admin sidebar: **Deal Pipeline** now sits directly under Dashboard
 - Test in `tests/admin-pipeline.test.ts` asserts Deal Pipeline is ordered before Loan Applications.
 
 **Full suite 491 pass**, `build` + `build:worker` green. **Not deployed** (`#spec-test-commit-push` stops at push). This drains the final queued item — the queue is now empty.
-<!-- agent:boundary:5ef2863b -->
+<!-- agent:boundary:be6559bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

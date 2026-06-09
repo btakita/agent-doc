@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -117,7 +117,24 @@ Before deploying I synced EFS to latest `main` (it was behind by 2 — a remote 
 - `/portal-admin/users?status=active` (URL filter sync)
 
 This ships everything from this queue: the four admin detail routes, the per-key Public Contents editor, the Documents detail routes, and the URL-filter-sync across the admin lists. Queue drained.
-<!-- agent:boundary:3f3ff256 -->
+
+### Re: full-applications "Failed to load applications" — opus-4-8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications has a "Failed to load applications" error.
+
+
+Fixed. Root cause was a **schema/code mismatch in production**, not a code bug.
+
+**What happened:** the deploy I shipped earlier this session pulled in a remote refactor that added migrations **0055** (`application_broker_info` table + `full_applications.broker_user_id`) and **0056** (shared `documents` pool + `loan_documents`/`investor_documents` columns). `wrangler deploy` does **not** run D1 migrations, so production D1 was missing both.
+
+**Exact failure path:** `GET /api/admin/full-applications` → `application_admin_list_` → per-row `application_sections_R_` → `application_broker_info_R_` runs `SELECT … FROM application_broker_info`. That table didn't exist on prod → the query threw → the `Promise.all` rejected → the endpoint 500'd → the client rendered "Failed to load applications".
+
+**Fix:** applied the two pending migrations to the production D1 (`equityfundingsource`, `280e1539…`). Both are additive only (CREATE TABLE/INDEX, ADD COLUMN, INSERT OR IGNORE) — no destructive statements. Verified afterward: zero pending migrations; `application_broker_info` and `documents` tables exist; `full_applications.broker_user_id` is present.
+
+Please re-load `/portal-admin/full-applications` (behind your admin auth) to confirm — the schema it needs is now in place. Queued a process fix so deploys apply migrations (or fail closed) and this class of outage can't recur.
+<!-- agent:boundary:43ae3b45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,12 +142,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- https://equityfundingsource.brian-takita.workers.dev/portal-admin/full-applications has a "Failed to load applications" error.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#my09] [recommended] Make deploy apply pending D1 migrations (or fail-closed when migrations are pending): the 2026-06-09 "Failed to load applications" outage happened because cf-deploy shipped code ahead of migrations 0055/0056. Add a `bun run cf:d1:migrate:remote` step (or a pending-migration gate) to the deploy:worker flow.
 - [ ] [#vtx8] [bug] Application leads vanish when advanced past intake (e.g. 'Contacted') — finish the admin pipeline so leads aren't dropped from view. From 2026-06-03 call.
 - [ ] [#ty2v] Secure wiring-instructions delivery: expiring/self-destructing link or click-to-reveal (bank-style), plus 'verify wiring with the title company directly' reminder; flow title/escrow -> EFS -> lender. From 2026-06-03 call.
 - [ ] [#z3kx] GoHighLevel CRM as messaging/notifications path of record (Robert's enterprise GHL); integrate with the site so notifications also surface in-app; avoid SendGrid/extra recurring fees. From 2026-06-03 call. Relates to #xcvg.

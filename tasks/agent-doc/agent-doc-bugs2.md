@@ -155,23 +155,28 @@ Marking `#postcommit-ipc-worktree-corruption` **done** — the live marker is th
 **Two things to flag (not touched this turn, scoped to other items):**
 - **`#saevon` review collision:** preflight warns the same `#saevon` id resolves twice in `agent:review` (two identical `[/]` entries). There's no `--review-remove` flag, and resolving `#saevon` is a separate live-gate decision, so I left it — recommend deduping those stragglers.
 - **`#saevon` looks already activated in HEAD:** `EARLY_ACK_ENABLED = true` in `ipc_socket.rs` (commit `c6c883ee` "activate early-ack (#saevon)"), so the *flip* half of the `#saevon` gate is satisfied; only the `#lvbremain` live `#saev` marker remains. The two `#saevon` review items read as stale relative to HEAD.
-<!-- agent:boundary:30489b22 -->
-<!-- agent:boundary:c0d96a7e -->
+
+### Re: queue cleanup + stale-install resolved — opus-4-8
+
+No new prompt this turn — the diff is queue bookkeeping (struck-through completed items + a stray `- test` line removed; `user_intent_prompt_changes` empty). I used the turn to fully deploy last turn's fix and triage the remaining queue.
+
+**Resolved the `stale_install` warning.** My `#postcommit-ipc-worktree-corruption` change lives in `git.rs` (the `agent-doc-orchestration` crate), which compiles into the **cdylib** as well as the CLI binary. Last turn I rebuilt only the binary, so JetBrains/tmux sessions that commit via FFI would still run pre-`c9bf3492` code. Ran `make install` (rebuilds `~/.cargo/bin/agent-doc` + cdylib + `lib-install`) plus `cargo build --release` for `target/release/agent-doc`. All three artifacts are now post-`c9bf3492`; preflight no longer reports `stale_install`. The `postcommit_worktree_check` marker is now live in the CLI, tmux, and JetBrains FFI commit paths.
+
+**Remaining queue is not autonomously completable in this session.** `#pcpc5live`, `#lvbremain`, and `#s760wire` are each explicitly scoped to a **fresh focused / operator-live-gated** session (live IntelliJ/Codex editor-boundary proof; `scripts/xdotool-live-verify.sh`; live-verified destructive `/clear`), and `#optverify` is a `:pushpin:` planning flag, not a `do`. This session is degraded (accretion `warn`, 6 no-op closeouts/30 min). Per the plan's Safety section and the standing PCP directive, I'm not draining these here. **Recommend:** halt this queue and start the PCP entry point in a fresh window — `/agent-doc tasks/agent-doc/plan-supervisor-in-process.md` beginning at `#pcpc1`.
+
+**Filed `#reviewrm`** for the `#saevon` review collision: `agent-doc write` has no `--review-remove`/`--review-resolve`, so the two identical stale `[/] #saevon` entries (the `preset_item_id_collision` warning) can't be cleanly deduped. Left them untouched rather than risk an ambiguous edit-by-id. Note `EARLY_ACK_ENABLED = true` is already in HEAD (`c6c883ee`), so the flip half of `#saevon` is satisfied; only the `#lvbremain` live `#saev` marker remains.
+
+Not auto-looping — the queue head needs operator/fresh-session attention.
+<!-- agent:boundary:74cc8d9d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Do the PCP~~
-- ~~:pushpin: do [#bkx9wire]~~
-- ~~:round_pushpin: do [#saevon]~~
-- ~~:round_pushpin: do [#postcommit-ipc-worktree-corruption]~~
 - :round_pushpin: do [#pcpc5live]
 - :round_pushpin: do [#lvbremain]
 - :round_pushpin: do [#s760wire]
-- ~~:round_pushpin: do [#bkx9perid]~~
 - :pushpin: [#optverify]
-- test 
 <!-- /agent:queue -->
 ###
 <!--
@@ -201,6 +206,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#reviewrm] #agent-doc-bug agent:review has no clean removal/resolve flag — agent-doc write exposes only --review-add/--review-edit, so a stale or DUPLICATE review item (the two identical [/] #saevon entries preflight flags as preset_item_id_collision, from an earlier finalize interleave) cannot be deduped or converted to backlog without an ambiguous edit-by-id. Add --review-remove <id> / --review-resolve <id> and dedupe identical same-id review entries during finalize. Files: write.rs review flag parsing; template.rs review component ops; preflight collision warning.
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).

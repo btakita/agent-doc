@@ -242,27 +242,24 @@ export AGENT_DOC_WRITE_AUTHORITY=authority
 **Restart to apply:** `~/.zshenv` is read by every new shell, so restart your shells / tmux sessions (or `source ~/.zshenv`) and relaunch the agent-doc sessions you want on the new rung. To test the next stage later, change the line to `removed`; to roll back instantly, set it back to `dual-write` (or comment it out for `off`).
 
 What `authority` exercises: the session-actor ordered write queue becomes the sole in-process serializer for editor-visible document writes. Note it does **not** by itself stop `#postcommit-ipc-worktree-corruption` — that needs the `removed` rung plus the pcpc5d/e plugin-writer demotion (still gated under `#pcpc5live`). So if you keep seeing post-commit working-tree splices under `authority`, that's expected until the removal rungs land.
-<!-- agent:boundary:bb11088d -->
+
+### Re: console stdout bleeding in front of the OpenCode TUI — opus-4-8
+
+Fixed and shipped (submodule `595bdfc4`, superproject `3011f068d`).
+
+**Root cause.** `input_diag::emit` (`agent-doc-orchestration/src/input_diag.rs`) wrote **every** `tmux_input_event` to stderr unconditionally — even though a `verbose_enabled()` gate (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) already existed and the same message was already persisted to `ops.log`. In an OpenCode session those high-frequency input-delivery lines — plus the per-cycle `idle-queue watch: drained...` and `auto-triggered:` eprintlns in `start.rs` (all already in `session_log`) — bled in front of the full-screen TUI and interleaved with its status line (your `img_16.png`: `tmux_input_event source=supervisor.auto_trigger ...`, `idle-queue watch: drained active queue head ...`, `tmux_input_event source=sessions.send_submitted_text_for_harness ...`).
+
+**Fix.** Gate all four per-cycle stderr diagnostics behind `input_diag::verbose_enabled()`. The durable records (`ops.log` / `session_log`) are unchanged, so nothing is lost — the diagnostics are now opt-in and no longer pollute a full-screen harness pane. Left the infrequent `auto-trigger gated: <reason>` line, which fires only when dispatch is blocked and carries a reason not otherwise logged.
+
+**Verified:** `make check` green (exit 0); `cargo build --release` + `cargo install` + `agent-doc lib-install` (supervisor/input path is FFI-reachable → live OpenCode sessions pick it up after the cdylib refresh). To see the diagnostics again on demand: `export AGENT_DOC_TMUX_INPUT_DIAG=1`.
+<!-- agent:boundary:dd03a9b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#lvbatch]~~
-- ~~:pushpin: :round_pushpin: do [#s760wire]~~
-- ~~:pushpin: do [#xdotool-lvbatch]~~
-- ~~:round_pushpin: do [#lvbatch]~~
-- ~~:pushpin: :round_pushpin: do [#saevon]~~
-- ~~:round_pushpin: do [#bkx9perid]~~
-- ~~:round_pushpin: do [#tmux-switch-lag]~~
-- ~~:round_pushpin: do [#exch-intermix-verify]~~
-- ~~:round_pushpin: do [#postcommit-ipc-worktree-corruption]~~
-- ~~do [#dropqueue-consumed-falsecount]~~
-- ~~:round_pushpin: do [#lvbatch]~~
-- ~~:round_pushpin: do [#pcpc5live]~~
-- ~~:round_pushpin: do [#lvbremain]~~
-- ~~Automatically add the env vars to ~/ so I can test. I can restart.~~
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+- [#s760wire]
+- ~~[#bkx9perid]~~
 <!-- /agent:queue -->
 ###
 <!--

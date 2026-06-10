@@ -114,7 +114,7 @@ Filed as an actionable backlog item: when a user manually adds a queue line with
 These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint — repeated in the backlog text and the prior response — that they run in a **fresh focused session**, not at the tail of a drain. This session is flagged degraded (warn-level accretion: 2 no-op closeouts + 2 restart-heavy events in the last 30 min). I am deliberately **not** draining them or marking them done. Start a fresh `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` session and it will begin at #dav9/pcpc5e1.
 
 **Not auto-looping:** the rest of the queue is either operator-drive (can't self-complete) or fresh-session-gated, so continuing the go-mode drain here would only churn the same heads. Handing back to you.
-<!-- agent:boundary:6f2d2a13 -->
+<!-- agent:boundary:87b6e526 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -122,7 +122,7 @@ These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint �
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: [#gng8]~~
 - ~~:pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.~~
-- ~~:round_pushpin: [#ktw8]~~
+- :round_pushpin: [#ktw8]
 - :round_pushpin: [#lvbremain]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - do [#8j86]

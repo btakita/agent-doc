@@ -277,7 +277,7 @@ You overrode the prior defer; I did it. This is a fresh Claude Code process and 
 **`#s760d` stays open — and it genuinely can't close here.** It's operator live-verify of the *destructive* path: drive a throwaway opted-in doc past threshold and confirm `/clear` fires exactly once at the boundary with no false fire below it. I can't safely fire a real `/clear` from inside this session. I filed it as a gated review item with a concrete recipe, and wired its verification to the new `#optverify` predicate (`ops.log` `clear=true` marker) so it auto-proves once you enable `agent_doc_gate_autoverify` and drive it.
 
 **Notes:** left an unrelated `AGENTS.md` tsift code-nav version auto-bump (0.1.66→0.1.67) uncommitted — not mine, not part of this. No version bump (matches the s760a/b convention; logged under VERSIONS.md `## Unreleased`). Not auto-looping: you removed `go` and this was an explicit exchange prompt, so `#x9ds` stays queued for your next go.
-<!-- agent:boundary:80de8ef8 -->
+<!-- agent:boundary:24e8fc6b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -322,6 +322,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#nnrt] operator live-verify (#s760d) of the destructive /clear path: on a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold and confirm ops.log shows the s760 clear-decision line flip to a true clear and that /clear fires exactly once at the boundary, with no false fire below threshold. Code shipped in submodule 1edb20d2 (start.rs idle-queue watch + context_pct gate). This gated item is the destructive-path live verification only; it cannot be discharged from a normal session.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

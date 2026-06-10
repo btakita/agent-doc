@@ -162,7 +162,7 @@ Symmetric to #2: `notify_borrower_of_admin_message_` always sends the borrower a
 **Reply-by-email (#3)** is the only one that needs real implementation, not just config. Say the word and I'll queue it as a concrete backlog item with the three steps above.
 
 **Queue housekeeping:** the queue is currently **inactive**, so `#eyp0`/`#6r8v` aren't auto-running. They were duplicate entries of the same item (the deferred *investor* accreditation-control follow-up — unrelated to this messaging work), so I folded the endpoint detail into **#eyp0** and closed **#6r8v** as a duplicate. Note: preflight flagged #eyp0 as possibly-done against `#pipeline-dialog-controls-scope` — that's a false positive; #eyp0 is the genuinely-not-yet-built follow-up, not the shipped loan/payment dropdowns. Want me to build #eyp0, or enable the messaging email round-trip? Activate the queue or just say which.
-<!-- agent:boundary:1e5213db -->
+<!-- agent:boundary:38e318e1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,8 +177,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#eyp0] [recommended] Investor dialog editable action: the investor pipeline lifecycle stage is DERIVED (furthest stage from accreditation + lender account + active/pending funds), so it has no settable status. The real editable investor action is the accreditation decision — wire an Accredit/Pending control in the Investor Pipeline card dialog to the existing POST /api/admin/investor-accreditation/:id/decision endpoint. Follow-up to #pipeline-dialog-controls-scope (loan + payment status dropdowns shipped EFS d4b7e55).
-- [ ] [#6r8v] [recommended] Investor dialog editable action: the investor pipeline lifecycle stage is DERIVED (furthest stage from accreditation + lender account + active/pending funds), so it has no settable status. The real editable investor action is the accreditation decision — wire an Accredit/Pending control in the Investor Pipeline card dialog to the existing POST /api/admin/investor-accreditation/:id/decision endpoint (admin_investor_accreditation_by_id_decision_POST_). Follow-up to #pipeline-dialog-controls-scope (loan + payment status dropdowns shipped EFS d4b7e55).
+- [ ] [#b0wq] Investor Pipeline: "Open Investor Profile" (admin investor-pipeline page, e.g. /portal-admin/investor-pipeline) should open a stacked dialog on top of the current one containing the investor form/profile, rather than navigating away. From 2026-06-09 session.
+- [ ] [#eyp0] [recommended] Investor dialog editable action: the investor pipeline lifecycle stage is DERIVED (furthest stage from accreditation + lender account + active/pending funds), so it has no settable status. The real editable investor action is the accreditation decision — wire an Accredit/Pending control in the Investor Pipeline card dialog to the existing POST /api/admin/investor-accreditation/:id/decision endpoint (admin_investor_accreditation_by_id_decision_POST_). Follow-up to #pipeline-dialog-controls-scope (loan + payment status dropdowns shipped EFS d4b7e55).
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

@@ -36,7 +36,25 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 3 response topic(s): Boolean form fields as checkboxes (read-only → disabled); Human-readable lender field labels + lender-request documents link; Table row name opens the quick-view dialog (not a page jump)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:23b46762 -->
+
+### Re: Tabbed lender dialog — Lender Info + User tabs — opus-4-8
+
+Done, tests updated, committed + pushed + deployed (EFS `c11e58c`; live 200).
+
+The Lenders-table dialog is now **tabbed**, embedding the two existing pages instead of duplicating their content:
+
+- **Lender Info tab** → the dedicated lender page (`/portal-admin/lenders/:id`) rendered inline: request status/account, submitted lender data (with the human-readable labels), lender documents, and the **accept (assign account & complete) + deny request** controls.
+- **User tab** → the investor profile editor (`/portal-admin/users/:id`) rendered inline via `UserProfileEditor`.
+
+**How it's wired:**
+- Added an `embedded` prop to `AdminLenderDetail` that hides the page chrome (topbar / "Back to lenders") so the same component renders cleanly in the dialog, plus an `on_request_change` callback so the table row + dialog header stay in sync after an accept/deny — no refetch.
+- Retired the old single-view dialog (the `CopyRow` data grid + separate `DenyLenderRequestModal`); the embedded detail page owns that workflow now, so there's one source of truth. Net −92 lines.
+- Moved `lender_field_label_` to `lender_detail` (re-exported from `lender_management` for compatibility) so the humanized labels show on both the page and the dialog.
+
+**Scope note:** I verified the build + full suite structurally, but I did **not** do a live click-through of the dialog — that needs an authenticated admin session (Cloudflare Access) I can't drive headlessly. The embedded components are existing, working pages, so risk is integration-level (props/layout). Worth a 10-second eyeball on `/portal-admin/lender-pipeline?tab=lenders` → click a lender → toggle the two tabs.
+
+**Verification:** updated `admin-dashboard`, `lender-request-labels-docs`, and `table-row-opens-dialog` tests for the new structure. Full suite **543 pass / 0 fail**, worker build clean, no D1 migrations.
+<!-- agent:boundary:c7a66a04 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,8 +62,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- On /portal-admin/lender-pipeline?tab=lenders, make the link open the lender dialog. The dialog has the link to the dedicated lender page. Please use the same behavior for other table views.
-- deploy
+- We have /portal-admin/lenders/:lenderId and we have /portal-admin/users/:userId. The Lenders tab in the the Lender Pipeline should open the lender dialog. The lender dialog should a "Lender" tab and a "User" tab. The "Lender Info" tab should have the contents of /portal-admin/lenders/:lenderId..include the buttons to accept and deny the request. The "User" tab should have the contents of /portal-admin/users/:userId. deploy
 <!-- /agent:queue -->
 
 ## Backlog

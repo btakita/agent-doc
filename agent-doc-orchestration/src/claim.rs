@@ -154,6 +154,7 @@ pub fn cross_session_decision(
 }
 
 fn enforce_cross_session_claim(
+    file: &Path,
     pane_id: &str,
     pane_tmux_session: &str,
     configured: &str,
@@ -179,10 +180,13 @@ fn enforce_cross_session_claim(
             // Structured signal first so plugins can branch on the reject and
             // offer Force claim / Switch project session / Cancel instead of
             // rendering the raw exit-1 bail text. Human message preserved below.
-            eprintln!(
-                "{}",
-                cross_session_reject_marker(pane_id, pane_tmux_session, configured)
-            );
+            let marker = cross_session_reject_marker(pane_id, pane_tmux_session, configured);
+            eprintln!("{}", marker);
+            // #x9ds: the structured signal above is stderr-only (the plugin branch
+            // channel) and invisible to the ops.log gate-verify scan. Also record
+            // it to ops.log so the #4wxr reject behavior is provable from ops.log
+            // when driven live (claim from a pane in a non-configured session).
+            crate::ops_log::log_op(file, &marker);
             anyhow::bail!(
                 "pane {} is in tmux session '{}' but project session is '{}'; switch to the configured session or pass --force",
                 pane_id,
@@ -307,6 +311,7 @@ pub fn run(
         {
             let configured_alive = sessions::Multiplexer::session_alive(&tmux, &configured);
             enforce_cross_session_claim(
+                file,
                 &pane_id,
                 &pane_tmux_session,
                 &configured,
@@ -913,11 +918,25 @@ mod tests {
 
     #[test]
     fn enforce_cross_session_claim_errors_on_reject() {
-        let err = enforce_cross_session_claim("%12", "claude", "0", CrossSessionDecision::Reject)
-            .expect_err("reject should fail closed");
+        let dir = tempfile::tempdir().unwrap();
+        // find_project_root walks up for an `.agent-doc/` dir to resolve ops.log.
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "x").unwrap();
+        let err =
+            enforce_cross_session_claim(&doc, "%12", "claude", "0", CrossSessionDecision::Reject)
+                .expect_err("reject should fail closed");
         assert_eq!(
             err.to_string(),
             "pane %12 is in tmux session 'claude' but project session is '0'; switch to the configured session or pass --force"
+        );
+        // #x9ds: the reject marker is recorded to ops.log (not just stderr) so the
+        // #4wxr behavior is provable from the ops.log gate-verify scan.
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            log.contains("[claim] cross-session-reject pane_id=%12 pane_session=claude configured=0"),
+            "reject marker should reach ops.log: {log}"
         );
     }
 

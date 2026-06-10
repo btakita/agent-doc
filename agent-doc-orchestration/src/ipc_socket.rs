@@ -223,6 +223,15 @@ pub fn early_ack_line() -> &'static str {
     r#"{"type":"ack","status":"pending"}"#
 }
 
+/// `#x9ds`: the ops.log marker recorded when an early `pending` ack is emitted
+/// before the blocking apply. Distinct from the human-readable stderr line — it
+/// carries the exact `early_ack_pending` predicate token so the `#saev` gate is
+/// provable via the ops.log gate-verify scan (the stderr line's hyphenated
+/// "early-ack pending" text does not contain the token).
+pub fn early_ack_ops_marker() -> &'static str {
+    "[ipc-socket] early_ack_pending emitted before apply"
+}
+
 /// Classification of a plugin-sent IPC ack line.
 ///
 /// The plugin (JetBrains / VS Code) sends a JSON ack after applying a patch.
@@ -442,6 +451,13 @@ where
                                 // `pending` ack actually went out before the blocking
                                 // apply. Emit a positive marker on the success path.
                                 eprintln!("[ipc-socket] early-ack pending emitted before apply");
+                                // #x9ds: the stderr line above is invisible to the
+                                // ops.log gate-verify scan, and its hyphenated text does
+                                // not contain the `early_ack_pending` predicate token.
+                                // Also record the marker to ops.log (derived from the
+                                // listener's project root) so the #saev gate is provable
+                                // from ops.log once EARLY_ACK_ENABLED is driven live.
+                                crate::ops_log::log_op(project_root, early_ack_ops_marker());
                             }
                         }
                         if let Some(response) = handler(trimmed) {
@@ -540,6 +556,20 @@ mod tests {
         );
         // The canonical early-ack line classifies as Pending.
         assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
+    }
+
+    #[test]
+    fn early_ack_ops_marker_carries_predicate_token() {
+        // #x9ds: the ops.log marker must contain the exact `early_ack_pending`
+        // token the #saev gate-verify predicate scans for — the human stderr
+        // line ("early-ack pending", hyphenated) does NOT, which is why the
+        // gate was previously unprovable from ops.log.
+        let marker = early_ack_ops_marker();
+        assert!(
+            marker.contains("early_ack_pending"),
+            "ops marker must carry the predicate token: {marker}"
+        );
+        assert!(!early_ack_line().contains("early_ack_pending"));
     }
 
     #[test]

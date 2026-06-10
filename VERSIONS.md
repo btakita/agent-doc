@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`#lvbremain` verification markers now reach `ops.log` (`#x9ds`).** Two of the
+  marker emissions the `#lvbremain` ops.log scan expects were stderr-only and so
+  always scanned 0. The cross-session-reject reject path (`claim.rs`) now also
+  records its `[claim] cross-session-reject pane_id=.. pane_session=.. configured=..`
+  marker to `ops.log` (it previously went only to stderr as the plugin-branch
+  signal). The early-ack success path (`ipc_socket.rs`) now records a marker
+  carrying the exact `early_ack_pending` predicate token to `ops.log` (the
+  human stderr line "early-ack pending" is hyphenated and never contained the
+  token); new testable `ipc_socket::early_ack_ops_marker`. The third marker,
+  `run_clear_coalesce` (`#9adk`), is **not** a binary behavior — it is the
+  JetBrains-plugin `InvocationCoalescer` (Run/Clear dedup) whose marker goes to
+  `idea.log` and is operator-verified via the `#lvbatch` live batch, so there is
+  no ops.log emission site to wire; the ops.log-scan expectation for it was a
+  category error and is dropped. Tests `enforce_cross_session_claim_errors_on_reject`
+  (asserts the marker reaches ops.log) and `early_ack_ops_marker_carries_predicate_token`.
 - **Ops-proof auto-completion no longer reaps a same-cycle add (`#5b28` /
   `#opsproof-samecycle-add`).** A gated `agent:review` item (or `agent:backlog`
   item) added in the same `write`/`finalize` invocation via `--review-add` /

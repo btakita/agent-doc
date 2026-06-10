@@ -37,7 +37,32 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:539827c3 -->
+
+### Re: pcache-prefix-drift
+
+Implemented and pushed.
+
+Changes:
+- Added `prompt_cache_plan.analytics.prefix_drift` to `session-cost`, comparing adjacent prompt-cache calls by `stable_prefix_fingerprint`, cache key, explicit breakpoints, routing affinity, and provider.
+- Drift entries now report trigger/severity, first changed field, all changed fields, before/after cached-input ratios, and cache-creation ratio.
+- Cache-ratio-drop and cache-creation-spike diagnostics now point at the first changed prompt-cache field when attribution metadata changed.
+- Added compact/human output lines via `prompt-cache-prefix-drift`, and JSON keeps the structured field-change payload.
+- Updated the session-cost spec and `VERSIONS.md`.
+
+Verification:
+- `cargo test -p tsift-agent-doc prompt_cache_prefix_drift_points_regressions_at_first_changed_field`
+- `cargo test -p tsift-cli session_cost_reports_prompt_cache_invalidation_diagnostics`
+- `make check`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.67`
+- GitHub Actions CI in `btakita/tsift` for `bcc34fb`: success
+
+Commits pushed:
+- `btakita/tsift` `bcc34fb` (`feat: report prompt cache prefix drift`)
+- `btakita/agent-loop` `7424a5d92` (`chore: update tsift submodule`)
+
+Note: `agent-loop` has no workflow named `CI` for `gh run list --workflow CI`; the required tsift CI check passed.
+<!-- agent:boundary:3f3c66db -->
 <!-- /agent:exchange -->
 ###
 <!--

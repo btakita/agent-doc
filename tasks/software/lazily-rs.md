@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -126,7 +126,26 @@ Implemented the shared conformance test suite infrastructure:
 - Add IPC + conformance test runner to `lazily-py`
 - Initialize `lazily-zig` and add conformance test runner
 - Wire each binding's CI to run conformance against `lazily-spec/conformance/`
-<!-- agent:boundary:8310a13f -->
+
+### Re: org naming — lazily taken — opus
+
+> **Queue prompt:**
+>
+> lazily is not available. lazily is more than just rust. It's first implementation was python. lazily-hub seems the best so far. Is there a better option?
+
+
+Since `lazily` is taken and the project is multi-language (Python-first), the name should be language-agnostic. `lazily-hub` is strong. Other viable options to consider:
+
+- **`lazily-hub`** — clear, conveys ecosystem/hub purpose. Best of the remaining options.
+- **`lazily-dev`** — common GitHub pattern for dev-tooling orgs (concise, 10 chars).
+- **`lazily-signal`** — ties to the reactive signals concept, but longer.
+
+If `lazily-hub` is available, go with it. `lazily-dev` is the only shorter alternative worth considering — everything else either adds noise or is too niche.
+<!-- agent:boundary:c5d06868 -->
+- **`lazily-signal`** — ties to the reactive signals concept, but longer.
+- **`lazily-dev`** — common GitHub pattern for dev-tooling orgs (concise, 10 chars).
+- **`lazily-hub`** — clear, conveys ecosystem/hub purpose. Best of the remaining options.
+<!-- agent:boundary:ddd4177b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +154,6 @@ Implemented the shared conformance test suite infrastructure:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- lazily is not available. lazily is more than just rust. It's first implementation was python. lazily-hub seems the best so far. Is there a better option?
 <!-- /agent:queue -->
 
 ## Backlog

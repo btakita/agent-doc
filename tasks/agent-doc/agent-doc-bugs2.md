@@ -35,7 +35,24 @@ complete
 Compacted content:
 - Archived 1 response topic(s): do [#reviewrm]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4ba89a28 -->
+
+### Re: go-mode queue (#pcpc5live, #lvbremain, #s760wire, #optverify) — halting this drain — opus-4-8
+
+Not draining these in this session. This is a degraded, post-compaction drain (status `complete`, exchange archived, self-feeding `queue`-attr loop), and all four queued items are — per the document itself — fresh-session or operator-driven work that an agent cannot complete here:
+
+- **`#pcpc5live`** (08b cutover step 3, delete out-of-process supervisor + direct-disk writers / demote WatchService): **hard-blocked from any normal agent-doc cycle by spec 08b** — "Behavior changes here must never be landed in the same cycle that persists a live session response through the write path being changed." This cycle persists *this* response through that exact write path, so landing the cutover here would violate the spec and risk the live JB/Codex write path. Already tracked done as `#pcpc5`/`#21w2`/`#pcpc5cut` (BLOCKED tracking entries, not completed cutover). Needs a fresh non-saturated session with live-tmux + CLI + SimWorld + live IntelliJ proof.
+- **`#lvbremain`**: operator-driven live-verification batch (operator drives a mid-turn IntelliJ/Codex pane, agent checks logs). Its own text says the remaining markers are "NOT yet proven in ops.log." Tracked as `#lvbatch`/`#xdotool-lvbatch`. Run from a fresh session via `scripts/xdotool-live-verify.sh`.
+- **`#s760wire`**: remaining deliverable is the transcript-token ctx% source + live `/clear` verification; explicitly "run as a fresh focused session, NOT this degraded drain." Groundwork shipped as `#s760`.
+- **`#optverify`**: a real, distinct feature (opportunistic gated-review verification from ops.log markers) — *not* the same as the already-shipped per-id loss detector `#bkx9wire`/`#bkx9perid` (the semantic match is the weakest signal). Plan-worthy; run in a fresh session.
+
+None are genuinely complete, so I won't fabricate `--done`. The semantic-completion warnings preflight surfaced match *tracking* entries in `tasks/agent-doc-bugs2.done.md`, not finished work — so they stay open backlog.
+
+**Skipping the auto-loop** — this needs explicit operator attention, not unattended churn that keeps re-feeding fresh-session work into a saturated drain.
+
+**Recommended next step:** open a FRESH focused session for the supervisor-in-process migration (the stated priority) starting at `#pcpc1` per `tasks/agent-doc/plan-supervisor-in-process.md`; `#pcpc5live` is its final cutover gate.
+
+**Heads-up (stale install):** preflight flagged `~/.cargo/bin` cdylib predating source commit `388ac300` — live tmux/JetBrains sessions may run pre-`388ac300` code at an unchanged version. Run `make install` in `src/agent-doc` when convenient to refresh the binary + cdylib.
+<!-- agent:boundary:61f45616 -->
 <!-- /agent:exchange -->
 
 ## Queue

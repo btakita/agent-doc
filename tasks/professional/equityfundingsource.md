@@ -36,7 +36,18 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 4 response topic(s): "Open Investor Profile" → full investor profile in the 2nd-level dialog; Nest Investor Pipeline under Deal Pipeline (collapsible nav groups); Website rename + tab-menu pipelines + drop nav submenus; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:62f7e562 -->
+
+### Re: staged lender-pipeline rename directive — opus-4-8
+
+Got the new queued directive — swapping the prior "Move /portal-admin/messages" item for the **lender-pipeline rename**:
+
+- Rename route `/portal-admin/investor-pipeline` → `/portal-admin/lender-pipeline`
+- Rename labels "Investor Pipeline" → "Lender Pipeline", "Investor Deals" → "Lender Deals"
+- Drop "Lender Management" from main nav; add a "Lenders" tab (`/portal-admin/lenders`) inside lender-pipeline
+- Preset `#spec-test-commit-push` (update spec + tests, commit + push), then Deploy
+
+The queue is currently **inactive** (`queue: stop` in frontmatter; preflight flags `inactive_queue_residue`), so this is staged but not yet authorized to run. Activate it (flip `queue:` to a go state / add a `go` token) and I'll execute the rename, spec/test updates, commit+push, and deploy.
+<!-- agent:boundary:44a8b548 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +55,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- Move /portal-admin/messages to /portal-admin/portal-messages. Create /portal-admin/messages which contains "Portal Messages" (default) and "Contact Messages". The admin main nav has the new "Messages" "/portal-messages/messages". Remove "Contact Messages" from the admin main nav. Deploy 
+- Rename /portal-admin/investor-pipeline to /portal-admin/lender-pipeline. Rename "Investor Pipeline" to "Lender Pipeline". Rename "Investor Deals" to "Lender Deals". Remove "Lender Management" from main nav and add "Lenders" (/portal-admin/lenders) tab in /portal-admin/lender-pipeline. Deploy
 <!-- /agent:queue -->
 
 ## Backlog

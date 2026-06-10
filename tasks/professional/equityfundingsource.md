@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -225,7 +225,7 @@ Enabled, per `#spec-test-commit-push`. And a correction to what I said earlier: 
 2. **Sender is `info@briantakita.me`** until `info@equityfundingsource.com` is verified in Cloudflare Email (still tracked as `#f4rq`). Functionally fine; just not EFS-branded yet.
 
 Queue drained — that was the last item (`#eyp0` + `#emrt` both done; `#b0wq` done earlier).
-<!-- agent:boundary:4219ad87 -->
+<!-- agent:boundary:2d756ab7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -233,6 +233,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#emrt]
 <!-- /agent:queue -->
 
 ## Backlog

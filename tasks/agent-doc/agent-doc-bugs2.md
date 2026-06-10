@@ -224,13 +224,43 @@ Operator-drive item: I check logs, you drive the live actions. Re-scanned `.agen
 2. **Code `#s760c` in a fresh session:** wire `transcript_context_pct` into the `route.rs` dispatch gate (pure code, no live gate). Plan: `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`. Worth starting clean rather than inside this restart-heavy, accretion-`warn` session.
 
 Also cleaned up a stale orphan capture (`cycle-1781098034683`) whose body was already committed at HEAD — it was deadlock-fuel for future commits. Moved aside, not lost.
-<!-- agent:boundary:49be45b6 -->
+
+### Re: Drive #lvbremain — drove #4wxr live (works); found the verification harness is broken — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#lvbremain]
+
+
+> **Queue prompt:**
+>
+> [#lvbremain]
+
+
+I drove the one action that's CLI-drivable, then traced why every cycle finds 0. The answer is not "operator hasn't driven" — **3 of the 4 gate markers are never written to ops.log by production code**, so the scan can never go non-zero.
+
+**Drove #4wxr live — behavior is correct.** Ran `agent-doc claim … --pane %43` (a session-5 pane against configured session 9). It hit `CrossSessionDecision::Reject`, printed `[claim] cross-session-reject pane_id=%43 pane_session=5 configured=9`, and bailed **before** any registration — so the cross-session claim was correctly rejected with no ownership change. The behavior the marker is meant to prove works.
+
+**But the marker goes to stderr, not ops.log** (`claim.rs:182` is an `eprintln!` — a deliberate plugin-branch signal). I confirmed live: driving it added **0 lines** to ops.log. So the `#optverify` gate scan literally cannot see it.
+
+**Full marker audit (source-traced):**
+- **#4wxr `cross-session-reject`** — stderr only (`claim.rs:182`). Driven, works, invisible to ops.log.
+- **#9adk `run_clear_coalesce`** — **zero emission sites anywhere in the codebase.** Phantom marker; was never wired. No amount of run-then-clear will ever emit it.
+- **#saev `early_ack_pending`** — `ipc_socket.rs:444` emits `[ipc-socket] early-ack pending emitted before apply` to **stderr**, but the gate predicate expects the token `early_ack_pending` in **ops.log**. Wrong stream *and* wrong string.
+- **`visible_write_live_buffer_matches_disk`** — the only one that actually `log_op`s to ops.log (`write.rs:6675`); needs a live editor write where the buffer already equals disk.
+
+Also: **`scripts/xdotool-live-verify.sh` — the recipe script the item has pointed you at for 7 cycles — does not exist.**
+
+**So #lvbremain was never operator-blocked the way it claimed; it's harness-blocked.** I captured the fix as **`#lvbverify`** (top of backlog, with exact file:line and the concrete fix: emit `log_op` alongside the stderr markers using the predicate tokens, wire `run_clear_coalesce`, align the `#saev` token). I reduced `#lvbremain` to its true residual: `#4wxr` verified, the rest blocked on `#lvbverify` + live-editor driving.
+
+**Not auto-looping.** `#lvbverify` is a multi-file Rust change needing `make check` + CI, and this session just took post-commit worktree corruption last cycle. It should be done clean, not inside this drain.
+<!-- agent:boundary:73f03958 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#lvbremain]
+- ~~do [#lvbremain]~~
 - do [#s760wire]
 <!-- /agent:queue -->
 ###
@@ -261,7 +291,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#lvbremain] OPERATOR-DRIVE live verification (agent checks logs; operator drives live actions). Log status 2026-06-10: install REBUILT to eaca894d+ (binary+cdylib epoch 1781068348/1781068256, previously stale predating the #optverify ship) — stale-install blocker CLEARED. All 4 markers still ZERO real ops.log emissions (every apparent hit is a queue_diff_active_prompt_differs prompt-echo), so none of the live actions driven yet. DRIVE from a fresh session (scripts/xdotool-live-verify.sh): (1) #4wxr cross-session-reject — claim this doc from a 2nd tmux pane (claim.rs/ClaimAction.kt); (2) #9adk run_clear_coalesce — drive a run then a clear (route.rs/sync.rs); (3) visible_write_live_buffer_matches_disk — a live editor write where the buffer already matches disk (write.rs); (4) #saev early-ack — a live JB-plugin SOCKET-IPC session (not the file-IPC fallback), expect early-ack pending emitted before apply with no false-success / false ack-timeout. Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
+- [ ] [#x9ds] agent-doc-bug (root cause of #lvbremain always-0): the ops.log gate-verify harness is broken — 3 of 4 #lvbremain markers are NEVER written to ops.log, so the scan is always 0 regardless of operator driving. (1) cross-session-reject (#4wxr): claim.rs:182 eprintln!s "[claim] cross-session-reject ..." to STDERR only (plugin branch signal), never ops.log — DRIVEN LIVE 2026-06-10 via claim --pane %43 (session 5 vs configured 9): behavior CORRECT (reject before register, no ownership change). (2) run_clear_coalesce (#9adk): ZERO emission sites in the whole codebase — phantom marker, never wired. (3) early_ack_pending (#saev): ipc_socket.rs:444 eprintln!s "[ipc-socket] early-ack pending emitted before apply" to STDERR; gate predicate expects ops.log token early_ack_pending — wrong stream AND wrong string. Only visible_write_live_buffer_matches_disk (write.rs:6675) actually log_ops to ops.log (and needs a live editor buffer==disk write). FIX: add ops_log::log_op alongside the stderr eprintln! for cross-session-reject + early-ack using the exact predicate tokens; wire run_clear_coalesce in route.rs/sync.rs (or repoint the predicate to an existing coalesce marker); align the #saev predicate token. Multi-file + needs make check + CI = do in a CLEAN session. NOTE: scripts/xdotool-live-verify.sh referenced by #lvbremain DOES NOT EXIST.
+- [ ] [#lvbremain] OPERATOR-DRIVE residual. #4wxr cross-session-reject DRIVEN + VERIFIED live 2026-06-10 (behavior correct; marker is stderr-only so ops.log scan cannot see it). Remaining markers are NOT verifiable via ops.log as currently coded — see #lvbverify (harness fix): #9adk run_clear_coalesce has no emission site; #saev early_ack_pending is stderr-only with a mismatched token; only visible_write_live_buffer_matches_disk hits ops.log. visible_write + #saev also need a live editor / JB SOCKET-IPC session driven by operator. Blocked on #lvbverify, not on operator driving. Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
 - [ ] [#s760wire] s760c+s760d RESIDUAL. SHIPPED 2026-06-10 (submodule 2d2d0ce3, context_pct.rs): #s760a transcript locator + Claude-JSONL token reader (Codex/OpenCode unsupported -> None) + #s760b model->context-window table (Claude 200k; unknown -> None+warn) + context_pct/transcript_context_pct, fail-safe to None (never clear), 12 unit tests. REMAINING: #s760c wire transcript_context_pct into the route.rs dispatch gate (if queue_context_reset_opted_in AND pct >= clear_threshold_for_doc -> tracked /clear; emit [s760] clear-decision optIn/threshold/pct/clear to ops.log) — pure code, no live gate, do in a fresh session; #s760d operator live-verify the destructive /clear on a throwaway opted-in doc. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
 <!-- /agent:backlog -->
 

@@ -101,7 +101,31 @@ Did the agent-actionable half of #lvbremain — checked the logs — and execute
 **Bonus signal:** `write_authority gate=authority action=routed` *does* have real live emissions in ops.log — so the write-authority routing is exercised live at the `authority` gate, and after my pcpc5d the direct-run path now routes through it too. That's the closest live proof we have that the in-process write-queue cutover holds.
 
 **Halting the auto-loop** — the remaining queue (`#lvbremain` drive, `#s760wire` fresh session, `#optverify` feature) is operator-drive / fresh-session work, not unattended-drain work.
-<!-- agent:boundary:e38688dc -->
+
+### Re: do #s760wire — s760a/b shipped (transcript-token ctx% source); s760c/d remain — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#s760wire]
+
+
+Forced the actionable code core as you chose. Shipped the pure source half; the route wiring and destructive-`/clear` live-verify stay for a fresh session.
+
+**Shipped (s760a + s760b — `context_pct.rs`, submodule `2d2d0ce3`):**
+- **s760a** — harness-aware transcript locator + token reader. Claude Code JSONL parser reads the latest entry's cumulative `usage` (input + output + cache_read + cache_creation); `claude_transcript_path` locates `~/.claude/projects/<project-hash>/<session-id>.jsonl` (verified the `/`+`.`→`-` encoding against the real dir). Codex/OpenCode return `None` (unsupported until their stores are confirmed live).
+- **s760b** — model→context-window table (Claude family 200k; unknown → `None` + warn) + `context_pct` (clamped 0–100) + `transcript_context_pct` end-to-end.
+- **Fail-safe by construction:** unknown model / missing transcript / unsupported harness → `None`, and the caller never clears on `None` (per the plan's destructive-`/clear` safety invariants). 12 unit tests over committed fixtures.
+
+**Verification:** `make check` green — **2621 orchestration lib tests pass** (+12), 0 failed. Binaries refreshed (`~/.cargo/bin`, `target/release` `.bin` symlink, cdylib). Submodule `2d2d0ce3` pushed; superproject pointer `800a8bebf`.
+
+**Remaining (narrowed into `#s760wire`):**
+- **s760c** — wire `transcript_context_pct` into the `route.rs` dispatch gate (opt-in + `pct >= clear_threshold` → tracked `/clear`; emit `[s760] clear-decision …`). Pure code, no live gate — doable in a fresh session.
+- **s760d** — operator live-verify the destructive `/clear` at the threshold boundary.
+
+Kept it as an **actionable backlog item, not a gate** (per "no more gates"). The dangerous part (`/clear`) is still gated only by the existing default-off `agent_doc_queue_context_reset` opt-in, so nothing destructive ships from this.
+
+**Halting the auto-loop** — the last queue item `#optverify` is a separate feature for a fresh session, and `#s760c/d` need a fresh/live session too. This degraded drain (every finalize is hitting the exit-75 file-IPC fallback) shouldn't keep pulling feature work.
+<!-- agent:boundary:a51b5fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -109,7 +133,7 @@ Did the agent-actionable half of #lvbremain — checked the logs — and execute
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~:round_pushpin: do [#pcpc5live]~~
 - ~~:round_pushpin: do [#lvbremain]~~
-- :round_pushpin: do [#s760wire]
+- ~~:round_pushpin: do [#s760wire]~~
 - :pushpin: [#optverify]
 - ~~do [#reviewrm]~~
 <!-- /agent:queue -->
@@ -143,7 +167,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
 - [ ] [#lvbremain] OPERATOR-DRIVE live verification (agent checks logs; absorbs ex-review #saevon early-ack). EARLY_ACK already flipped: EARLY_ACK_ENABLED=true in ipc_socket.rs, live in shipped 0.34.0 — code-side done, only live confirmation remains. Log status 2026-06-09: all 4 markers have ZERO real ops.log emissions, so none of these live actions have been driven yet. DRIVE from a fresh session (scripts/xdotool-live-verify.sh): (1) #4wxr cross-session-reject — claim this doc from a 2nd tmux pane, expect cross-session-reject marker (claim.rs/ClaimAction.kt); (2) #9adk run/clear coalesce — drive a run then a clear, expect run_clear_coalesce (route.rs/sync.rs); (3) visible_write_live_buffer_matches_disk — a live editor write where the buffer already matches disk (write.rs); (4) #saev early-ack — drive a live JB-plugin SOCKET-IPC session (not the file-IPC fallback this drain keeps hitting), expect early-ack pending emitted before apply with no false-success / false ack-timeout. No JB install needed (plugin 0.2.158 unchanged, binary+cdylib current). Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
-- [ ] [#s760wire] Pre-emptive /clear gated on REAL transcript-token context-%. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md (phases #s760a locator+token reader, #s760b model→context-window table + pct, #s760c route-dispatch gate + '[s760] clear-decision' diagnostic + tracked /clear send, #s760d operator live-verify). Shipped infra: session_accretion::{queue_context_reset_opted_in (default OFF), clear_threshold_for_doc, queue_context_reset_reason*}. Remaining = the transcript-token ctx% SOURCE (no JB install). Gated: destructive /clear must be live-verified; harness-aware (Claude JSONL usage / Codex / OpenCode) + model context-window table is plan-worthy; run as a fresh focused session, NOT this degraded drain.
+- [ ] [#s760wire] s760c+s760d RESIDUAL. SHIPPED 2026-06-10 (submodule 2d2d0ce3, context_pct.rs): #s760a transcript locator + Claude-JSONL token reader (Codex/OpenCode unsupported -> None) + #s760b model->context-window table (Claude 200k; unknown -> None+warn) + context_pct/transcript_context_pct, fail-safe to None (never clear), 12 unit tests. REMAINING: #s760c wire transcript_context_pct into the route.rs dispatch gate (if queue_context_reset_opted_in AND pct >= clear_threshold_for_doc -> tracked /clear; emit [s760] clear-decision optIn/threshold/pct/clear to ops.log) — pure code, no live gate, do in a fresh session; #s760d operator live-verify the destructive /clear on a throwaway opted-in doc. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
 <!-- /agent:backlog -->
 
 ## Review

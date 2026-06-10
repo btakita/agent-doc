@@ -75,13 +75,30 @@ Port-worthy follow-ups added to backlog in priority order: `#cbmsnap`, `#cbmquer
 Important caution: codebase-memory-mcp's own issue history includes WAL/orphan-process stale-index failure modes on Windows. tsift already has stronger WAL-aware snapshot fallback, `graph-db doctor`, freshness, schema-version, compaction, and semantic-readiness checks, and my local `tsift graph-db --path . --json status` currently reports a stale schema plus summary-cache readiness block. Any shareable snapshot work should import through those checks and fail closed when projection metadata or semantic readiness is stale.
 
 Changed paths: session document/backlog only. Commands/proof: `agent_doc_preflight`, `agent_doc_plan`, web/source review of codebase-memory-mcp, `tsift --envelope search`, local spec reads, `git status`, and `tsift graph-db --path . --json status`. Verification: no build/test run was needed because this cycle did not change source, tests, build logic, or instruction surfaces. Confidence: high for the evaluation and backlog triage; medium on upstream performance/security claims because I verified project documentation and issue history, not an independent benchmark run. Escalation: none.
-<!-- agent:boundary:847aeda7 -->
+
+### Re: graph-db snapshot artifact prototype — gpt-5
+
+> **Queue prompt:**
+>
+> [#cbmsnap]
+
+
+Completed `#cbmsnap`.
+
+I implemented a shareable compressed graph snapshot prototype in `src/tsift`: `tsift graph-db snapshot-export <output.db.gz> [--force]` and `tsift graph-db snapshot-import <artifact.db.gz> [--replace]`. Export validates the live SQLite graph through existing doctor/freshness checks, refuses a recovered WAL/rollback snapshot-read path, materializes a clean SQLite copy with `VACUUM INTO`, gzip-compresses that copy, and reports the preserved `projection_version`, `content_hash`, `source_watermark`, counts, recovery, warnings, and semantic readiness. Import decompresses to a staged DB, validates through doctor/freshness before install, requires `--replace` before overwriting an existing `.tsift/graph.db`, validates again after install, and rolls back on post-install failure.
+
+Changed paths: `src/tsift/packages/tsift-cli/src/cli.rs`, `src/tsift/packages/tsift-cli/src/commands/infra.rs`, `src/tsift/packages/tsift-cli/src/lib.rs`, `src/tsift/specs/graph.md`, plus the parent `src/tsift` gitlink. Added CLI parser coverage, export/import metadata round-trip coverage, and WAL-lock fail-closed coverage. Spec/schema docs now describe the snapshot artifact contract.
+
+Commits: `src/tsift` commit `342baff` (`feat: add graph-db snapshot artifacts`) and parent gitlink commit `634509a79` (`tsift: add graph-db snapshot artifacts`). Existing unrelated dirty state remains in both the submodule and parent repo; I staged and committed only the snapshot-related files and gitlink.
+
+Verification: `cargo test -p tsift-cli graph_db_snapshot -- --nocapture` passed; `make check` passed; latest GitHub Actions CI check was already green (`CI`, run `27287546999`, completed success at `2026-06-10T15:37:26Z`). Confidence: high. Escalation: none.
+<!-- agent:boundary:b5bf9e98 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#cbmsnap]
+- ~~[#cbmsnap]~~
 - [#cbmquery]
 - [#cbmsearch]
 - [#cbmtrust]
@@ -93,7 +110,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cbmsnap] [recommended] Prototype a shareable compressed tsift graph snapshot artifact that imports through graph-db doctor/freshness checks, preserves projection_version/content_hash/source_watermark, and never bypasses WAL/lock/semantic-readiness diagnostics.
 - [ ] [#cbmquery] [recommended] Spike a constrained read-only graph query DSL for tsift graph-db over the stable node/edge/property schema; compare Cypher-like expressiveness against existing node/kind/neighborhood/path/map commands before committing syntax.
 - [ ] [#cbmsearch] [recommended] Add a graph-augmented exact/search preview mode that expands grep hits to containing symbol/source_handle windows, ranks definitions and high-signal symbols before tests, and keeps scale_guard/retrieval handles intact.
 - [ ] [#cbmtrust] [recommended] Compare codebase-memory-mcp's single-binary install/trust UX against tsift release/install flow, including checksums, attestations/scans, and idempotent agent config upserts, without changing tsift's Rust architecture.

@@ -135,7 +135,26 @@ This was inconsistent with the rest of the queue machinery: `cycle_state::leads_
 **Scope note.** This is the *binary* half: the head now stays pinned and runnable without corrupting state. The *skill* half — not auto-looping an operator-drive head that can only be log-checked — stays an operator/skill behavior (I am stopping here, not re-serving `#ktw8`).
 
 **Not pushed** — committed locally only (manual-testing gate). The fix is live in your installed binary; drive a `:round_pushpin: [#id]` verify head through a finalize and confirm ops.log shows no `queue consumed` / dropped-head line for it.
-<!-- agent:boundary:245906d5 -->
+
+### Re: do [#8j86] + do [#7r2s] — stuck-capture false-alarm & manual-queue auto-pin — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#8j86]
+>
+> :pushpin: do [#7r2s]
+
+Both fixed, committed to the agent-doc submodule (`bf26aa99`), built `--release` + `cargo install`ed. `make check` green (incl. the FlowCore hot-path budget gate).
+
+**`#8j86` — `stuck_captured_cycle` false-alarm.** The archive/compaction half was already handled (`response_materialized_in_head_compact_archive`, commit `7cc2ead5`). But I hit a *different* sub-case live at the start of this session: capture `cycle-1781112407668` whose body WAS in HEAD (no archive involved) still warned `stuck_captured_cycle`. Root cause: the captured body carries the ephemeral `<!-- no-pending-done-guard -->` marker, which `git::strip_guard_markers` removes at commit, but the materialization probe kept it — so `response_already_applied` never matched the committed (marker-stripped) blob. Fix: `response_materialization_probe_from_response` now strips those guard markers before matching, mirroring commit. So the probe matches whether the response is in HEAD or a compact archive.
+
+**`#7r2s` — auto-pushpin manual queue adds.** `annotate_operator_priority_reorders` only pinned an *existing* prompt that moved earlier; a brand-new line you typed was ignored, so the backlog-priority sort could sink it under `queue`-attr backlog items. New `queue::annotate_manual_queue_additions` (wired into preflight before the sort) auto-prefixes `:pushpin:` to a prompt that is present in the live queue but absent from the snapshot **and** is not one the binary just appended from the backlog this cycle — so the line you placed stays position-locked at its slot. (When you re-add a line with no pin, it now keeps its priority.)
+
+**Coverage.** `stuck_captured_cycle_ignores_committed_cycle_when_only_guard_marker_stripped` (faithful `<!-- no-pending-done-guard -->` repro), `annotate_manual_queue_additions_pins_operator_added_unpinned_line`, and `..._skips_backlog_synced_and_pinned`. FlowCore `guard_` budget for write.rs bumped 87→89 with an audit note (reuses the existing `git::strip_guard_markers` helper — no new flow token).
+
+**Not pushed** — committed locally only (manual-testing gate). The fixes are live in your installed binary.
+
+Queue status: `#ktw8` / `#lvbremain` ahead are operator-drive (your live drive, I check ops.log). `#dav9`/`#dsqa`/`#q6js` (the 08b supervisor cut-over) carry your recorded fresh-focused-session constraint, so I'm not draining those here.
 <!-- /agent:exchange -->
 
 ## Queue
@@ -146,11 +165,11 @@ This was inconsistent with the rest of the queue machinery: `cycle_state::leads_
 - :round_pushpin: [#ktw8]
 - :round_pushpin: [#lvbremain]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
-- do [#8j86]
-- do [#dav9]
-- do [#dsqa]
-- do [#q6js]
-- do [#7r2s]
+- :round_pushpin: do [#dav9]
+- :round_pushpin: do [#dsqa]
+- :round_pushpin: do [#q6js]
+- ~~do [#8j86]~~
+- ~~do [#7r2s]~~
 <!-- /agent:queue -->
 ###
 <!--

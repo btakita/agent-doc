@@ -3252,17 +3252,29 @@ fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
 }
 
 /// True when this cycle's captured response heading targets EXACTLY the active
-/// queue head's id and that head is a *synthetic/preset* prompt rather than a
-/// bare `do [#id]` directive (#queue-head-consume-on-topic-id-regression).
+/// queue head's id and that head is a *synthetic/preset* prompt rather than an
+/// id-backed directive (#queue-head-consume-on-topic-id-regression / #zwn5).
 ///
 /// Synthetic queue prompts — a preset expansion or a natural-language prompt
 /// carrying a trailing `#preset` id — are completed by the response itself, so a
 /// `### Re: #<id>` heading that resolves to exactly that id is a genuine
-/// completion signal. Bare `do [#id]` directives still require an explicit
-/// closeout flag (#queue-strike-on-halt) because a halt/refusal response names
+/// completion signal. Id-backed directives still require an explicit closeout
+/// flag (#queue-strike-on-halt) because a halt/refusal/log-check response names
 /// the head to explain why it is *not* being done. A heading topic that merely
 /// contains the id with trailing modifiers — `#id halt`, `#id deferred` — never
 /// counts, for either head shape.
+///
+/// Two head shapes are id-backed directives, never heading-consumable:
+///  1. A bare `do [#id]` / `do #id` directive (`queue_head_is_bare_do_directive`).
+///  2. An operator-pinned bare id head (`[#id]` / `#id`, with or without a
+///     priority pin) that resolves to exactly its own id AND whose id names a
+///     tracked `agent:backlog` / `agent:review` item (#zwn5). Such a head is a
+///     directive referencing a tracked item — e.g. an operator-drive live-verify
+///     item the agent answers with a log-check but can never close itself — so a
+///     `### Re: #id` heading must leave it pinned for an explicit
+///     `--done`/`--pending-gate`/`--pending-edit` close. A registered prompt
+///     preset id (e.g. `#spec-...`) is NOT a tracked item, so it stays synthetic
+///     and still consumes on a matching heading.
 fn response_targets_synthetic_queue_head_id(file: &Path, response: &str) -> Result<bool> {
     let content =
         std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
@@ -3275,10 +3287,40 @@ fn response_targets_synthetic_queue_head_id(file: &Path, response: &str) -> Resu
     let Some(head_id) = queue_prompt_done_id(&queue_head) else {
         return Ok(false);
     };
+    // #zwn5: an operator-pinned bare id head that resolves to exactly its own id
+    // and names a tracked backlog/review item is an id-backed directive, not a
+    // synthetic/preset prompt. Leave it pinned for an explicit closeout flag
+    // instead of striking it on a log-check/halt `### Re: #id` heading.
+    let normalized_head = normalize_queue_prompt_text(&queue_head);
+    if topic_resolves_to_exact_id(&normalized_head, &head_id)
+        && head_id_names_tracked_directive_item(&content, &head_id)
+    {
+        return Ok(false);
+    }
     Ok(response
         .lines()
         .filter_map(response_heading_topic)
         .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
+}
+
+/// True when `head_id` names an item tracked in `agent:backlog` or `agent:review`.
+/// These ids are id-backed directives requiring an explicit
+/// `--done`/`--pending-gate`/`--pending-edit` closeout — distinct from a
+/// registered prompt-preset id (e.g. `#spec-...`), which is not a tracked item and
+/// still completes on a `### Re: #id` heading match (#zwn5).
+fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> bool {
+    let Ok(comps) = crate::component::parse(content) else {
+        return false;
+    };
+    comps
+        .iter()
+        .filter(|c| c.name == "backlog" || c.name == "review" || c.name == "pending")
+        .any(|comp| {
+            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            items
+                .iter()
+                .any(|item| !item.id.is_empty() && item.id.eq_ignore_ascii_case(head_id))
+        })
 }
 
 /// A queue head that is just a `do [#id]` / `do #id` directive — the `do` verb
@@ -14992,6 +15034,55 @@ mod tests {
             )
             .unwrap(),
             "--done naming the head id must consume it"
+        );
+    }
+
+    #[test]
+    fn consume_decision_keeps_operator_pinned_tracked_backlog_head_without_explicit_flag() {
+        // #zwn5: an operator-pinned bare id head (`:round_pushpin: [#ktw8]`) whose
+        // id names a tracked agent:backlog item is an id-backed directive — e.g. an
+        // operator-drive live-verify item the agent answers with a log-check but can
+        // never close itself. A `### Re: #ktw8` log-check heading must NOT strike it
+        // (the old synthetic/preset heading-id path wrongly consumed it, then
+        // session-check dropped the struck head and locked the snapshot).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ktw8] operator live-verify: destructive /clear path, operator drives.\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- :round_pushpin: [#ktw8]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #ktw8 — destructive /clear live-verify (operator-drive log check)\n\nops.log shows 0 markers; stays open.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "an operator-pinned head naming a tracked backlog item must stay queued without an explicit completion flag"
+        );
+        // The same head WITH --pending-gate naming its id is a real completion signal.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #ktw8\n\nGated pending live verification.",
+                &[],
+                &["ktw8".to_string()],
+                &[],
+            )
+            .unwrap(),
+            "--pending-gate naming the head id must consume it"
         );
     }
 

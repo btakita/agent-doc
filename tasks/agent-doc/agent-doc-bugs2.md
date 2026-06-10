@@ -35,13 +35,30 @@ complete
 Compacted content:
 - Archived 7 response topic(s): do [#gng8]; monsterrodholders IPC-drift hiccups + completing the 08b cut-over; #ktw8; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d9d8f512 -->
+
+### Re: do [#dav9] — pcpc5e1 supervisor-host cutover gate (observe rung) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#dav9]
+
+
+> **Queue prompt:** :pushpin: [#dav9]
+
+Landed the first, safe rung of the 08b supervisor-host cutover (submodule `98e6ac0e`), built + installed, `make check` green. You chose to proceed in this session despite the fresh-session constraint, so I scoped to a **zero-live-risk** increment rather than the full multi-hour hosting swap (which the plan explicitly says not to attempt in a saturated session — and this one can't even commit without raw-git recovery).
+
+**What landed:** a new `AGENT_DOC_SUPERVISOR` rollback flag (`supervisor_authority.rs`), mirroring the `AGENT_DOC_WRITE_AUTHORITY` ladder — `SupervisorMode { Off (default = today's out-of-process host), Shadow, InProcess }`, `current_mode()` read fresh each call, fail-safe to `Off` on an unknown value. `start.rs` (`run_with_reap_policy`) reads it once at session start and logs `supervisor_host_gate mode=… hosting=out-of-process swap_pending=…` to ops.log + session-log for any non-off mode. Default `off` is silent — **zero change to shipped users**. Setting `in-process` early is accepted but still hosts out-of-process (logged `swap_pending=true`), so the flag can never strand a session before the swap lands. 3 unit tests.
+
+**What this rung deliberately does NOT do:** re-point `start.rs`'s child run loop at `supervisor::in_process::InProcessSupervisor`. That adapter (`#pcpc2`, already SimWorld-tested) is the lifecycle *core* (`tick_at`/restart/heartbeat/reattach over `SupervisedChild`), not a drop-in for start.rs's 7300-line inline PTY-output/stdin/prompt-detection foreground loop — so the hosting swap is genuine careful work. I re-scoped `#dav9` to that remaining authority rung.
+
+**Not pushed** (manual-testing gate). I'm stopping here, not auto-looping into `#dsqa` (plugin-side, needs a live IntelliJ install) or `#q6js` (operator-drive live proof) — both need surfaces this session can't drive. The honest recommendation stands: the *hosting swap itself is what fixes the commit-race you keep hitting*, and it deserves the fresh focused session your constraint calls for.
+<!-- agent:boundary:014bb468 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#dav9]
+- ~~:pushpin: [#dav9]~~
 - :pushpin: [#dsqa]
 - :pushpin: [#q6js]
 - [#ktw8]
@@ -76,7 +93,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#dav9] pcpc5e1 08b cut-over residual phase 1 (binary-side, SimWorld-provable): cut agent-doc start over to the in-process supervisor adapter. supervisor::in_process (pcpc2) is fully built + SimWorld-tested but start.rs has ZERO call sites — the out-of-process supervisor is still the live writer. Host the harness child PTY/stdin/restart/heartbeat as a controller-managed task behind a rollback flag (e.g. AGENT_DOC_SUPERVISOR=in-process, default off, same ladder pattern as AGENT_DOC_WRITE_AUTHORITY), preserve the Unix-socket IPC boundary for CLI/editor callers. SimWorld + CLI integration proof. Run in a FRESH focused session (operator-scoped constraint; plan Safety section). Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#dav9] pcpc5e1 08b supervisor-host cutover — REMAINING (hosting swap authority rung). Observe rung landed 98e6ac0e: AGENT_DOC_SUPERVISOR flag (supervisor_authority.rs; Off default=out-of-process / Shadow / InProcess) + start.rs logs supervisor_host_gate. Remaining: re-point start.rs run_with_reap_policy child run loop at supervisor::in_process::InProcessSupervisor when mode=in-process (drive the adapter tick loop for PTY/stdin/restart/heartbeat, keep start.rs PTY-output/prompt plumbing + the Unix-socket IPC boundary), behind the flag, with SimWorld + CLI integration proof. Run in a FRESH focused session. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#dsqa] pcpc5e2 08b cut-over residual phase 2 (plugin-side, depends on pcpc5e1): demote JB plugin WatchService to read-only buffer reporting (pcp7/vbk7) so the single controller-owned watcher is the only event source. Kotlin change: bump pluginVersion, build signed+unsigned zips, then tell the operator to install the JB plugin update. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#q6js] pcpc5e3 08b cut-over completion proof (operator drives, agent checks logs): restart live sessions with the in-process supervisor flag on, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows serialized writes and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Then flip the flag default and delete the out-of-process supervisor writer paths. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked on the gate-verify prose false-positive bug. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).

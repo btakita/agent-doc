@@ -123,6 +123,43 @@ impl InProcessSupervisor {
         })
     }
 
+    /// Adopt a pre-spawned child instead of spawning through a factory. Used by
+    /// the `start.rs` in-process host loop (`#pcpc5e1` authority rung): `start.rs`
+    /// spawns the `PtySession` and sets up its reader/writer/resize threads, then
+    /// hands the child here so the adapter owns exit reaping, heartbeat, and the
+    /// crash-policy decision for that generation. Respawn stays with the
+    /// `start.rs` outer restart loop (which rebuilds the I/O plumbing), so the
+    /// factory is wired to fail if the policy ever asks for an in-adapter restart
+    /// — a transient exit then surfaces as `RestartFailed { exit_code, .. }`,
+    /// carrying the real code back to the host loop without spawning a child the
+    /// host loop is not tracking.
+    pub fn adopt(child: Box<dyn SupervisedChild>) -> Self {
+        Self {
+            factory: Box::new(|_with_continue| {
+                anyhow::bail!(
+                    "in-process supervisor adopted a pre-spawned child; respawn is owned by the start.rs supervisor restart loop (#pcpc5e1)"
+                )
+            }),
+            child: Some(child),
+            policy: CrashPolicy::new(),
+            heartbeat: Arc::new(AtomicU64::new(0)),
+            generation: 1,
+            stopped: false,
+        }
+    }
+
+    /// Kill the live child WITHOUT halting the supervisor, so the next
+    /// [`tick_at`](Self::tick_at) observes the exit and reports its code. The
+    /// `start.rs` in-process host loop calls this to honor an external
+    /// stop/restart/route-complete request — the out-of-process host path kills
+    /// via `libc::kill` by PID; this is the in-process equivalent.
+    pub fn kill_child(&mut self) -> Result<()> {
+        match self.child.as_mut() {
+            Some(child) => child.kill(),
+            None => Ok(()),
+        }
+    }
+
     /// Shared handle to the heartbeat counter. The controller snapshots this and
     /// compares against a later read to detect heartbeat loss without reaching
     /// into the adapter.
@@ -270,49 +307,67 @@ pub fn heartbeat_lost(previous: u64, current: u64, min_advance: u64) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Production child: a thin wrapper over `supervisor::pty::PtySession`.
+// Production child: owns the `portable-pty` child handle taken from a
+// `PtySession` via `PtySession::take_child` (`#pcpc5e1` authority rung).
 //
-// The PTY's blocking `wait()` runs on a reaper thread that publishes the exit
-// code through a channel, so `try_exit_code` stays non-blocking and pty.rs needs
-// no changes. Wired into `agent-doc start` / the controller socket handler in
-// `#pcpc5`.
+// `portable_pty::Child` exposes a non-blocking `try_wait`, so exit reaping needs
+// neither a reaper thread nor a channel — `try_exit_code` calls `try_wait`
+// directly and caches the first exit. The owning `PtySession` keeps the master
+// (reader/writer/resize handles) so `start.rs` retains its PTY-output/prompt
+// plumbing while this adapter owns child lifecycle. Wired into `agent-doc start`
+// behind `AGENT_DOC_SUPERVISOR=in-process`.
 // ---------------------------------------------------------------------------
 
 use std::io::Write;
-use std::sync::mpsc::{Receiver, TryRecvError};
 
-/// Real PTY-backed [`SupervisedChild`].
+use portable_pty::Child;
+
+/// Real PTY-backed [`SupervisedChild`] owning the `portable-pty` child handle.
 pub struct PtySupervisedChild {
     pid: Option<u32>,
-    writer: Box<dyn Write + Send>,
-    exit_rx: Receiver<i32>,
+    /// Stdin writer, when the adapter owns stdin injection. `None` in
+    /// monitor-only hosting (the `start.rs` writer thread already owns the pty
+    /// writer for keyboard/IPC inject; the adapter then only reaps + kills).
+    writer: Option<Box<dyn Write + Send>>,
+    child: Box<dyn Child + Send + Sync>,
     exit_code: Option<i32>,
 }
 
 impl PtySupervisedChild {
-    /// Adopt an already-spawned `PtySession`, taking its stdin writer and
-    /// spawning the exit reaper. The caller keeps the `PtySession` for resize /
-    /// screen state; ownership of stdin and exit-waiting moves here.
-    pub fn adopt(session: &super::pty::PtySession) -> Result<Self> {
-        let pid = session.process_id();
-        let writer = session.take_writer()?;
-        let exit_rx = spawn_exit_reaper(session)?;
-        Ok(Self {
+    /// Adopt the child handle taken from a `PtySession`. `writer` is the pty
+    /// stdin writer when the adapter owns injection; pass `None` for
+    /// monitor-only hosting where `start.rs`'s writer thread keeps stdin.
+    pub fn new(
+        child: Box<dyn Child + Send + Sync>,
+        pid: Option<u32>,
+        writer: Option<Box<dyn Write + Send>>,
+    ) -> Self {
+        Self {
             pid,
             writer,
-            exit_rx,
+            child,
             exit_code: None,
-        })
+        }
     }
-}
 
-fn spawn_exit_reaper(_session: &super::pty::PtySession) -> Result<Receiver<i32>> {
-    // The real reaper takes a clone of the child handle and blocks on
-    // `wait()`; `PtySession` does not yet expose a `Send` child clone, so the
-    // wiring lands with the `#pcpc5` cutover. Until then this returns an empty
-    // channel — the adapter logic and its SimWorld coverage do not depend on it.
-    let (_tx, rx) = std::sync::mpsc::channel();
-    Ok(rx)
+    /// Monitor-only constructor: the adapter reaps + kills the child while
+    /// `start.rs` keeps the pty writer for keyboard/IPC stdin injection.
+    pub fn monitor(child: Box<dyn Child + Send + Sync>, pid: Option<u32>) -> Self {
+        Self::new(child, pid, None)
+    }
+
+    /// Normalize a `portable_pty::ExitStatus` to the `i32` exit code the crash
+    /// policy classifies. `portable-pty` already folds signal termination into a
+    /// non-zero code, so a non-success status maps to its `exit_code()` (or `1`
+    /// if that is somehow zero).
+    fn status_code(status: &portable_pty::ExitStatus) -> i32 {
+        let code = status.exit_code() as i32;
+        if !status.success() && code == 0 {
+            1
+        } else {
+            code
+        }
+    }
 }
 
 impl SupervisedChild for PtySupervisedChild {
@@ -328,26 +383,39 @@ impl SupervisedChild for PtySupervisedChild {
         if let Some(code) = self.exit_code {
             return Some(code);
         }
-        match self.exit_rx.try_recv() {
-            Ok(code) => {
+        match self.child.try_wait() {
+            Ok(Some(status)) => {
+                let code = Self::status_code(&status);
                 self.exit_code = Some(code);
                 Some(code)
             }
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => None,
+            Ok(None) => None,
+            Err(e) => {
+                // A reaping error means we can no longer observe the child;
+                // surface it (never swallow) and treat the child as exited so the
+                // host loop does not spin forever on a dead handle.
+                eprintln!("[supervisor::in_process] try_wait failed: {e}");
+                self.exit_code = Some(1);
+                Some(1)
+            }
         }
     }
 
     fn write_stdin(&mut self, bytes: &[u8]) -> Result<()> {
-        self.writer.write_all(bytes)?;
-        self.writer.flush()?;
-        Ok(())
+        match self.writer.as_mut() {
+            Some(writer) => {
+                writer.write_all(bytes)?;
+                writer.flush()?;
+                Ok(())
+            }
+            None => anyhow::bail!(
+                "in-process child is monitor-only; stdin is owned by the start.rs writer thread"
+            ),
+        }
     }
 
     fn kill(&mut self) -> Result<()> {
-        // The PTY child is killed through the retained `PtySession::kill` on the
-        // owning side; the writer drop closes stdin. Nothing else to do here.
-        Ok(())
+        self.child.kill().map_err(anyhow::Error::from)
     }
 }
 
@@ -547,5 +615,172 @@ mod tests {
         sup.stop().unwrap();
         assert!(sup.is_stopped());
         assert_eq!(sup.tick_at(now), TickOutcome::Stopped);
+    }
+
+    // ----- Production PtySupervisedChild coverage (#pcpc5e1 authority rung) -----
+    //
+    // These drive the real `portable-pty` child through `PtySession::take_child`
+    // + `PtySupervisedChild`, proving the non-blocking `try_wait` reaper and the
+    // adapter `adopt` host loop the deferred `#pcpc5` stub left untested.
+
+    use super::super::pty::{PtySession, PtySpawnConfig};
+    use portable_pty::PtySize;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn sh_session(script: &str) -> PtySession {
+        let mut env = HashMap::new();
+        if let Ok(path) = std::env::var("PATH") {
+            env.insert("PATH".to_string(), path);
+        }
+        let cfg = PtySpawnConfig {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            cwd: std::env::temp_dir(),
+            env,
+            size: PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        };
+        PtySession::spawn(cfg).expect("spawn /bin/sh session")
+    }
+
+    /// Poll a child's exit code with a bounded wall-clock budget so a hung child
+    /// fails the test instead of hanging the suite.
+    fn poll_exit(child: &mut dyn SupervisedChild) -> i32 {
+        for _ in 0..200 {
+            if let Some(code) = child.try_exit_code() {
+                return code;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("child did not exit within budget");
+    }
+
+    #[test]
+    fn pty_supervised_child_reaps_real_exit_code() {
+        let mut session = sh_session("exit 7");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup_child = PtySupervisedChild::monitor(child, pid);
+        assert!(sup_child.is_alive());
+        assert_eq!(poll_exit(&mut sup_child), 7);
+        // Idempotent after first Some.
+        assert_eq!(sup_child.try_exit_code(), Some(7));
+        assert!(!sup_child.is_alive());
+        // Dropping the session (after take_child) only closes the master; the
+        // child handle is owned by the adapter and already reaped.
+        drop(session);
+    }
+
+    #[test]
+    fn pty_supervised_child_kill_terminates_live_child() {
+        // Sleep long enough that the child is unambiguously alive when killed.
+        let mut session = sh_session("sleep 30");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup_child = PtySupervisedChild::monitor(child, pid);
+        assert_eq!(sup_child.try_exit_code(), None, "child should be alive");
+        sup_child.kill().expect("kill live child");
+        // A killed child reaps to a non-zero code (signal folded by portable-pty).
+        assert_ne!(poll_exit(&mut sup_child), 0);
+    }
+
+    #[test]
+    fn pty_supervised_child_monitor_rejects_stdin() {
+        let mut session = sh_session("exit 0");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup_child = PtySupervisedChild::monitor(child, pid);
+        // Monitor-only hosting: stdin stays with start.rs's writer thread, so the
+        // adapter must refuse (never silently drop) an inject.
+        assert!(sup_child.write_stdin(b"x").is_err());
+        let _ = poll_exit(&mut sup_child);
+    }
+
+    #[test]
+    fn adopt_hosts_real_child_through_tick_loop() {
+        let mut session = sh_session("exit 0");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup =
+            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+        assert_eq!(sup.pid(), pid);
+
+        // Drive the adapter tick loop the way start.rs's in-process host loop
+        // does, until the child exits. A clean exit prompts the operator.
+        let mut outcome = None;
+        for _ in 0..200 {
+            match sup.tick() {
+                TickOutcome::Running => std::thread::sleep(Duration::from_millis(10)),
+                other => {
+                    outcome = Some(other);
+                    break;
+                }
+            }
+        }
+        assert_eq!(outcome, Some(TickOutcome::PromptOperator { exit_code: 0 }));
+        assert!(sup.heartbeat() >= 1, "tick loop advanced the heartbeat");
+    }
+
+    #[test]
+    fn adopt_transient_exit_surfaces_code_without_respawn() {
+        // A non-zero (transient) exit makes the crash policy ask for a restart;
+        // the adopted factory refuses (respawn is the start.rs loop's job), so the
+        // real exit code surfaces as RestartFailed instead of spawning an
+        // untracked child.
+        let mut session = sh_session("exit 3");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup =
+            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+
+        let mut outcome = None;
+        for _ in 0..200 {
+            match sup.tick() {
+                TickOutcome::Running => std::thread::sleep(Duration::from_millis(10)),
+                other => {
+                    outcome = Some(other);
+                    break;
+                }
+            }
+        }
+        match outcome {
+            Some(TickOutcome::RestartFailed { exit_code, .. }) => assert_eq!(exit_code, 3),
+            other => panic!("expected RestartFailed carrying exit 3, got {other:?}"),
+        }
+        assert_eq!(sup.generation(), 1, "no respawn happened in-adapter");
+    }
+
+    #[test]
+    fn kill_child_lets_tick_report_exit_without_halt() {
+        let mut session = sh_session("sleep 30");
+        let pid = session.process_id();
+        let child = session.take_child().expect("take child");
+        let mut sup =
+            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+
+        assert_eq!(sup.tick(), TickOutcome::Running);
+        // External stop/restart request: kill the child, keep the supervisor live.
+        sup.kill_child().expect("kill child");
+        assert!(!sup.is_stopped(), "kill_child must not halt the supervisor");
+
+        let mut exited = false;
+        for _ in 0..200 {
+            match sup.tick() {
+                TickOutcome::Running => std::thread::sleep(Duration::from_millis(10)),
+                // A killed child reaps non-zero → policy asks restart → adopted
+                // factory refuses → RestartFailed carries the code back.
+                TickOutcome::RestartFailed { .. } | TickOutcome::Halted { .. } => {
+                    exited = true;
+                    break;
+                }
+                other => panic!("unexpected outcome after kill_child: {other:?}"),
+            }
+        }
+        assert!(exited, "tick loop observed the killed child's exit");
     }
 }

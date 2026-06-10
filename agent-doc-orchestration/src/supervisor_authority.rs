@@ -28,11 +28,15 @@
 //!   *reports* that the in-process adapter is the configured cutover target to
 //!   `ops.log`, so an operator can confirm the wiring before flipping authority.
 //!   Observe-only: zero behavior change to child hosting.
-//! - **`in-process`** (`#pcpc5e1` authority rung) — `agent-doc start` hosts the
-//!   harness child through [`InProcessSupervisor`] driven by the controller task
-//!   loop instead of the inline out-of-process supervisor. The external
-//!   Unix-socket IPC boundary for CLI/editor callers is preserved either way.
-//!   Landing this rung is the hosting-swap follow-on (gated under `#pcpc5`).
+//! - **`in-process`** (`#pcpc5e1` authority rung — landed) — `agent-doc start`
+//!   hosts the harness child through [`InProcessSupervisor`]: the run loop hands
+//!   the spawned child to the adapter via `pty::PtySession::take_child` and
+//!   drives its tick loop for non-blocking exit reaping, heartbeat, and crash
+//!   policy instead of blocking on `session.wait()`. `start.rs` keeps the
+//!   reader/writer/resize/auto-trigger/idle-watch plumbing and the external
+//!   Unix-socket IPC boundary for CLI/editor callers; the outer restart loop
+//!   still owns respawn. Flipping the default off→in-process, then deleting the
+//!   inline out-of-process wait path, are the live-gated removal rungs.
 //!
 //! ## Agentic Contracts
 //! - [`current_mode`] reads `AGENT_DOC_SUPERVISOR` on every call (cheap, no

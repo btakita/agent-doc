@@ -123,6 +123,7 @@ use std::time::{Duration, Instant};
 use crate::supervisor::{
     cwd,
     env::EnvSpec,
+    in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
     ipc::{IpcMethod, IpcResponse, SupervisorIpc},
     pty::PtySpawnConfig,
     resize,
@@ -3715,33 +3716,44 @@ pub fn run_with_reap_policy(
         &resolved_model,
     );
 
-    // #pcpc5e1 / #dav9 — 08b supervisor-host cutover gate (observe rung).
-    // This out-of-process `agent-doc start` process hosts the harness child in
-    // the run loop below. `AGENT_DOC_SUPERVISOR=off` (default) is silent — zero
-    // change to shipped users. A non-off mode reports the configured cutover
-    // target so an operator can confirm the wiring before the hosting-swap rung
-    // flips authority onto `supervisor::in_process::InProcessSupervisor`. The
-    // `in-process` rung is accepted but not yet hosted here (the swap is the
-    // gated #pcpc5 follow-on); this rung always hosts out-of-process, so setting
-    // the flag early never strands a session.
+    // #pcpc5e1 / #dav9 — 08b supervisor-host cutover gate.
+    // `AGENT_DOC_SUPERVISOR=off` (default) is silent — the inline blocking
+    // `session.wait()` in the run loop below hosts the harness child exactly as
+    // before (zero change to shipped users). `shadow` still hosts out-of-process
+    // but reports the configured cutover target. `in-process` (authority rung)
+    // hosts the child through `supervisor::in_process::InProcessSupervisor`:
+    // `start.rs` keeps the PTY-output/prompt plumbing and the Unix-socket IPC
+    // boundary, but the run loop drives the adapter's tick loop for exit
+    // reaping / heartbeat / crash-policy instead of blocking on `session.wait()`.
+    let supervisor_mode = crate::supervisor_authority::current_mode();
+    let supervisor_hosts_in_process = supervisor_mode.hosts_in_process();
     {
-        let supervisor_mode = crate::supervisor_authority::current_mode();
         if !matches!(supervisor_mode, crate::supervisor_authority::SupervisorMode::Off) {
+            let hosting = if supervisor_hosts_in_process {
+                "in-process"
+            } else {
+                "out-of-process"
+            };
+            // `swap_pending` = the configured cutover target (in-process) is not
+            // yet the live host. True for `shadow`; false once `in-process` hosts.
+            let swap_pending = !supervisor_hosts_in_process;
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "supervisor_host_gate file={} mode={} hosting=out-of-process swap_pending={}",
+                    "supervisor_host_gate file={} mode={} hosting={} swap_pending={}",
                     file.display(),
                     supervisor_mode.as_str(),
-                    supervisor_mode.hosts_in_process()
+                    hosting,
+                    swap_pending
                 ),
             );
             log_event(
                 &mut session_log,
                 &format!(
-                    "supervisor_host_gate mode={} hosting=out-of-process swap_pending={}",
+                    "supervisor_host_gate mode={} hosting={} swap_pending={}",
                     supervisor_mode.as_str(),
-                    supervisor_mode.hosts_in_process()
+                    hosting,
+                    swap_pending
                 ),
             );
         }
@@ -4176,10 +4188,79 @@ pub fn run_with_reap_policy(
             )
         };
 
-        // Block until child exits
-        let status = session
-            .wait()
-            .with_context(|| format!("failed waiting on {}", harness.binary))?;
+        // Block until child exits.
+        //
+        // Default (out-of-process host): block on `session.wait()` exactly as
+        // before. `#pcpc5e1` in-process authority rung: hand the child to the
+        // in-process supervisor adapter (`PtySession::take_child`) and drive its
+        // tick loop for non-blocking exit reaping + heartbeat + crash policy.
+        // `start.rs` keeps the reader/writer/resize/auto-trigger/idle-watch
+        // plumbing (set up above) and the Unix-socket IPC boundary; only *who
+        // reaps the child* moves into the adapter. The outer restart loop still
+        // owns respawn (it rebuilds the I/O plumbing per generation), so the
+        // adapter's factory is wired to refuse an in-adapter respawn.
+        let status = if supervisor_hosts_in_process {
+            let child_pid = session.process_id();
+            let pty_child = PtySupervisedChild::monitor(
+                session
+                    .take_child()
+                    .context("take child for in-process supervisor hosting")?,
+                child_pid,
+            );
+            let mut sup = InProcessSupervisor::adopt(Box::new(pty_child));
+            log_event(
+                &mut session_log,
+                &format!(
+                    "supervisor_host_inprocess_attach pane={} harness={} pid={} generation={}",
+                    pane_id,
+                    harness.binary,
+                    child_pid.unwrap_or(0),
+                    sup.generation()
+                ),
+            );
+            let poll = Duration::from_millis(40);
+            // Honor an external stop/restart/route-complete request by killing the
+            // child once, so the next tick observes its exit (the out-of-process
+            // host path is killed via the IPC handler's `libc::kill` by PID).
+            let mut kill_requested = false;
+            let exit_code = loop {
+                if !kill_requested
+                    && (shared.stop_requested.load(Ordering::Relaxed)
+                        || shared.restart_requested.load(Ordering::Relaxed)
+                        || route_owned_completion.load(Ordering::Relaxed))
+                {
+                    kill_requested = true;
+                    if let Err(e) = sup.kill_child() {
+                        eprintln!(
+                            "[supervisor::in_process] kill on stop/restart request failed: {e}"
+                        );
+                    }
+                }
+                match sup.tick() {
+                    TickOutcome::Running => std::thread::sleep(poll),
+                    TickOutcome::PromptOperator { exit_code }
+                    | TickOutcome::Halted { exit_code }
+                    | TickOutcome::RestartFailed { exit_code, .. }
+                    | TickOutcome::Restarted { exit_code, .. } => break exit_code,
+                    TickOutcome::Stopped => break 0,
+                }
+            };
+            log_event(
+                &mut session_log,
+                &format!(
+                    "supervisor_host_inprocess_exit pane={} harness={} exit_code={} heartbeat={}",
+                    pane_id,
+                    harness.binary,
+                    exit_code,
+                    sup.heartbeat()
+                ),
+            );
+            portable_pty::ExitStatus::with_exit_code(exit_code as u32)
+        } else {
+            session
+                .wait()
+                .with_context(|| format!("failed waiting on {}", harness.binary))?
+        };
         first_run = false;
 
         if let Some((stop, _)) = auto_trigger_thread.as_ref() {

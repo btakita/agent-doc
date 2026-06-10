@@ -154,7 +154,12 @@ impl PtySpawnConfig {
 /// handles drop.
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    /// The child handle. `Some` until [`take_child`](Self::take_child) hands it
+    /// to the in-process supervisor adapter (`#pcpc5e1` authority rung), which
+    /// then owns non-blocking exit reaping (`try_wait`) and `kill`. In the
+    /// default out-of-process host path this stays `Some` and [`wait`](Self::wait)
+    /// reaps it inline.
+    child: Option<Box<dyn Child + Send + Sync>>,
     #[allow(dead_code)] // used by forward_stdio (test path)
     io_threads: Vec<JoinHandle<()>>,
 }
@@ -195,7 +200,7 @@ impl PtySession {
 
         Ok(Self {
             master: pair.master,
-            child,
+            child: Some(child),
             io_threads: Vec::new(),
         })
     }
@@ -303,14 +308,40 @@ impl PtySession {
     ///
     /// Mutable because `portable-pty`'s `Child::wait` takes `&mut self`.
     pub fn wait(&mut self) -> Result<ExitStatus> {
-        self.child.wait().context("child.wait failed")
+        self.child
+            .as_mut()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "PtySession::wait called after take_child — the in-process supervisor adapter now owns child reaping"
+                )
+            })?
+            .wait()
+            .context("child.wait failed")
+    }
+
+    /// Hand the child handle to the in-process supervisor adapter
+    /// ([`super::in_process::PtySupervisedChild`], `#pcpc5e1` authority rung).
+    /// The master (and its reader/writer/resize handles) stays with this
+    /// `PtySession`, so the caller keeps PTY-output/prompt plumbing while the
+    /// adapter drives non-blocking exit reaping (`try_wait`) and `kill`. After
+    /// this call [`wait`](Self::wait) and [`kill`](Self::kill) fail (the child is
+    /// gone); dropping the session then only closes the master, signalling reader
+    /// EOF. Returns an error if the child was already taken.
+    pub fn take_child(&mut self) -> Result<Box<dyn Child + Send + Sync>> {
+        self.child
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("PtySession::take_child called twice"))
     }
 
     /// Attempt to kill the child. Used by the IPC `stop` handler and on
     /// supervisor shutdown when the child refuses to exit via SIGHUP.
     #[allow(dead_code)] // API surface — used by tests; IPC stop uses libc::kill via PID
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().context("child.kill failed")
+        match self.child.as_mut() {
+            Some(child) => child.kill().context("child.kill failed"),
+            // Child already handed to the in-process adapter, which owns kill.
+            None => Ok(()),
+        }
     }
 
     /// Create a thread-safe resize handle that can be sent to other threads
@@ -373,7 +404,7 @@ impl PtySession {
 
     /// Get the child's process ID, if available.
     pub fn process_id(&self) -> Option<u32> {
-        self.child.process_id()
+        self.child.as_ref().and_then(|c| c.process_id())
     }
 }
 

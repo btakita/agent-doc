@@ -6,6 +6,25 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Land the in-process supervisor hosting swap (`#dav9` / `pcpc5e1` authority rung).**
+  `AGENT_DOC_SUPERVISOR=in-process` now actually hosts the harness child through
+  `supervisor::in_process::InProcessSupervisor` instead of only logging the gate.
+  `PtySession::take_child` hands the `portable-pty` child to the adapter, which
+  reaps exits non-blockingly via `try_wait` (no reaper thread/channel), drives
+  heartbeat + crash policy through its `tick` loop, and owns `kill`. `start.rs`'s
+  `run_with_reap_policy` branches on `supervisor_hosts_in_process`: in-process
+  mode hands off the child and drives the tick loop (honoring stop/restart/
+  route-complete by killing once so the next tick reports the exit), while
+  keeping the reader/writer/resize/auto-trigger/idle-watch plumbing and the
+  Unix-socket IPC boundary; the outer restart loop still owns respawn (the
+  adapter factory refuses an in-adapter respawn). **Default `off` is unchanged**
+  — shipped users still block on `session.wait()` exactly as before; this is the
+  dormant, flag-gated authority rung, not the live default flip. New coverage:
+  `adopt_hosts_real_child_through_tick_loop`, `pty_supervised_child_reaps_real_exit_code`,
+  `pty_supervised_child_kill_terminates_live_child`, `pty_supervised_child_monitor_rejects_stdin`,
+  `kill_child_lets_tick_report_exit_without_halt`. Remaining: the live-gated
+  default flip + out-of-process writer removal (`#q6js`), and the plugin
+  WatchService demotion (`#dsqa`), both of which require live operator proof.
 - **Fix UTF-8 char-boundary panic in closeout heuristics (`#heurpanic`).**
   `heuristics::has_quantified_remaining_work` computed a 30-byte look-back window
   start as a raw byte offset (`pos - 30`) and sliced `&lower[start..pos]`. When a

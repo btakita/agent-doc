@@ -122,6 +122,7 @@ enum SimCommand {
     RepairBoundary,
     DuplicateVisibleResponse,
     CrashAt(FaultPoint),
+    PostCommitIpcRepositionSignal,
     Recover,
     SessionClear,
     SessionRestart,
@@ -448,6 +449,7 @@ struct Coverage {
     sync_focus_handoffs: usize,
     harness_matrix_edges: BTreeSet<(HarnessKind, HarnessMatrixEdge)>,
     commits: usize,
+    post_commit_worktree_checks: usize,
 }
 
 impl Coverage {
@@ -567,6 +569,7 @@ impl Coverage {
         self.sync_focus_handoffs += other.sync_focus_handoffs;
         self.harness_matrix_edges.extend(other.harness_matrix_edges);
         self.commits += other.commits;
+        self.post_commit_worktree_checks += other.post_commit_worktree_checks;
     }
 }
 
@@ -607,7 +610,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(58) {
+            let command = match rng.next_usize(59) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -660,6 +663,7 @@ impl SimWorld {
                 54 => SimCommand::AdminReap,
                 55 => SimCommand::AdminReapStale,
                 56 => SimCommand::SupervisorHeartbeatReattach,
+                57 => SimCommand::PostCommitIpcRepositionSignal,
                 _ => SimCommand::SupervisorHeartbeatStale,
             };
             world.apply(command)?;
@@ -755,6 +759,25 @@ impl SimWorld {
             SimCommand::CrashAt(fault) => {
                 self.pending_fault = Some(fault);
                 self.coverage.fault_points_hit.insert(fault);
+            }
+            SimCommand::PostCommitIpcRepositionSignal => {
+                // `#postcommit-ipc-worktree-corruption` regression guard. After a
+                // committed closeout (snapshot == HEAD == working tree), the live
+                // IPC listener fires a post-commit boundary-reposition signal at
+                // the working tree (`IPC reposition boundary signal sent`). The
+                // bug class is that signal rewriting the working tree with a
+                // stale/spliced buffer so the visible file drifts from HEAD. The
+                // production-correct behavior is idempotent: repositioning an
+                // already-clean committed boundary must not mutate the tree.
+                // `assert_post_commit_reposition_idempotent` re-applies the
+                // production reposition to the working tree (`self.doc`) without
+                // touching HEAD (`self.snapshot`) and enforces tree == HEAD; a
+                // reposition change that mutated an already-clean committed doc
+                // would drift the tree and fail closed — exactly the corruption we
+                // want to catch offline.
+                if self.assert_post_commit_reposition_idempotent()? {
+                    self.coverage.post_commit_worktree_checks += 1;
+                }
             }
             SimCommand::Recover => {
                 if let Err(err) = self.recover_after_fault() {
@@ -1869,6 +1892,38 @@ impl SimWorld {
         Ok(())
     }
 
+    /// `#postcommit-ipc-worktree-corruption` invariant: on a *clean* committed
+    /// boundary (working tree already byte-equal to HEAD modulo `(HEAD)` /
+    /// boundary-id artifacts), the post-commit IPC reposition signal must be
+    /// idempotent — it must not drift the visible file away from the committed
+    /// blob. Returns `Ok(false)` when the boundary is not clean (a legitimate
+    /// post-commit user edit started a new cycle; not the modeled scenario),
+    /// `Ok(true)` when the idempotent reposition preserved tree==HEAD, and an
+    /// error when the working tree drifted (the corruption regression). Scoped to
+    /// the reposition signal rather than asserted globally so ordinary post-commit
+    /// edits are not mistaken for corruption.
+    fn assert_post_commit_reposition_idempotent(&mut self) -> Result<bool> {
+        if !matches!(self.phase, CyclePhase::Committed) {
+            return Ok(false);
+        }
+        let head = normalize_committed_worktree(&self.snapshot);
+        if normalize_committed_worktree(&self.doc) != head {
+            // Working tree already diverged via a legitimate new edit; the clean
+            // committed-boundary reposition scenario does not apply.
+            return Ok(false);
+        }
+        self.doc =
+            crate::template::reposition_boundary_to_end_clean_with_id(&self.doc, Some("committed"));
+        if normalize_committed_worktree(&self.doc) != head {
+            bail!(
+                "post-commit working tree drifted from HEAD (#postcommit-ipc-worktree-corruption); seed={} trace={:?}",
+                self.seed,
+                self.trace
+            );
+        }
+        Ok(true)
+    }
+
     fn has_duplicate_response_heading(&self) -> bool {
         self.doc.matches("### Re: sim closeout").count() > 1
     }
@@ -1942,6 +1997,32 @@ fn template_doc(exchange_body: &str) -> String {
          <!-- agent:icebox -->\n\
          <!-- /agent:icebox -->\n"
     )
+}
+
+/// Normalize a committed document for working-tree==HEAD comparison: collapse the
+/// boundary marker id to a stable token and strip ` (HEAD)` heading annotations
+/// that the working tree/editor buffer is allowed to carry post-commit while the
+/// committed blob does not. Anything left differing is real worktree drift.
+fn normalize_committed_worktree(doc: &str) -> String {
+    let mut out = String::with_capacity(doc.len());
+    let mut rest = doc;
+    while let Some(start) = rest.find("<!-- agent:boundary:") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        match after.find("-->") {
+            Some(end) => {
+                out.push_str("<!-- agent:boundary:NORM -->");
+                rest = &after[end + 3..];
+            }
+            None => {
+                out.push_str(after);
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace(" (HEAD)", "")
 }
 
 fn response_patch(topic: &str) -> String {
@@ -2320,6 +2401,10 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         coverage.sync_focus_handoffs > 0,
         "seed corpus must exercise sync focus handoffs"
     );
+    assert!(
+        coverage.post_commit_worktree_checks > 0,
+        "seed corpus must exercise the post-commit IPC reposition working-tree==HEAD guard (#postcommit-ipc-worktree-corruption)"
+    );
 }
 
 #[test]
@@ -2471,6 +2556,73 @@ fn closeout_sim_blocks_later_prompt_after_response_write() {
     assert!(
         err.to_string().contains("unresolved prompt_target"),
         "unexpected closeout error: {err}"
+    );
+}
+
+#[test]
+fn post_commit_ipc_reposition_signal_keeps_worktree_equal_to_head() {
+    // `#postcommit-ipc-worktree-corruption`: drive a clean committed closeout,
+    // then fire the post-commit IPC boundary-reposition signal at the working
+    // tree. The production reposition is idempotent on an already-clean committed
+    // boundary, so the visible file must stay byte-equal to HEAD and the
+    // working-tree==HEAD invariant must hold.
+    let mut world = SimWorld::new(515);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.try_commit().unwrap();
+    assert!(matches!(world.phase, CyclePhase::Committed));
+    assert_eq!(
+        world.doc, world.snapshot,
+        "committed closeout must leave working tree == HEAD"
+    );
+
+    world
+        .apply(SimCommand::PostCommitIpcRepositionSignal)
+        .unwrap();
+    assert_eq!(
+        world.coverage.post_commit_worktree_checks, 1,
+        "post-commit reposition signal must record a worktree==HEAD check"
+    );
+    world.assert_structural_invariants().unwrap();
+    assert_eq!(
+        normalize_committed_worktree(&world.doc),
+        normalize_committed_worktree(&world.snapshot),
+        "post-commit IPC reposition signal must not drift the working tree from HEAD"
+    );
+}
+
+#[test]
+fn post_commit_worktree_drift_is_distinguishable_from_head() {
+    // Negative control for the working-tree==HEAD guard: the normalized comparison
+    // the invariant relies on must distinguish a stale/spliced working-tree buffer
+    // (the #postcommit-ipc-worktree-corruption bug) from the committed blob, while
+    // still treating `(HEAD)` annotations and boundary-id churn as equal.
+    let mut world = SimWorld::new(516);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.try_commit().unwrap();
+    assert!(matches!(world.phase, CyclePhase::Committed));
+
+    let head = world.snapshot.clone();
+    // Allowed post-commit divergence: editor `(HEAD)` annotations + boundary id.
+    let annotated = head
+        .replace("### Re: sim closeout", "### Re: sim closeout (HEAD)")
+        .replace("agent:boundary:committed", "agent:boundary:live-42");
+    assert_eq!(
+        normalize_committed_worktree(&annotated),
+        normalize_committed_worktree(&head),
+        "(HEAD)/boundary-id artifacts must normalize equal to HEAD"
+    );
+
+    // Real corruption: the IPC listener splices a duplicate response body into the
+    // visible file. This must NOT normalize equal to HEAD.
+    let corrupted = format!("{head}### Re: sim closeout — gpt-5\n\nStale spliced buffer.\n");
+    assert_ne!(
+        normalize_committed_worktree(&corrupted),
+        normalize_committed_worktree(&head),
+        "a spliced working-tree buffer must be detectable as drift from HEAD"
     );
 }
 

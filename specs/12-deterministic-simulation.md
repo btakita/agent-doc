@@ -33,6 +33,7 @@ FailCommit
 RepairBoundary
 DuplicateVisibleResponse
 CrashAt(FaultPoint)
+PostCommitIpcRepositionSignal
 Recover
 SessionClear
 BindRouteOwner
@@ -137,6 +138,13 @@ Closeout invariants currently exercised by the simulator:
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
 - Boundary cleanup leaves at most one live exchange boundary marker.
+- After a committed closeout the working tree stays equal to HEAD modulo `(HEAD)`
+  annotations and the transient boundary marker id
+  (`#postcommit-ipc-worktree-corruption`). `PostCommitIpcRepositionSignal` models
+  the live IPC listener firing the post-commit boundary-reposition signal at the
+  working tree; because repositioning an already-clean committed boundary is
+  idempotent, the visible file must not drift from the committed blob. A negative
+  control proves a spliced/stale working-tree buffer fails the invariant closed.
 - A sync projection never presents the same document under two visible panes
   (no-duplicate-editor-pane cardinality invariant).
 - IPC snapshot duplicate-prompt repair removes an extra live-typed prompt copy

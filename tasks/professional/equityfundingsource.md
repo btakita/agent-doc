@@ -177,9 +177,31 @@ Done, per `#spec-test-commit-push`. On the Investor Pipeline board, **"Open inve
 **Queue (still inactive — staged, not auto-running):**
 - **`#eyp0`** — investor accreditation Accredit/Pending control. Codeable next; say "go" to build it.
 - **`enable email round trip`** — captured as **`#emrt`**. This one is **config-only, no code**, but blocked on **`#f4rq`** (verify an EFS-owned Resend sending domain) + setting the production flag/secrets, which need Robert's domain access. I can't safely flip production secrets from here. Want me to draft the exact wrangler secret commands + the Resend domain-verification steps for Robert?
+- **Honest constraint:** the endpoint only accepts `verified`/`rejected`, and it operates on a *verification record*. So the control acts only once the investor has actually **submitted** their accreditation questionnaire — if there's no submission yet it shows "No accreditation submission yet" rather than a fake toggle. "Pending" is the pre-decision state, not a settable button. If you want an explicit admin "reset to pending" or the ability to accredit someone who hasn't submitted, that needs a small backend change — say the word and I'll add it.
+- A decision **reloads the board** so the derived lane re-computes (an accredited investor can move Signed Up → Accredited).
+- New `InvestorAccreditationControl` in the card dialog. On open it fetches the investor's latest verification record (`GET /api/admin/users/:id/investor-accreditation`), shows the current status (Pending / Verified / Rejected), and offers **Accredit** and **Reject** actions wired to the existing admin endpoint `POST /api/admin/investor-accreditation/:verification_id/decision` (it was already admin-guarded but had no UI until now).
 
 Next, or activate the queue and I'll keep draining.
-<!-- agent:boundary:27703c11 -->
+
+### Re: #eyp0 — admin accreditation control in the Investor Pipeline card dialog — opus-4-8
+
+> **Queue prompt:**
+>
+> [#eyp0]
+
+
+Built, per `#spec-test-commit-push`. The Investor Pipeline card dialog now has an **Accreditation decision** control — the genuinely editable investor action (the lifecycle *stage* is derived, so there's nothing to set there).
+
+**Shipped (EFS `25a55ab`, pointer `344c8d7a1`):**
+- New `InvestorAccreditationControl` in the card dialog. On open it fetches the investor's latest verification record (`GET /api/admin/users/:id/investor-accreditation`), shows the current status (Pending / Verified / Rejected), and offers **Accredit** and **Reject** actions wired to the existing admin endpoint `POST /api/admin/investor-accreditation/:verification_id/decision` (it was already admin-guarded but had no UI until now).
+- A decision **reloads the board** so the derived lane re-computes (an accredited investor can move Signed Up → Accredited).
+- **Honest constraint:** the endpoint only accepts `verified`/`rejected`, and it operates on a *verification record*. So the control acts only once the investor has actually **submitted** their accreditation questionnaire — if there's no submission yet it shows "No accreditation submission yet" rather than a fake toggle. "Pending" is the pre-decision state, not a settable button. If you want an explicit admin "reset to pending" or the ability to accredit someone who hasn't submitted, that needs a small backend change — say the word and I'll add it.
+
+**Verification:** `bun test` **504 pass / 0 fail** (+2: the card control + endpoint guard); `build` + `build:worker` clean. Committed + pushed, pointer bumped. No deploy (say "deploy" to ship).
+
+Next in the queue: **`#emrt`** (enable the messaging email round-trip) — that one's config-only but blocked on `#f4rq` (Resend domain) + Robert's access, so I'll surface it rather than flip production secrets.
+<!-- agent:boundary:e19b2980 -->
+<!-- agent:boundary:0bbafc73 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,7 +209,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#eyp0]
+- ~~[#eyp0]~~
 - [#emrt]
 <!-- /agent:queue -->
 
@@ -195,7 +217,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:backlog -->
 - [ ] [#emrt] Enable the borrower-messaging email round-trip (#2/#4 from the messaging answer): config-only, no code. Set MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true, configure delivery (Cloudflare Email Service token/account or Resend) + MESSAGE_NOTIFICATION_FROM, on an EFS-verified sending domain. Gated on #f4rq (verify the Resend sending domain) — needs Robert domain access. Reply-by-email INTO chat (#3) is separate (scaffold at POST /api/email/inbound, needs inbound routing + sender-auth + append wiring).
-- [ ] [#eyp0] [recommended] Investor dialog editable action: the investor pipeline lifecycle stage is DERIVED (furthest stage from accreditation + lender account + active/pending funds), so it has no settable status. The real editable investor action is the accreditation decision — wire an Accredit/Pending control in the Investor Pipeline card dialog to the existing POST /api/admin/investor-accreditation/:id/decision endpoint (admin_investor_accreditation_by_id_decision_POST_). Follow-up to #pipeline-dialog-controls-scope (loan + payment status dropdowns shipped EFS d4b7e55).
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

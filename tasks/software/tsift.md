@@ -54,7 +54,25 @@ Compacted content:
 - Verification: this is a queue-state repair for an accidental recommendation promotion; no code tests run.
 - Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc admin inspect`, `agent-doc admin queue pause`, `agent-doc session-check` attempt, and queue/backlog behavior inspection.
 - Changed paths: session document state only; no `src/tsift` implementation/spec edits.
-<!-- agent:boundary:ae634441 -->
+
+### Re: headroom investigation repair — gpt-5
+
+Clean repair response for the Headroom investigation: Headroom is best treated as a design reference for tsift, not a direct dependency. tsift already has deterministic local envelopes, handles, source/symbol reads, context packs, digests, graph evidence, memory import, and token-savings gates. The useful imports are the patterns that make compressed evidence reversible, adaptive, and measurable.
+
+Best feature ideas for tsift:
+
+1. CCR-style reversible retrieval handles: store omitted originals for truncated search/source/context-pack/digest output and expose a stable retrieve command with optional query filtering.
+2. SmartCrusher-style adaptive sampling: when outputs are too large, preserve errors, first/last rows, anomalies, file diversity, graph-central rows, and query-relevant rows before generic truncation.
+3. CacheAligner-style packet layout: keep stable instructions and evidence first, move volatile dates, run ids, watermarks, and timestamps later, then gate packet layouts with prompt-cache ROI checks.
+4. Failure-learning over tsift/session history: mine repeated wrong paths, failed commands, stale-index misses, and broad searches from session-review/log-digest/test-digest output, then propose marker-owned AGENTS or tsift-memory corrections.
+5. First-party MCP tools: expose tsift search/source/context-pack/retrieve/stats directly to MCP hosts so agents can use structured envelopes without shell rewrite glue.
+
+Lower fit: Headroom's proxy/wrapper mode is not tsift's lane, default source-body compression would weaken exact-code evidence, and opaque ML text compression should stay outside the default deterministic path.
+
+Sources: [Headroom README](https://github.com/chopratejas/headroom), [CCR](https://headroom-docs.vercel.app/docs/ccr), [SmartCrusher](https://headroom-docs.vercel.app/docs/smart-crusher), [Cache Optimization](https://headroom-docs.vercel.app/docs/cache-optimization), [Code Compression](https://headroom-docs.vercel.app/docs/code-compression), [Failure Learning](https://headroom-docs.vercel.app/docs/failure-learning), [MCP Tools](https://headroom-docs.vercel.app/docs/mcp), [Benchmarks](https://headroom-docs.vercel.app/docs/benchmarks).
+
+Closeout note: I cleared the accidental recommended backlog/queue entries generated during the first write attempt, because this document's `queue` mode promoted them into executable `do [#...]` items without explicit user acceptance. No `src/tsift` code or spec files were changed, and no code tests were run.
+<!-- agent:boundary:f539ea75 -->
 <!-- /agent:exchange -->
 
 ## Queue

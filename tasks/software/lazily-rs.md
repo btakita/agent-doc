@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -38,7 +38,29 @@ queue: start
 Compacted content:
 - Archived 5 response topic(s): GitHub org naming; #kavj ipc-binary; #ms7x cross-lang conformance; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:8dd0b7f9 -->
+
+### Re: Transfer repos to lazily-hub — glm-5-1
+
+> **Queue prompt:**
+>
+> I created the lazily-hub organization. Please move lazily-rs, lazily-zig, and lazily-py to lazily-hub.
+
+
+Transferred all 4 repos via GitHub API:
+
+| Repo | Status |
+|------|--------|
+| `lazily-rs` | `lazily-hub/lazily-rs` |
+| `lazily-py` | `lazily-hub/lazily-py` |
+| `lazily-zig` | `lazily-hub/lazily-zig` |
+| `lazily-spec` | `lazily-hub/lazily-spec` |
+
+**Remotes updated:**
+- Standalone clones: `~/work/btakita/lazily-py`, `~/work/btakita/lazily-zig` → new SSH URLs
+- Submodules in `agent-loop`: `.gitmodules` updated for `src/lazily-rs`, `src/lazily-py`, `src/lazily-zig`, `src/lazily-spec` → synced with `git submodule sync`
+
+The `.gitmodules` change is unstaged — commit when ready. Marking `#w30b` done.
+<!-- agent:boundary:b1a3f115 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +69,6 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- I created the lazily-hub organization. Please move lazily-rs, lazily-zig, and lazily-py to lazily-hub.
 <!-- /agent:queue -->
 
 ## Backlog

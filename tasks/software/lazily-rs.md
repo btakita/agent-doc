@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -43,6 +43,16 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#ms7x]
+
+
+> **Queue prompt:**
+>
+> do [#kavj]
+
+
+> **Queue prompt:**
+>
 > lazily-reactive is a bit long and difficult to remember. lazily-org is better. Is there an ever better name? lazily-root? lazily-super? lazily-hub? 
 
 
@@ -51,6 +61,22 @@ Best candidates, ranked:
 1. **`lazily`** — shortest, most memorable, directly matches the project/crate identity. If available, this is the clear winner.
 2. **`lazily-rs`** — follows Rust ecosystem convention (`tokio-rs`, `serde-rs`, `tauri-apps`). Natural fallback if `lazily` is taken.
 3. **`lazily-hub`** — decent but adds an unnecessary qualifier; GitHub already shows it's an org.
+- **Build:** `cargo build --features ipc-binary` passes; all 105 tests pass
+- Wire each binding's CI to run conformance against `lazily-spec/conformance/`
+- Initialize `lazily-zig` and add conformance test runner
+- Add IPC + conformance test runner to `lazily-py`
+- `lazily-zig` — submodule not initialized; conformance tests require IPC support first (backlog)
+- `lazily-py` — no IPC module yet; conformance tests require IPC support first (backlog)
+- All 105 tests pass, including 9 conformance tests
+- Updated `tests/conformance.rs` to prefer `../lazily-spec/conformance/` when available, falling back to local `tests/conformance/`
+- Added fixture format documentation to README.md with table of fixtures and instructions for new bindings
+- Added `conformance/` directory with 6 canonical JSON fixtures (snapshot_minimal, snapshot_multi_node, snapshot_shared_blob, delta_sequential, delta_non_sequential, delta_shared_blob)
+- **Spec:** Documented in `SPEC.md` under "Binary serialization (`ipc-binary` feature)"
+- **Tests:** 7 binary-specific tests across `tests/ipc.rs`, `tests/conformance.rs`, `tests/ffi.rs` — round-trip, garbage rejection, size comparison
+- **FFI:** `lazily_ffi_channel_send_binary`, `recv_binary`, `validate_binary`, `kind_binary`, `clone_binary` (`src/ffi.rs`)
+- **Error types:** `EncodeError::Binary` / `DecodeError::Binary` variants
+- **API:** `IpcMessage::encode_binary()` / `decode_binary()` via postcard (`src/ipc.rs:646-654`)
+- **Feature flag:** `ipc-binary = ["ipc", "dep:postcard"]` in `Cargo.toml`
 
 The others are weaker: `lazily-org` is redundant (GitHub already denotes orgs), `lazily-root` and `lazily-super` don't convey clear meaning.
 
@@ -100,7 +126,7 @@ Implemented the shared conformance test suite infrastructure:
 - Add IPC + conformance test runner to `lazily-py`
 - Initialize `lazily-zig` and add conformance test runner
 - Wire each binding's CI to run conformance against `lazily-spec/conformance/`
-<!-- agent:boundary:f68c06a4 -->
+<!-- agent:boundary:8310a13f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +135,7 @@ Implemented the shared conformance test suite infrastructure:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
+- lazily is not available. lazily is more than just rust. It's first implementation was python. lazily-hub seems the best so far. Is there a better option?
 <!-- /agent:queue -->
 
 ## Backlog

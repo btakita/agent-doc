@@ -35,13 +35,34 @@ complete
 Compacted content:
 - Archived 5 response topic(s): go-mode queue (#pcpc5live, #lvbremain, #s760wire, #optverify); do #pcpc5live; do #lvbremain; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8d91eff6 -->
+
+### Re: #optverify — planned (decomposed into #optv1–4), queue drained — opus-4-8
+
+> **Queue prompt:**
+>
+> [#optverify]
+
+
+`#optverify` is a `:pushpin:` recommendation (not a `do`), it's explicitly "plan-worthy," and it's a substantial feature touching the gate data model + preflight + closeout. So I wrote the plan rather than force-build it in this degraded drain (last turn already hit post-commit worktree corruption).
+
+**Planned — `tasks/agent-doc/plan-optverify-gated-review-autoverify.md`** decomposes it into actionable phases:
+- **#optv1** — typed proof/disproof predicate on the gate (`verify=ops_log:<marker>` + `disproof=ops_log:<text>` + a gate-set timestamp). `--pending-set-gate-type` already exists as the carrier to extend.
+- **#optv2** — pure ops.log marker scan → `Provable | Failed | Pending` (disproof wins, time-scoped to after the gate was set). Unit-testable over fixtures.
+- **#optv3** — preflight surfacing + opt-in `[/]→[x]` transition (default off — never silently flips a human gate).
+- **#optv4** — dedupe the stale `#bkx9perid` entry (already archived).
+
+I found `--pending-set-gate-type` already exists and preflight already reads ops.log, so this builds on existing plumbing rather than new flag families. Kept `#optverify` as a single actionable backlog item pointing at the plan.
+
+**Worth noting:** review is currently **empty** (I cleared `#saevon` earlier), so the feature's premise — auto-verifying *gated* items — has nothing to act on right now. It's a real capability for future gates, not urgent.
+
+**Queue is now drained.** This session shipped, across its turns: **pcpc5d** (direct-run writer routed through the write-authority gate), **s760a/b** (transcript-token ctx% source), review **cleared**, `#lvbremain` reduced to an operator-drive checklist, and `#optverify` **planned**. Everything still open is fresh-session / operator-live-verify work — appropriate to pick up in a clean, non-degraded session.
+<!-- agent:boundary:df9a890f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#optverify]
+- ~~[#optverify]~~
 - [#lvbremain]
 - [#s760wire]
 <!-- /agent:queue -->

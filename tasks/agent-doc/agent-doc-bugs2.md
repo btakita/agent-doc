@@ -182,7 +182,26 @@ Two-part closeout: the **in-scope SimWorld deliverable is done**; the **root fix
 **Why it can't be binary-fixed here.** I ruled out the cheap cause: `.agent-doc/patches/` is empty, so it is *not* a stale fallback patch being re-applied. The binary sends a *correct* `send_reposition` signal (`write.rs:12521`); the corruption is the **editor-plugin-side** listener/PatchWatcher applying that reposition against a stale buffer and writing it to the working tree. That's exactly the out-of-process editor write authority the item names as the root cause.
 
 **Gated on (root fix):** the supervisor-in-process migration — demote the editor WatchService to read-only and remove the out-of-process direct-disk writers so nothing but the in-process control plane writes the working tree. Tracked as `#pcpc5live` / `tasks/agent-doc/plan-supervisor-in-process.md` (`#pcpc1..#pcpc5`), which per the operator's stated priority should run as a fresh focused session. Files when it lands: `editors/jetbrains` PatchWatcher, `ffi.rs` IPC listener, `write.rs` post-commit reposition signal path. Suppressing the signal binary-side is possible but would regress the live `(HEAD)`-marker UX and still needs live verification — not safe in this drift-reproducing session.
-<!-- agent:boundary:c7c69f86 -->
+
+### Re: do [#pcpc5live] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#pcpc5live]
+
+
+Gating `#pcpc5live` — this is the supervisor-in-process migration cutover, which the item, the spec, and your own stated priority all say must run as a **fresh focused session**, not a degraded queue-drain like this one.
+
+State (unchanged, still accurate):
+- **STEP 1 (shadow) + STEP 2 (dual-write) PROVEN** 2026-06-09 — ops.log has `write_authority gate=shadow action=would-route` and `gate=dual-write action=routed` (event 1781047338).
+- **REMAINING: step 3 (pcpc5d/e)** — delete the out-of-process supervisor direct-disk writers + demote the editor WatchService to read-only, per spec 08b lines 131–133. This needs **live IntelliJ/Codex editor-boundary proof**.
+
+Why not here:
+- This is the root fix for `#postcommit-ipc-worktree-corruption` (just gated) — and *this very session* is reproducing that corruption on most closeouts. Performing the editor-write-authority cutover while the out-of-process listener is actively mis-writing the working tree is the worst possible validation environment.
+- It is decomposed into dependency-ordered phases `#pcpc1..#pcpc5` in `tasks/agent-doc/plan-supervisor-in-process.md`. The right execution is a fresh session starting at `#pcpc1`, with the live editor-boundary proof captured cleanly.
+
+**Unblock:** start a fresh, non-degraded `/agent-doc` (or dedicated) session and run `plan-supervisor-in-process.md` `#pcpc1`→`#pcpc5`; capture the spec-08b 131–133 editor-boundary proof for step 3 (pcpc5d/e), then commit/push and flip the authority. That cutover closes `#postcommit-ipc-worktree-corruption` as a side effect.
+<!-- agent:boundary:d52a4fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -199,7 +218,7 @@ Two-part closeout: the **in-scope SimWorld deliverable is done**; the **root fix
 - ~~:round_pushpin: do [#postcommit-ipc-worktree-corruption]~~
 - ~~do [#dropqueue-consumed-falsecount]~~
 - ~~:round_pushpin: do [#lvbatch]~~
-- :round_pushpin: do [#pcpc5live]
+- ~~:round_pushpin: do [#pcpc5live]~~
 - :round_pushpin: do [#lvbremain]
 - Automatically add the env vars to ~/ so I can test. I can restart.
 - This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
@@ -235,12 +254,12 @@ What are #next-steps to fix bugs?
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
 - [ ] [#s760wire] Pre-emptive /clear: predicate ContextResetDecision.shouldClearBeforeDispatch + clear_threshold_for_doc + agent_doc_queue_context_reset opt-in ALL SHIPPED. Blocker = live context-usage % source. SubmitAction.kt is a thin dispatcher (no ctx%); per Shared Foundation it belongs in route.rs. Observed footers vary by harness+config (Claude custom statusline 'ctx:NN%', Codex 'Context NN% used') so TUI-scrape is wrong for the shipped product — derive ctx% from session transcript token usage / context window instead. Remaining (CLI-side, no JB install): add harness-aware transcript-based ctx% reader in route.rs, gate dispatch via shouldClearBeforeDispatch, emit '[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..', send /clear when true; live-verify.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
-- [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 - [/] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
 - [/] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.

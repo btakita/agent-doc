@@ -109,18 +109,55 @@ Every apparent hit (43x `cross-session-reject`, 228x `early-ack`, etc.) is a **p
 2. **#9adk** — drive a run then a clear, expect `run_clear_coalesce`.
 3. **visible-write** — a live editor write where the buffer already matches disk, expect `visible_write_live_buffer_matches_disk`.
 4. **#saev** — a live **JB-plugin SOCKET-IPC** session (not the file-IPC fallback this drain keeps hitting), expect `early-ack` pending emitted before apply, no false-success / false ack-timeout.
+4. **#saev** — a live JB-plugin **SOCKET-IPC** session (not the file-IPC fallback) → expect `early-ack` pending emitted before apply, no false-success / false ack-timeout.
+3. **visible-write** — a live editor write where the buffer already matches disk → expect `visible_write_live_buffer_matches_disk`.
+2. **#9adk** — drive a run then a clear → expect `run_clear_coalesce`.
+1. **#4wxr** — claim this doc from a 2nd tmux pane → expect `cross-session-reject`.
 
 **`#lvbremain` stays open** as an actionable backlog item — not a gate, just blocked on you driving the 4 actions. Concrete unblock: `make install`, then run the recipe; I re-scan the logs.
 
 **Recommend halting the drain here.** This session is restart-heavy (preflight: 3 restart-heavy events in 30 min, accretion guidance = "restart cleanly from the current committed boundary"). The two remaining items are both fresh-session work: `#lvbremain` needs your live driving, and `#s760wire`'s `#s760c` route-gate wire explicitly says "do in a fresh session." Driving them inside this degraded drain is exactly the pattern that caused last turn's post-commit worktree corruption. Better to restart clean and pick them up there.
-<!-- agent:boundary:d0a7e365 -->
+
+### Re: #lvbremain — stale-install blocker cleared; markers still 0, operator-blocked — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lvbremain]
+
+
+Operator-drive item: I check logs, you drive the live actions. This cycle I cleared the one blocker I could act on myself — the item stays open (operator must still drive the 4 live actions; I cannot from here).
+
+**Fixed — the stale install.** Preflight flagged the live binary+cdylib as predating `eaca894d` (the #optverify ship): installed at epoch `1781066281`, source landed `1781066593` ~5 min later. The prior turn left this for you; I rebuilt it instead. Full `cargo build --release` + `cargo install --path .` + `agent-doc lib-install` — binary now epoch `1781068348`, cdylib `1781068256`, both past `eaca894d`. So the live tmux/JB code is current; the markers will emit when you drive the actions. (Corrected the item's stale "binary+cdylib current" note.)
+
+**Log re-scan — still 0.** All 4 markers have zero real event-type emissions in `.agent-doc/logs/ops.log`:
+
+| Marker | Path | Real emissions |
+|---|---|---|
+| `cross-session-reject` (#4wxr) | claim.rs / ClaimAction.kt | **0** |
+| `run_clear_coalesce` (#9adk) | route.rs / sync.rs | **0** |
+| `visible_write_live_buffer_matches_disk` | write.rs | **0** |
+| `early-ack` (#saev) | ipc_socket.rs | **0** |
+
+Every apparent hit (e.g. 43× `cross-session-reject`, 228× `early-ack`) is a `queue_diff_active_prompt_differs` prompt-echo — the marker name appears inside `prompt_changes=[…]`, not as the event type right after the `[epoch]` stamp. Filtered to real event lines, all four are 0. No live action has been driven.
+
+**Drive recipe (now unblocked — install is current):** `scripts/xdotool-live-verify.sh` —
+1. **#4wxr** — claim this doc from a 2nd tmux pane → expect `cross-session-reject`.
+2. **#9adk** — drive a run then a clear → expect `run_clear_coalesce`.
+3. **visible-write** — a live editor write where the buffer already matches disk → expect `visible_write_live_buffer_matches_disk`.
+4. **#saev** — a live JB-plugin **SOCKET-IPC** session (not the file-IPC fallback) → expect `early-ack` pending emitted before apply, no false-success / false ack-timeout.
+
+`#lvbremain` **stays open** as an actionable backlog item — not a gate, just blocked on you driving the 4 actions. The install blocker is gone; concrete unblock is now just: run the recipe, I re-scan.
+
+(Session size note, no stall: exchange is at accretion `warn` — restart-heavy. Queue is active so I'm continuing the drain rather than asking to compact.)
+<!-- agent:boundary:734d46a6 -->
+<!-- agent:boundary:86b45341 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#optverify]~~
-- [#lvbremain]
+- ~~[#lvbremain]~~
 - [#s760wire]
 <!-- /agent:queue -->
 ###

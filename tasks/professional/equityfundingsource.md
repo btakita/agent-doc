@@ -44,13 +44,30 @@ Done and deployed. The "Open investor profile" button on the admin Investor Pipe
 **What the 2nd-level dialog shows now** (investor role only):
 - **Account + Address** — the existing editable form (unchanged, still saves via `PUT /api/admin/users/:id`).
 - **Investor profile** (new section): **lender account**, **accreditation status**, **verification type**, **accreditation evidence on file**, **verified-on** / **renews-or-expires** dates, and **accreditation notes** — read from the existing `GET /api/admin/users/:id/investor-accreditation`.
+- **Investor Pipeline** (page → `/portal-admin/investor-pipeline`) ▸ **Investor Deals**, **Funding Commits**
+- **Deal Pipeline** (page → `/portal-admin/pipeline`) ▸ **Application Leads**, **Loan Applications**
 
 **Why those parts are read-only here:** the lender account is assigned through the lender-account request/approval flow, and accreditation has an Accredit/Reject decision workflow that already lives on the pipeline card (one level up, with reviewer + timestamp). Making them free-text fields in the generic profile form would bypass those flows, so the dialog surfaces them in full but routes edits to the right place (noted inline in the dialog).
 
 **Verification:** `bun test` **518 pass / 0 fail** (+1 new); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root and the borrower payments-config endpoint both return 200. No new D1 migrations (this is UI + an existing read endpoint).
 
 This deploy also shipped the previously-pushed **admin-configurable payments + borrower reveal panel** (`c790ed3`) and the earlier `#eyp0`/`#emrt` work that was awaiting a deploy.
-<!-- agent:boundary:b993f72a -->
+
+### Re: Nest Investor Pipeline under Deal Pipeline (collapsible nav groups) — opus-4-8
+
+Done and deployed. The admin sidebar was a flat list; it's now two clickable pipeline pages that each own a collapsible submenu, with **Investor Pipeline moved directly under Deal Pipeline**. Shipped EFS `fad9013`, deployed (version `f1a5c05b`).
+
+**New nav structure:**
+- **Deal Pipeline** (page → `/portal-admin/pipeline`) ▸ **Application Leads**, **Loan Applications**
+- **Investor Pipeline** (page → `/portal-admin/investor-pipeline`) ▸ **Investor Deals**, **Funding Commits**
+
+Both parent rows are still real links — clicking the label navigates to the pipeline page; a caret next to it expands/collapses the submenu. The group that owns the current page **auto-expands and highlights**, and detail pages map to their owning item (e.g. a lead detail keeps **Application Leads** lit). Count badges still render on both parents and children.
+
+I read "move under" as **reposition + group**, not literal 3-level nesting: your follow-up said each pipeline is its own page with its own submenu and listed each submenu's contents separately, so they're two sibling collapsible groups with Investor Pipeline placed right below Deal Pipeline. Contact Messages, Payments, Documents, etc. stay as top-level items.
+
+**Verification:** `bun test` **519 pass / 0 fail** (added a nav-structure test; updated the nav-highlight + ordering tests for the new tree); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root returns 200. No D1 migrations (UI + CSS only).
+<!-- agent:boundary:f4c17438 -->
+<!-- agent:boundary:c566ffa0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +75,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- "Open Investor Profile" button in https://equityfundingsource.brian-takita.workers.dev/portal-admin/investor-pipeline should open a 2nd level dialog with the entire investor profile form. deploy
+- Move "Investor Pipeline" under "Deal Pipeline". "Investor Pipeline" and "Deal Pipeline" are both pages and have a collapsed submenu. "Deal Pipeline" submenu contains "Application Leads", "Loan Applications" and "Deal Pipeline" submenu contains "Investor Deals", "Funding Commits"...since Deal Pipeline and Investor Pipeline already cover these items. deploy
 <!-- /agent:queue -->
 
 ## Backlog

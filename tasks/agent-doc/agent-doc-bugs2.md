@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -57,6 +57,11 @@ Drained the go-mode head. `#5b28` (the bug I filed last cycle when my own `--rev
 
 > **Queue prompt:**
 >
+> [#lvbremain]
+
+
+> **Queue prompt:**
+>
 > [#x9ds]
 
 
@@ -71,16 +76,12 @@ Drained the head. `#x9ds` is the harness fix that made `#lvbremain` always scan 
 **Verification:** `make check` green; both binaries rebuilt + installed + cdylib refreshed. Two new tests: `enforce_cross_session_claim_errors_on_reject` (asserts the reject marker reaches ops.log) and `early_ack_ops_marker_carries_predicate_token`. CI for `9b22d576` is pending — recording it and proceeding on local evidence; prior `#5b28` CI went green.
 
 **What this unblocks:** `#lvbremain` is now genuinely ops.log-verifiable for the two real binary markers — it can become an `#optverify`-gated review item that auto-proves when you drive the live scenario (claim from a 2nd-session pane; flip `EARLY_ACK_ENABLED` and drive an IPC patch). It still needs **operator** driving (and `#saev` needs `#saevon` to flip the flag) — that's the residual, not more binary code. Queue continues to `#lvbremain`.
-<!-- agent:boundary:5ac56dc0 -->
-<!-- agent:boundary:fe96d675 -->
+<!-- agent:boundary:d56f4671 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#5b28]~~
-- ~~[#x9ds]~~
-- [#lvbremain]
 <!-- /agent:queue -->
 ###
 <!--
@@ -110,13 +111,14 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#lvbremain] OPERATOR-DRIVE residual. #4wxr cross-session-reject DRIVEN + VERIFIED live 2026-06-10 (behavior correct; marker is stderr-only so ops.log scan cannot see it). Remaining markers are NOT verifiable via ops.log as currently coded — see #lvbverify (harness fix): #9adk run_clear_coalesce has no emission site; #saev early_ack_pending is stderr-only with a mismatched token; only visible_write_live_buffer_matches_disk hits ops.log. visible_write + #saev also need a live editor / JB SOCKET-IPC session driven by operator. Blocked on #lvbverify, not on operator driving. Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
+- [ ] [#gng8] agent-doc-bug (gate-verify ops.log prose false-positive): the ops.log gate-verify scan (scan_ops_log substring match) false-positives on document prose. queue_diff_active_prompt_differs logs prompt_changes content to ops.log, so backlog/response text mentioning a marker token (cross-session-reject, early_ack_pending, clear-decision) matches a bare-substring predicate — a gate can auto-prove from its own description rather than a genuine emission. Confirmed in this project ops.log: only 2 of 7 cross-session-reject hits are structured [claim] markers; 0 of the early_ack/clear-decision hits are real (the rest are queue_diff prose at lines 475047/475599). Fix: predicates match the full STRUCTURED marker prefix (e.g. the [claim] cross-session-reject pane_id= prefix), or exclude content-logging entries from gate-verify scans. Add SimWorld/unit coverage. Files: gate_verify.rs scan_ops_log; preflight.rs optverify; the queue_diff content-logging site. CLEAN session.
+- [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked on the gate-verify prose false-positive bug. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
+- [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#nnrt] operator live-verify (#s760d) of the destructive /clear path: on a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold and confirm ops.log shows the s760 clear-decision line flip to a true clear and that /clear fires exactly once at the boundary, with no false fire below threshold. Code shipped in submodule 1edb20d2 (start.rs idle-queue watch + context_pct gate). This gated item is the destructive-path live verification only; it cannot be discharged from a normal session.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

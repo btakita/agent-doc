@@ -87,15 +87,40 @@ Used `--force-disk` to bypass the IPC listener that's been corrupting this sessi
 **What's actually actionable (and where):**
 - `#pcpc1`→`#pcpc4` (actor runtime → supervisor adapter → ordered write queue → controller-owned watcher core) are **pure-Rust + SimWorld, no live editor needed** — but multi-day and dependency-ordered. These belong in a **fresh dedicated session at `#pcpc1`**, `make check` + `cargo install` + `cargo build --release` per phase.
 - `#pcpc5` cutover (08b gate ladder: shadow→dual-write→read-switch→authority→removal) + the `#pcpc4` plugin WatchService read-only demote (`#pcp7`) are **operator-run live-gated** — they need a live IntelliJ/Codex pane to prove the editor boundary. Steps 1–2 already proven (`#pcpc5live`); only step 3 (pcpc5d/e) remains and is spec-08b-blocked from any response cycle.
+- Refactored the I/O `directive_response_materialized` into a pure `directive_response_source` (exchange/archive/none) driving the `found`/`source` fields; dropped the now-stale `#[allow(dead_code)]` dormancy markers.
+- The warn/error **escalation** stays scoped to reap-only / bookkeeping closeouts (no capture this cycle). On captured cycles the diagnostic still records the captured-but-id-lost residual, but the known multi-id-single-heading false-positive class must never wedge a committed closeout, so it does not escalate there. This honors the explicit `#z2jy` doc warning ("a false positive would wedge all closeouts").
+- For each reaped `do #id` directive head it emits `bkx9 directive_response_materialized id=<id> found=<bool> source=<exchange|archive>` to ops.log. A reproduced `#ipc-crdt-response-drift` logs `found=false` (the catch); a multi-id-under-one-heading cycle logs `found=true` per id (proves no false positive). **No live-verify** — the proof is the log marker.
+- The guard previously short-circuited to `None` the moment a capture existed this cycle, so the `#z2jy` `reaped_directive_ids_without_response` detector never ran on real response cycles. Now the per-id check runs **even when a capture exists**.
 
 **To start it:** open a fresh Claude Code window and run `/agent-doc tasks/agent-doc/plan-supervisor-in-process.md` (or a plain session pointed at that plan), beginning at `#pcpc1`. I've queued `#pcpc1` as an actionable backlog item here so the entry point is concrete. I'm leaving the rest of this doc's degraded queue alone rather than draining it underneath you.
-<!-- agent:boundary:608e9a7e -->
+
+### Re: do #bkx9wire — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#bkx9wire]
+
+
+Done — wired the dormant per-id response-loss detector into the live reaped-queue guard (agent-doc submodule, committed locally; `make check` green, binary + release rebuilt + installed at 0.34.0).
+
+**What changed** (`session_check.rs`, `check_reaped_queue_head_without_response`):
+- The guard previously short-circuited to `None` the moment a capture existed this cycle, so the `#z2jy` `reaped_directive_ids_without_response` detector never ran on real response cycles. Now the per-id check runs **even when a capture exists**.
+- For each reaped `do #id` directive head it emits `bkx9 directive_response_materialized id=<id> found=<bool> source=<exchange|archive>` to ops.log. A reproduced `#ipc-crdt-response-drift` logs `found=false` (the catch); a multi-id-under-one-heading cycle logs `found=true` per id (proves no false positive). **No live-verify** — the proof is the log marker.
+- The warn/error **escalation** stays scoped to reap-only / bookkeeping closeouts (no capture this cycle). On captured cycles the diagnostic still records the captured-but-id-lost residual, but the known multi-id-single-heading false-positive class must never wedge a committed closeout, so it does not escalate there. This honors the explicit `#z2jy` doc warning ("a false positive would wedge all closeouts").
+- Refactored the I/O `directive_response_materialized` into a pure `directive_response_source` (exchange/archive/none) driving the `found`/`source` fields; dropped the now-stale `#[allow(dead_code)]` dormancy markers.
+
+**Coverage:** existing pure-detector tests (reap-only loss, captured-but-id-lost residual, archive materialization, multi-id false-positive class) stay green; added `directive_response_source_resolves_found_and_source_for_bkx9_diagnostic` pinning the three emitted shapes. Full suite: 183 session_check tests pass, `make check` clean.
+
+CI note: the submodule commit is local (not pushed), so CI hasn't run it; closing on local `make check` evidence. This is a pure closeout-guard change — no tmux/route surface touched.
+<!-- agent:boundary:6b02f742 -->
+<!-- agent:boundary:2a3de9c2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Do the PCP~~
+- ~~:pushpin: do [#bkx9wire]~~
 - :round_pushpin: do [#saevon]
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - :round_pushpin: do [#pcpc5live]
@@ -103,7 +128,6 @@ Used `--force-disk` to bypass the IPC listener that's been corrupting this sessi
 - :round_pushpin: do [#s760wire]
 - ~~:round_pushpin: do [#bkx9perid]~~
 - :pushpin: [#optverify]
-- do [#bkx9wire]
 <!-- /agent:queue -->
 ###
 <!--
@@ -133,7 +157,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#bkx9wire] Wire the dormant per-id response-loss detector (#z2jy, session_check.rs reaped_directive_ids_without_response) into check_reaped_queue_head_without_response even when a capture exists. Emit 'bkx9 directive_response_materialized id=<id> found=<bool> source=<exchange|archive>' so a drift repro logging found=false proves the catch and a multi-id-under-one-heading cycle logging found=true proves no false positive (no live-verify). Continuation of archived #bkx9perid; spec specs/07-closeout-commands.md #compact-reap-no-response-record.
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
 - [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 - [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.

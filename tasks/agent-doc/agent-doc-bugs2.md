@@ -35,14 +35,15 @@ complete
 Compacted content:
 - Archived 9 response topic(s): #optverify; #optverify; #lvbremain; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c6af33f8 -->
+<!-- agent:boundary:bdfd0810 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~do [#s760wire]~~
-- do [#x9ds]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#5b28]
+- [#x9ds]
+- [#lvbremain]
 <!-- /agent:queue -->
 ###
 <!--

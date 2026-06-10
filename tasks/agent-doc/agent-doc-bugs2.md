@@ -76,7 +76,24 @@ Drained the head. `#x9ds` is the harness fix that made `#lvbremain` always scan 
 **Verification:** `make check` green; both binaries rebuilt + installed + cdylib refreshed. Two new tests: `enforce_cross_session_claim_errors_on_reject` (asserts the reject marker reaches ops.log) and `early_ack_ops_marker_carries_predicate_token`. CI for `9b22d576` is pending — recording it and proceeding on local evidence; prior `#5b28` CI went green.
 
 **What this unblocks:** `#lvbremain` is now genuinely ops.log-verifiable for the two real binary markers — it can become an `#optverify`-gated review item that auto-proves when you drive the live scenario (claim from a 2nd-session pane; flip `EARLY_ACK_ENABLED` and drive an IPC patch). It still needs **operator** driving (and `#saev` needs `#saevon` to flip the flag) — that's the residual, not more binary code. Queue continues to `#lvbremain`.
-<!-- agent:boundary:d56f4671 -->
+
+### Re: #lvbremain — honest log audit + cleared the gate per your directive — opus-4-8
+
+`#lvbremain` stays OPEN as operator-drive: `#4wxr` is verified but `#saev` + `visible_write` still need live driving, so this response is not a completion.
+
+I checked the logs (your workflow: you drive, I check). Honest per-marker status for `#lvbremain`:
+
+- **#4wxr cross-session-reject** — driven + verified live: **2 genuine structured `[claim] cross-session-reject pane_id=…` markers** in ops.log.
+- **#9adk run_clear_coalesce** — plugin-side (`idea.log` `InvocationCoalescer`), operator-verified via `#lvbatch`. Not an ops.log marker (corrected in `#x9ds`).
+- **#saev early_ack_pending** — **0** structured markers. Needs `EARLY_ACK_ENABLED` flipped (`#saevon`) + a live SOCKET-IPC drive. Operator-only.
+- **visible_write_live_buffer_matches_disk** — needs a live editor buffer==disk write. Operator-only.
+
+**New bug found while auditing (`#gng8`, filed top of backlog).** The ops.log gate-verify scan substring-matches **document prose**: `queue_diff_active_prompt_differs` logs `prompt_changes=[…]` content to ops.log, so a backlog/response line that merely *mentions* a token matches a bare-substring predicate — a gate could auto-prove from its own description. Confirmed: only 2 of 7 `cross-session-reject` hits are real markers; the rest are prose. Fix: match the full structured marker prefix (or exclude content-logging from the scan). This blocks reliable auto-proof.
+
+**Per your directive (no more gates):** cleared the gated review item `#nnrt` (the `#s760d` destructive-/clear verify) and converted it to an operator-drive backlog item (`#ktw8`). `agent:review` is now empty.
+
+**Halting the go-mode drain here — not auto-looping.** The two remaining `#lvbremain` markers (`#saev`, `visible_write`) and `#ktw8` (destructive `/clear`) are things only you can drive live; `#gng8` is a clean-session code fix. Looping would just re-present `#lvbremain` with no progress (the 7-cycle pattern). When you drive the live scenarios, I'll check ops.log for the **structured** markers. No JB plugin update needed this round (no `.kt`/FFI change).
+<!-- agent:boundary:4ffe5f47 -->
 <!-- /agent:exchange -->
 
 ## Queue

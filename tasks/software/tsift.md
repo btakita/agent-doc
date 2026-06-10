@@ -32,64 +32,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260610-183527.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260610-185850.md`*
 
 Compacted content:
-- Archived 1 response topic(s): headroom investigation repair
+- Archived 1 response topic(s): next-steps closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: next-steps — gpt-5
-
-> **Queue prompt:**
->
-> What are #next-steps to fix tsift bugs?
-
-
-I added the follow-up backlog in priority order.
-
-Top backlog item: #hdrccr.
-
-Priority order:
-1. #hdrccr — reversible retrieval handles for truncated search/source/context-pack/digest output. This should be first because it fixes the core failure mode where useful evidence is omitted and cannot be recovered without rerunning broader commands.
-2. #hdrsmart — adaptive sampling for large JSON/list outputs. This should follow because it makes bounded envelopes preserve errors, anomalies, first/last rows, and query-relevant rows before generic truncation.
-3. #hdrcache — stable-prefix packet layout checks. This is next because cache instability creates recurring cost and context churn, but it depends less directly on correctness than recoverable evidence.
-4. #hdrlearn — failure-learning mining over session-review/log-digest/test-digest history. This is useful once retrieval and sampling preserve the evidence needed to mine repeated failures.
-5. #hdrmcp — first-party MCP tools for compress/retrieve/stats-style workflows. This is valuable integration work, but should wait until the retrieval and statistics contracts are sharper.
-
-Proof:
-- Changed paths: session document/backlog only via agent-doc finalize.
-- Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, archived context reads, and `agent-doc finalize`.
-- Verification: document-only backlog capture; no tsift code tests were run.
-- Confidence: high.
-- Escalation: none.
-
-### Re: next-steps closeout repair — gpt-5
-
-Handled the closeout drift from the prior response and re-added the follow-up backlog with fresh active ids. The previous `hdr*` ids are already present in completed history, so the live backlog uses new ids.
-
-Top backlog item id: `hccr2`.
-
-Priority order:
-1. `hccr2` - reversible retrieval handles for truncated evidence.
-2. `hsmart2` - adaptive sampling for oversized structured outputs.
-3. `hcache2` - stable-prefix and prompt-cache layout checks.
-4. `hlearn2` - failure-learning mining over session and digest history.
-5. `hmcp2` - first-party MCP tools for tsift envelopes and retrieval stats.
-
-The earlier `hdrlearn`, `hdrcache`, `hdrsmart`, and `hdrccr` lines were prior-response summary lines, not fresh user directives.
-
-Proof:
-- Changed paths: session document/backlog only via agent-doc finalize.
-- Commands: `agent-doc repair --apply-recovery`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and `agent-doc finalize`.
-- Verification: document-only backlog capture; no tsift code tests were run.
-- Confidence: high.
-- Escalation: none.
-<!-- agent:boundary:f01e7e2e -->
+<!-- agent:boundary:8e15b0ae -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

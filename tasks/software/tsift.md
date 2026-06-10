@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -122,16 +122,27 @@ Completed `#cbmsearch` with a committed implementation. Search preview hits now 
 Changed paths in the tsift submodule: `packages/tsift-cli/src/search_budget.rs`, `packages/tsift-cli/src/lib.rs`, and `specs/output-formats.md`. Added focused unit coverage for exact-hit source-handle/containing-symbol enrichment and source-definition ranking before tests. Updated the output-format spec to make the new nested hit fields part of the preview contract. Commits: `src/tsift` `0e71761 feat: augment search preview hits`; parent repo `216d1f1c5 tsift: augment search preview hits`.
 
 Verification: `cargo test -p tsift-cli search_budget_ -- --nocapture` passed; `make check` passed, including clippy, full Rust workspace tests/doc-tests, OpenCode npm tests, and npm pack dry run. Latest GitHub Actions check inspected with `gh run list --workflow CI --limit 1`: run `27287546999` completed `success` on `2026-06-10T15:37:26Z`. Residual note: the tsift submodule still has unrelated pre-existing dirty files, including an import-order-only hunk in `packages/tsift-cli/src/search_budget.rs`; those were intentionally left out of this commit. Escalation: none.
-<!-- agent:boundary:a838d06e -->
+
+### Re: install/trust UX comparison — gpt-5
+
+> **Queue prompt:**
+>
+> [#cbmtrust]
+
+
+Completed `#cbmtrust` as a design comparison only; no tsift source or Rust architecture changed. Upstream codebase-memory-mcp has a stronger single-command trust story today: the README advertises platform archives, static binaries, SHA-256 checksums, setup scripts, AUR install, and agent-mediated install; its current `install.sh` detects OS/arch, refuses non-HTTPS download URLs except localhost, downloads a latest-release archive, verifies `checksums.txt`, installs the binary, and then runs `codebase-memory-mcp install -y` unless `--skip-config` is passed. Its security policy also claims release-time SLSA provenance, Sigstore/cosign signatures, SBOMs, SHA-256 checksums, VirusTotal blocking scans, OpenSSF Scorecard, native AV checks, CodeQL, fuzzing, and other release gates. The multi-agent UX matters because v0.5.0 release notes describe auto-configuring multiple coding agents, and the later security-hardening issue says `install --plan` / a machine-readable install receipt was added so config/hook writes can be inspected before mutation. Sources checked: https://github.com/DeusData/codebase-memory-mcp, https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh, https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/SECURITY.md, https://github.com/DeusData/codebase-memory-mcp/releases, https://github.com/DeusData/codebase-memory-mcp/issues/397, and https://github.com/DeusData/codebase-memory-mcp/issues/388.
+
+tsift already has the right architectural base but a thinner trust wrapper. Its release workflow is tag-driven, checks that all crate versions match the `vX.Y.Z` tag, runs the full CI/package checks, publishes GitHub release archives for Linux x86_64, macOS arm64, and Windows x86_64, attaches per-asset `.sha256` files, publishes crates.io packages, and publishes the OpenCode npm plugin through OIDC trusted publishing. The local `scripts/install.sh` verifies the downloaded archive against the matching `.sha256` before copying `tsift` into `~/.local/bin`, but it only covers Linux x86_64 and macOS arm64, does not expose attestation/SBOM/scan verification, and does not configure agents. Agent integration is intentionally separate: `tsift init` writes managed `AGENTS.md`/`CLAUDE.md` instruction sections, can install a Codex `UserPromptSubmit` hook, and can install OpenCode commands. Those config writes are already idempotent and marker-aware: existing managed blocks become `already present` or `updated`, duplicates are removed for Codex hooks, and unmanaged OpenCode command files fail closed instead of being clobbered. Local sources checked: `src/tsift/scripts/install.sh`, `src/tsift/specs/release-integration.md`, `src/tsift/.github/workflows/release.yml`, `src/tsift/packages/tsift-index/src/init.rs`, and `src/tsift/packages/opencode-tsift/src/install.js`.
+
+Recommendation: copy the trust UX, not the C/static-binary architecture. Keep tsift's Rust workspace, Cargo install path, SQLite graph store, and split crates. Add a thin trust layer in three pieces: first, extend releases with an aggregate `checksums.txt`, GitHub build provenance attestations, an SBOM, and documented `gh attestation verify` / checksum verification steps; add scan gates only where they are deterministic enough not to create noisy release blocks. Second, add a JSON plan/receipt mode to the existing init path, e.g. `tsift init --plan --codex --opencode [--workspace]`, returning planned files, hook events, command sources, created/updated/already-present/conflict actions, redacted paths where appropriate, `writes_started=false`, and the next apply command. Third, let `scripts/install.sh` remain a binary installer by default but optionally chain to that plan/apply flow, for example `--agent-config codex,opencode --plan` and `--agent-config codex,opencode --yes`, so agents can verify binary provenance and config mutations in one flow without moving config-writing logic out of Rust.
+
+Priority order for tsift: `init --plan`/receipt first, because it directly addresses sensitive agent config upserts and can reuse the current idempotent init code; release attestations/SBOM second, because they strengthen binary trust without changing runtime behavior; installer chaining third, because it is mainly UX once the binary and init plan surfaces are trustworthy. Verification: no build/test run was needed because this cycle made no source, spec, or workflow edits. Commands/proof: `agent-doc preflight`, `tsift status`, `tsift --envelope source-read`, `tsift --envelope symbol-read`, `tsift --envelope search`, local release/install file reads, `git status`, and upstream primary-source review. Escalation: none.
+<!-- agent:boundary:b38c7fe5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#cbmsnap]~~
-- ~~[#cbmquery]~~
-- ~~[#cbmsearch]~~
-- [#cbmtrust]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -140,7 +151,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cbmtrust] [recommended] Compare codebase-memory-mcp's single-binary install/trust UX against tsift release/install flow, including checksums, attestations/scans, and idempotent agent config upserts, without changing tsift's Rust architecture.
 <!-- /agent:backlog -->
 
 ## Review

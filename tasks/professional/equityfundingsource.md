@@ -31,68 +31,12 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-023457.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-041629.md`*
 
 Compacted content:
-- Archived 14 response topic(s): Deal Pipeline controls in the admin dialog (+ deploy); Wider/shorter Deal Pipeline dialog + mobile scroll; deploy; 11 more
+- Archived 4 response topic(s): "Open Investor Profile" → full investor profile in the 2nd-level dialog; Nest Investor Pipeline under Deal Pipeline (collapsible nav groups); Website rename + tab-menu pipelines + drop nav submenus; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: "Open Investor Profile" → full investor profile in the 2nd-level dialog — opus-4-8
-
-Done and deployed. The "Open investor profile" button on the admin Investor Pipeline card already opened a stacked 2nd-level dialog (`#b0wq`), but it only carried the **account + address** editor. It now shows the **entire investor profile**. Shipped EFS `b3e9ddd`, deployed (version `9652f4ab`).
-
-**What the 2nd-level dialog shows now** (investor role only):
-- **Account + Address** — the existing editable form (unchanged, still saves via `PUT /api/admin/users/:id`).
-- **Investor profile** (new section): **lender account**, **accreditation status**, **verification type**, **accreditation evidence on file**, **verified-on** / **renews-or-expires** dates, and **accreditation notes** — read from the existing `GET /api/admin/users/:id/investor-accreditation`.
-- **Investor Pipeline** (page → `/portal-admin/investor-pipeline`) ▸ **Investor Deals**, **Funding Commits**
-- **Deal Pipeline** (page → `/portal-admin/pipeline`) ▸ **Application Leads**, **Loan Applications**
-
-**Why those parts are read-only here:** the lender account is assigned through the lender-account request/approval flow, and accreditation has an Accredit/Reject decision workflow that already lives on the pipeline card (one level up, with reviewer + timestamp). Making them free-text fields in the generic profile form would bypass those flows, so the dialog surfaces them in full but routes edits to the right place (noted inline in the dialog).
-
-**Verification:** `bun test` **518 pass / 0 fail** (+1 new); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root and the borrower payments-config endpoint both return 200. No new D1 migrations (this is UI + an existing read endpoint).
-
-This deploy also shipped the previously-pushed **admin-configurable payments + borrower reveal panel** (`c790ed3`) and the earlier `#eyp0`/`#emrt` work that was awaiting a deploy.
-
-### Re: Nest Investor Pipeline under Deal Pipeline (collapsible nav groups) — opus-4-8
-
-Done and deployed. The admin sidebar was a flat list; it's now two clickable pipeline pages that each own a collapsible submenu, with **Investor Pipeline moved directly under Deal Pipeline**. Shipped EFS `fad9013`, deployed (version `f1a5c05b`).
-
-**New nav structure:**
-- **Deal Pipeline** (page → `/portal-admin/pipeline`) ▸ **Application Leads**, **Loan Applications**
-- **Investor Pipeline** (page → `/portal-admin/investor-pipeline`) ▸ **Investor Deals**, **Funding Commits**
-
-Both parent rows are still real links — clicking the label navigates to the pipeline page; a caret next to it expands/collapses the submenu. The group that owns the current page **auto-expands and highlights**, and detail pages map to their owning item (e.g. a lead detail keeps **Application Leads** lit). Count badges still render on both parents and children.
-
-I read "move under" as **reposition + group**, not literal 3-level nesting: your follow-up said each pipeline is its own page with its own submenu and listed each submenu's contents separately, so they're two sibling collapsible groups with Investor Pipeline placed right below Deal Pipeline. Contact Messages, Payments, Documents, etc. stay as top-level items.
-
-**Verification:** `bun test` **519 pass / 0 fail** (added a nav-structure test; updated the nav-highlight + ordering tests for the new tree); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root returns 200. No D1 migrations (UI + CSS only).
-
-### Re: Website rename + tab-menu pipelines + drop nav submenus — opus-4-8
-
-Done and deployed (EFS `001034c`, version `7c983e32`). Three changes:
-
-**1. Public Content → Website.** Renamed the section + label + page title, and moved the route `/portal-admin/public-contents` → `/portal-admin/website`. Old URLs **301-redirect** to the new ones (verified live). The data API (`/api/admin/public-content`) is untouched.
-
-**2. Website-style tab menu on both pipeline pages.** Reused the same "Pages | Blog Posts | Funded Deals" segmented menu (extracted as a shared `PortalTabs` + `?tab=` sync helper):
-- **Deal Pipeline** → `Pipeline` · `Application Leads` · `Loan Applications`
-- **Investor Pipeline** → `Pipeline` · `Investor Deals` · `Funding Commits`
-
-The lists render in-page (added an `embedded` mode to Application Leads, Investor Deals, Funding Commits; Loan Applications already had one), so the active tab is remembered across reloads via the URL.
-
-**3. Removed the left-nav submenus.** The sidebar is flat again — **Deal Pipeline** and **Investor Pipeline** are single items; the four sub-lists are now tabs rather than nav entries. Their pages (and detail pages like a lead or funding detail) highlight their parent pipeline item.
-
-**Verification:** `bun test` **519 pass / 0 fail** (updated the nav/route/section tests for the new structure); `build` + `build:worker` clean. Deployed — root 200, `/portal-admin/website` reachable, `/portal-admin/public-contents` → 301 → `/portal-admin/website`. No D1 migrations.
-
-### Re: Messages hub — Portal + Contact Messages tabs, chat moved to /portal-messages — opus-4-8
-
-Done and deployed (EFS `8357ee3`, version `42a39fef`). Same tab pattern as the Website/pipeline pages:
-
-- **Moved the portal chat** from `/portal-admin/messages` to **`/portal-admin/portal-messages`** (new `portal-messages` section). Old chat deep-links (`/portal-admin/messages/:id`) **301-redirect** to the new URL (verified live).
-- **`/portal-admin/messages` is now a Messages hub** with the segmented tab menu: **Portal Messages** (the chat, default) and **Contact Messages** — each embedded in-page, with `?tab=` remembered across reloads.
-- **Removed the standalone "Contact Messages" left-nav item.** The main nav keeps a single **Messages** item that opens the hub; Contact Messages (and its detail page) now highlight the Messages item.
-
-**Verification:** `bun test` **520 pass / 0 fail** (+1 new, updated the contact-messages nav test); `build` + `build:worker` clean. The first `deploy:worker` attempt hit a transient Cloudflare error; the retry deployed cleanly. Live checks: root 200, `/portal-admin/messages` and `/portal-admin/portal-messages` reachable, `/portal-admin/messages/:id` → 301 → `/portal-admin/portal-messages/:id`. No D1 migrations.
-<!-- agent:boundary:e327a475 -->
+<!-- agent:boundary:62f7e562 -->
 <!-- /agent:exchange -->
 ###
 <!--

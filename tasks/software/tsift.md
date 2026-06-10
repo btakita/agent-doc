@@ -37,17 +37,39 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7c910a53 -->
+
+### Re: queue duplicate cleanup — gpt-5
+
+> **Queue prompt:**
+>
+> [#hccr2]
+>
+> [#hsmart2]
+>
+> [#hcache2]
+>
+> [#hlearn2]
+>
+> [#hmcp2]
+
+
+Preflight found the current queue head `#hccr2` is already satisfied by archived completion `#hdrccr`. I checked the sibling headroom-derived items too and closed the duplicated set: `#hccr2`, `#hsmart2`, `#hcache2`, `#hlearn2`, and `#hmcp2`.
+
+No source files changed in this cycle. Commands/proof: `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` repaired prior queue metadata drift; `tsift status` and `tsift index --workspace .` refreshed navigation; `rg` confirmed the archived matches in `tasks/software/tsift.done.md`. No build/test run was needed because this was backlog cleanup only.
+
+Verification confidence: high for duplicate cleanup. Escalation: none. `#cmmcp-eval` remains queued as the next substantive tsift evaluation item.
+<!-- agent:boundary:327c57d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#hccr2]
-- [#hsmart2]
-- [#hcache2]
-- [#hlearn2]
-- [#hmcp2]
+- ~~[#hccr2]~~
+- ~~[#hsmart2]~~
+- ~~[#hcache2]~~
+- ~~[#hlearn2]~~
+- ~~[#hmcp2]~~
+- :pushpin: [#cmmcp-eval]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -57,11 +79,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#cmmcp-eval] [recommended] Evaluate DeusData/codebase-memory-mcp (https://github.com/DeusData/codebase-memory-mcp) as a tsift idea-source — NOT a replacement. Pure-C zero-dep single binary, 159 tree-sitter grammars, SQLite knowledge graph, Cypher-like read-only query language + BM25 + regex + bundled-embedding vector search, Hybrid-LSP type resolution (Py/TS/Go/PHP/C#/C/C++), team-shareable compressed graph artifact (.codebase-memory/graph.db.zst), 3D graph viz, PreToolUse grep/glob augmentation hook, 14 MCP tools. Port-worthy ideas to assess: (1) Cypher-like graph query language as a first-class agent interface vs our graph --callers/--callees; (2) committed/shareable compressed graph artifact so teammates+CI skip re-indexing; (3) pure-C zero-toolchain single-binary install; (4) grep/glob result augmentation. MIT, 3.1k stars, active. tsift keeps the edge on agent-doc integration (rewrite hooks, digest-runner, session-review, diff-digest, envelope budgets/scale_guard).
-- [ ] [#hccr2] [recommended] Implement reversible retrieval handles for truncated tsift search/source/context-pack/digest output, storing omitted originals in .tsift/cache with query-scoped retrieve commands.
-- [ ] [#hsmart2] [recommended] Add adaptive sampling for large JSON/list outputs in tsift envelopes and digests, preserving errors, first/last rows, anomalies, and query-relevant rows before budget truncation.
-- [ ] [#hcache2] [recommended] Add stable-prefix and prompt-cache layout checks to session-review/context-pack output, separating stable instructions/evidence from volatile dates, paths, watermarks, and run ids.
-- [ ] [#hlearn2] [recommended] Add failure-learning mining over session-review/log-digest/test-digest history, producing marker-owned AGENTS or tsift-memory corrections for repeated command/path/search failures.
-- [ ] [#hmcp2] [recommended] Add first-party tsift MCP tools for compress/retrieve/stats-style workflows, reusing existing envelope, digest, and token-savings metrics rather than requiring a proxy.
 <!-- /agent:backlog -->
 
 ## Review

@@ -35,13 +35,30 @@ complete
 Compacted content:
 - Archived 9 response topic(s): #optverify; #optverify; #lvbremain; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:bdfd0810 -->
+
+### Re: do #5b28 — fixed ops-proof same-cycle auto-completion — opus-4-8
+
+> **Queue prompt:**
+>
+> [#5b28]
+
+
+Drained the go-mode head. `#5b28` (the bug I filed last cycle when my own `--review-add` got auto-completed) is fixed, tested, built, installed, committed (`5cfba9e6`), pushed.
+
+**Root cause:** ops-proof auto-completion is a text heuristic, not a gate-verify predicate — `classify_ops_proof_completion` reaps a **gated** item when its text carries a completion marker (SHIPPED/DONE/…) plus a commit hash. My `#s760d` gate said "Code **shipped** 1edb20d2", so it qualified. The existing `#opsproof-falsepos` guard is supposed to exclude brand-new same-cycle adds by comparing against the cycle-start snapshot — but in the `finalize`/`write` path the **same invocation** that runs `--review-add` re-syncs the on-disk snapshot to include the new item, so the snapshot already contains it and the snapshot-only test can't tell it apart from a pre-existing item.
+
+**Fix:** the add primitives (`--pending-add`, `--pending-add-gated`, `--review-add`) now record the ids they create in `cycle_state.pending_added_ids`, and the reap in `run_pending_maintenance` excludes any id added this cycle — a signal the same-invocation snapshot re-sync can't poison. `review_add` now returns its assigned id; new `cycle_state::{record_pending_added_ids, pending_added_ids}`. Regression test `ops_proof_does_not_reap_same_cycle_added_gated_item` models the poisoned-snapshot case and asserts the fresh gate survives.
+
+**Verification:** `make check` green (clippy `-D warnings` + full suite); both binaries rebuilt + installed; JB cdylib refreshed via `lib-install` (cleared the preflight `stale_install` warning). CI for `5cfba9e6` is in progress — recording it pending and proceeding on local evidence per the test-bearing-turn rule; the prior `s760c` CI run passed.
+
+**Note:** `#s760d` (the operator-verify gate) is intact in `agent:review` — it survived because its text says "cannot be discharged from a normal session," which trips the blocker-phrase guard; the new same-cycle-add fix is the durable protection. Queue continues to `#x9ds`.
+<!-- agent:boundary:797aab53 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#5b28]
+- ~~[#5b28]~~
 - [#x9ds]
 - [#lvbremain]
 <!-- /agent:queue -->
@@ -73,7 +90,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#5b28] agent-doc-bug (#optverify same-cycle auto-prove): a review item added via --review-add whose text contains an inline gate-verify predicate substring is parsed as a predicate AND auto-completed in the SAME finalize/write cycle it was created (observed 2026-06-10: review item a7qh added + auto-completed in one finalize, emptying agent:review). A freshly set gate must never auto-prove in the cycle it was set — its set_at stamp should exclude same-cycle markers, and same-cycle add+auto-complete should be impossible. Likely in gate_verify scan vs set_at ordering during closeout reap. Repro: --review-add text containing an ops-log predicate token with agent_doc_gate_autoverify on. Fix in the binary (gate_verify/preflight reap), add SimWorld coverage. CLEAN session.
 - [ ] [#x9ds] agent-doc-bug (root cause of #lvbremain always-0): the ops.log gate-verify harness is broken — 3 of 4 #lvbremain markers are NEVER written to ops.log, so the scan is always 0 regardless of operator driving. (1) cross-session-reject (#4wxr): claim.rs:182 eprintln!s "[claim] cross-session-reject ..." to STDERR only (plugin branch signal), never ops.log — DRIVEN LIVE 2026-06-10 via claim --pane %43 (session 5 vs configured 9): behavior CORRECT (reject before register, no ownership change). (2) run_clear_coalesce (#9adk): ZERO emission sites in the whole codebase — phantom marker, never wired. (3) early_ack_pending (#saev): ipc_socket.rs:444 eprintln!s "[ipc-socket] early-ack pending emitted before apply" to STDERR; gate predicate expects ops.log token early_ack_pending — wrong stream AND wrong string. Only visible_write_live_buffer_matches_disk (write.rs:6675) actually log_ops to ops.log (and needs a live editor buffer==disk write). FIX: add ops_log::log_op alongside the stderr eprintln! for cross-session-reject + early-ack using the exact predicate tokens; wire run_clear_coalesce in route.rs/sync.rs (or repoint the predicate to an existing coalesce marker); align the #saev predicate token. Multi-file + needs make check + CI = do in a CLEAN session. NOTE: scripts/xdotool-live-verify.sh referenced by #lvbremain DOES NOT EXIST.
 - [ ] [#lvbremain] OPERATOR-DRIVE residual. #4wxr cross-session-reject DRIVEN + VERIFIED live 2026-06-10 (behavior correct; marker is stderr-only so ops.log scan cannot see it). Remaining markers are NOT verifiable via ops.log as currently coded — see #lvbverify (harness fix): #9adk run_clear_coalesce has no emission site; #saev early_ack_pending is stderr-only with a mismatched token; only visible_write_live_buffer_matches_disk hits ops.log. visible_write + #saev also need a live editor / JB SOCKET-IPC session driven by operator. Blocked on #lvbverify, not on operator driving. Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
 <!-- /agent:backlog -->

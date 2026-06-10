@@ -30,75 +30,21 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-154504.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-165015.md`*
 
 Compacted content:
-- Archived 9 response topic(s): #optverify; #optverify; #lvbremain; 6 more
+- Archived 3 response topic(s): do #5b28; do #x9ds; #lvbremain
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #5b28 — fixed ops-proof same-cycle auto-completion — opus-4-8
-
-> **Queue prompt:**
->
-> [#5b28]
-
-
-Drained the go-mode head. `#5b28` (the bug I filed last cycle when my own `--review-add` got auto-completed) is fixed, tested, built, installed, committed (`5cfba9e6`), pushed.
-
-**Root cause:** ops-proof auto-completion is a text heuristic, not a gate-verify predicate — `classify_ops_proof_completion` reaps a **gated** item when its text carries a completion marker (SHIPPED/DONE/…) plus a commit hash. My `#s760d` gate said "Code **shipped** 1edb20d2", so it qualified. The existing `#opsproof-falsepos` guard is supposed to exclude brand-new same-cycle adds by comparing against the cycle-start snapshot — but in the `finalize`/`write` path the **same invocation** that runs `--review-add` re-syncs the on-disk snapshot to include the new item, so the snapshot already contains it and the snapshot-only test can't tell it apart from a pre-existing item.
-
-**Fix:** the add primitives (`--pending-add`, `--pending-add-gated`, `--review-add`) now record the ids they create in `cycle_state.pending_added_ids`, and the reap in `run_pending_maintenance` excludes any id added this cycle — a signal the same-invocation snapshot re-sync can't poison. `review_add` now returns its assigned id; new `cycle_state::{record_pending_added_ids, pending_added_ids}`. Regression test `ops_proof_does_not_reap_same_cycle_added_gated_item` models the poisoned-snapshot case and asserts the fresh gate survives.
-
-**Verification:** `make check` green (clippy `-D warnings` + full suite); both binaries rebuilt + installed; JB cdylib refreshed via `lib-install` (cleared the preflight `stale_install` warning). CI for `5cfba9e6` is in progress — recording it pending and proceeding on local evidence per the test-bearing-turn rule; the prior `s760c` CI run passed.
-
-**Note:** `#s760d` (the operator-verify gate) is intact in `agent:review` — it survived because its text says "cannot be discharged from a normal session," which trips the blocker-phrase guard; the new same-cycle-add fix is the durable protection. Queue continues to `#x9ds`.
-
-### Re: do #x9ds — landed the #lvbremain markers in ops.log (and corrected one) — opus-4-8
-
-> **Queue prompt:**
->
-> [#lvbremain]
-
-
-> **Queue prompt:**
->
-> [#x9ds]
-
-
-Drained the head. `#x9ds` is the harness fix that made `#lvbremain` always scan 0. Shipped, tested, built, installed, committed (`9b22d576`), pushed.
-
-**What I found and fixed.** Three of four `#lvbremain` markers never reached `ops.log`:
-- **cross-session-reject (`#4wxr`)** — `claim.rs` emitted the structured reject marker to **stderr only** (the plugin-branch channel). Now it also `log_op`s `[claim] cross-session-reject pane_id=.. pane_session=.. configured=..` to `ops.log` (threaded the doc path into `enforce_cross_session_claim`).
-- **early_ack_pending (`#saev`)** — `ipc_socket.rs` emitted `[ipc-socket] early-ack pending emitted before apply` to stderr; that hyphenated text never contained the `early_ack_pending` **token** the predicate scans for. Now it also `log_op`s a marker carrying the exact token (new testable `early_ack_ops_marker()`).
-- **run_clear_coalesce (`#9adk`)** — this one was a **category error in the item**, not a missing emission. There is no `run_clear_coalesce` behavior in the binary: `#9adk` is the JetBrains-plugin `InvocationCoalescer` (Run/Clear dedup), whose marker goes to **idea.log** and is operator-verified via `#lvbatch`. There's nothing to wire in Rust; I dropped the false ops.log expectation rather than invent a phantom emission.
-- **visible_write_live_buffer_matches_disk** — already `log_op`s (`write.rs`), unchanged.
-
-**Verification:** `make check` green; both binaries rebuilt + installed + cdylib refreshed. Two new tests: `enforce_cross_session_claim_errors_on_reject` (asserts the reject marker reaches ops.log) and `early_ack_ops_marker_carries_predicate_token`. CI for `9b22d576` is pending — recording it and proceeding on local evidence; prior `#5b28` CI went green.
-
-**What this unblocks:** `#lvbremain` is now genuinely ops.log-verifiable for the two real binary markers — it can become an `#optverify`-gated review item that auto-proves when you drive the live scenario (claim from a 2nd-session pane; flip `EARLY_ACK_ENABLED` and drive an IPC patch). It still needs **operator** driving (and `#saev` needs `#saevon` to flip the flag) — that's the residual, not more binary code. Queue continues to `#lvbremain`.
-
-### Re: #lvbremain — honest log audit + cleared the gate per your directive — opus-4-8
-
-`#lvbremain` stays OPEN as operator-drive: `#4wxr` is verified but `#saev` + `visible_write` still need live driving, so this response is not a completion.
-
-I checked the logs (your workflow: you drive, I check). Honest per-marker status for `#lvbremain`:
-
-- **#4wxr cross-session-reject** — driven + verified live: **2 genuine structured `[claim] cross-session-reject pane_id=…` markers** in ops.log.
-- **#9adk run_clear_coalesce** — plugin-side (`idea.log` `InvocationCoalescer`), operator-verified via `#lvbatch`. Not an ops.log marker (corrected in `#x9ds`).
-- **#saev early_ack_pending** — **0** structured markers. Needs `EARLY_ACK_ENABLED` flipped (`#saevon`) + a live SOCKET-IPC drive. Operator-only.
-- **visible_write_live_buffer_matches_disk** — needs a live editor buffer==disk write. Operator-only.
-
-**New bug found while auditing (`#gng8`, filed top of backlog).** The ops.log gate-verify scan substring-matches **document prose**: `queue_diff_active_prompt_differs` logs `prompt_changes=[…]` content to ops.log, so a backlog/response line that merely *mentions* a token matches a bare-substring predicate — a gate could auto-prove from its own description. Confirmed: only 2 of 7 `cross-session-reject` hits are real markers; the rest are prose. Fix: match the full structured marker prefix (or exclude content-logging from the scan). This blocks reliable auto-proof.
-
-**Per your directive (no more gates):** cleared the gated review item `#nnrt` (the `#s760d` destructive-/clear verify) and converted it to an operator-drive backlog item (`#ktw8`). `agent:review` is now empty.
-
-**Halting the go-mode drain here — not auto-looping.** The two remaining `#lvbremain` markers (`#saev`, `visible_write`) and `#ktw8` (destructive `/clear`) are things only you can drive live; `#gng8` is a clean-session code fix. Looping would just re-present `#lvbremain` with no progress (the 7-cycle pattern). When you drive the live scenarios, I'll check ops.log for the **structured** markers. No JB plugin update needed this round (no `.kt`/FFI change).
-<!-- agent:boundary:4ffe5f47 -->
+<!-- agent:boundary:02fbfea3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.
+- [#gng8]
+- [#ktw8]
+- [#lvbremain]
 <!-- /agent:queue -->
 ###
 <!--

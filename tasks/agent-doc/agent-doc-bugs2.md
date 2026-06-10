@@ -114,7 +114,28 @@ Filed as an actionable backlog item: when a user manually adds a queue line with
 These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint — repeated in the backlog text and the prior response — that they run in a **fresh focused session**, not at the tail of a drain. This session is flagged degraded (warn-level accretion: 2 no-op closeouts + 2 restart-heavy events in the last 30 min). I am deliberately **not** draining them or marking them done. Start a fresh `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` session and it will begin at #dav9/pcpc5e1.
 
 **Not auto-looping:** the rest of the queue is either operator-drive (can't self-complete) or fresh-session-gated, so continuing the go-mode drain here would only churn the same heads. Handing back to you.
-<!-- agent:boundary:0b185c5c -->
+
+### Re: do [#zwn5] — operator-pinned tracked-backlog head is an id-backed directive — opus-4-8
+
+> **Queue prompt:** do [#zwn5]
+
+Fixed in code, committed to the agent-doc submodule (`c5194baf`), built + installed. `#ktw8` stays at the queue head (operator-drive log-check, unchanged — ops.log still shows 0 structured `[s760] clear-decision … clear=` markers); it is no longer struck.
+
+**Root cause.** The finalize-path consume decision (`response_targets_synthetic_queue_head_id` in `write.rs`) only treated a *literal* `do [#id]` / `do #id` head as an id-backed directive. An operator-pinned bare id like `:round_pushpin: [#ktw8]` normalizes to `#ktw8` — no `do` verb — so it fell through to the *synthetic/preset* path, where a `### Re: #ktw8` log-check heading "resolves to exactly the head id" and **consumed** it. That strike then tripped the downstream churn you kept hitting: session-check drops the struck head against the still-open backlog item, `pending_done_guard` fires, and the snapshot locks the struck version (needing `reset --from-current --preserve-session` to restore the pin).
+
+This was inconsistent with the rest of the queue machinery: `cycle_state::leads_with_bare_id_directive` and `session_check::leads_with_bare_id_token` already classify a bare `[#id]` as id-backed. Only the finalize consume path disagreed.
+
+**The fix.** `response_targets_synthetic_queue_head_id` now bails (never heading-consumes) when the head resolves to exactly its own id **and** that id names a tracked `agent:backlog` / `agent:review` item. So:
+
+- `:round_pushpin: [#ktw8]` / `[#ktw8]` / `#ktw8` whose id is a backlog item → id-backed directive → stays pinned until an explicit `--done` / `--pending-gate` / `--pending-edit` closes it. No strike, no dropped head, no snapshot lock.
+- A registered prompt-preset id (e.g. `#spec-test-build-install-commit-push`, **not** a tracked item) → still synthetic → still consumes on a matching `### Re: #id` heading. Existing behavior preserved.
+
+**Coverage.** Added `consume_decision_keeps_operator_pinned_tracked_backlog_head_without_explicit_flag` (the exact `[#ktw8]` repro, deterministic — no live tmux needed), plus the `--pending-gate` close path. `make check` green; the existing preset and bare-`do` consume tests still pass. SPEC §queue-consume updated.
+
+**Scope note.** This is the *binary* half: the head now stays pinned and runnable without corrupting state. The *skill* half — not auto-looping an operator-drive head that can only be log-checked — stays an operator/skill behavior (I am stopping here, not re-serving `#ktw8`).
+
+**Not pushed** — committed locally only (manual-testing gate). The fix is live in your installed binary; drive a `:round_pushpin: [#id]` verify head through a finalize and confirm ops.log shows no `queue consumed` / dropped-head line for it.
+<!-- agent:boundary:8d170ce8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -159,7 +180,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#zwn5] agent-doc-bug (operator-drive queue-head disposition): operator-drive live-verify items (e.g. #ktw8, #lvbremain) are queue-attr backlog items the agent can NEVER close — agent checks ops.log, operator drives the live test. When the agent responds with a log-check that finds the gate still unproven, finalize strike-consumes the id-backed head ([queue] consumed), then session-check INTERRUPTS (struck head + open backlog = silently dropped) AND pending_done_guard fires, and the snapshot locks the struck version so restoring the pinned head needs reset --from-current --preserve-session. Root cause: the queue machinery treats a responded head as a COMPLETED head; an operator-drive log-check addresses the head without closing it. Fix: add a non-completable disposition (e.g. a verify/operator-drive attribute on the queue/backlog item, or recognize an unproven-gate log-check response as non-consuming) so the head stays pinned/runnable without tripping the strike heuristic or the removal/done guards. Distinct from #dav9 (retires the supervisor write-race) and #7r2s (auto-pushpin). Repro 2026-06-10 agent-doc-bugs2.md #ktw8.
 - [ ] [#7r2s] queue-sync auto-pushpin: when a user manually adds a queue line that has no pushpin/round_pushpin emoji prefix, queue-sync should auto-prefix a pushpin so the backlog->queue priority re-sync does not deprioritize the manual item below queue-attr backlog items. Repro 2026-06-10: operator manually added the #ktw8 queue line. Touch the queue sync/priority path in agent-doc-orchestration.
 - [ ] [#dav9] pcpc5e1 08b cut-over residual phase 1 (binary-side, SimWorld-provable): cut agent-doc start over to the in-process supervisor adapter. supervisor::in_process (pcpc2) is fully built + SimWorld-tested but start.rs has ZERO call sites — the out-of-process supervisor is still the live writer. Host the harness child PTY/stdin/restart/heartbeat as a controller-managed task behind a rollback flag (e.g. AGENT_DOC_SUPERVISOR=in-process, default off, same ladder pattern as AGENT_DOC_WRITE_AUTHORITY), preserve the Unix-socket IPC boundary for CLI/editor callers. SimWorld + CLI integration proof. Run in a FRESH focused session (operator-scoped constraint; plan Safety section). Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#dsqa] pcpc5e2 08b cut-over residual phase 2 (plugin-side, depends on pcpc5e1): demote JB plugin WatchService to read-only buffer reporting (pcp7/vbk7) so the single controller-owned watcher is the only event source. Kotlin change: bump pluginVersion, build signed+unsigned zips, then tell the operator to install the JB plugin update. Plan: tasks/agent-doc/plan-supervisor-in-process.md

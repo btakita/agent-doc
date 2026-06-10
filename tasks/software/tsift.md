@@ -32,29 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260609-232927.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260610-004715.md`*
 
 Compacted content:
-- Archived 4 response topic(s): prompt caching backlog; pcache-missrank; pcache-boundary-contract; 1 more
+- Archived 1 response topic(s): release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: release + publish — gpt-5
-
-> **Queue prompt:**
->
-> release + publish
-
-
-Released and published `tsift` `v0.1.67`.
-
-Changed paths: `src/tsift` release commit `17e8282` (`chore: release v0.1.67`) updates the workspace/package versions from `0.1.66` to `0.1.67`, moves the `VERSIONS.md` unreleased entries under `0.1.67`, refreshes `Cargo.lock`, and updates generated tsift/OpenCode version markers. The `v0.1.67` tag was created at `17e8282` and pushed with `main`.
-
-Commands: ran `make check`, `cargo build -p tsift --release --locked`, `cargo install --path . --force --locked`, `tsift --version`, `tsift status`, `git push origin main v0.1.67`, `gh run list/view` for CI/Release, `cargo info --registry crates-io tsift@0.1.67`, and `npm view opencode-tsift version`.
-
-Verification: local `make check` passed; release build passed; installed CLI reports `tsift 0.1.67`; standalone GitHub CI run `27242832606` completed successfully; Release workflow run `27242832636` completed successfully, including release assets, GitHub Release creation, OpenCode npm publish, and crates.io publish. Registry checks now show `tsift = "0.1.67"` on crates.io and `opencode-tsift` `0.1.67` on npm.
-
-Confidence: high. No escalation was needed.
-<!-- agent:boundary:9dfa3962 -->
+<!-- agent:boundary:972af7ec -->
 <!-- /agent:exchange -->
 ###
 <!--

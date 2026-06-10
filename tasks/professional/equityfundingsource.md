@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -232,14 +232,12 @@ Queue drained — that was the last item (`#eyp0` + `#emrt` both done; `#b0wq` d
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#emrt]
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#emrt] Enable the borrower-messaging email round-trip (#2/#4 from the messaging answer): config-only, no code. Set MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true, configure delivery (Cloudflare Email Service token/account or Resend) + MESSAGE_NOTIFICATION_FROM, on an EFS-verified sending domain. Gated on #f4rq (verify the Resend sending domain) — needs Robert domain access. Reply-by-email INTO chat (#3) is separate (scaffold at POST /api/email/inbound, needs inbound routing + sender-auth + append wiring).
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

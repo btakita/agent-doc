@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -121,21 +121,42 @@ Forced the actionable code core as you chose. Shipped the pure source half; the 
 **Remaining (narrowed into `#s760wire`):**
 - **s760c** — wire `transcript_context_pct` into the `route.rs` dispatch gate (opt-in + `pct >= clear_threshold` → tracked `/clear`; emit `[s760] clear-decision …`). Pure code, no live gate — doable in a fresh session.
 - **s760d** — operator live-verify the destructive `/clear` at the threshold boundary.
+- **#optv4** — dedupe the stale `#bkx9perid` entry (already archived).
+- **#optv3** — preflight surfacing + opt-in `[/]→[x]` transition (default off — never silently flips a human gate).
+- **#optv2** — pure ops.log marker scan → `Provable | Failed | Pending` (disproof wins, time-scoped to after the gate was set). Unit-testable over fixtures.
+- **#optv1** — typed proof/disproof predicate on the gate (`verify=ops_log:<marker>` + `disproof=ops_log:<text>` + a gate-set timestamp). `--pending-set-gate-type` already exists as the carrier to extend.
 
 Kept it as an **actionable backlog item, not a gate** (per "no more gates"). The dangerous part (`/clear`) is still gated only by the existing default-off `agent_doc_queue_context_reset` opt-in, so nothing destructive ships from this.
 
 **Halting the auto-loop** — the last queue item `#optverify` is a separate feature for a fresh session, and `#s760c/d` need a fresh/live session too. This degraded drain (every finalize is hitting the exit-75 file-IPC fallback) shouldn't keep pulling feature work.
-<!-- agent:boundary:a51b5fb1 -->
+
+### Re: #optverify — planned (decomposed into #optv1–4), queue drained — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#optverify]
+
+
+`#optverify` is a `:pushpin:` recommendation (not a `do`), it's explicitly "plan-worthy," and it's a substantial feature touching the gate data model + preflight + closeout. So I wrote the plan rather than force-build it in this degraded drain (last turn already hit post-commit worktree corruption).
+
+**Planned — `tasks/agent-doc/plan-optverify-gated-review-autoverify.md`** decomposes it into actionable phases:
+- **#optv1** — typed proof/disproof predicate on the gate (`verify=ops_log:<marker>` + `disproof=ops_log:<text>` + a gate-set timestamp). `--pending-set-gate-type` already exists as the carrier to extend.
+- **#optv2** — pure ops.log marker scan → `Provable | Failed | Pending` (disproof wins, time-scoped to after the gate was set). Unit-testable over fixtures.
+- **#optv3** — preflight surfacing + opt-in `[/]→[x]` transition (default off — never silently flips a human gate).
+- **#optv4** — dedupe the stale `#bkx9perid` entry (already archived).
+
+I found `--pending-set-gate-type` already exists and preflight already reads ops.log, so this builds on existing plumbing rather than new flag families. Kept `#optverify` as a single actionable backlog item pointing at the plan.
+
+**Worth noting:** review is currently **empty** (I cleared `#saevon` earlier), so the feature's premise — auto-verifying *gated* items — has nothing to act on right now. It's a real capability for future gates, not urgent.
+
+**Queue is now drained.** This session shipped, across its turns: **pcpc5d** (direct-run writer routed through the write-authority gate), **s760a/b** (transcript-token ctx% source), review **cleared**, `#lvbremain` reduced to an operator-drive checklist, and `#optverify` **planned**. Everything still open is fresh-session / operator-live-verify work — appropriate to pick up in a clean, non-degraded session.
+<!-- agent:boundary:1cec3f32 -->
+<!-- agent:boundary:630dea04 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:round_pushpin: do [#pcpc5live]~~
-- ~~:round_pushpin: do [#lvbremain]~~
-- ~~:round_pushpin: do [#s760wire]~~
-- :pushpin: [#optverify]
-- ~~do [#reviewrm]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -165,7 +186,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
+- [ ] [#optverify] [feature] Opportunistic gated-review verification: auto-prove/disprove gated [/] items from ops.log markers during preflight/closeout (no live-verify session). PLANNED 2026-06-10: tasks/agent-doc/plan-optverify-gated-review-autoverify.md decomposes into #optv1 (typed verify=ops_log:marker + disproof predicate on the gate + gate-set timestamp; --pending-set-gate-type already exists as the carrier), #optv2 (pure ops.log marker scan: Provable/Failed/Pending, disproof-wins, time-scoped), #optv3 (preflight surfacing + opt-in [/]->[x], default off, never silently flip a human gate), #optv4 (dedupe stale #bkx9perid, already archived). Spec: specs/07-closeout-commands.md. Run as a fresh focused session. NOTE: review is currently empty, so this is not urgent.
 - [ ] [#lvbremain] OPERATOR-DRIVE live verification (agent checks logs; absorbs ex-review #saevon early-ack). EARLY_ACK already flipped: EARLY_ACK_ENABLED=true in ipc_socket.rs, live in shipped 0.34.0 — code-side done, only live confirmation remains. Log status 2026-06-09: all 4 markers have ZERO real ops.log emissions, so none of these live actions have been driven yet. DRIVE from a fresh session (scripts/xdotool-live-verify.sh): (1) #4wxr cross-session-reject — claim this doc from a 2nd tmux pane, expect cross-session-reject marker (claim.rs/ClaimAction.kt); (2) #9adk run/clear coalesce — drive a run then a clear, expect run_clear_coalesce (route.rs/sync.rs); (3) visible_write_live_buffer_matches_disk — a live editor write where the buffer already matches disk (write.rs); (4) #saev early-ack — drive a live JB-plugin SOCKET-IPC session (not the file-IPC fallback this drain keeps hitting), expect early-ack pending emitted before apply with no false-success / false ack-timeout. No JB install needed (plugin 0.2.158 unchanged, binary+cdylib current). Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
 - [ ] [#s760wire] s760c+s760d RESIDUAL. SHIPPED 2026-06-10 (submodule 2d2d0ce3, context_pct.rs): #s760a transcript locator + Claude-JSONL token reader (Codex/OpenCode unsupported -> None) + #s760b model->context-window table (Claude 200k; unknown -> None+warn) + context_pct/transcript_context_pct, fail-safe to None (never clear), 12 unit tests. REMAINING: #s760c wire transcript_context_pct into the route.rs dispatch gate (if queue_context_reset_opted_in AND pct >= clear_threshold_for_doc -> tracked /clear; emit [s760] clear-decision optIn/threshold/pct/clear to ops.log) — pure code, no live gate, do in a fresh session; #s760d operator live-verify the destructive /clear on a throwaway opted-in doc. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
 <!-- /agent:backlog -->

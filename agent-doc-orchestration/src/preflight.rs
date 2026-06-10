@@ -3947,6 +3947,13 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             let snapshot_baseline = snapshot_at_start.as_deref().filter(|s| !s.trim().is_empty());
             let snapshot_ids =
                 snapshot_baseline.map(|snap| surface_pending_ids(snap, surface));
+            // `#opsproof-samecycle-add`: the snapshot baseline alone is not enough.
+            // In the `write`/`finalize` path the same invocation that adds an item
+            // via `--review-add` / `--pending-add*` also re-syncs the on-disk
+            // snapshot, so a brand-new same-cycle add is already present in
+            // `snapshot_ids` and the snapshot test cannot exclude it. Cross-check
+            // the ids cycle-state recorded as added this cycle and never reap them.
+            let added_this_cycle = crate::cycle_state::pending_added_ids(file);
             let ops_proof_completions: Vec<OpsProofCompletion> =
                 ops_proof_completion_candidates(&current_body)
                     .into_iter()
@@ -3955,6 +3962,7 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
                             .as_ref()
                             .is_none_or(|ids| ids.contains(&candidate.id))
                     })
+                    .filter(|candidate| !added_this_cycle.contains(&candidate.id))
                     .collect();
             if !ops_proof_completions.is_empty() {
                 let evidence_by_id: HashMap<String, String> = ops_proof_completions
@@ -9976,6 +9984,48 @@ mod tests {
         assert!(log.contains("auto_complete_ops_proof"));
         assert!(log.contains("id=doneci"));
         assert!(log.contains("id=reviewdone"));
+    }
+
+    // #opsproof-samecycle-add: a gated review/backlog item added THIS cycle (its
+    // text legitimately cites a shipped dependency commit) must NOT be ops-proof
+    // auto-completed on the same cycle it first appears — even though the
+    // write/finalize path already re-synced the on-disk snapshot to include it,
+    // which defeats the snapshot-only same-cycle guard. cycle_state records the
+    // added id; the reap must honor it.
+    #[test]
+    fn ops_proof_does_not_reap_same_cycle_added_gated_item() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#freshgate] operator live-verify the destructive path. Code SHIPPED 1edb20d2; this is the live gate only\n",
+            "<!-- /agent:review -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        // The snapshot already contains the item — this models the finalize path
+        // where the same invocation's --review-add re-synced the snapshot, so the
+        // snapshot-only guard cannot tell this is a brand-new add.
+        snapshot::save(&doc, content).unwrap();
+        // cycle_state records #freshgate as added this cycle.
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::record_pending_added_ids(&doc, &["freshgate".to_string()]).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        // The freshly added gated item survives — not reaped on its first cycle.
+        assert!(
+            file_after.contains("[#freshgate]"),
+            "same-cycle-added gated item must not be ops-proof reaped: {file_after}"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !log.contains("auto_complete_ops_proof"),
+            "no ops-proof auto-completion should fire for a same-cycle add"
+        );
     }
 
     // #opsproof-falsepos: an open actionable backlog item whose completion

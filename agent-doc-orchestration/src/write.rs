@@ -1478,7 +1478,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         if options.pending_clear {
             crate::pending_cmd::clear(file)?;
         }
-        crate::pending_cmd::add_many(file, &options.pending_add, false)?;
+        // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
+        // ops-proof auto-completion never reaps a brand-new same-cycle add.
+        let mut same_cycle_added_ids: Vec<String> =
+            crate::pending_cmd::add_many(file, &options.pending_add, false)?;
         let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
         for (target, items) in &pending_add_targets {
             ensure_pending_add_target(target)?;
@@ -1489,7 +1492,8 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 )
             })?;
         }
-        crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?;
+        same_cycle_added_ids
+            .extend(crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?);
         // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
         // the front-insert default so anchor ids added this same cycle resolve.
         for pair in options.pending_add_after.chunks(2) {
@@ -1521,6 +1525,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             crate::cycle_state::mark_pending_mutations(file)?;
             crate::cycle_state::mark_pending_added(file)?;
         }
+        if !same_cycle_added_ids.is_empty() {
+            crate::cycle_state::record_pending_added_ids(file, &same_cycle_added_ids)?;
+        }
         for pair in &options.pending_edit {
             let (id, text) = pair
                 .split_once('=')
@@ -1548,8 +1555,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             })?;
             crate::pending_cmd::set_gate_verify(file, id, spec)?;
         }
+        let mut review_added_ids: Vec<String> = Vec::new();
         for value in &options.review_add {
-            crate::pending_cmd::review_add(file, value)?;
+            review_added_ids.push(crate::pending_cmd::review_add(file, value)?);
+        }
+        if !review_added_ids.is_empty() {
+            // `#opsproof-samecycle-add`: a freshly added gated review item must
+            // not be ops-proof auto-completed on the cycle it first appears.
+            crate::cycle_state::record_pending_added_ids(file, &review_added_ids)?;
         }
         for pair in &options.review_edit {
             let (id, text) = pair

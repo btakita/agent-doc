@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Ops-proof auto-completion no longer reaps a same-cycle add (`#5b28` /
+  `#opsproof-samecycle-add`).** A gated `agent:review` item (or `agent:backlog`
+  item) added in the same `write`/`finalize` invocation via `--review-add` /
+  `--pending-add` / `--pending-add-gated` could be opportunistically ops-proof
+  auto-completed on the cycle it first appeared, when its text carried a
+  completion marker plus a commit hash (e.g. a `#s760d` operator-verify gate that
+  cites "Code shipped <commit>"). The existing `#opsproof-falsepos` guard compared
+  against the on-disk snapshot, but in the finalize path the same invocation
+  re-syncs that snapshot to include the new item, so the snapshot test could not
+  tell a brand-new add from a pre-existing one. The add primitives now record the
+  ids added this cycle in `cycle_state` (`pending_added_ids`), and the reap
+  excludes them. `review_add` returns its assigned id; new
+  `cycle_state::{record_pending_added_ids, pending_added_ids}`. Regression test
+  `ops_proof_does_not_reap_same_cycle_added_gated_item`.
 - **Transcript-token context-% pre-emptive `/clear` gate (`#s760c`).** The
   supervisor idle-queue watch now derives its pre-emptive `/clear` decision from
   the **real** harness context-usage % (cumulative session-transcript tokens ÷

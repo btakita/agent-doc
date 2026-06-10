@@ -121,6 +121,14 @@ pub struct CycleState {
     /// gated). Satisfies the blocked-closeout follow-up requirement.
     #[serde(default)]
     pub pending_added_this_cycle: bool,
+    /// `#opsproof-samecycle-add`: ids of tracked-work items added THIS cycle via
+    /// `--pending-add` / `--pending-add-gated` / `--review-add`. Opportunistic
+    /// ops-proof auto-completion must never reap an id that first appeared this
+    /// cycle — the on-disk snapshot it compares against is updated by the same
+    /// write invocation, so the snapshot baseline alone cannot distinguish a
+    /// brand-new same-cycle add from a pre-existing item.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_added_ids: Vec<String>,
     #[serde(default)]
     pub ipc_snapshot_adoption_blocked: bool,
     /// `#exchange-prompt-dropped-on-merge`: user-authored exchange prompt lines
@@ -323,6 +331,7 @@ pub fn start_preflight_with_task(
         expect_done_or_gate_ids: Vec::new(),
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
+        pending_added_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
@@ -604,6 +613,44 @@ pub fn record_pending_gated_ids(file: &Path, ids: &[String]) -> Result<Option<Cy
         save(file, &state)?;
     }
     Ok(Some(state))
+}
+
+/// `#opsproof-samecycle-add`: record the ids of tracked-work items added this
+/// cycle (via `--pending-add` / `--pending-add-gated` / `--review-add`) so the
+/// opportunistic ops-proof auto-completion can exclude brand-new same-cycle adds.
+pub fn record_pending_added_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state.pending_added_ids.iter().any(|existing| existing == &id) {
+            state.pending_added_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#opsproof-samecycle-add`: ids of tracked-work items added this cycle. Empty
+/// when no cycle state exists. Used to exclude brand-new same-cycle adds from
+/// opportunistic ops-proof auto-completion.
+pub fn pending_added_ids(file: &Path) -> std::collections::HashSet<String> {
+    load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.pending_added_ids.into_iter().collect())
+        .unwrap_or_default()
 }
 
 /// `#blocked-closeout-followup-capture`: mark that this cycle added at least one
@@ -1028,6 +1075,7 @@ fn synthetic_state_with_id(
         expect_done_or_gate_ids: Vec::new(),
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
+        pending_added_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),

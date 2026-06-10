@@ -5426,6 +5426,7 @@ mod tests {
             expect_done_or_gate_ids: Vec::new(),
             pending_gated_ids: Vec::new(),
             pending_added_this_cycle: false,
+            pending_added_ids: Vec::new(),
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),
             dropped_queue_prompts: Vec::new(),

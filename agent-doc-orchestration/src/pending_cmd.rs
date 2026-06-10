@@ -537,17 +537,18 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Add a new review item directly to `agent:review`.
-pub fn review_add(file: &Path, item: &str) -> Result<()> {
+/// Add a new review item directly to `agent:review`. Returns the assigned id so
+/// the caller can record it as a same-cycle add (`#opsproof-samecycle-add`).
+pub fn review_add(file: &Path, item: &str) -> Result<String> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
     let (full_content, comp) = ensure_review_component(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (new_content, _id) = pending::op_add(existing, item, &doc_id, true)?;
+    let (new_content, id) = pending::op_add(existing, item, &doc_id, true)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
-    Ok(())
+    Ok(id)
 }
 
 /// Edit a review item's text, preserving its hash id.

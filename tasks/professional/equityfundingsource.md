@@ -51,18 +51,44 @@ Done and deployed. Boolean fields that used to display as the words **true/false
 - **`lender_detail`** — "Submitted lender data" raw rows.
 - **`full_application_detail`** — Step 5 declarations + Step 6 e-sign consent (passed as raw booleans instead of pre-stringified Yes/No).
 - **`tmo_loan_details`** — payment-schedule `Prepaid` cell.
+- *Should the admin be able to change them here?* No — I kept them read-only (the disabled checkboxes from last cycle). The booleans are fixed EFS conventions (`Send1099=true`, `UsePayee=false`, `IsVendor=false`, set in `deal_marketplace`). Letting admins edit the cached snapshot in EFS would silently diverge from TMO with no sync. "Follow TMO with our cache" → treat our copy as a read-only mirror of what was submitted; TMO stays the system of record. Making these editable (with real TMO write-back) is gated on TMO access being restored (already tracked under #xt4d / the TMO roadmap), so I didn't add a duplicate item.
+- *Can these values be changed in TMO?* Yes, in TMO's lender management UI. EFS has **no write-back** for these fields today.
+- *Is there a record of these values in TMO?* Not as a live mirror. `lender_data` is the snapshot the **investor submitted** when requesting a lender account — it's the data the admin keys **into** TMO when creating the lender. After creation, TMO holds them; EFS does not poll them back.
+- Note on your suggestions: I used **Send 1099** rather than "1099 Sent?" because the field is a *directive* (send a 1099 to this lender), not a record of one having been sent — past tense would mislead. And **Use Payee** rather than "Payee?" because there's a separate `Payee` field (the payee name); "Payee?" would collide. Easy to change if you'd rather match your wording exactly.
+- `Send1099` → **Send 1099**, `UsePayee` → **Use Payee**, `IsVendor` → **Vendor**, `Payee` → **Payee**, `TINType` → **TIN Type**, `EmailAddress` → **Email**, `ZipCode` → **ZIP Code**, `PhoneCell` → **Cell Phone**, etc.
 
 `bool_or_null_` is conservative: only actual booleans and the strings `"true"`/`"false"` (case/whitespace-tolerant) become checkboxes — data like `"1"`, `"yes"`, or `"SEND1099"` stays text. No editable boolean selects exist in the portal, so there was nothing to convert to an *enabled* checkbox.
 
 **Verification:** new `boolean-checkbox-fields.test.ts` (6 tests) + full suite **527 pass / 0 fail**, worker build clean. **Deployed** to the EFS Worker (version `2df7ff05`, no D1 migrations pending); live site 200/301.
-<!-- agent:boundary:f9111082 -->
+
+### Re: Human-readable lender field labels + lender-request documents link — opus-4-8
+
+Both queue items done, spec/tests updated, committed + pushed + deployed (EFS `bf48b16` → pushed in `0158b4c`; Worker version `9eae668d`).
+
+**1. Human-readable labels.** The lender-request grid used raw TMO field keys. Added `lender_field_label_` (in `lender_management.tsx`) — an override map for the ambiguous keys plus a camelCase/digit-splitting fallback for everything else:
+- `Send1099` → **Send 1099**, `UsePayee` → **Use Payee**, `IsVendor` → **Vendor**, `Payee` → **Payee**, `TINType` → **TIN Type**, `EmailAddress` → **Email**, `ZipCode` → **ZIP Code**, `PhoneCell` → **Cell Phone**, etc.
+- Note on your suggestions: I used **Send 1099** rather than "1099 Sent?" because the field is a *directive* (send a 1099 to this lender), not a record of one having been sent — past tense would mislead. And **Use Payee** rather than "Payee?" because there's a separate `Payee` field (the payee name); "Payee?" would collide. Easy to change if you'd rather match your wording exactly.
+
+**Your questions (answered, behavior unchanged — kept read-only):**
+- *Is there a record of these values in TMO?* Not as a live mirror. `lender_data` is the snapshot the **investor submitted** when requesting a lender account — it's the data the admin keys **into** TMO when creating the lender. After creation, TMO holds them; EFS does not poll them back.
+- *Can these values be changed in TMO?* Yes, in TMO's lender management UI. EFS has **no write-back** for these fields today.
+- *Should the admin be able to change them here?* No — I kept them read-only (the disabled checkboxes from last cycle). The booleans are fixed EFS conventions (`Send1099=true`, `UsePayee=false`, `IsVendor=false`, set in `deal_marketplace`). Letting admins edit the cached snapshot in EFS would silently diverge from TMO with no sync. "Follow TMO with our cache" → treat our copy as a read-only mirror of what was submitted; TMO stays the system of record. Making these editable (with real TMO write-back) is gated on TMO access being restored (already tracked under #xt4d / the TMO roadmap), so I didn't add a duplicate item.
+
+**2. Lender-request documents link.** The request payload itself carries **no uploaded files** — it's identity/payee form fields only. Documents live on the lender (investor) as a separate collection. The request **list** already links there (the eye icon → `/portal-admin/lenders/:id`, which embeds the per-lender documents). The gap was the **dialog**, so I added a **"View lender documents"** link (with a file icon) in the `CompleteLenderRequestModal` pointing to the same lender detail page.
+
+**Verification:** new `lender-request-labels-docs.test.ts` (4 tests). Rebased onto 5 upstream commits that landed meanwhile (forgot-password flow, etc.) — clean, no conflicts — then re-ran the full suite: **539 pass / 0 fail**, worker build clean, no D1 migrations, live site 200.
+<!-- agent:boundary:e9017546 -->
+<!-- agent:boundary:3c3eae25 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- Make the label more human-readable. Send1099->1099 Sent? UsePayee->Payee? IsVendor->Vendor? Should the admin be able to change these values or not? Is there a record of these values in TMO? Can these values be changed in TMO? Follow the behavior of TMO with our cache.
+- Does the Lender request include documents? If yes, the request page & dialog should link to the lender documents.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

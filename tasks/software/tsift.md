@@ -47,13 +47,29 @@ tsift already has the right architectural base but a thinner trust wrapper. Its 
 Recommendation: copy the trust UX, not the C/static-binary architecture. Keep tsift's Rust workspace, Cargo install path, SQLite graph store, and split crates. Add a thin trust layer in three pieces: first, extend releases with an aggregate `checksums.txt`, GitHub build provenance attestations, an SBOM, and documented `gh attestation verify` / checksum verification steps; add scan gates only where they are deterministic enough not to create noisy release blocks. Second, add a JSON plan/receipt mode to the existing init path, e.g. `tsift init --plan --codex --opencode [--workspace]`, returning planned files, hook events, command sources, created/updated/already-present/conflict actions, redacted paths where appropriate, `writes_started=false`, and the next apply command. Third, let `scripts/install.sh` remain a binary installer by default but optionally chain to that plan/apply flow, for example `--agent-config codex,opencode --plan` and `--agent-config codex,opencode --yes`, so agents can verify binary provenance and config mutations in one flow without moving config-writing logic out of Rust.
 
 Priority order for tsift: `init --plan`/receipt first, because it directly addresses sensitive agent config upserts and can reuse the current idempotent init code; release attestations/SBOM second, because they strengthen binary trust without changing runtime behavior; installer chaining third, because it is mainly UX once the binary and init plan surfaces are trustworthy. Verification: no build/test run was needed because this cycle made no source, spec, or workflow edits. Commands/proof: `agent-doc preflight`, `tsift status`, `tsift --envelope source-read`, `tsift --envelope symbol-read`, `tsift --envelope search`, local release/install file reads, `git status`, and upstream primary-source review. Escalation: none.
-<!-- agent:boundary:ebc86f60 -->
+
+### Re: next-steps — gpt-5
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix bugs in tsift?
+
+
+Top backlog item: `#tsbugev`.
+
+I added a fresh priority-ordered tsift bug-fix backlog instead of reopening archived completed ids. The highest-priority bug is graph evidence target resolution: the local command `tsift graph-db --json --path . evidence next-steps --depth 3 --limit 8` resolved `next-steps` to an unrelated `tasks/professional/equityfundingsource.md` backlog row, which means generic queue-head ids can pull the wrong document context. That should be fixed before relying on graph-backed planning for ambiguous queue terms.
+
+Priority order added: `#tsbugev`, `#tsbugtok`, `#tsbuglock`, `#tsbugcm`, `#tsbugidx`, `#tsbugcache`.
+
+Notes: `#tsbugtok` comes from this session's current token/churn signals: prompt_budget, cache_resend, repeated_raw_read, restart_loop, and noop_closeout all appeared in `session-review --next-context`. `#tsbuglock`, `#tsbugcm`, `#tsbugidx`, and `#tsbugcache` come from archived dogfood findings that are still credible root-cause work: graph-db locking, conflict-matrix mixed verdicts, stale index/summary readiness, and unstable full-projection cache reuse. I did not add the stale `agent-doc` install warning to the tsift backlog because that belongs to `src/agent-doc`, but it is real: preflight warned that the installed binary/cdylib predates source commit `616ef21f`, so live sessions may need `make install` in `src/agent-doc` separately.
+
+Changed paths: session document/backlog only. Verification: no tsift source/build/test run was needed for this planning-only cycle. Commands/proof: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift --envelope context-pack`, `tsift --envelope session-review --next-context`, archive/backlog searches with `rg`, `git -C src/tsift status --short`, and `tsift graph-db --json --path . evidence next-steps --depth 3 --limit 8`. Confidence: high on the ordering; medium on deeper implementation effort until each item is isolated in source. Escalation: none.
+<!-- agent:boundary:b2122279 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps to fix bugs in tsift?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -62,6 +78,12 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsbugev] Fix graph-db evidence target resolution for session queue heads and generic ids: scope targets like `next-steps` to the current session/path, require disambiguation on collisions, and add regression coverage proving `tasks/software/tsift.md` does not resolve to unrelated backlog rows in another document.
+- [ ] [#tsbugtok] Add fixture-backed session-review/context-pack token-pressure guardrails: dedupe prompt_budget, cache_resend, restart_loop, repeated_raw_read, and noop_closeout signals into one prioritized next_token_actions block with exact compact/restart/digest commands.
+- [ ] [#tsbuglock] Harden graph-db SQLite lock recovery for concurrent agent runs: document or add a safe release/diagnostic command, prefer WAL-safe reader behavior where appropriate, and cover hot-journal/locked-db failures in graph-db status/doctor tests.
+- [ ] [#tsbugcm] Clarify conflict-matrix dispatch semantics: split per-target fail_closed diagnostics from cross-target parallel-safety, expose previously_completed/worker_result evidence, and add contract tests for low-overlap targets with missing source ownership.
+- [ ] [#tsbugidx] Tighten stale index and summary-cache readiness: make graph-db refresh/status/context-pack fail closed or emit one clear repair command when indexes or summaries are stale/empty, and cover stale workspace/submodule cases with fixtures.
+- [ ] [#tsbugcache] Stabilize full-projection cache reuse before further graph performance work: reproduce source-watermark cache misses on a quiescent checkout, identify unstable inputs, and gate backend-eval metrics on repeated cache-hit evidence.
 <!-- /agent:backlog -->
 
 ## Review

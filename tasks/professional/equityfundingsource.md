@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,29 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 2 response topic(s): staged lender-pipeline rename directive; Rename Investor Pipeline → Lender Pipeline + fold in Lenders tab
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:c7d6f8be -->
+
+### Re: Rename Investor Pipeline → Lender Pipeline + fold in Lenders tab — opus-4-8
+
+> **Queue prompt:**
+>
+> Is /portal-admin/documents only relating to the "Deal Pipeline" or does it also include "Lender Pipeline" documents?
+
+
+Done, deployed, and verified in production.
+
+**What changed (EFS `bad0516`, pushed):**
+- **Route:** `/portal-admin/investor-pipeline` → `/portal-admin/lender-pipeline`. Old URL **301-redirects** (verified live: `GET /portal-admin/investor-pipeline` → `301 Location: /portal-admin/lender-pipeline`).
+- **Section id** `investor-pipeline` → `lender-pipeline` across `layout.tsx`, `index.tsx`, `portal/admin/routes.ts`, and the `nav-counts` key (so the action-count badge still renders).
+- **Labels:** nav "Investor Pipeline" → **Lender Pipeline**; tab "Investor Deals" → **Lender Deals**; page title + subtitle reworded to lender.
+- **Nav restructure:** removed the standalone **Lender Management** nav item; added a **Lenders** tab inside Lender Pipeline that embeds the former Lender Management page (`LenderManagement` gained an `embedded` prop that drops its own topbar title). `/portal-admin/lenders` + the lender-detail route still work and now highlight the Lender Pipeline nav item.
+- **Unchanged on purpose:** internal symbols `AdminInvestorPipeline` / `admin_investor_pipeline_GET_` and the `GET /api/admin/investor-pipeline` endpoint keep their names (no API churn).
+
+**Spec + tests:** updated `prds/investor-pipeline-admin.md` (rename note + route/label/tab facts) and the three affected test files. Full suite green — **520 pass / 0 fail**, `bun run build` + `build:worker` clean.
+
+**Deploy:** Worker version `cf563a0f-f494-4fff-a81d-bf4431091c91` at https://equityfundingsource.brian-takita.workers.dev.
+
+Note: the agent-loop superproject submodule pointer now lags this EFS commit; bump it in a separate commit when you next sync submodules.
+<!-- agent:boundary:cfa2ea11 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +66,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Is /portal-admin/documents only relating to the "Deal Pipeline" or does it also include "Lender Pipeline" documents?
 <!-- /agent:queue -->
 
 ## Backlog
@@ -52,7 +73,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:backlog -->
 - [ ] [#efspgo] [recommended] EFS online-payment go-live config (after Robert provides Stripe account): set Cloudflare secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + var STRIPE_PAYMENTS_ENABLED=true (wrangler secret put / wrangler.toml), point a Stripe webhook at /api/stripe/webhook, then in admin Platform Settings fill the borrower payment wire/ACH + lender ACH values and flip the per-method enable toggles. Deploy with bun run deploy:worker. Capability is BUILT + admin-configurable (EFS c790ed3); this is config + deploy only.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
-- [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document 
+- [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document
 intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.

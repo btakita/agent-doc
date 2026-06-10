@@ -37,7 +37,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:338002fc -->
+<!-- agent:boundary:539827c3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +47,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#pcache-prefix-drift]
+- ~~[#pcache-prefix-drift]~~
 - [#contextpack-queue-slim]
 - [#token-actions-rewrite]
 - [#pcache-fixture-drift]
@@ -57,7 +57,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-prefix-drift] Add a prompt-cache prefix drift report to session-cost: compare stable_prefix_fingerprint, cache key, explicit breakpoints, routing affinity, and provider across turns, and point cache-ratio drops or creation spikes at the first changed field.
 - [ ] [#contextpack-queue-slim] Add a queue-head context-pack profile for agent-doc documents: emit the active queue prompt, live unresolved exchange tail, top backlog/review rows, compact prompt preset references, and expansion handles while suppressing archives, done history, and stale session summaries by default.
 - [ ] [#token-actions-rewrite] Promote session-review next_token_actions into exact rewrite commands for token-heavy behavior: repeated raw source/session/log reads, repeated command bundles, oversized prompt turns, and high cached-resend ratios should map to concrete tsift rewrite/source-read/session-review/context-pack commands.
 - [ ] [#pcache-fixture-drift] Extend real-session prompt-cache fixtures with regression cases for volatile timestamps/generated headers in cached prefixes, cold standalone compaction, OpenAI prompt_cache_key churn, and replica routing churn; fail under when cache reads no longer beat creation work.

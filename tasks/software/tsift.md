@@ -62,7 +62,29 @@ Proof:
 - Verification: document-only backlog capture; no tsift code tests were run.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:bfd113b7 -->
+
+### Re: next-steps closeout repair — gpt-5
+
+Handled the closeout drift from the prior response and re-added the follow-up backlog with fresh active ids. The previous `hdr*` ids are already present in completed history, so the live backlog uses new ids.
+
+Top backlog item id: `hccr2`.
+
+Priority order:
+1. `hccr2` - reversible retrieval handles for truncated evidence.
+2. `hsmart2` - adaptive sampling for oversized structured outputs.
+3. `hcache2` - stable-prefix and prompt-cache layout checks.
+4. `hlearn2` - failure-learning mining over session and digest history.
+5. `hmcp2` - first-party MCP tools for tsift envelopes and retrieval stats.
+
+The earlier `hdrlearn`, `hdrcache`, `hdrsmart`, and `hdrccr` lines were prior-response summary lines, not fresh user directives.
+
+Proof:
+- Changed paths: session document/backlog only via agent-doc finalize.
+- Commands: `agent-doc repair --apply-recovery`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and `agent-doc finalize`.
+- Verification: document-only backlog capture; no tsift code tests were run.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:f01e7e2e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -76,6 +98,11 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#hccr2] [recommended] Implement reversible retrieval handles for truncated tsift search/source/context-pack/digest output, storing omitted originals in .tsift/cache with query-scoped retrieve commands.
+- [ ] [#hsmart2] [recommended] Add adaptive sampling for large JSON/list outputs in tsift envelopes and digests, preserving errors, first/last rows, anomalies, and query-relevant rows before budget truncation.
+- [ ] [#hcache2] [recommended] Add stable-prefix and prompt-cache layout checks to session-review/context-pack output, separating stable instructions/evidence from volatile dates, paths, watermarks, and run ids.
+- [ ] [#hlearn2] [recommended] Add failure-learning mining over session-review/log-digest/test-digest history, producing marker-owned AGENTS or tsift-memory corrections for repeated command/path/search failures.
+- [ ] [#hmcp2] [recommended] Add first-party tsift MCP tools for compress/retrieve/stats-style workflows, reusing existing envelope, digest, and token-savings metrics rather than requiring a proxy.
 <!-- /agent:backlog -->
 
 ## Review

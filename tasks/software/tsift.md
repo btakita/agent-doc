@@ -109,7 +109,20 @@ Recommended spike boundary: define a read-only `GraphDbQuerySpec`/JSON AST with 
 Syntax guardrails if sugar is later added: one `MATCH` pattern per query, labels map only to stable node `kind`, edge labels map only to stable edge `kind`, properties are string equality only, `RETURN` can only name bound aliases, `LIMIT` is mandatory or defaults low, bounded path syntax must require an upper bound, and the grammar must reject mutation keywords outright. That keeps the DSL provider-neutral and compatible with SQLite/Convex/tokensave instead of becoming a second database language.
 
 Changed paths: none in this cycle. Commands/proof: `agent-doc preflight tasks/software/tsift.md`, `agent_doc_plan`, and `agent_doc_read` for the queued item; graph-db command/schema context came from the immediately preceding `#cbmsnap` source pass. Verification: no build/test rerun was needed because this cycle changed only the session document response. Confidence: high for the recommendation; medium for final syntax details until a JSON AST prototype is exercised against real agent queries. Escalation: none.
-<!-- agent:boundary:ae3f4107 -->
+
+### Re: graph-augmented search preview — gpt-5
+
+> **Queue prompt:**
+>
+> [#cbmsearch]
+
+
+Completed `#cbmsearch` with a committed implementation. Search preview hits now preserve the existing `shit-*` retrieval handles while adding nested bounded source context: line-anchored hits expose a `source_handle` window with a concrete `source-read` expansion, and hits inside indexed spans also expose `containing_symbol` metadata with a `symbol-read` expansion. The ranked preview now carries lexical hit line numbers and adds scoring reasons for `source_handle`, `containing_symbol`, `definition_kind`, `source_path`, and `test_path`, so production definitions and high-signal symbols rank ahead of test-only matches without dropping fallback file hits.
+
+Changed paths in the tsift submodule: `packages/tsift-cli/src/search_budget.rs`, `packages/tsift-cli/src/lib.rs`, and `specs/output-formats.md`. Added focused unit coverage for exact-hit source-handle/containing-symbol enrichment and source-definition ranking before tests. Updated the output-format spec to make the new nested hit fields part of the preview contract. Commits: `src/tsift` `0e71761 feat: augment search preview hits`; parent repo `216d1f1c5 tsift: augment search preview hits`.
+
+Verification: `cargo test -p tsift-cli search_budget_ -- --nocapture` passed; `make check` passed, including clippy, full Rust workspace tests/doc-tests, OpenCode npm tests, and npm pack dry run. Latest GitHub Actions check inspected with `gh run list --workflow CI --limit 1`: run `27287546999` completed `success` on `2026-06-10T15:37:26Z`. Residual note: the tsift submodule still has unrelated pre-existing dirty files, including an import-order-only hunk in `packages/tsift-cli/src/search_budget.rs`; those were intentionally left out of this commit. Escalation: none.
+<!-- agent:boundary:a838d06e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -117,7 +130,7 @@ Changed paths: none in this cycle. Commands/proof: `agent-doc preflight tasks/so
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#cbmsnap]~~
 - ~~[#cbmquery]~~
-- [#cbmsearch]
+- ~~[#cbmsearch]~~
 - [#cbmtrust]
 <!-- /agent:queue -->
 <!--
@@ -127,7 +140,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cbmsearch] [recommended] Add a graph-augmented exact/search preview mode that expands grep hits to containing symbol/source_handle windows, ranks definitions and high-signal symbols before tests, and keeps scale_guard/retrieval handles intact.
 - [ ] [#cbmtrust] [recommended] Compare codebase-memory-mcp's single-binary install/trust UX against tsift release/install flow, including checksums, attestations/scans, and idempotent agent config upserts, without changing tsift's Rust architecture.
 <!-- /agent:backlog -->
 

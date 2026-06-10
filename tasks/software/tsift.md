@@ -32,23 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260610-004715.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260610-013837.md`*
 
 Compacted content:
-- Archived 1 response topic(s): release + publish
+- Archived 1 response topic(s): next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: next-steps — gpt-5
-
-> **Queue prompt:**
->
-> What are #next-steps to improve prompt caching and saving tokens?
-
-
-I added the prompt-cache/token-savings follow-ups in priority order. Top backlog item: `#pcache-prefix-drift`.
-
-The ordering is intentional: first diagnose why cache reuse breaks, then shrink active queue handoffs, then convert token guardrails into exact rewrite commands, then add regression fixtures, then expose an operator scorecard for deciding what to run before another long agent-doc cycle.
-<!-- agent:boundary:c6f305ee -->
+<!-- agent:boundary:8d0442f4 -->
 <!-- /agent:exchange -->
 ###
 <!--

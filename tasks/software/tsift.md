@@ -37,7 +37,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:8e15b0ae -->
+<!-- agent:boundary:7c910a53 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,7 +48,6 @@ Compacted content:
 - [#hcache2]
 - [#hlearn2]
 - [#hmcp2]
-- 
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

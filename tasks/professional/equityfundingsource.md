@@ -243,7 +243,23 @@ Short answer: **the bank-style reveal already exists** — what's missing is put
 So "show it on the website like a bank" means different things depending on who's logged in. For a **borrower** portal panel, that should be their **payment** wiring; the **funding** wiring stays admin/title-facing. Showing the wrong wire to the wrong party is exactly the BEC risk the reveal flow is built to reduce.
 
 **So:** yes, we can — and the secure plumbing is done. Tell me which surface you want (borrower-portal payment-wire panel? admin per-loan funding-wire issuance? both?) and I'll build it. I've refined `#8tkq` to capture both display surfaces + the audience split.
-<!-- agent:boundary:0ffdeb8a -->
+
+### Re: #8tkq (as planned) + do we offer ACH/card to the borrower? — opus-4-8
+
+Did the unambiguous half of `#8tkq` and held the other half on a real decision your second question surfaces. Answering the ACH/card question first because it reshapes the borrower side.
+
+**Do we offer ACH / credit card to the borrower?** The capability is **built but turned off in production.** The borrower make-payment page has a "Pay $X online" path backed by **Stripe Checkout** (`lib/payments/`), with a webhook that records `payment_intent.succeeded`. It's gated behind `STRIPE_PAYMENTS_ENABLED` + `STRIPE_SECRET_KEY` — **neither is set**, so today borrowers see "remit by ACH/wire/check to the servicing trust account" + a read-only payment schedule from TMO. Enabling online card/ACH needs Robert's Stripe account (secret + webhook secret + flag) and a servicing decision, since TMO/the trust currently handles servicing. Stripe Checkout does card by default; ACH bank-debit is a config toggle on the session.
+
+**`#8tkq` part 1 — shipped (EFS `4538963`, pointer `bf2bedab1`):** admin **per-loan** secure wire-link issuance. The admin loan detail page now has a **"Wiring Instructions (secure link)"** card: issue a link bound to that loan, see the loan's links (status / uses / expiry), and revoke. It reuses the shipped `#wir3` bank-style reveal (`/w/:token` — hidden until Reveal, single-use, expiring, anti-fraud "verify with title" reminder); previously links could only be issued from the global Settings card. This is the **funding** wire (title/escrow → EFS → lender) — title-company-facing.
+
+**`#8tkq` part 2 — held on a decision (this is why the ACH/card question matters):** the *borrower-facing* "show it on the website like a bank" panel. Your ACH/card question reshapes it:
+- If we **enable online pay** (Stripe), a borrower wire panel is largely **redundant** — they just click "Pay online."
+- If we **don't**, a borrower panel should show their **payment remittance** wire, **not** the funding wire (showing the funding wire to a borrower is the BEC risk).
+
+So before I build a borrower panel, pick one: **(a)** enable Stripe online pay (I'd wire the secrets/flow, needs Robert's Stripe), **(b)** build a borrower payment-wire reveal panel, or **(c)** both / neither. I refined `#8tkq` to record part 1 done + this decision.
+
+**Verification:** `bun test` **507 pass / 0 fail** (+1 for the loan-detail issuance); `build` + `build:worker` clean. Committed + pushed. No deploy (say "deploy" to ship part 1 + the earlier `#eyp0`/`#emrt`).
+<!-- agent:boundary:2cbc6afe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,13 +267,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- re [#8tkq], can we show the wire-link instructions on the website like a bank?
+- re [#8tkq], can we show the wire-link instructions on the website like a bank? Do [#8tkq] as planned. Do we also offer ACH and credit card to the borrower?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing (builds on the shipped #wir3 bank-style reveal at /w/:token). Two parts: (1) issue secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces, not just the global Settings card; (2) surface them "on the website like a bank" — a logged-in borrower-portal reveal panel (authenticated, click-to-reveal, single-use/expiring, anti-BEC "verify with title" reminder), reusing the wire_link reveal endpoint gated on the borrower session + their loan. AUDIENCE NUANCE: the FUNDING wire (title/escrow -> EFS -> lender) is for the title company, NOT the borrower; the borrower-facing wire is their PAYMENT remittance/payoff. Decide which surface shows which wire before building.
+- [ ] [#8tkq] Wire-link surfaces — PART 1 SHIPPED (EFS 4538963): admin per-loan funding-wire-link issuance on the loan detail page (issue/list/revoke, bound to loan_id, reuses #wir3 bank-style /w/:token reveal). PART 2 PENDING A DECISION: borrower-portal reveal panel. Reshaped by the online-pay question — Stripe Checkout (card/ACH) is BUILT but OFF in prod (STRIPE_PAYMENTS_ENABLED + STRIPE_SECRET_KEY unset). If we enable online pay, a borrower wire panel is largely redundant (they click Pay). If not, a borrower panel should show their PAYMENT remittance wire (NOT the funding wire). Decide: (a) enable Stripe online pay vs (b) build borrower payment-wire panel vs (c) both/neither.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

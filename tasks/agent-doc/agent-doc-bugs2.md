@@ -30,26 +30,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-023913.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-031448.md`*
 
 Compacted content:
-- Archived 7 response topic(s): close the review items via logging-provable backlog tasks (no live-verify); How can agent-doc support opportunistic gated review item verification?; Do the PCP; 4 more
+- Archived 1 response topic(s): do [#reviewrm]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#reviewrm] — opus-4-8
-
-Done. `agent:review` previously exposed only `--review-add`/`--review-edit`, so a stale or duplicate review entry (the identical `[/] #saevon` pair an interleaved finalize leaves behind, flagged `preset_item_id_collision`) couldn't be deduped or resolved without an ambiguous edit-by-id. Added the missing clean-removal and resolve paths plus an automatic finalize-time dedupe.
-
-**Shipped (submodule 388ac300):**
-- **`--review-remove <id>`** — deletes a review item by id, clearing **every** entry that shares the id (a duplicate pair collapses in one pass). Errors if no review component or no match.
-- **`--review-resolve <id>`** — removes the item from `agent:review` and archives it to `agent:done` (the completion path for finished gated work).
-- **Finalize auto-dedupe** — closeout pending-maintenance collapses **identical** same-id review entries (same id/state/gate/text/continuation) to one across all tracked surfaces; distinct items sharing an id are preserved so the ambiguity warning still surfaces. (It fired live during this closeout: `review: deduped 1 duplicate same-id entry: saevon`.)
-- Core ops `op_take_all_by_id` + `op_dedupe_identical_items`; wired through `CommandOptions`, the CLI (`main.rs`), and the MCP finalize schema (`mcp.rs`).
-
-**Verified:** `make check` green (no FAILED), 28 `pending_cmd` review tests pass (remove-all-by-id, resolve→done archive, finalize dedupe, distinct-id preservation), end-to-end smoke test on a fixture, latest CI run green. Both binaries rebuilt + `cargo install`ed and runbook/spec docs propagated to the Claude/Codex/OpenCode installed surfaces.
-
-Closeout note: #reviewrm reaped to the done archive; the first IPC finalize hit `#ipc-crdt-response-drift` (snapshot > visible file), recovered via checkout HEAD → reset --from-current → clear stale cycle-state → `finalize --force-disk`. Exchange tail is large but the queue is active, so left as-is per the no-compact-during-drain rule.
-<!-- agent:boundary:8bdebc1e -->
+<!-- agent:boundary:4ba89a28 -->
 <!-- /agent:exchange -->
 
 ## Queue

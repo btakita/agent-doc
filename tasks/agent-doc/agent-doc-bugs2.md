@@ -120,9 +120,8 @@ Every apparent hit (43x `cross-session-reject`, 228x `early-ack`, etc.) is a **p
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#optverify]~~
-- ~~[#lvbremain]~~
+- [#lvbremain]
 - [#s760wire]
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###
 <!--

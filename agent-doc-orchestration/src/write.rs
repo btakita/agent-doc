@@ -3034,6 +3034,9 @@ fn should_consume_queue_prompt_for_diff_content(
     // consumption" line is the authoritative skip signal, so record this detail
     // to ops_log instead of stderr to avoid a false-alarm during a turn that
     // ultimately consumes the head (#pending-add-suppresses-queue-consume).
+    // The {:?} quoting on prompt_changes/queue_head is load-bearing: the
+    // gate-verify scan excludes double-quoted spans so this embedded document
+    // prose cannot prove a gated review item (#gng8).
     crate::ops_log::log_op(
         file,
         &format!(

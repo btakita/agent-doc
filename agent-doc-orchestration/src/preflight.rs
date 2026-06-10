@@ -10693,6 +10693,30 @@ mod tests {
     }
 
     #[test]
+    fn gate_verify_ignores_marker_quoted_in_content_logging_lines() {
+        // #gng8: queue_diff_active_prompt_differs embeds document prose via
+        // {:?}; a gate must not auto-prove from its own backlog description.
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some("early_ack_pending".to_string()),
+            disproof: None,
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(
+            &dir,
+            "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect early_ack_pending emitted before apply\"] queue_head=\"[#saev]\"\n",
+        );
+
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "pending", "quoted prose must not prove");
+        assert!(!results[0].auto_resolved);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+    }
+
+    #[test]
     fn pending_maintenance_fails_closed_when_snapshot_backlog_cannot_be_synced() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

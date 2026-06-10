@@ -27,6 +27,19 @@
 //! [`scan_ops_log`] is a pure function over `(predicate, ops.log content)` →
 //! [`VerifyOutcome`]. Disproof wins ties (a disproved gate must never
 //! auto-resolve); neither marker → `Pending`.
+//!
+//! ## Prose exclusion (`#gng8`)
+//!
+//! Several ops.log entries embed *document content* (for example
+//! `queue_diff_active_prompt_differs ... prompt_changes=["..."]`, route
+//! `prompt={:?}`, session `tail={:?}`). Backlog or response text that merely
+//! *mentions* a marker token would otherwise prove the gate from its own
+//! description. Embedded content always arrives through `{:?}` debug
+//! formatting, which wraps strings in double quotes — so the scan strips
+//! double-quoted spans from each message before matching. Structured marker
+//! emissions (`[claim] cross-session-reject pane_id=...`,
+//! `[ipc-socket] early_ack_pending ...`, `[s760] clear-decision ...`) are
+//! plain unquoted message text and must stay that way to remain provable.
 
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +116,39 @@ fn parse_ops_line(line: &str) -> Option<(u64, &str)> {
     Some((ts, msg))
 }
 
+/// Strip double-quoted spans from an ops.log message (`#gng8`).
+///
+/// Content-logging entries embed document/prompt text via `{:?}` debug
+/// formatting, which always wraps strings in double quotes with `\"` escapes.
+/// A marker token inside such a span is embedded prose, not a structured
+/// emission, so it must not prove or disprove a gate. An unterminated quote
+/// drops the rest of the line (fail safe: malformed content stays excluded).
+fn strip_quoted_spans(msg: &str) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut chars = msg.chars();
+    let mut in_quote = false;
+    while let Some(c) = chars.next() {
+        if in_quote {
+            match c {
+                '\\' => {
+                    let _ = chars.next();
+                }
+                '"' => {
+                    in_quote = false;
+                    out.push('"');
+                }
+                _ => {}
+            }
+        } else {
+            if c == '"' {
+                in_quote = true;
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Scan `ops.log` content for a gate predicate (`#optv2`, pure).
 ///
 /// Decision matrix (only markers at/after `set_at` count):
@@ -111,7 +157,9 @@ fn parse_ops_line(line: &str) -> Option<(u64, &str)> {
 /// - else → [`VerifyOutcome::Pending`]
 ///
 /// Both `Provable` and `Failed` report the earliest qualifying line so repeated
-/// markers are stable.
+/// markers are stable. Markers are matched against the message with
+/// double-quoted spans stripped ([`strip_quoted_spans`], `#gng8`) so embedded
+/// document prose cannot prove a gate from its own description.
 pub fn scan_ops_log(predicate: &GatePredicate, ops_log: &str) -> VerifyOutcome {
     let set_at = predicate.set_at.unwrap_or(0);
     let verify = predicate.verify.as_deref().filter(|s| !s.is_empty());
@@ -127,6 +175,7 @@ pub fn scan_ops_log(predicate: &GatePredicate, ops_log: &str) -> VerifyOutcome {
         if ts < set_at {
             continue;
         }
+        let msg = strip_quoted_spans(msg);
         if let Some(d) = disproof
             && msg.contains(d)
         {
@@ -389,6 +438,67 @@ mod tests {
                 at: 10
             }
         );
+    }
+
+    #[test]
+    fn scan_ignores_marker_inside_quoted_prose() {
+        // #gng8: queue_diff_active_prompt_differs logs document content via
+        // {:?}, so a backlog item *describing* the marker must not prove it.
+        let pred = GatePredicate {
+            verify: Some("cross-session-reject".to_string()),
+            disproof: None,
+            set_at: Some(0),
+        };
+        let log = "[10] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"- [ ] [#4wxr] claim emits cross-session-reject pane_id=..\"] queue_head=\"[#x]\"\n";
+        assert_eq!(scan_ops_log(&pred, log), VerifyOutcome::Pending);
+    }
+
+    #[test]
+    fn scan_ignores_disproof_inside_quoted_prose() {
+        let pred = GatePredicate {
+            verify: Some("ok marker".to_string()),
+            disproof: Some("manual cleanup".to_string()),
+            set_at: Some(0),
+        };
+        let log = "[5] route_dispatch_queued prompt=Some(\"discussing the manual cleanup path\")\n[10] ok marker emitted\n";
+        assert_eq!(
+            scan_ops_log(&pred, log),
+            VerifyOutcome::Provable {
+                marker: "ok marker".to_string(),
+                at: 10
+            }
+        );
+    }
+
+    #[test]
+    fn scan_structured_marker_proves_despite_prose_mentions() {
+        let pred = GatePredicate {
+            verify: Some("cross-session-reject".to_string()),
+            disproof: None,
+            set_at: Some(0),
+        };
+        let log = concat!(
+            "[10] queue_diff_active_prompt_differs prompt_changes=[\"mentions cross-session-reject in prose\"]\n",
+            "[20] [claim] cross-session-reject pane_id=%43 pane_session=5 configured=0\n",
+        );
+        assert_eq!(
+            scan_ops_log(&pred, log),
+            VerifyOutcome::Provable {
+                marker: "cross-session-reject".to_string(),
+                at: 20
+            }
+        );
+    }
+
+    #[test]
+    fn strip_quoted_spans_handles_escaped_quotes_and_unterminated() {
+        assert_eq!(
+            strip_quoted_spans("a=\"text \\\"inner\\\" more\" tail marker"),
+            "a=\"\" tail marker"
+        );
+        // Unterminated quote drops the rest of the line (fail safe).
+        assert_eq!(strip_quoted_spans("a=\"unterminated marker"), "a=\"");
+        assert_eq!(strip_quoted_spans("no quotes marker"), "no quotes marker");
     }
 
     #[test]

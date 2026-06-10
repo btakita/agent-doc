@@ -50,13 +50,37 @@ Compacted content:
 - **#optv2** — pure ops.log marker scan → `Provable | Failed | Pending` (disproof wins, time-scoped to after the gate was set). Unit-testable over fixtures.
 - **#optv3** — preflight surfacing + opt-in `[/]→[x]` transition (default off — never silently flips a human gate).
 - **#optv4** — dedupe the stale `#bkx9perid` entry (already archived).
+- **`#optv4` — cleanup.** Confirmed there is no stale *live* `#bkx9perid` duplicate — it exists only as a single archived entry (plus its `#bkx9wire` continuation) in `agent-doc-bugs2.done.md`. Nothing to dedupe.
+- **`#optv3` — preflight surfacing + opt-in transition.** Preflight emits one `gate_verify` result per predicate-bearing gated item and logs `optverify review=<id> status=<…>`. The `[/]→[x]` auto-flip is **opt-in, default off** — only when `agent_doc_gate_autoverify` is true (frontmatter → project config) does a provable gate flip, staged to both the working tree and the snapshot so the step-2 commit picks it up. Without the opt-in it only surfaces status; a human gate is never silently flipped.
+- **`#optv2` — ops.log scan (pure).** `scan_ops_log` decides `provable` / `failed` / `pending`: proof marker at/after `set_at` with no disproof → provable; disproof marker → failed (**disproof wins ties**, fail-safe); neither → pending. Full unit matrix (time-scoping, disproof-wins, earliest-line).
+- **`#optv1` — typed predicate (data model).** New pure `agent_doc_core::gate_verify` module: `GatePredicate { verify, disproof, set_at }`, persisted inline on the item text as a `<!-- gate-verify verify="…" disproof="…" set_at="…" -->` annotation that round-trips through the pending parser without touching the `[/gate_type]` checkbox grammar. Set it via `agent-doc backlog <FILE> set-verify <id> "verify=ops_log:<marker>;disproof=ops_log:<text>"` (or `--pending-set-verify id=<spec>` on `write`/`finalize`); the gate-set time is stamped automatically so stale pre-gate markers can't prove a freshly re-opened gate.
 
 I found `--pending-set-gate-type` already exists and preflight already reads ops.log, so this builds on existing plumbing rather than new flag families. Kept `#optverify` as a single actionable backlog item pointing at the plan.
 
 **Worth noting:** review is currently **empty** (I cleared `#saevon` earlier), so the feature's premise — auto-verifying *gated* items — has nothing to act on right now. It's a real capability for future gates, not urgent.
 
 **Queue is now drained.** This session shipped, across its turns: **pcpc5d** (direct-run writer routed through the write-authority gate), **s760a/b** (transcript-token ctx% source), review **cleared**, `#lvbremain` reduced to an operator-drive checklist, and `#optverify` **planned**. Everything still open is fresh-session / operator-live-verify work — appropriate to pick up in a clean, non-degraded session.
-<!-- agent:boundary:df9a890f -->
+
+### Re: #optverify — built, shipped, queue-continues — opus-4-8
+
+> **Queue prompt:**
+>
+> [#optverify]
+
+You un-struck `#optverify` because the prior turn only *planned* it (decomposed into `#optv1–4`) instead of building it. This was a fresh, resynced session, so I implemented the whole feature this cycle under the `#spec-test-build-install-commit-push` preset.
+
+**Shipped (agent-doc submodule `eaca894d`, superproject `c958d38a0`):**
+
+- **`#optv1` — typed predicate (data model).** New pure `agent_doc_core::gate_verify` module: `GatePredicate { verify, disproof, set_at }`, persisted inline on the item text as a `<!-- gate-verify verify="…" disproof="…" set_at="…" -->` annotation that round-trips through the pending parser without touching the `[/gate_type]` checkbox grammar. Set it via `agent-doc backlog <FILE> set-verify <id> "verify=ops_log:<marker>;disproof=ops_log:<text>"` (or `--pending-set-verify id=<spec>` on `write`/`finalize`); the gate-set time is stamped automatically so stale pre-gate markers can't prove a freshly re-opened gate.
+- **`#optv2` — ops.log scan (pure).** `scan_ops_log` decides `provable` / `failed` / `pending`: proof marker at/after `set_at` with no disproof → provable; disproof marker → failed (**disproof wins ties**, fail-safe); neither → pending. Full unit matrix (time-scoping, disproof-wins, earliest-line).
+- **`#optv3` — preflight surfacing + opt-in transition.** Preflight emits one `gate_verify` result per predicate-bearing gated item and logs `optverify review=<id> status=<…>`. The `[/]→[x]` auto-flip is **opt-in, default off** — only when `agent_doc_gate_autoverify` is true (frontmatter → project config) does a provable gate flip, staged to both the working tree and the snapshot so the step-2 commit picks it up. Without the opt-in it only surfaces status; a human gate is never silently flipped.
+- **`#optv4` — cleanup.** Confirmed there is no stale *live* `#bkx9perid` duplicate — it exists only as a single archived entry (plus its `#bkx9wire` continuation) in `agent-doc-bugs2.done.md`. Nothing to dedupe.
+
+**Verification:** `make check` green — 4221 tests pass (incl. 17 new core + 4 new preflight tests), clippy clean. Hit and fixed the FlowCore token-budget gate (a `disproof=` error string in `write.rs` carried the audited `proof=` substring — reworded). Smoke-tested the full CLI path live: `set-verify` → preflight `pending` → emit proof marker → preflight `provable` + auto-resolved `[/]→[x]` with the opt-in on. Built + installed (release + `cargo install`); latest CI run is green.
+
+**Queue continues** to `#lvbremain` (operator-drive live JB SOCKET-IPC verification) and `#s760wire` (`#s760c` route-gate wire + `#s760d` operator live-verify) — both are fresh-session / operator-live work.
+<!-- agent:boundary:51ce8eab -->
+<!-- agent:boundary:4407422b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +118,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#optverify] [feature] Opportunistic gated-review verification: auto-prove/disprove gated [/] items from ops.log markers during preflight/closeout (no live-verify session). PLANNED 2026-06-10: tasks/agent-doc/plan-optverify-gated-review-autoverify.md decomposes into #optv1 (typed verify=ops_log:marker + disproof predicate on the gate + gate-set timestamp; --pending-set-gate-type already exists as the carrier), #optv2 (pure ops.log marker scan: Provable/Failed/Pending, disproof-wins, time-scoped), #optv3 (preflight surfacing + opt-in [/]->[x], default off, never silently flip a human gate), #optv4 (dedupe stale #bkx9perid, already archived). Spec: specs/07-closeout-commands.md. Run as a fresh focused session. NOTE: review is currently empty, so this is not urgent.
 - [ ] [#lvbremain] OPERATOR-DRIVE live verification (agent checks logs; absorbs ex-review #saevon early-ack). EARLY_ACK already flipped: EARLY_ACK_ENABLED=true in ipc_socket.rs, live in shipped 0.34.0 — code-side done, only live confirmation remains. Log status 2026-06-09: all 4 markers have ZERO real ops.log emissions, so none of these live actions have been driven yet. DRIVE from a fresh session (scripts/xdotool-live-verify.sh): (1) #4wxr cross-session-reject — claim this doc from a 2nd tmux pane, expect cross-session-reject marker (claim.rs/ClaimAction.kt); (2) #9adk run/clear coalesce — drive a run then a clear, expect run_clear_coalesce (route.rs/sync.rs); (3) visible_write_live_buffer_matches_disk — a live editor write where the buffer already matches disk (write.rs); (4) #saev early-ack — drive a live JB-plugin SOCKET-IPC session (not the file-IPC fallback this drain keeps hitting), expect early-ack pending emitted before apply with no false-success / false ack-timeout. No JB install needed (plugin 0.2.158 unchanged, binary+cdylib current). Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
 - [ ] [#s760wire] s760c+s760d RESIDUAL. SHIPPED 2026-06-10 (submodule 2d2d0ce3, context_pct.rs): #s760a transcript locator + Claude-JSONL token reader (Codex/OpenCode unsupported -> None) + #s760b model->context-window table (Claude 200k; unknown -> None+warn) + context_pct/transcript_context_pct, fail-safe to None (never clear), 12 unit tests. REMAINING: #s760c wire transcript_context_pct into the route.rs dispatch gate (if queue_context_reset_opted_in AND pct >= clear_threshold_for_doc -> tracked /clear; emit [s760] clear-decision optIn/threshold/pct/clear to ops.log) — pure code, no live gate, do in a fresh session; #s760d operator live-verify the destructive /clear on a throwaway opted-in doc. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
 <!-- /agent:backlog -->

@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Early-ack IPC activated (`#saevon`).** Flipped `EARLY_ACK_ENABLED false → true`
+  in `ipc_socket.rs`: the sender now auto-tags live closeout `patch` messages with
+  `early_ack: true`, so an early-ack-aware listener emits a `pending` ack the instant
+  it receives the patch — before the blocking apply — decoupling the sender's liveness
+  probe from plugin apply latency (root of the R2 false ack-timeout / degrade-vote
+  class). The two-phase protocol was landed dormant and unit-tested in a prior cycle;
+  this flip activates auto-injection. Skew-safe: older listeners ignore the unknown
+  `early_ack` field and still get exactly the prior single terminal ack. Live
+  verification (`#xkpf` / `#lvb-run`) greps `ops.log` for `[ipc-socket] early-ack
+  pending emitted before apply` with a paired terminal ack and no `ack_timeout` /
+  `false_success`. Test `early_ack_tagging_is_dormant_by_default` → renamed/inverted
+  to `early_ack_tagging_is_active_for_patches`. `ipc_socket.rs`,
+  `specs/process-topology.md`.
+
 - **Consumed (struck) queue items are no longer recorded as dropped user edits
   (`#dropqueue-consumed-falsecount`).** `dropped_queue_prompt_lines_after_content_ours`
   counted only `content_ours` *active* queue prompts, so a queue item the user

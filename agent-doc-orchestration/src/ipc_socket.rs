@@ -59,13 +59,17 @@ const IPC_ACK_TIMEOUT_SECS: u64 = 6;
 /// protocol is fully wired and unit-tested; only the auto-injection of the
 /// opt-in flag onto live closeout patches is gated here.
 ///
-/// Kept `false` (dormant) until the two-phase flow is verified end-to-end in a
-/// live IntelliJ/Codex session under real typing load (`#xkpf`): with the flag
-/// off, no patch carries `early_ack`, no listener emits a `pending` ack, and the
-/// read loop runs exactly once — byte-for-byte the pre-existing single-ack
-/// behavior. Flipping this to `true` (plus that live verification) activates the
-/// decoupling of the sender liveness probe from plugin apply latency.
-const EARLY_ACK_ENABLED: bool = false;
+/// Activated (`#saevon`, 2026-06-09): the sender auto-tags live closeout `patch`
+/// messages with `early_ack: true`, so an early-ack-aware listener emits a
+/// `pending` ack on receipt (before the blocking apply) and the sender's
+/// liveness probe is decoupled from plugin apply latency. The protocol was
+/// landed dormant and unit-tested before this flip; activation is verified live
+/// under real typing load (`#xkpf` / `#lvb-run`) by grepping `ops.log` for
+/// `[ipc-socket] early-ack pending emitted before apply` with a paired terminal
+/// ack and no `ack_timeout` / `false_success`. Older listeners ignore the
+/// unknown `early_ack` field (skew-safe), so a non-early-ack plugin still gets
+/// exactly the prior single terminal ack.
+const EARLY_ACK_ENABLED: bool = true;
 
 /// Get the socket path for a project.
 pub fn socket_path(project_root: &Path) -> PathBuf {
@@ -551,11 +555,19 @@ mod tests {
     }
 
     #[test]
-    fn early_ack_tagging_is_dormant_by_default() {
-        // With EARLY_ACK_ENABLED off (the dormant default), the sender must not
-        // add the flag — wire traffic stays byte-identical to pre-early-ack.
+    fn early_ack_tagging_is_active_for_patches() {
+        // With EARLY_ACK_ENABLED on (#saevon activation), the sender tags
+        // outgoing `patch` messages with `early_ack: true` so an early-ack-aware
+        // listener emits a `pending` ack before the blocking apply. Non-patch
+        // messages stay untagged, and the existing fields are preserved.
         let patch = serde_json::json!({"type": "patch", "file": "x.md"});
-        assert_eq!(early_ack_tagged_message(&patch), patch);
+        let tagged = early_ack_tagged_message(&patch);
+        assert_eq!(tagged["early_ack"], serde_json::Value::Bool(true));
+        assert_eq!(tagged["type"], "patch");
+        assert_eq!(tagged["file"], "x.md");
+        assert!(message_requests_early_ack(&tagged.to_string()));
+
+        // Non-patch traffic must never carry the opt-in flag.
         let other = serde_json::json!({"type": "vcs_refresh"});
         assert_eq!(early_ack_tagged_message(&other), other);
     }

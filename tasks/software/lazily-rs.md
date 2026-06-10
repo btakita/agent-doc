@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -163,7 +163,26 @@ Both are available (404 on GitHub org/user API for each).
 | Uniqueness | Distinctive, unlikely to conflict | Generic suffix (`-dev` is overused) |
 
 **Recommendation: `lazily-hub`** — it's more specific about purpose (ecosystem hub for all lazily bindings) and less generic than `-dev`, which is widely used and may not stand out. The 1-char difference is negligible.
-<!-- agent:boundary:09bf99ca -->
+
+### Re: Create a lazily-hub GitHub org — glm-5-1
+
+> **Queue prompt:**
+>
+> Create a lazily-hub GitHub org
+
+
+GitHub does not expose an API for creating organizations — this must be done through the web UI:
+
+**https://github.com/organizations/new**
+
+Steps:
+1. Open the link above (logged in as `btakita`)
+2. Set org name to `lazily-hub`
+3. Choose plan (Free is fine for now)
+4. After creation, invite any collaborators
+
+Once the org exists, I can transfer repos (`lazily-rs`, `lazily-py`, etc.) and set up team permissions via `gh`.
+<!-- agent:boundary:3b930f39 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,7 +191,6 @@ Both are available (404 on GitHub org/user API for each).
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- Create a lazily-hub GitHub org
 <!-- /agent:queue -->
 
 ## Backlog

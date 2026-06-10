@@ -6,6 +6,31 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Demote the JetBrains plugin WatchService to read-only buffer reporting (`#dsqa` / `#pcp7` —
+  08b cut-over residual phase 2).** New `AGENT_DOC_PLUGIN_WATCH` rollback flag
+  (`watch_authority.rs`, mirroring the `#dav9` / `AGENT_DOC_SUPERVISOR` ladder):
+  `active` (default = today's behavior) / `read-only` (demoted). At `read-only`, the JB
+  plugin's autonomous NIO `WatchService` file-apply path no longer applies patches it
+  observes under `.agent-doc/patches/` — the single controller-owned watcher (`#pcpc4`) plus
+  the socket IPC command channel become the sole writer to the live editor buffer, killing the
+  second-watcher race that produced `live_prompt_drift_after_preflight` /
+  `ipc_socket_already_applied_live_buffer_diverged` even under in-process hosting (the `#dav9`
+  swap moved *who hosts the child*, not *who writes the buffer*). The plugin reads the flag fresh
+  via the new `agent_doc_plugin_watch_readonly` FFI export (the flag lives in the binary, so the
+  operator opts in once on the `agent-doc` session and every IDE instance honors it without
+  depending on the IDE's inherited environment); the export emits a structured
+  `plugin_watch_readonly` `ops.log` marker so the cut-over is log-verifiable (`#q6js` /
+  `#lvbremain`). **Default `active` is unchanged** — shipped users keep the WatchService applier
+  until an operator opts in, and the gate fails safe back to `active` on an unrecognized value so
+  a typo can never strand a live editor without an applier. The socket IPC apply path (the
+  controller's writer arm into the editor) stays active in both modes. JB `pluginVersion`
+  0.2.158 → 0.2.159. Coverage: `mode_parses_known_values_and_defaults_active`,
+  `mode_unknown_value_falls_back_active`, `mode_is_readonly_only_at_demotion_rung`,
+  `current_mode_reads_env_and_defaults_active`, `plugin_watch_readonly_default_active_returns_zero`.
+  Remaining for `#q6js`/`#lvbremain`: the live operator drive (restart with
+  `AGENT_DOC_PLUGIN_WATCH=read-only` + the 0.2.159 plugin installed, drive an edit-during-finalize
+  cycle) so the agent can confirm zero-drift + the `visible_write_live_buffer_matches_disk` marker
+  from `ops.log`.
 - **Land the in-process supervisor hosting swap (`#dav9` / `pcpc5e1` authority rung).**
   `AGENT_DOC_SUPERVISOR=in-process` now actually hosts the harness child through
   `supervisor::in_process::InProcessSupervisor` instead of only logging the gate.

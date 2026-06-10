@@ -134,6 +134,7 @@ pub mod supervisor_authority;
 pub mod sync;
 pub mod turn_scope_store;
 pub mod watch;
+pub mod watch_authority;
 pub mod write;
 pub mod write_authority;
 pub mod write_queue;

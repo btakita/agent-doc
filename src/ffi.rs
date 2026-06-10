@@ -923,6 +923,40 @@ pub unsafe extern "C" fn agent_doc_patch_content_already_committed(
     ffi_response_already_applied(&head, patch_content) as i32
 }
 
+/// Report whether the editor plugin's own `WatchService` file-apply path is
+/// demoted to read-only buffer reporting (`#dsqa` / `#pcp7` — 08b cut-over
+/// residual phase 2). Returns `1` when the plugin must NOT apply file-IPC
+/// patches it observes on disk (the controller-owned watcher + socket IPC are
+/// the sole writer), `0` when the plugin keeps today's apply behavior.
+///
+/// The flag (`AGENT_DOC_PLUGIN_WATCH`) lives in the binary, read fresh on every
+/// call via [`agent_doc_orchestration::watch_authority::current_mode`], so an
+/// operator sets it once on the `agent-doc` session and every plugin instance
+/// honors it through FFI instead of depending on the IDE's inherited
+/// environment. When read-only, this emits a structured `plugin_watch_readonly`
+/// marker to that document's `ops.log` so the cut-over can be verified from the
+/// logs (the `#q6js` / `#lvbremain` proof). `active` (default) is silent.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_plugin_watch_readonly(file_path: *const c_char) -> i32 {
+    let file = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    if agent_doc_orchestration::watch_authority::current_mode().is_readonly() {
+        agent_doc_orchestration::ops_log::log_op(
+            std::path::Path::new(file),
+            "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) gate=read-only #dsqa",
+        );
+        1
+    } else {
+        0
+    }
+}
+
 fn ffi_show_head(file: &std::path::Path) -> Option<String> {
     let parent = file.parent()?;
     let root = std::process::Command::new("git")
@@ -2159,6 +2193,17 @@ mod ack_content_tests {
         let claimed_again =
             unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
         assert_eq!(claimed_again, 1, "claimed sentinel should be durable");
+    }
+
+    #[test]
+    fn plugin_watch_readonly_default_active_returns_zero() {
+        // Default (no AGENT_DOC_PLUGIN_WATCH) keeps the plugin applying file-IPC
+        // patches — read-only demotion is strictly opt-in (#dsqa rollback-safe).
+        unsafe { std::env::remove_var("AGENT_DOC_PLUGIN_WATCH") };
+        let tmp = TempDir::new().unwrap();
+        let file = CString::new(tmp.path().join("plan.md").to_str().unwrap()).unwrap();
+        let readonly = unsafe { agent_doc_plugin_watch_readonly(file.as_ptr()) };
+        assert_eq!(readonly, 0, "default must keep the plugin applier active");
     }
 
     #[test]

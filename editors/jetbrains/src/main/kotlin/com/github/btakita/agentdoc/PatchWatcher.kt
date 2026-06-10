@@ -538,6 +538,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
 
+            // Read-only demotion (#dsqa / #pcp7): the autonomous WatchService
+            // must not apply patches it observes on disk. The socket IPC path
+            // (controller's writer arm) applies + deletes this patch file. Leave
+            // the file in place for that path; the dedup/stale checks above
+            // already removed anything stale, so this is a genuine pending apply
+            // that only the controller-owned writer may perform.
+            if (isFileWatchApplyDemoted(patch.file)) {
+                LOG.info("[patch-watcher] read-only demotion (#dsqa): not applying ${patchFile.name} via WatchService; controller-owned watcher + socket IPC are sole writer")
+                return
+            }
             if (!awaitIdleBeforeDocumentMutation(patch.file, "file patch")) {
                 schedulePatchRetry(patchFile, "typing active")
                 return
@@ -664,6 +674,33 @@ class PatchWatcher(private val project: Project) : Disposable {
         val lib = AgentDocLib.get() ?: return false
         return lib.agent_doc_is_claimed_by_force_disk(root, patchId).also { claimed ->
             if (claimed) LOG.info("[patch-watcher] dedup: patch_id $patchId claimed by force-disk — skipping apply")
+        }
+    }
+
+    /**
+     * Read-only demotion gate (#dsqa / #pcp7 — 08b cut-over residual phase 2).
+     *
+     * When the binary's `AGENT_DOC_PLUGIN_WATCH` flag is `read-only`, the
+     * plugin's autonomous NIO `WatchService` file-apply path must NOT mutate the
+     * live buffer: the single controller-owned watcher plus the socket IPC
+     * command channel become the sole writer, killing the second-watcher race
+     * that produces `live_prompt_drift_after_preflight`. Read fresh via FFI on
+     * every observed patch (default `active` => false, zero behavior change for
+     * shipped users until an operator opts in). The FFI emits the structured
+     * `plugin_watch_readonly` ops.log marker so the cut-over is log-verifiable.
+     *
+     * Note: this gates only the filesystem WatchService apply. The socket IPC
+     * apply path ([handleSocketMessageV2]) is the controller's writer arm into
+     * the editor and stays active.
+     */
+    private fun isFileWatchApplyDemoted(filePath: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_plugin_watch_readonly(filePath)
+        } catch (_: UnsatisfiedLinkError) {
+            false // older binary without the export: keep today's apply behavior
+        } catch (_: NoSuchMethodError) {
+            false
         }
     }
 

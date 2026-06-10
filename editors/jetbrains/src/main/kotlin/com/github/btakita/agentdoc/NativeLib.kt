@@ -314,6 +314,19 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_patch_content_already_committed(file_path: String, content: String): Boolean
 
+    /**
+     * True when the plugin's own `WatchService` file-apply path must be demoted
+     * to read-only buffer reporting (#dsqa / #pcp7 — 08b cut-over residual phase
+     * 2). When true the plugin must NOT apply file-IPC patches it observes on
+     * disk under `.agent-doc/patches/`; the controller-owned watcher + socket
+     * IPC are the sole writer to the live buffer. Reads `AGENT_DOC_PLUGIN_WATCH`
+     * fresh in the binary (default `active` => false), so the operator opts in
+     * once on the `agent-doc` session and every plugin instance honors it via
+     * FFI instead of depending on the IDE's inherited environment. Emits a
+     * structured `plugin_watch_readonly` ops.log marker when it returns true.
+     */
+    fun agent_doc_plugin_watch_readonly(file_path: String): Boolean
+
     /** Callback interface for socket IPC messages. */
     interface IpcMessageCallback : Callback {
         /** Called with each JSON message. Return true if handled, false on error. */

@@ -166,6 +166,28 @@ direct-run `run.rs::atomic_write` by delegating to `write::atomic_write_pub`
   Code/Codex editor-boundary proof and stay in review `#xkpf`; at this
   write-routing layer `removed` behaves like `authority`.
 
+The editor-plugin filesystem-watch demotion rung of this ladder is realized by
+the `AGENT_DOC_PLUGIN_WATCH` environment gate, read on each observed patch by
+`watch_authority::current_mode` and surfaced to the editor plugin through the
+`agent_doc_plugin_watch_readonly` FFI export. The flag lives in the binary (not
+the IDE process), so an operator opts in once on the `agent-doc` session and
+every plugin instance honors it via FFI rather than depending on the IDE's
+inherited environment.
+
+- `active` (default) — the plugin's autonomous NIO `WatchService` thread keeps
+  applying file-IPC patches it observes under `.agent-doc/patches/`. Unchanged
+  shipped behavior and the rollback target.
+- `read-only` (`#dsqa`/`#pcp7`) — the plugin `WatchService` file-apply path is
+  demoted to read-only buffer reporting: it no longer applies observed patches.
+  The single controller-owned watcher plus the socket IPC command channel (the
+  controller's writer arm into the editor) become the sole writer to the live
+  buffer, removing the second-watcher race that mutates the live buffer between
+  an agent finalize's preflight and commit. The export emits a structured
+  `plugin_watch_readonly` `ops.log` marker so the cut-over is log-verifiable. The
+  gate fails safe back to `active` on an unrecognized value so a typo can never
+  strand a live editor without an applier. This rung still requires live
+  IntelliJ/VS Code editor-boundary proof.
+
 Routing a write through the queue re-enters `atomic_write` on the session-actor
 owner thread; the thread-local owner-scope re-entrancy guard
 (`write_authority::owner_scope_guard`, installed by

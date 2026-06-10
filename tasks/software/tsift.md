@@ -42,11 +42,6 @@ Compacted content:
 
 Implemented and pushed.
 
-> **Queue prompt:**
->
-> [#contextpack-queue-slim]
-
-
 Changes:
 - Added `prompt_cache_plan.analytics.prefix_drift` to `session-cost`, comparing adjacent prompt-cache calls by `stable_prefix_fingerprint`, cache key, explicit breakpoints, routing affinity, and provider.
 - Drift entries now report trigger/severity, first changed field, all changed fields, before/after cached-input ratios, and cache-creation ratio.
@@ -67,34 +62,12 @@ Commits pushed:
 - `btakita/agent-loop` `7424a5d92` (`chore: update tsift submodule`)
 
 Note: `agent-loop` has no workflow named `CI` for `gh run list --workflow CI`; the required tsift CI check passed.
-
-### Re: pcache-prefix-drift
-
-Implemented and pushed.
-
-Changes:
-- Added `prompt_cache_plan.analytics.prefix_drift` to `session-cost`, comparing adjacent prompt-cache calls by `stable_prefix_fingerprint`, cache key, explicit breakpoints, routing affinity, and provider.
-- Drift entries now report trigger/severity, first changed field, all changed fields, before/after cached-input ratios, and cache-creation ratio.
-- Cache-ratio-drop and cache-creation-spike diagnostics now point at the first changed prompt-cache field when attribution metadata changed.
-- Added compact/human output lines via `prompt-cache-prefix-drift`, and JSON keeps the structured field-change payload.
-- Updated the session-cost spec and `VERSIONS.md`.
-
-Verification:
-- `cargo test -p tsift-agent-doc prompt_cache_prefix_drift_points_regressions_at_first_changed_field`
-- `cargo test -p tsift-cli session_cost_reports_prompt_cache_invalidation_diagnostics`
-- `make check`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.67`
-- GitHub Actions CI in `btakita/tsift` for `bcc34fb`: success
-
-Commits pushed:
-- `btakita/tsift` `bcc34fb` (`feat: report prompt cache prefix drift`)
-- `btakita/agent-loop` `7424a5d92` (`chore: update tsift submodule`)
 
 Queue guard note: preflight remembered the removed free-text queue head "What are #next-steps to improve prompt caching and saving tokens?". I did not treat that as this cycle's active queue head; the live queue head was `#pcache-prefix-drift`, and the remaining prompt-cache follow-ups are preserved in the active backlog/queue.
 <!-- no-free-text-queue-head-guard -->
 
-Note: `agent-loop` has no workflow named `CI` for `gh run list --workflow CI`; the required tsift CI check passed.
+### Re: contextpack-queue-slim
+
 Implemented and pushed.
 
 Changes:
@@ -123,19 +96,48 @@ CI:
 - `agent-loop` has no workflow named `CI`.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:f8388f9e -->
+
+### Re: token-actions-rewrite
+
+Implemented and pushed.
+
+Changes:
+- Added `rewrite_commands` to `session-review --next-context` `next_token_actions`.
+- Guardrail actions now point at concrete bounded follow-ups: `context-pack`, `session-review --next-context`, and relevant rewrite commands.
+- Added `repeated_raw_read` actions for repeated raw source/session/log reads, with `tsift rewrite --run ...` plus normalized `tsift --envelope source-read ...` commands.
+- Added `repeated_command_bundle` actions for repeated shell command bundles, with exact `tsift rewrite --run ...` commands.
+- Updated `context-pack` and budgeted human output to show rewrite commands, plus session-review specs/version notes.
+- Added unit and compiled CLI JSON coverage for the new action commands.
+
+Verification:
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists`
+- `cargo test -p tsift-cli --test exit_code session_review_json_surfaces_loop_clusters`
+- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_actionable_guardrail_failures`
+- `make check`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.67`
+
+Commits pushed:
+- `btakita/tsift` `c884ade2` (`feat: add token action rewrite commands`)
+- `btakita/agent-loop` `8203cef1c` (`chore: update tsift submodule`)
+
+CI:
+- `btakita/tsift` run `27249341345`: success.
+- `agent-loop` has no workflow named `CI`.
+
+Note: pushing the superproject pointer also published eight pre-existing local agent-doc commits that were already ahead of `origin/main`. The exchange is large, but the queue remains active, so I continued draining it.
+
+<!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:ef6572fa -->
 <!-- /agent:exchange -->
-###
-<!--
-What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
--->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#pcache-prefix-drift]~~
 - ~~[#contextpack-queue-slim]~~
-- [#token-actions-rewrite]
+- ~~[#token-actions-rewrite]~~
 - [#pcache-fixture-drift]
 - [#pcache-scorecard]
 <!-- /agent:queue -->
@@ -143,7 +145,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#token-actions-rewrite] Promote session-review next_token_actions into exact rewrite commands for token-heavy behavior: repeated raw source/session/log reads, repeated command bundles, oversized prompt turns, and high cached-resend ratios should map to concrete tsift rewrite/source-read/session-review/context-pack commands.
+- [x] [#token-actions-rewrite] Promote session-review next_token_actions into exact rewrite commands for token-heavy behavior: repeated raw source/session/log reads, repeated command bundles, oversized prompt turns, and high cached-resend ratios should map to concrete tsift rewrite/source-read/session-review/context-pack commands.
 - [ ] [#pcache-fixture-drift] Extend real-session prompt-cache fixtures with regression cases for volatile timestamps/generated headers in cached prefixes, cold standalone compaction, OpenAI prompt_cache_key churn, and replica routing churn; fail under when cache reads no longer beat creation work.
 - [ ] [#pcache-scorecard] Add a compact prompt-cache ROI scorecard to session-cost/session-review: per provider/session show net cached-read tokens, read/create ratio, trend, suspected invalidation cause, and the one next command to run before the next long agent-doc cycle.
 <!-- /agent:backlog -->
@@ -152,13 +154,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:review -->
 <!-- /agent:review -->
-###
-<!--
-Can we increase max-hop caps?
-Could FalkorDB help with performance?
--->
 
 <!-- agent:icebox -->
+- What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
+- Can we increase max-hop caps?
+- Could FalkorDB help with performance?
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

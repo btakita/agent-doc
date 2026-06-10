@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -42,7 +42,13 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#hccr2]
+- [#hsmart2]
+- [#hcache2]
+- [#hlearn2]
+- [#hmcp2]
+- 
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -51,6 +57,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#cmmcp-eval] [recommended] Evaluate DeusData/codebase-memory-mcp (https://github.com/DeusData/codebase-memory-mcp) as a tsift idea-source — NOT a replacement. Pure-C zero-dep single binary, 159 tree-sitter grammars, SQLite knowledge graph, Cypher-like read-only query language + BM25 + regex + bundled-embedding vector search, Hybrid-LSP type resolution (Py/TS/Go/PHP/C#/C/C++), team-shareable compressed graph artifact (.codebase-memory/graph.db.zst), 3D graph viz, PreToolUse grep/glob augmentation hook, 14 MCP tools. Port-worthy ideas to assess: (1) Cypher-like graph query language as a first-class agent interface vs our graph --callers/--callees; (2) committed/shareable compressed graph artifact so teammates+CI skip re-indexing; (3) pure-C zero-toolchain single-binary install; (4) grep/glob result augmentation. MIT, 3.1k stars, active. tsift keeps the edge on agent-doc integration (rewrite hooks, digest-runner, session-review, diff-digest, envelope budgets/scale_guard).
 - [ ] [#hccr2] [recommended] Implement reversible retrieval handles for truncated tsift search/source/context-pack/digest output, storing omitted originals in .tsift/cache with query-scoped retrieve commands.
 - [ ] [#hsmart2] [recommended] Add adaptive sampling for large JSON/list outputs in tsift envelopes and digests, preserving errors, first/last rows, anomalies, and query-relevant rows before budget truncation.
 - [ ] [#hcache2] [recommended] Add stable-prefix and prompt-cache layout checks to session-review/context-pack output, separating stable instructions/evidence from volatile dates, paths, watermarks, and run ids.

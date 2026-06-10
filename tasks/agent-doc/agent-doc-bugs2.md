@@ -79,11 +79,39 @@ Ran the log-check half of the `#lvbatch` operator batch (your model: you drive t
 - `#9adk` run/clear coalesced — 0 markers; needs a run→clear sequence.
 - `visible_write_live_buffer_matches_disk` — **0 real emissions**; needs a live write where the buffer already matches disk.
 - `#saev` early-ack — 0 real `[ipc-socket] early-ack pending emitted before apply` (correct: `EARLY_ACK_ENABLED=false`; blocked on `#saevon` flipping it first).
+4. Only then commit + push the flip and ship. Plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`.
+3. Drive the live batch under real typing load (`#lvbremain` marker `#saev`); confirm `[ipc-socket] early-ack pending emitted before apply` fires **before** apply, with **no** false-success and **no** false ack-timeout.
+2. `cargo build --release && agent-doc lib-install` (refresh the cdylib; no JB plugin reinstall needed).
+1. Flip `EARLY_ACK_ENABLED: bool = true` at `agent-doc-orchestration/src/ipc_socket.rs:68`.
 
 Closing `#lvbatch`: the log-check pass is complete and the three proven marker families are confirmed live. The remaining four markers each require a specific operator-driven action (or `#saevon` first), so I split them into actionable `#lvbremain` rather than leaving a gate — drive them via the now-shipped `scripts/xdotool-live-verify.sh` from a **fresh** session (this one is still `session_accretion: warn`, restart-heavy).
 
 Note on the false-positive trap I avoided: a naive `grep` matched the backlog item's own text echoed into `ops.log` (e.g. an apparent "early-ack" hit and a `visible_write_live_buffer_matches_disk` hit that were really the `#lvbatch`/`#pcpc5live` item descriptions logged as queue-diff content). All counts above are anchored to the `[<unixtime>] <marker>` emission prefix.
-<!-- agent:boundary:95fb43f4 -->
+
+### Re: do [#saevon] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#saevon]
+
+
+Gating `#saevon` — this is a live-JB-verification gate, the kind you accept, not effort-avoidance. Here's the concrete reason it cannot safely complete in *this* session.
+
+`#saevon` flips `EARLY_ACK_ENABLED` (`agent-doc-orchestration/src/ipc_socket.rs:68`) from `false` to `true`, which auto-injects `early_ack: true` onto live closeout patches so the listener emits a `pending` ack before the blocking apply. The flag's own doc comment is explicit:
+
+> *Kept `false` (dormant) until the two-phase flow is verified end-to-end in a live IntelliJ/Codex session under real typing load (`#xkpf`)... Flipping this to `true` (plus that live verification) activates the decoupling of the sender liveness probe from plugin apply latency.*
+
+Flipping + `cargo build --release` + `agent-doc lib-install` hot-reloads the cdylib into the **live** plugin, so the **very next finalize in this session** would run through the untested early-ack path. This session is already reproducing `#postcommit-ipc-worktree-corruption` (the previous cycle's commit was correct at HEAD but the working tree was spliced post-commit and I recovered it with `git checkout HEAD`). Activating a new IPC ack path on top of an already-misbehaving live listener would corrupt the verification, not prove it.
+
+**Exact unblock (fresh, non-degraded session):**
+1. Flip `EARLY_ACK_ENABLED: bool = true` at `agent-doc-orchestration/src/ipc_socket.rs:68`.
+2. `cargo build --release && agent-doc lib-install` (refresh the cdylib; no JB plugin reinstall needed).
+3. Drive the live batch under real typing load (`#lvbremain` marker `#saev`); confirm `[ipc-socket] early-ack pending emitted before apply` fires **before** apply, with **no** false-success and **no** false ack-timeout.
+4. Only then commit + push the flip and ship. Plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`.
+
+Driveable via `scripts/xdotool-live-verify.sh saevon` (its recipe expects the flag already flipped + lib-installed) from that fresh session — its fresh-session gate refuses this one by design.
+<!-- agent:boundary:72324009 -->
+<!-- agent:boundary:19df87d0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -92,7 +120,7 @@ Note on the false-positive trap I avoided: a naive `grep` matched the backlog it
 - ~~:pushpin: :round_pushpin: do [#s760wire]~~
 - ~~:pushpin: do [#xdotool-lvbatch]~~
 - ~~:round_pushpin: do [#lvbatch]~~
-- :pushpin: :round_pushpin: do [#saevon]
+- ~~:pushpin: :round_pushpin: do [#saevon]~~
 - :round_pushpin: do [#bkx9perid]
 - :round_pushpin: do [#tmux-switch-lag]
 - :round_pushpin: do [#exch-intermix-verify]
@@ -100,6 +128,7 @@ Note on the false-positive trap I avoided: a naive `grep` matched the backlog it
 - ~~do [#dropqueue-consumed-falsecount]~~
 - ~~:round_pushpin: do [#lvbatch]~~
 - :round_pushpin: do [#pcpc5live]
+- :round_pushpin: do [#lvbremain]
 - Automatically add the env vars to ~/ so I can test. I can restart.
 <!-- /agent:queue -->
 ###
@@ -134,7 +163,6 @@ What are #next-steps to fix bugs?
 - [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Pre-emptive /clear: predicate ContextResetDecision.shouldClearBeforeDispatch + clear_threshold_for_doc + agent_doc_queue_context_reset opt-in ALL SHIPPED. Blocker = live context-usage % source. SubmitAction.kt is a thin dispatcher (no ctx%); per Shared Foundation it belongs in route.rs. Observed footers vary by harness+config (Claude custom statusline 'ctx:NN%', Codex 'Context NN% used') so TUI-scrape is wrong for the shipped product — derive ctx% from session transcript token usage / context window instead. Remaining (CLI-side, no JB install): add harness-aware transcript-based ctx% reader in route.rs, gate dispatch via shouldClearBeforeDispatch, emit '[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..', send /clear when true; live-verify.
-- [ ] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [ ] [#tmux-switch-lag] #agent-doc-bug Slow tmux pane switch when switching between agent docs in the editor: the target doc pane is briefly visible in the stash window before it swaps into 0:agent-doc, so the operator sees a flash of the stash layout mid-switch. Likely the passive editor-sync fast-handoff path (sync.rs sync --no-autostart) selects/raises the hidden actor pane before moving it out of stash. Actionable, fresh session: make the stash->agent-doc pane move atomic (move first, then select) so no intermediate stash frame is shown; add SimWorld coverage for the switch ordering. Files: sync.rs passive fast-handoff path.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
@@ -143,6 +171,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

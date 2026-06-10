@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,26 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 3 response topic(s): Does /portal-admin/documents cover Lender Pipeline documents too?; Documents tabs + pages for Deal Pipeline and Lender Pipeline; do [#b0w3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:d66b7d2b -->
+
+### Re: Boolean form fields as checkboxes (read-only → disabled) — opus-4-8
+
+> **Queue prompt:**
+>
+> For all boolean form fields, use a checkbox ![img_6.png](img_6.png). If the boolean is read-only, make the checkbox disabled. deploy
+
+
+Done and deployed. Boolean fields that used to display as the words **true/false** (the `img_6.png` case — the TMO vendor data: `SEND1099`, `USEPAYEE`, `ISVENDOR`) now render as checkboxes. Every boolean surface I converted is read-only, so the checkboxes are **disabled** (checked/unchecked but non-interactive), matching your instruction.
+
+**Approach** (EFS `c2a0b9d`): added a shared `bool_or_null_` helper + `BoolCheckbox` component (`disabled` by default) in `shared/ui.tsx`, then routed the boolean display surfaces through them:
+- **`CopyRow`** (shared) — fixes the image directly: the lender-request vendor-data grid (`lender_management`) feeds `SEND1099`/`USEPAYEE`/`ISVENDOR` through `CopyRow`. The copy button is suppressed for booleans (nothing useful to copy).
+- **`lender_detail`** — "Submitted lender data" raw rows.
+- **`full_application_detail`** — Step 5 declarations + Step 6 e-sign consent (passed as raw booleans instead of pre-stringified Yes/No).
+- **`tmo_loan_details`** — payment-schedule `Prepaid` cell.
+
+`bool_or_null_` is conservative: only actual booleans and the strings `"true"`/`"false"` (case/whitespace-tolerant) become checkboxes — data like `"1"`, `"yes"`, or `"SEND1099"` stays text. No editable boolean selects exist in the portal, so there was nothing to convert to an *enabled* checkbox.
+
+**Verification:** new `boolean-checkbox-fields.test.ts` (6 tests) + full suite **527 pass / 0 fail**, worker build clean. **Deployed** to the EFS Worker (version `2df7ff05`, no D1 migrations pending); live site 200/301.
+<!-- agent:boundary:f9111082 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +63,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- For all boolean form fields, use a checkbox ![img_6.png](img_6.png). If the boolean is read-only, make the checkbox disabled. deploy
 <!-- /agent:queue -->
 
 ## Backlog

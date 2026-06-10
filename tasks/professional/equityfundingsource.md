@@ -36,7 +36,21 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 1 response topic(s): Rename Investor Pipeline → Lender Pipeline + fold in Lenders tab
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a3f7c8b6 -->
+
+### Re: Does /portal-admin/documents cover Lender Pipeline documents too? — opus-4-8
+
+It covers **both** — it is not Deal-Pipeline-only. The admin Documents section (`/portal-admin/documents`) has three tabs, two of which are lender/investor-side:
+
+- **Loan Documents** (default tab) — **Deal Pipeline**. `GET /api/admin/documents` reads `loan_documents JOIN loans`, grouped per loan / TMO loan number. Borrower-loan documents only.
+- **Document Requests** — **Lender Pipeline** (investor/lender). `GET /api/admin/investor-document-requests` reads the investor document-request records, with admin fulfill/reject + an `investor-documents-provided` notification email. This is the lender-side document flow.
+- **Public Documents** — neither pipeline specifically; public-site documents (investor-facing published materials, e.g. funded-deal docs) via `public_documents` + the investor_documents publish/archive endpoints.
+
+So: borrower/loan docs and lender (investor) document requests both live in this one admin section under separate tabs. The Document Requests + Public Documents tabs are wired to the `investor_management` handlers (`app/equityfundingsource/lib/admin/investor_management/index.ts`).
+
+Note: per-lender *lifecycle* documents that are NOT requests — e.g. an investor's accreditation submission — are surfaced on the **investor portal** side (`portal/investor/documents.tsx`, `accreditation.tsx`) and via the user/lender detail, not as a tab in `/portal-admin/documents`.
+
+No code change — informational answer; the `#spec-test-commit-push` preset attached to the queue item is moot for a question.
+<!-- agent:boundary:d559b248 -->
 <!-- /agent:exchange -->
 ###
 <!--

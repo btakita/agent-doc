@@ -77,8 +77,19 @@ Both queue items done, spec/tests updated, committed + pushed + deployed (EFS `b
 **2. Lender-request documents link.** The request payload itself carries **no uploaded files** — it's identity/payee form fields only. Documents live on the lender (investor) as a separate collection. The request **list** already links there (the eye icon → `/portal-admin/lenders/:id`, which embeds the per-lender documents). The gap was the **dialog**, so I added a **"View lender documents"** link (with a file icon) in the `CompleteLenderRequestModal` pointing to the same lender detail page.
 
 **Verification:** new `lender-request-labels-docs.test.ts` (4 tests). Rebased onto 5 upstream commits that landed meanwhile (forgot-password flow, etc.) — clean, no conflicts — then re-ran the full suite: **539 pass / 0 fail**, worker build clean, no D1 migrations, live site 200.
-<!-- agent:boundary:e9017546 -->
-<!-- agent:boundary:3c3eae25 -->
+
+### Re: Table row name opens the quick-view dialog (not a page jump) — opus-4-8
+
+Done, spec/tests updated, committed + pushed + deployed (EFS `77db552`; live 200).
+
+**Lenders tab (`?tab=lenders`).** The name cell linked straight to the investor profile page while the rest of the row opened the lender request dialog — that's the inconsistency you hit. Now the **name opens the dialog** (keyboard-accessible `role="button"`, Enter/Space), consistent with the whole row. The dialog gains explicit links out so nothing is lost: **"Open lender page & documents"** → `/portal-admin/lenders/:id` (the dedicated lender page) and **"Investor profile"** → `/portal-admin/users/:id`.
+
+**Same behavior for other table views.** I applied the pattern to every admin table that *has* a quick-view dialog a name link was bypassing — which turned out to be one other: **Payments**. The payment number (`#N`) now opens the payment detail dialog instead of jumping to the page, and that dialog gets an **"Open payment page"** link to `/portal-admin/payments/:id`.
+
+The remaining admin tables — **Loans, Deals, Application Leads, Funding Commits** — don't have a row quick-view dialog at all; their rows navigate directly to a dedicated detail page (no dialog to open). The pattern can't apply there without building new per-row dialogs for each, which is a larger change I didn't want to make unilaterally. Say the word if you want quick-view dialogs added to those too and I'll scope it.
+
+**Verification:** new `table-row-opens-dialog.test.ts` (4 tests) + updated the lender-docs label test. Full suite **543 pass / 0 fail**, worker build clean, no D1 migrations. Deploy hit one transient Cloudflare assets-upload error (code 10013) and succeeded on retry.
+<!-- agent:boundary:975b56ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,8 +97,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- Make the label more human-readable. Send1099->1099 Sent? UsePayee->Payee? IsVendor->Vendor? Should the admin be able to change these values or not? Is there a record of these values in TMO? Can these values be changed in TMO? Follow the behavior of TMO with our cache.
-- Does the Lender request include documents? If yes, the request page & dialog should link to the lender documents.
+- On /portal-admin/lender-pipeline?tab=lenders, make the link open the lender dialog. The dialog has the link to the dedicated lender page. Please use the same behavior for other table views.
 - deploy
 <!-- /agent:queue -->
 
@@ -97,7 +107,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [ ] [#efspgo] [recommended] EFS online-payment go-live config (after Robert provides Stripe account): set Cloudflare secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + var STRIPE_PAYMENTS_ENABLED=true (wrangler secret put / wrangler.toml), point a Stripe webhook at /api/stripe/webhook, then in admin Platform Settings fill the borrower payment wire/ACH + lender ACH values and flip the per-method enable toggles. Deploy with bun run deploy:worker. Capability is BUILT + admin-configurable (EFS c790ed3); this is config + deploy only.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document
-intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
@@ -123,6 +132,7 @@ intelligence/search, borrower/broker/investor/admin portals, and tenant-ready re
 - [ ] [#kf1p] Tier 3: Ragie Parse + Index for approved docs
 - [ ] [#4ktv] Discuss Ragie content validation with Bob Remeika (scheduled call)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
+intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 <!-- /agent:backlog -->
 
 ## Review

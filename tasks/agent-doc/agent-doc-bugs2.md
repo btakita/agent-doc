@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Per-item log proof (the line that proves/disproves it):
 - **`#lvbremain`**. The markers ARE logs (`#4wxr`/`#9adk`/`visible_write_live_buffer_matches_disk`/`#saev`). Completion = drive once, grep the markers; reframed so I check logs, not you interacting.
 
 Next: with the queue active again, I'll drive these as actionable tasks, leading with the PCP (`#pcpc5live`) since it root-fixes the working-tree corruption that's been disrupting this very session. Cleaning the duplicate `#bkx9perid` entry as part of this.
-<!-- agent:boundary:f93cf1e9 -->
+<!-- agent:boundary:7fb14611 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -63,6 +63,11 @@ Next: with the queue active again, I'll drive these as actionable tasks, leading
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#bkx9perid]~~
 - ~~Please add backlog tasks to close the review items and complete the implementation of the Project Control Pane. I don't want to live verify. Ensure we have adequate logging to prove/disprove the item. I can also file bugs.~~
+- :round_pushpin: do [#saevon]
+- :round_pushpin: do [#postcommit-ipc-worktree-corruption]
+- :round_pushpin: do [#pcpc5live]
+- :round_pushpin: do [#lvbremain]
+- :round_pushpin: do [#s760wire]
 - How can agent-doc support opportunistic gated review item verification?
 <!-- /agent:queue -->
 ###

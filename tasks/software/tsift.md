@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -64,12 +64,18 @@ Priority order added: `#tsbugev`, `#tsbugtok`, `#tsbuglock`, `#tsbugcm`, `#tsbug
 Notes: `#tsbugtok` comes from this session's current token/churn signals: prompt_budget, cache_resend, repeated_raw_read, restart_loop, and noop_closeout all appeared in `session-review --next-context`. `#tsbuglock`, `#tsbugcm`, `#tsbugidx`, and `#tsbugcache` come from archived dogfood findings that are still credible root-cause work: graph-db locking, conflict-matrix mixed verdicts, stale index/summary readiness, and unstable full-projection cache reuse. I did not add the stale `agent-doc` install warning to the tsift backlog because that belongs to `src/agent-doc`, but it is real: preflight warned that the installed binary/cdylib predates source commit `616ef21f`, so live sessions may need `make install` in `src/agent-doc` separately.
 
 Changed paths: session document/backlog only. Verification: no tsift source/build/test run was needed for this planning-only cycle. Commands/proof: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift --envelope context-pack`, `tsift --envelope session-review --next-context`, archive/backlog searches with `rg`, `git -C src/tsift status --short`, and `tsift graph-db --json --path . evidence next-steps --depth 3 --limit 8`. Confidence: high on the ordering; medium on deeper implementation effort until each item is isolated in source. Escalation: none.
-<!-- agent:boundary:b2122279 -->
+<!-- agent:boundary:9fbdba57 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#tsbugev]
+- [#tsbugtok]
+- [#tsbuglock]
+- [#tsbugcm]
+- [#tsbugidx]
+- [#tsbugcache]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

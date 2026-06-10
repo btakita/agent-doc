@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -50,12 +50,21 @@ Compacted content:
 3. **CacheAligner-style stable-prefix layout.** Headroom separates volatile prompt material from stable prefix material to improve provider cache hits. tsift can apply the same idea without touching providers: `session-review`, `context-pack`, and agent-doc packets should emit stable sections first and volatile watermarks, timestamps, run ids, and current-date facts later. tsift already reports prompt-cache ROI in session-cost/session-review; the next step is a lint/gate that detects volatile fields too early in an agent packet.
 2. **SmartCrusher-style adaptive sampling for structured output.** Headroom's JSON/list compressor preserves first/last items, errors, anomalies, and query-relevant rows before sampling the rest. tsift currently caps previews deterministically by `max_items` / `max_bytes`; for large JSON, test logs, search hits, graph rows, and context-pack subsections, it should rank retained rows by error signal, recency, file diversity, graph centrality, and query relevance before budget truncation. This would make small/normal/deep budgets safer under high-hit search and noisy digest cases.
 1. **CCR-style reversible envelope compression.** Headroom's Compress-Cache-Retrieve model caches the original locally and gives the model a retrieve handle when compressed content is insufficient. tsift should generalize its existing expansion commands into a true retrieval contract: every truncated search result set, digest section, context-pack section, and source window can carry a stable cache handle plus a `tsift retrieve <handle> [--query ...]` or existing narrow expansion command. This is the highest-value fit because tsift already emits handles and resume commands; the missing piece is a uniform local original store and query-within-original path.
-<!-- agent:boundary:2a4d6fb9 -->
+- Escalation: none.
+- Verification: this is a queue-state repair for an accidental recommendation promotion; no code tests run.
+- Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc admin inspect`, `agent-doc admin queue pause`, `agent-doc session-check` attempt, and queue/backlog behavior inspection.
+- Changed paths: session document state only; no `src/tsift` implementation/spec edits.
+<!-- agent:boundary:a1b4ac54 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#hdrccr]
+- do [#hdrsmart]
+- do [#hdrcache]
+- do [#hdrlearn]
+- do [#hdrmcp]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -64,11 +73,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hdrccr] [recommended] Implement CCR-style reversible retrieval handles for tsift search/source/context-pack/digest previews, storing omitted originals in .tsift/cache with query-scoped retrieve commands.
-- [ ] [#hdrsmart] [recommended] Add SmartCrusher-style adaptive sampling for large JSON/list outputs in tsift envelopes and digests, preserving errors, first/last rows, anomalies, and query-relevant rows before budget truncation.
-- [ ] [#hdrcache] [recommended] Add CacheAligner-style stable-prefix/prompt-cache layout checks to session-review/context-pack output, separating stable instructions/evidence from volatile dates, paths, watermarks, and run ids.
-- [ ] [#hdrlearn] [recommended] Add headroom-learn-inspired failure-learning mining over session-review/log-digest/test-digest history, producing marker-owned AGENTS or tsift-memory corrections for repeated command/path/search failures.
-- [ ] [#hdrmcp] [recommended] Add first-party tsift MCP tools for compress/retrieve/stats-style workflows, reusing existing envelope, digest, and token-savings metrics rather than requiring a proxy.
 <!-- /agent:backlog -->
 
 ## Review

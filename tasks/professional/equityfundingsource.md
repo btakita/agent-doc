@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -179,17 +179,16 @@ Done, per `#spec-test-commit-push`. On the Investor Pipeline board, **"Open inve
 - **`enable email round trip`** — captured as **`#emrt`**. This one is **config-only, no code**, but blocked on **`#f4rq`** (verify an EFS-owned Resend sending domain) + setting the production flag/secrets, which need Robert's domain access. I can't safely flip production secrets from here. Want me to draft the exact wrangler secret commands + the Resend domain-verification steps for Robert?
 
 Next, or activate the queue and I'll keep draining.
-<!-- agent:boundary:072299c8 -->
+<!-- agent:boundary:27703c11 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 - [#eyp0]
-- ~~[#b0wq]~~
-- ~~[#6r8v]~~
+- [#emrt]
 <!-- /agent:queue -->
 
 ## Backlog

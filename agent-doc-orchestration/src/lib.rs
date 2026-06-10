@@ -93,6 +93,9 @@ pub mod hooks;
 // Relocated to `agent-doc-core` (#ipcfullprompt-recur2 — pure, zero-dep forensic
 // detector). Re-exported so `crate::ipc_corruption::*` call sites resolve.
 pub use agent_doc_core::ipc_corruption;
+// Relocated to `agent-doc-core` (#optverify — pure gate-verify predicate scan).
+// Re-exported so `crate::gate_verify::*` call sites resolve unchanged.
+pub use agent_doc_core::gate_verify;
 pub mod auto_dag;
 pub mod lint_gate;
 pub mod memory_cmd;

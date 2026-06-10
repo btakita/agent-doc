@@ -217,6 +217,14 @@ pub struct ProjectConfig {
     /// `/clear` that churns the session or is rejected mid-turn.
     #[serde(default, alias = "queue_context_reset")]
     pub agent_doc_queue_context_reset: Option<bool>,
+    /// Explicit opt-in for opportunistic gated-review auto-verification
+    /// (`#optverify`). When true, preflight may auto-flip a gated `[/]` review
+    /// item carrying a verify predicate to `[x]` once its proof marker is
+    /// provable from `ops.log`. A per-document frontmatter
+    /// `agent_doc_gate_autoverify` takes precedence. Off by default — never
+    /// silently flip a human gate without this opt-in.
+    #[serde(default, alias = "gate_autoverify")]
+    pub agent_doc_gate_autoverify: Option<bool>,
     /// Project-default context-usage percentage (0–100) at or above which an
     /// opted-in editor pre-emptively runs `/clear` (`#clear-opt-in-threshold`).
     /// A per-document frontmatter `agent_doc_clear_threshold` takes precedence;

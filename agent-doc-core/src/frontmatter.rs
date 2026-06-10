@@ -496,6 +496,18 @@ pub struct Frontmatter {
         rename = "agent_doc_queue_context_reset"
     )]
     pub queue_context_reset: Option<bool>,
+    /// Explicit opt-in for opportunistic gated-review auto-verification
+    /// (`#optverify`). When true, preflight may flip a gated `[/]` review item
+    /// carrying a verify predicate to `[x]` once its proof marker is provable
+    /// from `ops.log` (and no disproof marker fired). Off by default — without
+    /// the opt-in, preflight only *surfaces* the provable/failed status and
+    /// never silently flips a human gate.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_gate_autoverify"
+    )]
+    pub gate_autoverify: Option<bool>,
     /// Context-usage percentage (0–100) at or above which an opted-in editor
     /// (JB `Run Agent Doc`) pre-emptively runs `/clear` before the next dispatch
     /// (`#clear-opt-in-threshold`). Resolution: this frontmatter value, then the
@@ -1885,6 +1897,7 @@ mod tests {
             links: vec![],
             auto_compact: None,
             queue_context_reset: None,
+            gate_autoverify: None,
             clear_threshold: None,
             model_tier: None,
             pending_capture_guard: None,

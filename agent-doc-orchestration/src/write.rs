@@ -267,6 +267,7 @@ pub struct CommandOptions {
     pub pending_ungate: Vec<String>,
     pub pending_resolve_gate: Vec<String>,
     pub pending_set_gate_type: Vec<String>,
+    pub pending_set_verify: Vec<String>,
     pub review_add: Vec<String>,
     pub review_edit: Vec<String>,
     /// `#reviewrm`: ids to delete from `agent:review` (clears stale/duplicate
@@ -970,6 +971,10 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push("--pending-set-gate-type".to_string());
         args.push(value.clone());
     }
+    for value in &options.pending_set_verify {
+        args.push("--pending-set-verify".to_string());
+        args.push(value.clone());
+    }
     for value in &options.review_add {
         args.push("--review-add".to_string());
         args.push(value.clone());
@@ -1242,6 +1247,11 @@ fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
             ids.push(id.to_string());
         }
     }
+    for pair in &options.pending_set_verify {
+        if let Some((id, _)) = pair.split_once('=') {
+            ids.push(id.to_string());
+        }
+    }
     for pair in &options.review_edit {
         if let Some((id, _)) = pair.split_once('=') {
             ids.push(id.to_string());
@@ -1421,6 +1431,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         || !options.pending_ungate.is_empty()
         || !options.pending_resolve_gate.is_empty()
         || !options.pending_set_gate_type.is_empty()
+        || !options.pending_set_verify.is_empty()
         || !options.review_add.is_empty()
         || !options.review_edit.is_empty()
         || !options.review_remove.is_empty()
@@ -1527,6 +1538,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
             })?;
             crate::pending_cmd::set_gate_type(file, id, gt)?;
+        }
+        for pair in &options.pending_set_verify {
+            let (id, spec) = pair.split_once('=').with_context(|| {
+                format!(
+                    "--pending-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
+                    pair
+                )
+            })?;
+            crate::pending_cmd::set_gate_verify(file, id, spec)?;
         }
         for value in &options.review_add {
             crate::pending_cmd::review_add(file, value)?;

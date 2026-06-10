@@ -2250,6 +2250,51 @@ pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String>
     Ok(rewritten.render())
 }
 
+/// Set (or replace) a typed proof/disproof verify predicate on a gated item
+/// (`#optverify` / `#optv1`). The item must already be in `[/]` state. The
+/// predicate is stored as an inline `<!-- gate-verify ... -->` annotation in the
+/// item text (see [`crate::gate_verify`]); `set_at` stamps the gate-set time so
+/// the later ops.log scan only counts markers emitted at/after it.
+///
+/// Errors if the item is missing, not gated, or the spec carries no matcher.
+pub fn op_set_gate_verify(body: &str, id: &str, spec: &str, set_at: u64) -> Result<String> {
+    let id = normalize_pending_id(id);
+    let mut predicate = crate::gate_verify::parse_predicate_spec(spec);
+    if !predicate.is_actionable() {
+        bail!(
+            "pending set-verify: spec must include verify=... and/or disproof=..., got: {}",
+            spec
+        );
+    }
+    predicate.set_at = Some(set_at);
+
+    let layout = PendingLayout::parse(body);
+    let current = layout
+        .items()
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| anyhow!("pending set-verify: no item with id [#{}]", id))?;
+    if current.state != PendingState::Gated {
+        bail!(
+            "pending set-verify: item [#{}] must be gated ([/]) to set a verify predicate, current state: [{}]",
+            id,
+            current.state.box_char()
+        );
+    }
+    let mut found = false;
+    let rewritten = layout.replace_items(|item| {
+        if item.id != id {
+            return Some(item.clone());
+        }
+        found = true;
+        let mut next = item.clone();
+        next.text = crate::gate_verify::upsert_annotation(&next.text, &predicate);
+        Some(next)
+    });
+    debug_assert!(found, "validated item must be present during replacement");
+    Ok(rewritten.render())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3815,6 +3860,34 @@ mod tests {
     fn op_set_gate_type_errors_on_open() {
         let body = "- [ ] [#a1b2] task\n";
         assert!(op_set_gate_type(body, "a1b2", "release").is_err());
+    }
+
+    #[test]
+    fn op_set_gate_verify_round_trips_predicate() {
+        let body = "- [/] [#saev] early-ack live verify\n";
+        let new_body =
+            op_set_gate_verify(body, "saev", "verify=ops_log:early_ack_pending;disproof=false ack-timeout", 1749526200)
+                .unwrap();
+        let (_, items, _) = parse_items(&new_body);
+        // Still gated, untyped checkbox preserved.
+        assert_eq!(items[0].state, PendingState::Gated);
+        assert_eq!(items[0].gate_type, None);
+        let pred = crate::gate_verify::parse_gate_predicate(&items[0].text).unwrap();
+        assert_eq!(pred.verify.as_deref(), Some("early_ack_pending"));
+        assert_eq!(pred.disproof.as_deref(), Some("false ack-timeout"));
+        assert_eq!(pred.set_at, Some(1749526200));
+    }
+
+    #[test]
+    fn op_set_gate_verify_errors_on_open() {
+        let body = "- [ ] [#a1b2] task\n";
+        assert!(op_set_gate_verify(body, "a1b2", "verify=ops_log:m", 1).is_err());
+    }
+
+    #[test]
+    fn op_set_gate_verify_errors_on_empty_spec() {
+        let body = "- [/] [#a1b2] task\n";
+        assert!(op_set_gate_verify(body, "a1b2", "noop=1", 1).is_err());
     }
 
     #[test]

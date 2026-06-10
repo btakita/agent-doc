@@ -216,6 +216,24 @@ pub struct SemanticPromptChange {
     pub text_preview: String,
 }
 
+/// Per-item opportunistic gated-review verification result (`#optverify`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GateVerifyResult {
+    /// Review item id (no `#` prefix).
+    pub id: String,
+    /// Scan status: `provable`, `failed`, or `pending`.
+    pub status: String,
+    /// The matched proof/disproof substring (absent when pending).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<String>,
+    /// Epoch seconds of the matched marker line (absent when pending).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+    /// True when the opt-in auto-flipped this gate to `[x]` this cycle.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_resolved: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -355,6 +373,13 @@ pub struct PreflightOutput {
     /// Count of review items currently in `[/]` gated state.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub review_gated_count: usize,
+    /// Opportunistic gated-review verification results (`#optverify`). One entry
+    /// per gated review item carrying a verify predicate, with its `ops.log`
+    /// scan status (`provable` / `failed` / `pending`). `auto_resolved` is true
+    /// when the `agent_doc_gate_autoverify` opt-in flipped a provable gate to
+    /// `[x]` this cycle. Empty (and omitted) in the common no-predicate case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate_verify: Vec<GateVerifyResult>,
     /// Canonical ordered list of user-authored changes that need prompt-aware handling.
     /// `prompt_target` items require a response, `content_edit` items are corrections
     /// the agent must incorporate, and `recovery_artifact` / `boundary_artifact`
@@ -2886,6 +2911,22 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let pending_report = run_pending_maintenance(file)?;
     let pending_reordered = pending_report.reordered;
     let pending_gated_count = pending_report.pending_gated_count;
+
+    // `#optverify`: opportunistic gated-review auto-verification. Runs before the
+    // step-2 commit so any opt-in `[/]→[x]` flip is staged atomically (the
+    // mutation touches both the working-tree file and the snapshot). Default off
+    // — without the opt-in the gate status is only surfaced, never flipped.
+    let gate_autoverify_optin = initial_frontmatter
+        .gate_autoverify
+        .or(rc.project_config().agent_doc_gate_autoverify)
+        .unwrap_or(false);
+    let gate_verify_results = match run_gate_verify(file, gate_autoverify_optin) {
+        Ok(results) => results,
+        Err(e) => {
+            eprintln!("[preflight] optverify: scan skipped: {}", e);
+            Vec::new()
+        }
+    };
     if pending_report.legacy_gated_in_backlog_count > 0 {
         warnings.push(PreflightWarning {
             code: "legacy_gated_in_backlog".to_string(),
@@ -3745,6 +3786,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         pending_gated_count,
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
+        gate_verify: gate_verify_results,
         agent_model,
         queue_prompts: queue_state.queue_prompts,
         queue_active: queue_state.queue_active,
@@ -4371,6 +4413,141 @@ fn review_counts(content: &str) -> (usize, usize) {
         .filter(|item| matches!(item.state, crate::pending::PendingState::Gated))
         .count();
     (review_items.len(), gated)
+}
+
+/// Opportunistic gated-review auto-verification (`#optverify` / `#optv3`).
+///
+/// For each gated `[/]` review item carrying a verify predicate, scan `ops.log`
+/// and surface `provable` / `failed` / `pending`. When `autoverify` is true and
+/// an item is `provable`, flip it `[/]→[x]` in place (persisting to both the
+/// working-tree file and the snapshot, mirroring pending maintenance), so the
+/// existing reap pass archives it on a later cycle. Default off — without the
+/// opt-in the gate is only surfaced, never silently flipped.
+///
+/// Returns the per-item results for the preflight output. Best-effort: a missing
+/// `ops.log`, no review component, or no predicates yields an empty vector.
+fn run_gate_verify(file: &Path, autoverify: bool) -> Result<Vec<GateVerifyResult>> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let Some(review) = components
+        .iter()
+        .find(|c| is_review_component(&c.name))
+        .cloned()
+    else {
+        return Ok(Vec::new());
+    };
+    let body = review.content(&content).to_string();
+    let (_, items, _) = crate::pending::parse_items(&body);
+
+    // Gather predicate-bearing gated items.
+    let predicates: Vec<(String, crate::gate_verify::GatePredicate)> = items
+        .iter()
+        .filter(|item| matches!(item.state, crate::pending::PendingState::Gated))
+        .filter_map(|item| {
+            crate::gate_verify::parse_gate_predicate(&item.text)
+                .filter(|p| p.is_actionable())
+                .map(|p| (item.id.clone(), p))
+        })
+        .collect();
+    if predicates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let ops_log = snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+        .and_then(|root| std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).ok())
+        .unwrap_or_default();
+
+    let mut results = Vec::new();
+    let mut to_resolve: Vec<String> = Vec::new();
+    for (id, predicate) in &predicates {
+        let outcome = crate::gate_verify::scan_ops_log(predicate, &ops_log);
+        let (marker, at) = match &outcome {
+            crate::gate_verify::VerifyOutcome::Provable { marker, at } => {
+                (Some(marker.clone()), Some(*at))
+            }
+            crate::gate_verify::VerifyOutcome::Failed { marker, at } => {
+                (Some(marker.clone()), Some(*at))
+            }
+            crate::gate_verify::VerifyOutcome::Pending => (None, None),
+        };
+        let status = outcome.status_str().to_string();
+        let provable = matches!(outcome, crate::gate_verify::VerifyOutcome::Provable { .. });
+        let auto_resolved = autoverify && provable;
+        if auto_resolved {
+            to_resolve.push(id.clone());
+        }
+        match &outcome {
+            crate::gate_verify::VerifyOutcome::Provable { marker, at } => {
+                eprintln!(
+                    "[preflight] optverify: review #{} provable (marker {:?} @ {})",
+                    id, marker, at
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "optverify review={} status=provable marker={:?} at={} auto_resolved={}",
+                        id, marker, at, auto_resolved
+                    ),
+                );
+            }
+            crate::gate_verify::VerifyOutcome::Failed { marker, at } => {
+                eprintln!(
+                    "[preflight] optverify: review #{} FAILED (disproof {:?} @ {}) — file a bug",
+                    id, marker, at
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "optverify review={} status=failed marker={:?} at={}",
+                        id, marker, at
+                    ),
+                );
+            }
+            crate::gate_verify::VerifyOutcome::Pending => {}
+        }
+        results.push(GateVerifyResult {
+            id: id.clone(),
+            status,
+            marker,
+            at,
+            auto_resolved,
+        });
+    }
+
+    // Opt-in transition: flip provable gates [/]→[x] in place, persisting to
+    // both the working-tree file and the snapshot.
+    if !to_resolve.is_empty() {
+        let mut new_body = body.clone();
+        for id in &to_resolve {
+            new_body = crate::pending::op_done(&new_body, id)?;
+        }
+        let new_content = review.replace_content(&content, &new_body);
+        std::fs::write(file, &new_content)
+            .with_context(|| format!("failed to write {} after optverify", file.display()))?;
+        // Keep the snapshot in lockstep so the upcoming commit stages the flip.
+        if let Some(snap) = snapshot::load(file)?
+            && let Ok(snap_comps) = crate::component::parse(&snap)
+            && let Some(snap_review) = snap_comps.iter().find(|c| is_review_component(&c.name))
+        {
+            let snap_new = snap_review.replace_content(&snap, &new_body);
+            snapshot::save(file, &snap_new)?;
+        }
+        eprintln!(
+            "[preflight] optverify: auto-resolved {} provable gate(s): {}",
+            to_resolve.len(),
+            to_resolve.join(", ")
+        );
+    }
+
+    Ok(results)
 }
 
 fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
@@ -10365,6 +10542,104 @@ mod tests {
             "snapshot review must carry the gated item: {snap_review}"
         );
         assert!(snap_backlog.contains("[#keep1]"));
+    }
+
+    fn write_optverify_doc(dir: &TempDir, predicate_annotation: &str) -> std::path::PathBuf {
+        let doc = dir.path().join("session.md");
+        let file_content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Review\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#saev] early-ack live verify {}\n",
+                "<!-- /agent:review -->\n"
+            ),
+            predicate_annotation
+        );
+        std::fs::write(&doc, &file_content).unwrap();
+        snapshot::save(&doc, &file_content).unwrap();
+        doc
+    }
+
+    fn write_ops_log(dir: &TempDir, body: &str) {
+        let logs = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("ops.log"), body).unwrap();
+    }
+
+    #[test]
+    fn gate_verify_surfaces_provable_without_flipping_when_optin_off() {
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some("early_ack_pending".to_string()),
+            disproof: Some("false ack-timeout".to_string()),
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+
+        let results = run_gate_verify(&doc, false).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "saev");
+        assert_eq!(results[0].status, "provable");
+        assert!(!results[0].auto_resolved, "opt-in off must not flip the gate");
+
+        // The document still shows the gated item — never silently flipped.
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+    }
+
+    #[test]
+    fn gate_verify_auto_resolves_provable_when_optin_on() {
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some("early_ack_pending".to_string()),
+            disproof: None,
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "provable");
+        assert!(results[0].auto_resolved);
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("[x] [#saev]"), "gate must be flipped: {after}");
+        // Snapshot kept in lockstep for the upcoming commit.
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snap.contains("[x] [#saev]"), "snapshot must flip too: {snap}");
+    }
+
+    #[test]
+    fn gate_verify_failed_never_auto_resolves_even_with_optin() {
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some("early_ack_pending".to_string()),
+            disproof: Some("manual cleanup".to_string()),
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(
+            &dir,
+            "[150] early_ack_pending emitted\n[160] looks like a manual cleanup\n",
+        );
+
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert_eq!(results[0].status, "failed", "disproof wins");
+        assert!(!results[0].auto_resolved);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("- [/] [#saev]"), "failed gate must remain: {after}");
+    }
+
+    #[test]
+    fn gate_verify_empty_without_predicate() {
+        let dir = setup_project();
+        let doc = write_optverify_doc(&dir, "");
+        write_ops_log(&dir, "[150] early_ack_pending emitted\n");
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert!(results.is_empty(), "no predicate → no results");
     }
 
     #[test]

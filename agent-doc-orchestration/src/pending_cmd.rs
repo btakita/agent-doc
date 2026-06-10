@@ -874,6 +874,27 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     Ok(())
 }
 
+/// Set a typed proof/disproof verify predicate on a gated item (`#optverify`).
+/// The gate-set timestamp is stamped with the current time so the later ops.log
+/// scan only counts markers emitted at or after now.
+pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
+    let (full_content, comp) = find_component_containing_open_id(file, id)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let set_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let new_content = pending::op_set_gate_verify(existing, id, spec, set_at)?;
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    std::fs::write(file, &new_doc)?;
+    eprintln!(
+        "[pending] set verify predicate on [#{}] (set_at={})",
+        id, set_at
+    );
+    Ok(())
+}
+
 /// Scan documents under a directory for items matching a typed gate and resolve them.
 /// Returns total number of resolved items.
 pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {

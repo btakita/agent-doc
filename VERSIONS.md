@@ -6,6 +6,24 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Opportunistic gated-review auto-verification (`#optverify`).** A gated `[/]`
+  `agent:review` item can now carry a typed proof/disproof predicate so the binary
+  auto-proves or auto-disproves it from `ops.log` markers during the normal
+  preflight read — no dedicated live-verify session. Set it with
+  `agent-doc backlog <FILE> set-verify <id> "verify=ops_log:<marker>;disproof=ops_log:<text>"`
+  (or `--pending-set-verify id=<spec>` on `write`/`finalize`); the gate-set time
+  is stamped automatically. The predicate persists inline as a
+  `<!-- gate-verify verify=… disproof=… set_at=… -->` annotation (new pure
+  `agent_doc_core::gate_verify` module). The scan is fail-safe: a proof marker at or
+  after `set_at` with no disproof → `provable`; a disproof marker → `failed`
+  (**disproof wins ties**); neither → `pending`; stale pre-`set_at` markers never
+  count. Preflight surfaces a `gate_verify` result per predicate-bearing gated item
+  and logs `optverify review=<id> status=<…>`. The `[/]→[x]` auto-transition is
+  **opt-in and default off** — only when `agent_doc_gate_autoverify` is true
+  (frontmatter, then project `.agent-doc/config.toml`) does a `provable` gate flip,
+  staged to both the working tree and snapshot; otherwise the status is only
+  surfaced and a human gate is never silently flipped. Spec:
+  `specs/07-closeout-commands.md` (preflight section). Phases `#optv1`–`#optv4`.
 - **Early-ack IPC activated (`#saevon`).** Flipped `EARLY_ACK_ENABLED false → true`
   in `ipc_socket.rs`: the sender now auto-tags live closeout `patch` messages with
   `early_ack: true`, so an early-ack-aware listener emits a `pending` ack the instant

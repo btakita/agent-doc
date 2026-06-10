@@ -255,6 +255,12 @@ struct WriteArgs {
     /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
     #[arg(long = "pending-set-gate-type")]
     pending_set_gate_type: Vec<String>,
+    /// Set a typed proof/disproof verify predicate on a gated item so the gate
+    /// auto-resolves from ops.log markers (`#optverify`):
+    /// `id=verify=ops_log:<marker>;disproof=ops_log:<text>` (repeatable).
+    /// The gate-set timestamp is stamped automatically.
+    #[arg(long = "pending-set-verify")]
+    pending_set_verify: Vec<String>,
     /// Add a new gated item directly to the review list (repeatable).
     #[arg(long = "review-add")]
     review_add: Vec<String>,
@@ -1681,6 +1687,15 @@ enum PendingAction {
         /// Gate type (e.g., "release", "deploy")
         gate_type: String,
     },
+    /// Set a typed proof/disproof verify predicate on a gated item so the gate
+    /// auto-resolves from ops.log markers (`#optverify`).
+    SetVerify {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// Predicate spec, e.g.
+        /// `verify=ops_log:<marker>;disproof=ops_log:<text>`
+        spec: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2339,6 +2354,7 @@ fn main() -> anyhow::Result<()> {
                     pending_ungate: args.pending_ungate,
                     pending_resolve_gate: args.pending_resolve_gate,
                     pending_set_gate_type: args.pending_set_gate_type,
+                    pending_set_verify: args.pending_set_verify,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
@@ -2388,6 +2404,7 @@ fn main() -> anyhow::Result<()> {
                     pending_ungate: args.pending_ungate,
                     pending_resolve_gate: args.pending_resolve_gate,
                     pending_set_gate_type: args.pending_set_gate_type,
+                    pending_set_verify: args.pending_set_verify,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
@@ -3040,6 +3057,9 @@ fn main() -> anyhow::Result<()> {
             }
             PendingAction::SetGateType { id, gate_type } => {
                 agent_doc_orchestration::pending_cmd::set_gate_type(&file, &id, &gate_type)
+            }
+            PendingAction::SetVerify { id, spec } => {
+                agent_doc_orchestration::pending_cmd::set_gate_verify(&file, &id, &spec)
             }
         },
         Commands::Review { action } => match action {

@@ -114,7 +114,7 @@ Filed as an actionable backlog item: when a user manually adds a queue line with
 These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint — repeated in the backlog text and the prior response — that they run in a **fresh focused session**, not at the tail of a drain. This session is flagged degraded (warn-level accretion: 2 no-op closeouts + 2 restart-heavy events in the last 30 min). I am deliberately **not** draining them or marking them done. Start a fresh `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` session and it will begin at #dav9/pcpc5e1.
 
 **Not auto-looping:** the rest of the queue is either operator-drive (can't self-complete) or fresh-session-gated, so continuing the go-mode drain here would only churn the same heads. Handing back to you.
-<!-- agent:boundary:b9089d48 -->
+<!-- agent:boundary:6f2d2a13 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -129,6 +129,7 @@ These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint �
 - do [#dav9]
 - do [#dsqa]
 - do [#q6js]
+- do [#7r2s]
 <!-- /agent:queue -->
 ###
 <!--

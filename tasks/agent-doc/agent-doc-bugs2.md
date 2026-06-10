@@ -280,7 +280,8 @@ That's not another "fresh pane" deflection — it's the only path where I can *p
 - ~~:pushpin: [#lvbremain]. force run~~
 - ~~[#dsqa]~~
 - ~~Just finish the items. I don't care if they are "destructive". Complete the work. This in between state while running agent-doc is confusing. I'll just restart after you finish. Implement and install everything.~~
-- ~~[#q6js] [#ktw8]~~
+- [#q6js]
+- [#ktw8]
 - ~~[#lvbremain]~~
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 <!-- /agent:queue -->

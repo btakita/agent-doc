@@ -207,7 +207,24 @@ Operator-drive item: I check logs, you drive the live actions. Fresh scan of `.a
 Install is current (cleared a prior cycle), so markers will emit when you drive the recipe (`scripts/xdotool-live-verify.sh`): claim from a 2nd pane (#4wxr) -> run-then-clear (#9adk) -> buffer-matches-disk write -> JB SOCKET-IPC session (#saev).
 
 **Halting the drain here.** This is the 6th near-identical `#lvbremain` cycle in a restart-heavy, accretion-`warn` session. Both remaining items — `#lvbremain` (your live driving) and `#s760wire` (#s760c explicitly "fresh session") — need operator attention I can't supply in this degraded session, which is exactly the loop that caused prior post-commit worktree corruption. Pick them up in a clean session.
-<!-- agent:boundary:e3abbf1e -->
+
+### Re: #lvbremain — 7th cycle, logs still 0, halting the auto-drive loop — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lvbremain]
+
+
+Operator-drive item: I check logs, you drive the live actions. Re-scanned `.agent-doc/logs/ops.log` (475k lines, 56MB) filtering to real event-type lines (`^[epoch] <marker>`): **all 4 markers = 0** (`cross-session-reject`, `run_clear_coalesce`, `visible_write_live_buffer_matches_disk`, `early-ack`). The high apparent counts are all `queue_diff_active_prompt_differs` prompt-echoes of the marker names in the item text. No live action driven, so the item **stays open** (marking it done would be false reporting).
+
+**I'm halting the go-mode drain here — not auto-looping.** This is the 7th near-identical `#lvbremain` cycle. The root problem isn't the item, it's the loop: go-mode's continuous-backlog-loop keeps re-appending `do [#lvbremain]` and `do [#s760wire]`, but **both are blocked on you, not me** — `#lvbremain` needs you to drive the 4 live actions, and `#s760wire`'s `#s760c` route-gate wire is flagged "do in a fresh session." So every cycle re-scans the same logs, finds 0, and re-queues itself. That is an infinite no-progress loop, and it is the exact degraded-drain pattern that caused prior post-commit worktree corruption.
+
+**Two concrete unblocks (your call):**
+1. **Drive `#lvbremain`:** `make install` is current (cdylib epoch past `eaca894d`), so run `scripts/xdotool-live-verify.sh` — claim from a 2nd pane (#4wxr), run-then-clear (#9adk), buffer-matches-disk write, JB SOCKET-IPC session (#saev). Then re-queue and I re-scan; markers will emit.
+2. **Code `#s760c` in a fresh session:** wire `transcript_context_pct` into the `route.rs` dispatch gate (pure code, no live gate). Plan: `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`. Worth starting clean rather than inside this restart-heavy, accretion-`warn` session.
+
+Also cleaned up a stale orphan capture (`cycle-1781098034683`) whose body was already committed at HEAD — it was deadlock-fuel for future commits. Moved aside, not lost.
+<!-- agent:boundary:49be45b6 -->
 <!-- /agent:exchange -->
 
 ## Queue

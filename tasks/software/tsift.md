@@ -92,14 +92,31 @@ Changed paths: `src/tsift/packages/tsift-cli/src/cli.rs`, `src/tsift/packages/ts
 Commits: `src/tsift` commit `342baff` (`feat: add graph-db snapshot artifacts`) and parent gitlink commit `634509a79` (`tsift: add graph-db snapshot artifacts`). Existing unrelated dirty state remains in both the submodule and parent repo; I staged and committed only the snapshot-related files and gitlink.
 
 Verification: `cargo test -p tsift-cli graph_db_snapshot -- --nocapture` passed; `make check` passed; latest GitHub Actions CI check was already green (`CI`, run `27287546999`, completed success at `2026-06-10T15:37:26Z`). Confidence: high. Escalation: none.
-<!-- agent:boundary:b5bf9e98 -->
+
+### Re: graph-db query DSL spike — gpt-5
+
+> **Queue prompt:**
+>
+> [#cbmquery]
+
+
+Completed `#cbmquery` as a design spike. Recommendation: do not commit a Cypher-like surface yet. Use a constrained internal query AST first, then add syntax sugar only after real agent workflows prove the shapes.
+
+Comparison against existing graph-db commands: `node`, `edge`, `edges`, `incident`, `kind`, `neighborhood`, `path`, `related`, `evidence`, and `map` already cover the high-signal operations agents use today. A Cypher-like `MATCH (a:kind {k:"v"})-[e:kind]->(b)` form would be more compact for one-hop joins and property predicates, but it adds parser ambiguity, unbounded traversal risk, and expectation baggage from Cypher features tsift should not support (`CREATE`, `SET`, optional matches, arbitrary path expansion, aggregation, and mutation). The value is real, but mostly as a typed query-plan layer, not as immediate public syntax.
+
+Recommended spike boundary: define a read-only `GraphDbQuerySpec`/JSON AST with explicit `from` node selector, optional edge selector, optional `to` node selector, direction, string-equality property filters, required/default `limit`, and bounded path depth. Compile that AST only to existing GraphStore calls and existing CLI semantics: kind/property scans, edge scans, incident scans, bounded neighborhood, and shortest path. Then expose a preview command that returns a query plan plus the equivalent existing `graph-db` commands before any shorthand syntax is accepted.
+
+Syntax guardrails if sugar is later added: one `MATCH` pattern per query, labels map only to stable node `kind`, edge labels map only to stable edge `kind`, properties are string equality only, `RETURN` can only name bound aliases, `LIMIT` is mandatory or defaults low, bounded path syntax must require an upper bound, and the grammar must reject mutation keywords outright. That keeps the DSL provider-neutral and compatible with SQLite/Convex/tokensave instead of becoming a second database language.
+
+Changed paths: none in this cycle. Commands/proof: `agent-doc preflight tasks/software/tsift.md`, `agent_doc_plan`, and `agent_doc_read` for the queued item; graph-db command/schema context came from the immediately preceding `#cbmsnap` source pass. Verification: no build/test rerun was needed because this cycle changed only the session document response. Confidence: high for the recommendation; medium for final syntax details until a JSON AST prototype is exercised against real agent queries. Escalation: none.
+<!-- agent:boundary:ae3f4107 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#cbmsnap]~~
-- [#cbmquery]
+- ~~[#cbmquery]~~
 - [#cbmsearch]
 - [#cbmtrust]
 <!-- /agent:queue -->
@@ -110,7 +127,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cbmquery] [recommended] Spike a constrained read-only graph query DSL for tsift graph-db over the stable node/edge/property schema; compare Cypher-like expressiveness against existing node/kind/neighborhood/path/map commands before committing syntax.
 - [ ] [#cbmsearch] [recommended] Add a graph-augmented exact/search preview mode that expands grep hits to containing symbol/source_handle windows, ranks definitions and high-signal symbols before tests, and keeps scale_guard/retrieval handles intact.
 - [ ] [#cbmtrust] [recommended] Compare codebase-memory-mcp's single-binary install/trust UX against tsift release/install flow, including checksums, attestations/scans, and idempotent agent config upserts, without changing tsift's Rust architecture.
 <!-- /agent:backlog -->

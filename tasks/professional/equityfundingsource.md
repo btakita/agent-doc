@@ -137,8 +137,32 @@ Scope confirmed and built. You asked for editable pipeline-status dropdowns on t
 **Investor dialog — not a settable status (important).** The Investor Pipeline lifecycle stage is **derived**, not stored: the board computes each investor's stage as "the furthest stage reached" from accreditation status + lender account + active/pending fund counts. There's no column to write, so a "set stage" dropdown would be meaningless. The genuinely editable investor action is the **accreditation decision** (Accredit / Pending), which has its own endpoint. I've queued that as a concrete follow-up in the backlog rather than ship a fake control.
 
 **Verification:** `bun test` **501 pass / 0 fail** (3 new contract tests); `build` + `build:worker` clean; the loan/payment/controls files are TypeScript-clean. Committed + pushed per `#spec-test-commit-push` (no deploy this cycle — say "deploy" or re-queue with `#spec-test-commit-push-deploy` to ship to production).
-<!-- agent:boundary:462392ba -->
-<!-- agent:boundary:9b01ef4e -->
+
+### Re: Borrower portal messaging — admin inbox + email round-trip — opus-4-8
+
+Good news: the borrower secure-messaging feature (`#xcvg`) is already built. Three of your four asks are done (some behind an off-by-default flag); the fourth is scaffolded but not yet functional. Here's the honest status of each.
+
+**1. Is there an admin for the borrower portal messages? — Yes, live.**
+There's a full admin inbox at **`/portal-admin/messages`** (in the admin nav). It lists borrower chat sessions, lets you search by borrower (`q`), open a thread, reply, and it has realtime updates over WebSocket (plus a "watch" mode and unread-count badges). It's a *separate* surface from the `/contact` form inbox (`/portal-admin/contact-messages`) — that one is public contact-form submissions; this one is authenticated borrower↔admin chat. Reply endpoint: `POST /api/admin/messages/:session_id`.
+
+**2. Email notification when a borrower sends a message? — Built, currently off.**
+When a borrower sends a message, `notify_admin_of_borrower_message_` always fires an **in-app** notification immediately (to the owning admin, or all active admins if unassigned). It *also* sends an **email** to those admins — but only when `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` is on **and** email delivery is configured (Cloudflare Email Service, or Resend/local-capture). That flag is off by default, so today you get the in-app notification but no email. The email links straight to the thread in the admin portal.
+
+**3. Email response back into the chat (reply-by-email)? — Scaffolded, not yet working.**
+There's an inbound endpoint `POST /api/email/inbound`, but it deliberately returns `501` until `MESSAGE_EMAIL_INBOUND_ENABLED` is set **and** verified-sender authentication is in place — and the actual "append the parsed reply to the thread" step is still a `TODO`. So replying from your email client does **not** post into the chat yet. Finishing this needs: (a) an inbound mail route (Cloudflare Email Routing or Resend inbound) pointed at that endpoint, (b) sender-auth so only a verified admin address can inject a message, and (c) wiring the parsed body through `borrower_chat_message_create_admin_`. It's intentionally fail-closed so unauthenticated mail can never inject chat messages.
+
+**4. Borrower gets emailed when an admin replies? — Built, currently off.**
+Symmetric to #2: `notify_borrower_of_admin_message_` always sends the borrower an **in-app** notification, and emails them too **when the same `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` flag + delivery are configured**. The email links to `/portal-borrower/messages`.
+
+**To turn on the email round-trip (#2 + #4) — config only, no new code:**
+- Set `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true`
+- Configure delivery (Cloudflare Email Service token/account, or your Resend setup) and `MESSAGE_NOTIFICATION_FROM` (defaults to `info@equityfundingsource.com`)
+- These should use an EFS-verified sending domain — same dependency as backlog **#f4rq** (verify the Resend sending domain). I'd gate the flag flip on that.
+
+**Reply-by-email (#3)** is the only one that needs real implementation, not just config. Say the word and I'll queue it as a concrete backlog item with the three steps above.
+
+**Queue housekeeping:** the queue is currently **inactive**, so `#eyp0`/`#6r8v` aren't auto-running. They were duplicate entries of the same item (the deferred *investor* accreditation-control follow-up — unrelated to this messaging work), so I folded the endpoint detail into **#eyp0** and closed **#6r8v** as a duplicate. Note: preflight flagged #eyp0 as possibly-done against `#pipeline-dialog-controls-scope` — that's a false positive; #eyp0 is the genuinely-not-yet-built follow-up, not the shipped loan/payment dropdowns. Want me to build #eyp0, or enable the messaging email round-trip? Activate the queue or just say which.
+<!-- agent:boundary:1e5213db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,7 +170,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- ~~[#pipeline-dialog-controls-scope] ~~
+- [#eyp0]
+- ~~[#6r8v]~~
 <!-- /agent:queue -->
 
 ## Backlog

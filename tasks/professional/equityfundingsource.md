@@ -179,7 +179,7 @@ Done, per `#spec-test-commit-push`. On the Investor Pipeline board, **"Open inve
 - **`enable email round trip`** — captured as **`#emrt`**. This one is **config-only, no code**, but blocked on **`#f4rq`** (verify an EFS-owned Resend sending domain) + setting the production flag/secrets, which need Robert's domain access. I can't safely flip production secrets from here. Want me to draft the exact wrangler secret commands + the Resend domain-verification steps for Robert?
 
 Next, or activate the queue and I'll keep draining.
-<!-- agent:boundary:4b4ed31f -->
+<!-- agent:boundary:072299c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -189,6 +189,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" -->
 - [#eyp0]
 - ~~[#b0wq]~~
+- enable email round trip
+- https://equityfundingsource.brian-takita.workers.dev/portal-admin/investor-pipeline Open Investor Profile should open another dialog on top with the investor form.
 - ~~[#6r8v]~~
 <!-- /agent:queue -->
 

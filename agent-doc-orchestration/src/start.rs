@@ -1804,7 +1804,12 @@ fn spawn_auto_trigger_thread(
                                     harness.binary, trigger_cmd
                                 ),
                             );
-                            eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
+                            // Already in session_log; gate stderr so repeated
+                            // drain-cycle triggers don't bleed in front of a
+                            // full-screen harness TUI. (#opencode-stdout-bleed)
+                            if crate::input_diag::verbose_enabled() {
+                                eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
+                            }
                         }
                         AutoTriggerOutcome::Cancelled => {
                             shared
@@ -1822,7 +1827,10 @@ fn spawn_auto_trigger_thread(
                                     harness.binary
                                 ),
                             );
-                            eprintln!("[agent-doc] auto-trigger failed");
+                            // Already in session_log; gate stderr (#opencode-stdout-bleed).
+                            if crate::input_diag::verbose_enabled() {
+                                eprintln!("[agent-doc] auto-trigger failed");
+                            }
                         }
                         outcome => {
                             shared
@@ -2264,9 +2272,15 @@ fn spawn_idle_queue_watch_thread(
                                         harness.binary, payload_kind
                                     ),
                                 );
-                                eprintln!(
-                                    "[agent-doc] idle-queue watch: drained active queue head via {payload_kind}",
-                                );
+                                // Already recorded in session_log above; only
+                                // surface on stderr under verbose input diag so it
+                                // does not bleed in front of a full-screen harness
+                                // TUI (e.g. OpenCode). (#opencode-stdout-bleed)
+                                if crate::input_diag::verbose_enabled() {
+                                    eprintln!(
+                                        "[agent-doc] idle-queue watch: drained active queue head via {payload_kind}",
+                                    );
+                                }
                             }
                             AutoTriggerOutcome::Cancelled => return,
                             outcome => {

@@ -38,7 +38,14 @@ fn bytes_hash(bytes: &[u8]) -> String {
 }
 
 fn emit(file: Option<&Path>, message: String) {
-    eprintln!("[agent-doc] {message}");
+    // Input-delivery diagnostics are debug-level. Writing them to stderr
+    // unconditionally bleeds them in front of a full-screen harness TUI (e.g.
+    // OpenCode), interleaving with its status line. Keep the durable record in
+    // ops.log always, but only surface on stderr when the operator opted into
+    // verbose input diagnostics. (#opencode-stdout-bleed)
+    if verbose_enabled() {
+        eprintln!("[agent-doc] {message}");
+    }
     if let Some(file) = file {
         crate::ops_log::log_op(file, &message);
     }

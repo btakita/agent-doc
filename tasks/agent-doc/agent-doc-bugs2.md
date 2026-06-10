@@ -30,146 +30,23 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-165015.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-194633.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do #5b28; do #x9ds; #lvbremain
+- Archived 7 response topic(s): do [#gng8]; monsterrodholders IPC-drift hiccups + completing the 08b cut-over; #ktw8; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#gng8] — gate-verify quoted-prose exclusion — fable-5
-
-> **Queue prompt:**
->
-> :round_pushpin: [#gng8]
-
-
-Shipped. Root cause confirmed exactly as filed: scan_ops_log matched bare substrings against whole ops.log messages, and content-logging entries embed document text — every one of the 7 cross-session-reject hits in this project's ops.log is a queue_diff_active_prompt_differs line with the marker inside prompt_changes=["..."], so a gate could prove itself from its own backlog description.
-
-**Fix (structural, no denylist):** embedded prose always arrives through {:?} debug formatting, which double-quotes it; genuine emissions ([claim] cross-session-reject pane_id=..., [ipc-socket] early_ack_pending ..., [s760] clear-decision ...) are plain unquoted message text. scan_ops_log now strips double-quoted spans (honoring \" escapes; an unterminated quote drops the rest of the line, fail safe) before matching proof/disproof markers. This generically covers queue_diff, route prompt={:?}, and session tail={:?} contamination without operators having to write longer predicates.
-
-- agent-doc-core/src/gate_verify.rs — strip_quoted_spans + scan integration, module-doc prose-exclusion section, 4 new unit tests (quoted prose ignored for proof and disproof, structured marker still proves alongside prose mentions, escape/unterminated handling)
-- agent-doc-orchestration/src/preflight.rs — run_gate_verify integration test: a queue_diff-style contaminated line leaves the gate pending, never auto-resolves
-- agent-doc-orchestration/src/write.rs — comment marking the {:?} quoting at the queue_diff log site as load-bearing
-- specs/07-closeout-commands.md — #optverify paragraph extended with the #gng8 prose-exclusion rule
-
-**Verification:** make check green (exit 0 captured explicitly, 0 FAILED; remaining warnings are pre-existing in frontmatter.rs/template.rs test builds). Built + installed: cargo build --release, cargo install --path ., and agent-doc lib-install refreshed the JB cdylib — no .kt changed, so **no JB plugin reinstall is needed**. Submodule commit 7320a875 pushed to main; CI run 27292410729 is in progress (previous run green) — continuing on local evidence per the closeout rule. Superproject pointer bumped.
-
-**Side finding:** preflight's stuck_captured_cycle warning this cycle was a false alarm — capture cycle-1781108818351 (the #lvbremain audit response) committed fine and was then compacted out of HEAD; its body is preserved in the 165015 archive. Do not run the suggested write --commit recovery. Filed as a new backlog item.
-
-This fix also unblocks the auto-proof half of #ktw8/#lvbremain: structured markers now prove gates without prose false-positives, so operator-driven markers can be checked reliably next cycles.
-
-### Re: monsterrodholders IPC-drift hiccups + completing the 08b cut-over — fable-5
-
-> **Queue prompt:**
->
-> :pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.
-
-
-**Diagnosis: known class, not the next queue items.** The monsterrodholders.md hiccups (boost-client ops.log, last hour: ipc_socket_already_applied_live_buffer_diverged, finalize_typing_during_write with content_ours_adopted, live_prompt_drift_after_preflight, crdt_merge_base_overlay_stale) are the #ipc-crdt-response-drift editor-boundary class — the same family as the queue-item-deletion churn you saw. They are unrelated to #ktw8 / #lvbremain (those are verification tasks). Two concrete causes:
-
-1. **Stale supervisor process.** The monsterrodholders supervisor (PID 1816910) has been running since yesterday 19:03 — it predates every fix shipped since (x9ds ops.log markers, the UTF-8 closeout panic fix, today's gate-verify prose-exclusion #gng8, and a #queue-user-edit-overwrite guard fix that directly addresses "deleting a queue item that I added"). A running process keeps its old binary image; installing a new binary does not touch it.
-2. **The genuinely remaining cut-over rung (#pcpc5e).** Write-authority is NOT the gap: rungs pcpc5a–d are shipped and AGENT_DOC_WRITE_AUTHORITY=authority is already live everywhere via ~/.zshenv — both this session and monsterrodholders log "write_authority gate=authority action=routed". What remains is retiring the **out-of-process supervisor** itself and demoting the plugin WatchService: the in-process adapter (supervisor::in_process, pcpc2) is built and SimWorld-tested, but start.rs has zero call sites for it, so a separate supervisor process still writes the doc across a process boundary — exactly the interleave window the editor-boundary hiccups live in. This item had been reaped to the done archive as a residual note and was no longer tracked in the live backlog; that tracking gap is fixed this cycle.
-
-**Should you restart? Yes — restart the monsterrodholders.md session now** (and ideally the other long-lived agent-doc panes: equityfundingsource, tsift, corky, lazily-rs, agent-loop — all started before today's 13:15 binary). That alone should remove most of the day-to-day churn because the supervisors pick up the current binary with authority routing + the convergence fixes. No IntelliJ restart and no JB plugin install needed today — the cdylib was hot-reloaded via lib-install and no Kotlin changed.
-
-**Completing the full cut-over:** queued as three actionable, dependency-ordered phases at the top of the backlog — #pcpc5e1 (start.rs cut-over to the in-process supervisor behind a rollback flag; binary-side, SimWorld-provable), #pcpc5e2 (plugin WatchService read-only demotion; I will tell you exactly when to install the JB plugin update), #pcpc5e3 (operator-driven live proof on monsterrodholders.md, agent checks ops.log; then delete the out-of-process writer paths). No review gates — all three are actionable backlog items per your no-more-gates directive. Your own recorded scoping constraint (plan Safety section + prior session decision) is that this surgery runs in a FRESH focused session, not at the tail of a drain session — the items are queued so the next fresh /agent-doc session starts at #pcpc5e1 immediately.
-
-Also shipped mid-turn while closing the previous cycle: the #queue-user-edit-overwrite session-check guard no longer false-positives on a consumed struck/pinned queue head (submodule commit after 7320a875, both binaries + cdylib reinstalled, pushed, CI green for the first commit and in progress for the second).
-### Re: #ktw8 — destructive /clear live-verify (operator-drive log check) — opus-4-8
-
-> **Queue prompt:** :round_pushpin: [#ktw8]
-
-I can't fire a destructive `/clear` myself, so per the "you check the logs" split, here is the ops.log status. This item stays OPEN (pending, operator-drive) — not done, not gated.
-
-**Logging: adequate.** `start.rs:2178` emits the structured `[s760] clear-decision optIn=… threshold=… pct=… clear=…` line to ops.log via `ops_log::log_op` on every idle-queue-watch decision (gated on the `agent_doc_queue_context_reset` opt-in). The decision predicate is unit-tested in `context_pct.rs`. The prove/disprove signal exists.
-
-**ops.log: 0 genuine markers.** A scan of this project's ops.log finds exactly one `[s760] clear-decision` substring, and it is prose — it sits inside a `queue_diff_active_prompt_differs … prompt_changes=["…"]` line (the backlog text describing this very item). That is the #gng8 false-positive class, correctly excludable. No structured emission has fired.
-
-**To drive it:** throwaway doc with `agent_doc_queue_context_reset: true`, drive the exchange past the clear threshold (default 50%) while idle with an active queue head. You should then see a structured `[s760] clear-decision optIn=true threshold=50 pct=… clear=true` line at the boundary, exactly one `/clear`, and no false fire below threshold. Ping me and I will confirm the line. Stays pinned/pending until then.
-
-### Re: #lvbremain — operator-drive live-verify residual (log check) — opus-4-8
-
-> **Queue prompt:** :round_pushpin: [#lvbremain]
-
-Two markers remain; both now have adequate ops.log logging after #x9ds. This item stays OPEN (pending, operator-drive).
-
-- **#saev early_ack_pending** — `ipc_socket.rs:460` now calls `ops_log::log_op(project_root, "[ipc-socket] early_ack_pending emitted before apply")` (was stderr-only with a mismatched token before #x9ds). Fires only when the inbound message carries `early_ack:true` (i.e. `EARLY_ACK_ENABLED`/#saevon flipped on) over a live socket-IPC drive. ops.log currently: 0 structured hits (the only `early_ack_pending` line is, again, prose inside a queue_diff).
-- **visible_write_live_buffer_matches_disk** — needs a live editor buffer==disk write; 0 in ops.log.
-
-Both await your live drive; I will check the structured lines once you have run them. (#4wxr cross-session-reject and #9adk run_clear_coalesce were already resolved/reclassified in #x9ds — nothing more to check there.)
-
-### Re: auto-pushpin manually-queued items — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: [#ktw8]
-
-
-> **Queue prompt:** If I manually place an item onto the queue, automatically place a `:pushpin:` so it doesn't unexpectedly get deprioritized.
-
-Filed as an actionable backlog item: when a user manually adds a queue line with no pushpin prefix, queue-sync should auto-prefix `:pushpin:` so the backlog→queue priority re-sync does not reorder it below `queue`-attr backlog items. Your `:round_pushpin: [#ktw8]` edit this cycle is exactly that case.
-
-### Not run here: #dav9 / #dsqa / #q6js (supervisor in-process cut-over)
-
-These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint — repeated in the backlog text and the prior response — that they run in a **fresh focused session**, not at the tail of a drain. This session is flagged degraded (warn-level accretion: 2 no-op closeouts + 2 restart-heavy events in the last 30 min). I am deliberately **not** draining them or marking them done. Start a fresh `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` session and it will begin at #dav9/pcpc5e1.
-
-**Not auto-looping:** the rest of the queue is either operator-drive (can't self-complete) or fresh-session-gated, so continuing the go-mode drain here would only churn the same heads. Handing back to you.
-
-### Re: do [#zwn5] — operator-pinned tracked-backlog head is an id-backed directive — opus-4-8
-
-> **Queue prompt:** do [#zwn5]
-
-Fixed in code, committed to the agent-doc submodule (`c5194baf`), built + installed. `#ktw8` stays at the queue head (operator-drive log-check, unchanged — ops.log still shows 0 structured `[s760] clear-decision … clear=` markers); it is no longer struck.
-
-**Root cause.** The finalize-path consume decision (`response_targets_synthetic_queue_head_id` in `write.rs`) only treated a *literal* `do [#id]` / `do #id` head as an id-backed directive. An operator-pinned bare id like `:round_pushpin: [#ktw8]` normalizes to `#ktw8` — no `do` verb — so it fell through to the *synthetic/preset* path, where a `### Re: #ktw8` log-check heading "resolves to exactly the head id" and **consumed** it. That strike then tripped the downstream churn you kept hitting: session-check drops the struck head against the still-open backlog item, `pending_done_guard` fires, and the snapshot locks the struck version (needing `reset --from-current --preserve-session` to restore the pin).
-
-This was inconsistent with the rest of the queue machinery: `cycle_state::leads_with_bare_id_directive` and `session_check::leads_with_bare_id_token` already classify a bare `[#id]` as id-backed. Only the finalize consume path disagreed.
-
-**The fix.** `response_targets_synthetic_queue_head_id` now bails (never heading-consumes) when the head resolves to exactly its own id **and** that id names a tracked `agent:backlog` / `agent:review` item. So:
-
-- `:round_pushpin: [#ktw8]` / `[#ktw8]` / `#ktw8` whose id is a backlog item → id-backed directive → stays pinned until an explicit `--done` / `--pending-gate` / `--pending-edit` closes it. No strike, no dropped head, no snapshot lock.
-- A registered prompt-preset id (e.g. `#spec-test-build-install-commit-push`, **not** a tracked item) → still synthetic → still consumes on a matching `### Re: #id` heading. Existing behavior preserved.
-
-**Coverage.** Added `consume_decision_keeps_operator_pinned_tracked_backlog_head_without_explicit_flag` (the exact `[#ktw8]` repro, deterministic — no live tmux needed), plus the `--pending-gate` close path. `make check` green; the existing preset and bare-`do` consume tests still pass. SPEC §queue-consume updated.
-
-**Scope note.** This is the *binary* half: the head now stays pinned and runnable without corrupting state. The *skill* half — not auto-looping an operator-drive head that can only be log-checked — stays an operator/skill behavior (I am stopping here, not re-serving `#ktw8`).
-
-**Not pushed** — committed locally only (manual-testing gate). The fix is live in your installed binary; drive a `:round_pushpin: [#id]` verify head through a finalize and confirm ops.log shows no `queue consumed` / dropped-head line for it.
-
-### Re: do [#8j86] + do [#7r2s] — stuck-capture false-alarm & manual-queue auto-pin — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#8j86]
->
-> :pushpin: do [#7r2s]
-
-Both fixed, committed to the agent-doc submodule (`bf26aa99`), built `--release` + `cargo install`ed. `make check` green (incl. the FlowCore hot-path budget gate).
-
-**`#8j86` — `stuck_captured_cycle` false-alarm.** The archive/compaction half was already handled (`response_materialized_in_head_compact_archive`, commit `7cc2ead5`). But I hit a *different* sub-case live at the start of this session: capture `cycle-1781112407668` whose body WAS in HEAD (no archive involved) still warned `stuck_captured_cycle`. Root cause: the captured body carries the ephemeral `<!-- no-pending-done-guard -->` marker, which `git::strip_guard_markers` removes at commit, but the materialization probe kept it — so `response_already_applied` never matched the committed (marker-stripped) blob. Fix: `response_materialization_probe_from_response` now strips those guard markers before matching, mirroring commit. So the probe matches whether the response is in HEAD or a compact archive.
-
-**`#7r2s` — auto-pushpin manual queue adds.** `annotate_operator_priority_reorders` only pinned an *existing* prompt that moved earlier; a brand-new line you typed was ignored, so the backlog-priority sort could sink it under `queue`-attr backlog items. New `queue::annotate_manual_queue_additions` (wired into preflight before the sort) auto-prefixes `:pushpin:` to a prompt that is present in the live queue but absent from the snapshot **and** is not one the binary just appended from the backlog this cycle — so the line you placed stays position-locked at its slot. (When you re-add a line with no pin, it now keeps its priority.)
-
-**Coverage.** `stuck_captured_cycle_ignores_committed_cycle_when_only_guard_marker_stripped` (faithful `<!-- no-pending-done-guard -->` repro), `annotate_manual_queue_additions_pins_operator_added_unpinned_line`, and `..._skips_backlog_synced_and_pinned`. FlowCore `guard_` budget for write.rs bumped 87→89 with an audit note (reuses the existing `git::strip_guard_markers` helper — no new flow token).
-
-**Not pushed** — committed locally only (manual-testing gate). The fixes are live in your installed binary.
-
-Queue status: `#ktw8` / `#lvbremain` ahead are operator-drive (your live drive, I check ops.log). `#dav9`/`#dsqa`/`#q6js` (the 08b supervisor cut-over) carry your recorded fresh-focused-session constraint, so I'm not draining those here.
+<!-- agent:boundary:d9d8f512 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: [#gng8]~~
-- ~~:pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.~~
-- :round_pushpin: [#ktw8]
-- :round_pushpin: [#lvbremain]
+- :pushpin: [#dav9]
+- :pushpin: [#dsqa]
+- :pushpin: [#q6js]
+- [#ktw8]
+- [#lvbremain]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
-- :round_pushpin: do [#dav9]
-- :round_pushpin: do [#dsqa]
-- :round_pushpin: do [#q6js]
-- ~~do [#8j86]~~
-- ~~do [#7r2s]~~
 <!-- /agent:queue -->
 ###
 <!--

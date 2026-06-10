@@ -76,7 +76,7 @@ Forced the cutover as you directed, and dug into the actual code. The framing "d
 **Verification:** `make check` green — 2609 orchestration lib tests pass, 0 failed. Binaries refreshed (`~/.cargo/bin/agent-doc`, `target/release` for the `.bin` symlink, cdylib via `lib-install`) — clears the stale-install warning. Submodule `6f588d45` pushed; superproject pointer bumped (`2f4a4faeb`).
 
 **Why one gate genuinely remains (pcpc5e):** the residual is retiring the out-of-process `agent-doc start` supervisor in favor of the in-process adapter (`supervisor::in_process`, already SimWorld-complete but its own contract gates the live `start.rs` cutover) + the WatchService demote, **proven in a live IntelliJ/Codex pane**. That editor-boundary proof can't be manufactured by an agent — it's your "I test, you check logs" step. I narrowed `#pcpc5live` to just that residual and gated it with the exact `ops.log` marker to look for. This is the one gate I couldn't dissolve without a live editor; everything code-side is done.
-<!-- agent:boundary:ccfd7463 -->
+<!-- agent:boundary:5455e089 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -124,7 +124,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#pcpc5live] pcpc5e RESIDUAL (live-gated, folds prior #xkpf): retire the out-of-process agent-doc start supervisor in favor of supervisor::in_process + demote editor WatchService to read-only, then prove the editor boundary in a live IntelliJ/Codex pane. pcpc5d SHIPPED 2026-06-09 (submodule 6f588d45): run.rs::atomic_write now routes through the shared write-authority gate chokepoint, deleting the surviving direct-run direct-disk writer. To verify: drive a live pane with AGENT_DOC_WRITE_AUTHORITY=dual-write set and check ops.log for write_authority gate=dual-write action=routed on a direct-run write. Plan: tasks/agent-doc/plan-supervisor-in-process.md.
 - [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 

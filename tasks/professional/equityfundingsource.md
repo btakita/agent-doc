@@ -82,7 +82,17 @@ The lists render in-page (added an `embedded` mode to Application Leads, Investo
 **3. Removed the left-nav submenus.** The sidebar is flat again — **Deal Pipeline** and **Investor Pipeline** are single items; the four sub-lists are now tabs rather than nav entries. Their pages (and detail pages like a lead or funding detail) highlight their parent pipeline item.
 
 **Verification:** `bun test` **519 pass / 0 fail** (updated the nav/route/section tests for the new structure); `build` + `build:worker` clean. Deployed — root 200, `/portal-admin/website` reachable, `/portal-admin/public-contents` → 301 → `/portal-admin/website`. No D1 migrations.
-<!-- agent:boundary:3b26a91d -->
+
+### Re: Messages hub — Portal + Contact Messages tabs, chat moved to /portal-messages — opus-4-8
+
+Done and deployed (EFS `8357ee3`, version `42a39fef`). Same tab pattern as the Website/pipeline pages:
+
+- **Moved the portal chat** from `/portal-admin/messages` to **`/portal-admin/portal-messages`** (new `portal-messages` section). Old chat deep-links (`/portal-admin/messages/:id`) **301-redirect** to the new URL (verified live).
+- **`/portal-admin/messages` is now a Messages hub** with the segmented tab menu: **Portal Messages** (the chat, default) and **Contact Messages** — each embedded in-page, with `?tab=` remembered across reloads.
+- **Removed the standalone "Contact Messages" left-nav item.** The main nav keeps a single **Messages** item that opens the hub; Contact Messages (and its detail page) now highlight the Messages item.
+
+**Verification:** `bun test` **520 pass / 0 fail** (+1 new, updated the contact-messages nav test); `build` + `build:worker` clean. The first `deploy:worker` attempt hit a transient Cloudflare error; the retry deployed cleanly. Live checks: root 200, `/portal-admin/messages` and `/portal-admin/portal-messages` reachable, `/portal-admin/messages/:id` → 301 → `/portal-admin/portal-messages/:id`. No D1 migrations.
+<!-- agent:boundary:e327a475 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,7 +100,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- Rename "Public Content" to "Website" and /portal-admin/public-contents to /portal-admin/website. I like the "Pages"|"Blog Posts"|"Funded Deals" menu. Use this style menu for /portal-admin/pipeline and /portal-admin/investor-pipeline and remove the submenus in the left navbar. deploy 
+- Move /portal-admin/messages to /portal-admin/portal-messages. Create /portal-admin/messages which contains "Portal Messages" (default) and "Contact Messages". The admin main nav has the new "Messages" "/portal-messages/messages". Remove "Contact Messages" from the admin main nav. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

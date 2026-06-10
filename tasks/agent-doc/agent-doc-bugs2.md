@@ -79,16 +79,50 @@ You un-struck `#optverify` because the prior turn only *planned* it (decomposed 
 **Verification:** `make check` green — 4221 tests pass (incl. 17 new core + 4 new preflight tests), clippy clean. Hit and fixed the FlowCore token-budget gate (a `disproof=` error string in `write.rs` carried the audited `proof=` substring — reworded). Smoke-tested the full CLI path live: `set-verify` → preflight `pending` → emit proof marker → preflight `provable` + auto-resolved `[/]→[x]` with the opt-in on. Built + installed (release + `cargo install`); latest CI run is green.
 
 **Queue continues** to `#lvbremain` (operator-drive live JB SOCKET-IPC verification) and `#s760wire` (`#s760c` route-gate wire + `#s760d` operator live-verify) — both are fresh-session / operator-live work.
-<!-- agent:boundary:51ce8eab -->
-<!-- agent:boundary:4407422b -->
+
+### Re: #lvbremain — log status: still 0 emissions, operator-blocked — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lvbremain]
+
+
+This is operator-drive verification: I check logs, you drive the live actions. I checked the live `ops.log` and **none of the 4 markers have any real emission yet** — the item's claim still holds. It stays open (not done).
+
+**Log scan (`.agent-doc/logs/ops.log`, real event lines only):**
+
+| Marker | Path | Real emissions |
+|---|---|---|
+| `cross-session-reject` (#4wxr) | claim.rs / ClaimAction.kt | **0** |
+| `run_clear_coalesce` (#9adk) | route.rs / sync.rs | **0** |
+| `visible_write_live_buffer_matches_disk` | write.rs | **0** |
+| `early-ack` (#saev) | ipc_socket.rs | **0** |
+
+Every apparent hit (43x `cross-session-reject`, 228x `early-ack`, etc.) is a **prompt-echo** — the backlog item text contains those marker names, so `queue_diff_active_prompt_differs` lines re-log them. Filtering to lines where the marker is the actual event type (right after the `[epoch]` stamp) gives 0 for all four. So no live action has been driven; I can't drive them from here.
+
+**Blocker before you drive — the install is stale (trust preflight, not the item note):**
+- Release binary + cargo binary were built at epoch `1781066281`; source commit `eaca894d` (the #optverify ship) landed at `1781066593`, ~5 min later. The live tmux/JB binary is running **pre-`eaca894d`** code.
+- The item says "binary+cdylib current" — that is wrong now. Run `make install` in `src/agent-doc` first, or the markers may not emit even when you drive the actions correctly.
+
+**Drive recipe (unchanged, from a fresh session):** `scripts/xdotool-live-verify.sh` —
+1. **#4wxr** — claim this doc from a 2nd tmux session/pane, expect `cross-session-reject`.
+2. **#9adk** — drive a run then a clear, expect `run_clear_coalesce`.
+3. **visible-write** — a live editor write where the buffer already matches disk, expect `visible_write_live_buffer_matches_disk`.
+4. **#saev** — a live **JB-plugin SOCKET-IPC** session (not the file-IPC fallback this drain keeps hitting), expect `early-ack` pending emitted before apply, no false-success / false ack-timeout.
+
+**`#lvbremain` stays open** as an actionable backlog item — not a gate, just blocked on you driving the 4 actions. Concrete unblock: `make install`, then run the recipe; I re-scan the logs.
+
+**Recommend halting the drain here.** This session is restart-heavy (preflight: 3 restart-heavy events in 30 min, accretion guidance = "restart cleanly from the current committed boundary"). The two remaining items are both fresh-session work: `#lvbremain` needs your live driving, and `#s760wire`'s `#s760c` route-gate wire explicitly says "do in a fresh session." Driving them inside this degraded drain is exactly the pattern that caused last turn's post-commit worktree corruption. Better to restart clean and pick them up there.
+<!-- agent:boundary:4808bbe3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#optverify]~~
-- [#lvbremain]
+- ~~[#lvbremain]~~
 - [#s760wire]
+- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###
 <!--

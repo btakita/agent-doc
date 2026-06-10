@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -58,18 +58,29 @@ Preflight found the current queue head `#hccr2` is already satisfied by archived
 No source files changed in this cycle. Commands/proof: `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` repaired prior queue metadata drift; `tsift status` and `tsift index --workspace .` refreshed navigation; `rg` confirmed the archived matches in `tasks/software/tsift.done.md`. No build/test run was needed because this was backlog cleanup only.
 
 Verification confidence: high for duplicate cleanup. Escalation: none. `#cmmcp-eval` remains queued as the next substantive tsift evaluation item.
-<!-- agent:boundary:327c57d7 -->
+
+### Re: codebase-memory-mcp evaluation — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: [#cmmcp-eval]
+
+
+I evaluated DeusData/codebase-memory-mcp as an idea source, not as a tsift replacement. It is still active and current enough to matter: the GitHub README/repo advertises v0.7.0, 159 tree-sitter languages, 14 MCP tools, static binaries, local SQLite graph storage, bundled semantic/BM25 search, agent install support, and a shareable `.codebase-memory/graph.db.zst` artifact. Release notes also show graph-augmented `search_code` work and the compressed artifact path. Sources checked: https://github.com/DeusData/codebase-memory-mcp, https://github.com/DeusData/codebase-memory-mcp/releases, https://github.com/DeusData/codebase-memory-mcp/issues/277, plus local `src/tsift/README.md`, `src/tsift/specs/graph.md`, and `src/tsift/specs/search-navigation.md`.
+
+Verdict: port ideas selectively. tsift should keep its edge around agent-doc integration, bounded envelopes, digest-runner/session-review/diff-digest, scale guards, source handles, conflict-matrix/dependency-dag, provider-neutral GraphStore, and explicit freshness/doctor contracts. codebase-memory-mcp is strongest as evidence that agents benefit from a direct graph query surface, a committed compressed graph bootstrap, graph-augmented grep/search, and polished single-command MCP/install UX.
+
+Port-worthy follow-ups added to backlog in priority order: `#cbmsnap`, `#cbmquery`, `#cbmsearch`, and `#cbmtrust`. I did not add a new MCP-tools item because the existing archived `#hdrmcp` already covers first-party tsift MCP tools. I also would not port the pure-C architecture itself; for tsift the useful part is install/trust ergonomics, not rewriting the Rust crate stack.
+
+Important caution: codebase-memory-mcp's own issue history includes WAL/orphan-process stale-index failure modes on Windows. tsift already has stronger WAL-aware snapshot fallback, `graph-db doctor`, freshness, schema-version, compaction, and semantic-readiness checks, and my local `tsift graph-db --path . --json status` currently reports a stale schema plus summary-cache readiness block. Any shareable snapshot work should import through those checks and fail closed when projection metadata or semantic readiness is stale.
+
+Changed paths: session document/backlog only. Commands/proof: `agent_doc_preflight`, `agent_doc_plan`, web/source review of codebase-memory-mcp, `tsift --envelope search`, local spec reads, `git status`, and `tsift graph-db --path . --json status`. Verification: no build/test run was needed because this cycle did not change source, tests, build logic, or instruction surfaces. Confidence: high for the evaluation and backlog triage; medium on upstream performance/security claims because I verified project documentation and issue history, not an independent benchmark run. Escalation: none.
+<!-- agent:boundary:519e69a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#hccr2]~~
-- ~~[#hsmart2]~~
-- ~~[#hcache2]~~
-- ~~[#hlearn2]~~
-- ~~[#hmcp2]~~
-- :pushpin: [#cmmcp-eval]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -78,7 +89,10 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cmmcp-eval] [recommended] Evaluate DeusData/codebase-memory-mcp (https://github.com/DeusData/codebase-memory-mcp) as a tsift idea-source — NOT a replacement. Pure-C zero-dep single binary, 159 tree-sitter grammars, SQLite knowledge graph, Cypher-like read-only query language + BM25 + regex + bundled-embedding vector search, Hybrid-LSP type resolution (Py/TS/Go/PHP/C#/C/C++), team-shareable compressed graph artifact (.codebase-memory/graph.db.zst), 3D graph viz, PreToolUse grep/glob augmentation hook, 14 MCP tools. Port-worthy ideas to assess: (1) Cypher-like graph query language as a first-class agent interface vs our graph --callers/--callees; (2) committed/shareable compressed graph artifact so teammates+CI skip re-indexing; (3) pure-C zero-toolchain single-binary install; (4) grep/glob result augmentation. MIT, 3.1k stars, active. tsift keeps the edge on agent-doc integration (rewrite hooks, digest-runner, session-review, diff-digest, envelope budgets/scale_guard).
+- [ ] [#cbmsnap] [recommended] Prototype a shareable compressed tsift graph snapshot artifact that imports through graph-db doctor/freshness checks, preserves projection_version/content_hash/source_watermark, and never bypasses WAL/lock/semantic-readiness diagnostics.
+- [ ] [#cbmquery] [recommended] Spike a constrained read-only graph query DSL for tsift graph-db over the stable node/edge/property schema; compare Cypher-like expressiveness against existing node/kind/neighborhood/path/map commands before committing syntax.
+- [ ] [#cbmsearch] [recommended] Add a graph-augmented exact/search preview mode that expands grep hits to containing symbol/source_handle windows, ranks definitions and high-signal symbols before tests, and keeps scale_guard/retrieval handles intact.
+- [ ] [#cbmtrust] [recommended] Compare codebase-memory-mcp's single-binary install/trust UX against tsift release/install flow, including checksums, attestations/scans, and idempotent agent config upserts, without changing tsift's Rust architecture.
 <!-- /agent:backlog -->
 
 ## Review

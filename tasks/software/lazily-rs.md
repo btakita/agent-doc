@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -38,7 +38,33 @@ queue: start
 Compacted content:
 - Archived 1 response topic(s): Transfer repos to lazily-hub
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:b1561a9b -->
+
+### Re: Next steps for lazily-zig spec compliance — opus
+
+> **Queue prompt:**
+>
+> What are #next-steps to make lazily-zig compliant with the spec?
+
+
+The core gap is **architectural**: lazily-zig destroys slots on invalidation while the spec requires marking them dirty with preserved cached values. This blocks memo guards, effects, batching, and most downstream features.
+
+**Priority order (each item gates the next):**
+
+1. **`#lzinvmod`** — Refactor invalidation model to dirty-state (fresh/dirty/unset) with lazy recomputation
+2. **`#lznodevec`** — Refactor storage to `Vec(?Option(Node))` with sequential SlotId + free-list
+3. **`#lzmemo`** — Memo with PartialEq guard (requires dirty-state model)
+4. **`#lzeffect`** — Effect system (auto-tracking, scheduling, coalescing, cleanup, disposal)
+5. **`#lzbatch`** — Batch system (nested, outermost-boundary flush, deferred effects)
+6. **`#lzcellguard`** — Cell PartialEq change detection on set()
+7. **`#lzslotops`** — Missing slot operations: clear(), is_set(), clear_dependents(), computed alias
+8. **`#lzthreadsafe`** — ThreadSafeContext with sidecars, in-flight dedup, optimistic reads
+9. **`#lzasync`** — AsyncContext with async state machine and cancellation
+10. **`#lzipc`** — IPC layer (Snapshot, Delta, IpcSink/Source)
+
+Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
+
+**Top of backlog: `#lzinvmod`**
+<!-- agent:boundary:69d4aeda -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,12 +73,21 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- What are #next-steps to make lazily-zig compliant with the spec?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#r5an] #lzinvmod=Refactor Slot invalidation model from destroy-and-recreate to dirty-state (fresh/dirty/unset) with lazy recomputation. This is the critical architectural blocker — memo guards, effects, and batching all depend on it.
+- [ ] [#ce90] #lznodevec=Refactor node storage from HashMap(usize, *Slot) to Vec(?Option(Node)) indexed by sequential SlotId with free-list reuse per spec.
+- [ ] [#dtmx] #lzmemo=Implement Memo (ctx.memo) with PartialEq guard — dirty recomputation producing equal value suppresses downstream invalidation.
+- [ ] [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.
+- [ ] [#qhn6] #lzbatch=Implement Batch system — nested batches, outermost-boundary flush, coalesced updates, deferred effect scheduling.
+- [ ] [#39xb] #lzcellguard=Add PartialEq change detection to Cell.set() — no-op on equal value per spec.
+- [ ] [#p2pc] #lzslotops=Add missing slot operations: clear(), is_set(), cell.clear_dependents(), computed alias.
+- [ ] [#6965] #lzthreadsafe=Implement ThreadSafeContext with per-slot read-mostly sidecars, in-flight dedup, optimistic reads, InvalidationPlan.
+- [ ] [#9evs] #lzasync=Implement AsyncContext — async computed/memo/effect, AsyncSlotNode state machine, cancellation.
+- [ ] [#74c7] #lzipc=Implement IPC layer — Snapshot, Delta, DeltaOp, IpcSink/Source, ShmBlobArena.
 <!-- /agent:backlog -->
 
 ## Review

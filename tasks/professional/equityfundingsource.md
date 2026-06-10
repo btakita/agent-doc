@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -45,9 +45,37 @@ Got the new queued directive — swapping the prior "Move /portal-admin/messages
 - Rename labels "Investor Pipeline" → "Lender Pipeline", "Investor Deals" → "Lender Deals"
 - Drop "Lender Management" from main nav; add a "Lenders" tab (`/portal-admin/lenders`) inside lender-pipeline
 - Preset `#spec-test-commit-push` (update spec + tests, commit + push), then Deploy
+- **Unchanged on purpose:** internal symbols `AdminInvestorPipeline` / `admin_investor_pipeline_GET_` and the `GET /api/admin/investor-pipeline` endpoint keep their names (no API churn).
+- **Nav restructure:** removed the standalone **Lender Management** nav item; added a **Lenders** tab inside Lender Pipeline that embeds the former Lender Management page (`LenderManagement` gained an `embedded` prop that drops its own topbar title). `/portal-admin/lenders` + the lender-detail route still work and now highlight the Lender Pipeline nav item.
+- **Labels:** nav "Investor Pipeline" → **Lender Pipeline**; tab "Investor Deals" → **Lender Deals**; page title + subtitle reworded to lender.
+- **Section id** `investor-pipeline` → `lender-pipeline` across `layout.tsx`, `index.tsx`, `portal/admin/routes.ts`, and the `nav-counts` key (so the action-count badge still renders).
+- **Route:** `/portal-admin/investor-pipeline` → `/portal-admin/lender-pipeline`. Old URL **301-redirects** (verified live: `GET /portal-admin/investor-pipeline` → `301 Location: /portal-admin/lender-pipeline`).
 
 The queue is currently **inactive** (`queue: stop` in frontmatter; preflight flags `inactive_queue_residue`), so this is staged but not yet authorized to run. Activate it (flip `queue:` to a go state / add a `go` token) and I'll execute the rename, spec/test updates, commit+push, and deploy.
-<!-- agent:boundary:9092f86a -->
+
+### Re: Rename Investor Pipeline → Lender Pipeline + fold in Lenders tab — opus-4-8
+
+> **Queue prompt:**
+>
+> Rename /portal-admin/investor-pipeline to /portal-admin/lender-pipeline. Rename "Investor Pipeline" to "Lender Pipeline". Rename "Investor Deals" to "Lender Deals". Remove "Lender Management" from main nav and add "Lenders" (/portal-admin/lenders) tab in /portal-admin/lender-pipeline. Deploy
+
+
+Done, deployed, and verified in production.
+
+**What changed (EFS `bad0516`, pushed):**
+- **Route:** `/portal-admin/investor-pipeline` → `/portal-admin/lender-pipeline`. Old URL **301-redirects** (verified live: `GET /portal-admin/investor-pipeline` → `301 Location: /portal-admin/lender-pipeline`).
+- **Section id** `investor-pipeline` → `lender-pipeline` across `layout.tsx`, `index.tsx`, `portal/admin/routes.ts`, and the `nav-counts` key (so the action-count badge still renders).
+- **Labels:** nav "Investor Pipeline" → **Lender Pipeline**; tab "Investor Deals" → **Lender Deals**; page title + subtitle reworded to lender.
+- **Nav restructure:** removed the standalone **Lender Management** nav item; added a **Lenders** tab inside Lender Pipeline that embeds the former Lender Management page (`LenderManagement` gained an `embedded` prop that drops its own topbar title). `/portal-admin/lenders` + the lender-detail route still work and now highlight the Lender Pipeline nav item.
+- **Unchanged on purpose:** internal symbols `AdminInvestorPipeline` / `admin_investor_pipeline_GET_` and the `GET /api/admin/investor-pipeline` endpoint keep their names (no API churn).
+
+**Spec + tests:** updated `prds/investor-pipeline-admin.md` (rename note + route/label/tab facts) and the three affected test files. Full suite green — **520 pass / 0 fail**, `bun run build` + `build:worker` clean.
+
+**Deploy:** Worker version `cf563a0f-f494-4fff-a81d-bf4431091c91` at https://equityfundingsource.brian-takita.workers.dev.
+
+Note: the agent-loop superproject submodule pointer now lags this EFS commit; bump it in a separate commit when you next sync submodules.
+<!-- agent:boundary:f809387b -->
+<!-- agent:boundary:2c51ab43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,7 +83,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Rename /portal-admin/investor-pipeline to /portal-admin/lender-pipeline. Rename "Investor Pipeline" to "Lender Pipeline". Rename "Investor Deals" to "Lender Deals". Remove "Lender Management" from main nav and add "Lenders" (/portal-admin/lenders) tab in /portal-admin/lender-pipeline. Deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1093,8 +1093,8 @@ fn check_no_response_active_queue_head(
 /// guard to reap-only / bookkeeping closeouts: a real response cycle records a
 /// capture, so its reaps are answered (not lost) and never reach this guard. A
 /// legitimate prior-cycle reap (the id was answered in an earlier cycle and only
-/// reaped now) is filtered out by [`directive_response_materialized`], which finds
-/// the `### Re: ... #id` heading in the live exchange or a HEAD compact archive.
+/// reaped now) is filtered out by [`reaped_directive_ids_without_response`], which
+/// finds the `### Re: ... #id` heading in the live exchange or a HEAD compact archive.
 fn check_reaped_queue_head_without_response(
     file: &Path,
     rc: &crate::graph::RunContext,
@@ -1107,10 +1107,6 @@ fn check_reaped_queue_head_without_response(
         return Ok(GuardResult::None);
     };
     if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
-        return Ok(GuardResult::None);
-    }
-    // A response was captured this cycle → its reaps are answered, not lost.
-    if state.capture_id.is_some() || state.response_sha256.is_some() {
         return Ok(GuardResult::None);
     }
     if state.reaped_pending_ids.is_empty() {
@@ -1135,18 +1131,62 @@ fn check_reaped_queue_head_without_response(
 
     let content = rc.doc_content();
     let head = crate::git::show_head(file).ok().flatten();
-    let mut lost: Vec<String> = Vec::new();
-    for id in directive_ids {
-        if !reaped.contains(&id) {
-            continue;
-        }
-        if directive_response_materialized(file, &content, head.as_deref(), &id) {
-            continue;
-        }
-        if !lost.iter().any(|existing| existing == &id) {
-            lost.push(id);
-        }
+    let archives: Vec<String> = head
+        .as_deref()
+        .map(|head| {
+            crate::flow::closeout::compact_archive_pointers(head)
+                .into_iter()
+                .filter_map(|pointer| {
+                    crate::flow::closeout::read_head_compact_archive(file, pointer)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Reaped `do #id` directive heads, deterministically ordered so the `bkx9`
+    // diagnostic and the detector input are stable across runs.
+    let mut ordered_ids: Vec<String> = directive_ids
+        .into_iter()
+        .filter(|id| reaped.contains(id))
+        .collect();
+    ordered_ids.sort();
+    if ordered_ids.is_empty() {
+        return Ok(GuardResult::None);
     }
+
+    // #bkx9wire: per-id response-loss diagnostic. Emitted even when a response was
+    // captured this cycle, so a reproduced `#ipc-crdt-response-drift` (found=false)
+    // is catchable from ops.log and a multi-id-under-one-heading cycle (found=true
+    // for each id) proves no false positive — no live-verify needed.
+    for id in &ordered_ids {
+        let source = directive_response_source(&content, &archives, id);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "bkx9 directive_response_materialized id={} found={} source={}",
+                id,
+                source.is_some(),
+                source.map_or("none", ResponseSource::as_str),
+            ),
+        );
+    }
+
+    // Canonical lost set via the now-wired per-id detector (#z2jy bkx9-pure-detector).
+    let lost = reaped_directive_ids_without_response(&ReapedResponseLossInput {
+        directive_ids: &ordered_ids,
+        reaped_ids: &ordered_ids,
+        content: &content,
+        archives: &archives,
+    });
+
+    // Guard ESCALATION stays scoped to reap-only / bookkeeping closeouts: when a
+    // response was captured this cycle the diagnostic above still records any
+    // captured-but-id-lost residual, but a false positive on the known multi-id
+    // single-heading class must never wedge a committed closeout — so do not escalate.
+    if state.capture_id.is_some() || state.response_sha256.is_some() {
+        return Ok(GuardResult::None);
+    }
+
     if lost.is_empty() {
         return Ok(GuardResult::None);
     }
@@ -1189,30 +1229,45 @@ fn check_reaped_queue_head_without_response(
     })
 }
 
-/// True when a `### Re:` response heading targeting `id` (normalized, no `#`)
-/// exists in the live exchange `content` or in any HEAD-referenced compact
-/// archive. Used by [`check_reaped_queue_head_without_response`] to distinguish a
-/// legitimate prior-cycle reap (response durably recorded, possibly archived) from
-/// a silent loss.
-fn directive_response_materialized(
-    file: &Path,
-    content: &str,
-    head: Option<&str>,
-    id: &str,
-) -> bool {
-    if content_has_re_heading_for_id(content, id) {
-        return true;
+/// Where a reaped `do #id` directive's `### Re: ... #id` response heading
+/// materialized: the live exchange or a HEAD-referenced compact archive.
+#[derive(Clone, Copy)]
+enum ResponseSource {
+    Exchange,
+    Archive,
+}
+
+impl ResponseSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            ResponseSource::Exchange => "exchange",
+            ResponseSource::Archive => "archive",
+        }
     }
-    let Some(head) = head else {
-        return false;
-    };
-    crate::flow::closeout::compact_archive_pointers(head)
-        .into_iter()
-        .any(|pointer| {
-            crate::flow::closeout::read_head_compact_archive(file, pointer)
-                .map(|archive| content_has_re_heading_for_id(&archive, id))
-                .unwrap_or(false)
-        })
+}
+
+/// Resolve where `id`'s `### Re:` response heading materialized, if anywhere.
+/// Pure over already-resolved `content` (the live committed exchange) and
+/// `archives` (HEAD compact-archive bodies). Used by
+/// [`check_reaped_queue_head_without_response`] for the `#bkx9`
+/// `directive_response_materialized` diagnostic and to distinguish a legitimate
+/// prior-cycle reap (response durably recorded, possibly archived) from a silent
+/// loss.
+fn directive_response_source(
+    content: &str,
+    archives: &[String],
+    id: &str,
+) -> Option<ResponseSource> {
+    if content_has_re_heading_for_id(content, id) {
+        return Some(ResponseSource::Exchange);
+    }
+    if archives
+        .iter()
+        .any(|archive| content_has_re_heading_for_id(archive, id))
+    {
+        return Some(ResponseSource::Archive);
+    }
+    None
 }
 
 /// True when any `### Re:` heading line in `content` references `#id` / `[#id]`.
@@ -1252,8 +1307,7 @@ fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
 /// I/O: the caller resolves `content` (the live committed exchange) and
 /// `archives` (the HEAD-referenced compact-archive bodies) up front, so the core
 /// logic stays deterministically unit-testable.
-// Dormant (#z2jy): constructed only by unit tests until the #bkx9 wiring lands.
-#[allow(dead_code)]
+// Wired into [`check_reaped_queue_head_without_response`] by `#bkx9wire`.
 #[derive(Clone, Debug)]
 pub(crate) struct ReapedResponseLossInput<'a> {
     /// `do #id` directive target ids active this cycle.
@@ -1278,16 +1332,16 @@ pub(crate) struct ReapedResponseLossInput<'a> {
 /// residual — a response body *was* captured this cycle but a specific id's
 /// `### Re:` was lost in a CRDT merge (the captured-but-id-lost case).
 ///
-/// It is intentionally NOT wired into the live guard yet: wiring it (and proving
-/// it against a reproduced `#ipc-crdt-response-drift`) is gated as `#bkx9`,
-/// because this guard runs at every `write --commit` closeout and a false
-/// positive would wedge all closeouts. The known false-positive class is pinned
-/// by the unit tests: a single `### Re:` heading that answers `do #A` + `do #B`
-/// but names only `#A` flags `#B` as lost.
+/// Wired into the live guard by `#bkx9wire`: the guard emits a per-id
+/// `bkx9 directive_response_materialized` diagnostic (including on captured
+/// cycles, surfacing the captured-but-id-lost residual in ops.log) but only
+/// ESCALATES on reap-only / bookkeeping closeouts, because this guard runs at
+/// every `write --commit` closeout and a false positive would wedge all
+/// closeouts. The known false-positive class is pinned by the unit tests: a
+/// single `### Re:` heading that answers `do #A` + `do #B` but names only `#A`
+/// flags `#B` as lost.
 ///
 /// See `specs/07-closeout-commands.md` `#compact-reap-no-response-record`.
-// Dormant (#z2jy): exercised only by unit tests until the #bkx9 wiring lands.
-#[allow(dead_code)]
 pub(crate) fn reaped_directive_ids_without_response(
     input: &ReapedResponseLossInput<'_>,
 ) -> Vec<String> {
@@ -6556,6 +6610,31 @@ Body\n\
             .is_empty(),
             "a grouped heading naming both ids is not a loss"
         );
+    }
+
+    #[test]
+    fn directive_response_source_resolves_found_and_source_for_bkx9_diagnostic() {
+        // #bkx9wire: the per-id `bkx9 directive_response_materialized id=<id>
+        // found=<bool> source=<exchange|archive>` diagnostic is driven by this
+        // resolver. Cover the three emitted shapes deterministically.
+        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
+
+        // found=true source=exchange: heading lives in the live committed exchange.
+        let exchange = "### Re: do #live — opus-4-8\n\nShipped the live fix.\n";
+        let src = directive_response_source(exchange, &archives, "live");
+        assert!(src.is_some());
+        assert_eq!(src.unwrap().as_str(), "exchange");
+
+        // found=true source=archive: heading is absent from the exchange but
+        // present in a HEAD compact archive.
+        let unrelated = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
+        let src = directive_response_source(unrelated, &archives, "archived");
+        assert!(src.is_some());
+        assert_eq!(src.unwrap().as_str(), "archive");
+
+        // found=false source=none: the drift-repro catch — reaped id has no
+        // `### Re:` heading anywhere.
+        assert!(directive_response_source(unrelated, &archives, "lost").is_none());
     }
 
     #[test]

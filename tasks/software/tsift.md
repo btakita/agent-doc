@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -75,12 +75,16 @@ Port-worthy follow-ups added to backlog in priority order: `#cbmsnap`, `#cbmquer
 Important caution: codebase-memory-mcp's own issue history includes WAL/orphan-process stale-index failure modes on Windows. tsift already has stronger WAL-aware snapshot fallback, `graph-db doctor`, freshness, schema-version, compaction, and semantic-readiness checks, and my local `tsift graph-db --path . --json status` currently reports a stale schema plus summary-cache readiness block. Any shareable snapshot work should import through those checks and fail closed when projection metadata or semantic readiness is stale.
 
 Changed paths: session document/backlog only. Commands/proof: `agent_doc_preflight`, `agent_doc_plan`, web/source review of codebase-memory-mcp, `tsift --envelope search`, local spec reads, `git status`, and `tsift graph-db --path . --json status`. Verification: no build/test run was needed because this cycle did not change source, tests, build logic, or instruction surfaces. Confidence: high for the evaluation and backlog triage; medium on upstream performance/security claims because I verified project documentation and issue history, not an independent benchmark run. Escalation: none.
-<!-- agent:boundary:519e69a1 -->
+<!-- agent:boundary:847aeda7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#cbmsnap]
+- [#cbmquery]
+- [#cbmsearch]
+- [#cbmtrust]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

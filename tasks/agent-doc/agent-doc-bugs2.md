@@ -187,7 +187,27 @@ Every apparent hit (e.g. 43× `cross-session-reject`, 228× `early-ack`) is a `q
 `#lvbremain` **stays open** as an actionable backlog item — not a gate, just blocked on you driving the 4 actions. The install blocker is gone; concrete unblock is now just: run the recipe, I re-scan.
 
 (Session size note, no stall: exchange is at accretion `warn` — restart-heavy. Queue is active so I'm continuing the drain rather than asking to compact.)
-<!-- agent:boundary:135e9196 -->
+
+### Re: #lvbremain — fresh log re-scan: still 0, operator-blocked (halt recommended) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lvbremain]
+
+
+Operator-drive item: I check logs, you drive the live actions. Fresh scan of `.agent-doc/logs/ops.log` this cycle — all 4 markers still **0 real event-type emissions** (filtered to `[epoch] <marker>` event lines; the high apparent counts are all `queue_diff_active_prompt_differs` prompt-echoes of the marker names in the item text). No live action has been driven, so the item **stays open** — marking it done would be false reporting.
+
+| Marker | Path | Real emissions |
+|---|---|---|
+| `cross-session-reject` (#4wxr) | claim.rs / ClaimAction.kt | **0** |
+| `run_clear_coalesce` (#9adk) | route.rs / sync.rs | **0** |
+| `visible_write_live_buffer_matches_disk` | write.rs | **0** |
+| `early-ack` (#saev) | ipc_socket.rs | **0** |
+
+Install is current (cleared a prior cycle), so markers will emit when you drive the recipe (`scripts/xdotool-live-verify.sh`): claim from a 2nd pane (#4wxr) -> run-then-clear (#9adk) -> buffer-matches-disk write -> JB SOCKET-IPC session (#saev).
+
+**Halting the drain here.** This is the 6th near-identical `#lvbremain` cycle in a restart-heavy, accretion-`warn` session. Both remaining items — `#lvbremain` (your live driving) and `#s760wire` (#s760c explicitly "fresh session") — need operator attention I can't supply in this degraded session, which is exactly the loop that caused prior post-commit worktree corruption. Pick them up in a clean session.
+<!-- agent:boundary:e3abbf1e -->
 <!-- /agent:exchange -->
 
 ## Queue

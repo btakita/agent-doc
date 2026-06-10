@@ -13,6 +13,31 @@ the real writers until the supervisor lives inside the controller process. This 
 migration. It is multi-day and must be done in a fresh, unsaturated context — each phase is
 independently shippable and SimWorld-verifiable.
 
+## Status (2026-06-10): phases 1–4 done; cutover at `pcpc5e1` observe rung
+
+**The entire pure-Rust migration is built, committed, and on the agent-doc submodule's `main`.**
+Verified from `git log` (submodule HEAD `98e6ac0e`):
+
+| Phase | Commit | State |
+|-------|--------|-------|
+| `#pcpc1` session-actor message runtime (`session_actor.rs` mailbox + 3 SimWorld tests) | `55243328` | ✅ done |
+| `#pcpc2` in-process supervisor adapter (`supervisor/in_process.rs`) | `bcb63a1f` | ✅ done |
+| `#pcpc3` ordered write queue (`write_queue.rs`, wired into `write.rs`) | `ef47c07e` | ✅ done |
+| `#pcpc4` single controller-owned watcher (`document_watcher.rs`) | `038f0165` | ✅ done |
+| `#pcpc5a–c` write-authority gate ladder (`write_authority.rs`) | `600797b3` | ✅ done |
+| `#pcpc5d` direct-run writer routed through the gate | `6f588d45` | ✅ done |
+| `#pcpc5e1` supervisor-host cutover gate — **observe rung** (`supervisor_authority.rs`) | `98e6ac0e` | ✅ done (HEAD) |
+
+**Only the live-gated cutover swap remains** (`#pcpc5e1` authority rung → removal rungs): actually
+host the child on `supervisor::in_process::InProcessSupervisor` when `AGENT_DOC_SUPERVISOR=in-process`,
+advance `AGENT_DOC_WRITE_AUTHORITY` shadow→dual-write→authority, then delete the out-of-process
+direct-disk writers and demote the editor WatchService to read-only. This is **doubly constrained**:
+(1) it needs a live IntelliJ/Codex editor-boundary proof, and (2) per `specs/08b` §"Migration gates"
+the authority change must **never land inside an agent-doc response cycle** (every cycle persists its
+`### Re:` through exactly the write path being cut over). Run it **out-of-cycle in a plain Claude Code
+session**, each rung behind its rollback flag. The "Current state" and "Actionability" sections below
+describe the pre-migration baseline and are kept for historical context.
+
 ## Relationship to existing plans/specs (do not duplicate)
 
 - `specs/08b-single-process-control-plane.md` — the target. §"In-process actors" already specifies a
@@ -46,38 +71,53 @@ independently shippable and SimWorld-verifiable.
 
 Dependency order: actor runtime → supervisor adapter → write queue → watcher → migration cutover.
 
-### `#pcpc1` — Session-actor message runtime
+### `#pcpc1` — Session-actor message runtime ✅ done (`55243328`)
 Turn `session_actor.rs` from a data struct into a real in-process actor: a per-document mailbox
 (command channel) processed on a single owning thread/task, so all document-scoped operations
 (write submit, closeout, queue-head selection, lifecycle transitions) are serialized through one
 owner. Keep the SQLite CAS as the durable backstop. SimWorld: concurrent commands to one document
 actor execute in a deterministic serialized order.
 
-### `#pcpc2` — In-process supervisor adapter
+### `#pcpc2` — In-process supervisor adapter ✅ done (`bcb63a1f`)
 Replace the out-of-process `agent-doc start` supervisor with an in-process supervisor adapter hosted
 by the controller (per `08b` §"In-process actors"): it owns the harness child PTY/stdin, readiness,
 restart/clear, and heartbeat as a controller-managed task rather than a separate OS process. Preserve
 the existing Unix-socket external boundary for CLI/editor callers (they still talk to the controller
 process). SimWorld: supervisor heartbeat loss + reattach, restart/clear, all in-process.
 
-### `#pcpc3` — In-process ordered write queue (realizes `#pcp3b`)
+### `#pcpc3` — In-process ordered write queue (realizes `#pcp3b`) ✅ done (`ef47c07e`)
 With the supervisor and finalize now in the same process, route all `write`/`stream`/`finalize`/
 repair disk writes **and** supervisor idle/file-watch writes through the session actor's single
 ordered write queue (built on `#pcpc1`). The `flock` stays a cross-process backstop only. This kills
 the R6 self-race / exit-75 at the root (not just the `#pcp3a` drain-retry mitigation). SimWorld:
 concurrent supervisor-write + agent-finalize serialize; finalize never observes a half-applied write.
 
-### `#pcpc4` — Single controller-owned filesystem watcher (realizes `#pcp4`)
+### `#pcpc4` — Single controller-owned filesystem watcher (realizes `#pcp4`) ✅ core done (`038f0165`)
 Replace the per-process `notify` watchers with one controller-owned watcher per document feeding the
 session actor; demote the editor plugin WatchService to read-only buffer reporting (realizes `#pcp7`,
 which also needs its own plugin change + live verification). SimWorld: one watcher event stream, no
 duplicate-watcher reconcile race.
 
-### `#pcpc5` — Migration cutover (08b gate ladder)
+### `#pcpc5` — Migration cutover (08b gate ladder) — IN PROGRESS
 Drive the `08b` migration gates (shadow → dual-write → read-switch → authority → removal) for the
 write/watch authority move, each with a rollback flag, removing the obsolete out-of-process supervisor
 + direct-disk writers only after SimWorld + CLI + live-tmux coverage proves the in-process path for
 Claude/Codex/OpenCode.
+
+**Done (pure-Rust scaffolding, all behind default-off rollback flags):**
+- `#pcpc5a–c` (`600797b3`) — write-authority gate ladder: `AGENT_DOC_WRITE_AUTHORITY`
+  off→shadow→dual-write→authority routes `write::atomic_write` through `write_queue` (`write_authority.rs`).
+- `#pcpc5d` (`6f588d45`) — direct-run writer routed through the same write-authority gate.
+- `#pcpc5e1` observe rung (`98e6ac0e`) — supervisor-host ladder mirror: `AGENT_DOC_SUPERVISOR`
+  off→shadow→in-process flag + `supervisor_authority.rs`; observe-only (always still hosts
+  out-of-process, logs `supervisor_host_gate`). Zero live behavior change.
+
+**Remaining (live-gated, OUT-OF-CYCLE only — must NOT land in an agent-doc response cycle):**
+- `#pcpc5e1` authority rung — swap `agent-doc start` hosting onto
+  `supervisor::in_process::InProcessSupervisor` when `AGENT_DOC_SUPERVISOR=in-process`.
+- Removal rungs — delete the obsolete out-of-process supervisor + direct-disk writers; demote the
+  JetBrains/VS Code WatchService to read-only buffer reporting (realizes `#pcp7`).
+- Advance `AGENT_DOC_WRITE_AUTHORITY` to dual-write/authority live with editor-boundary proof.
 
 ## Verification obligations
 Per `08b` §"Verification obligations": deterministic SimWorld coverage for concurrent
@@ -91,7 +131,14 @@ saturated session. Each phase: `make check` + fresh `cargo install` + `cargo bui
 the watcher/plugin-demotion phases need live IntelliJ/Codex verification. Follow the gate ladder with
 rollback flags so a regression never strands committed controller rows.
 
-## Actionability (2026-06-09): what is NOT blocked by a live editor
+## Actionability — RESOLVED (see "Status (2026-06-10)" above)
+
+> **Historical note (2026-06-09):** the section below assessed which phases were actionable without a
+> live editor. **It is now obsolete:** every SimWorld-doable phase it listed (`#pcpc1`–`#pcpc4` plus
+> the pure-Rust cutover rungs `#pcpc5a`–`#pcpc5d` and the `#pcpc5e1` observe rung) has shipped. The
+> only work left — the `#pcpc5e1` authority swap, the supervisor/direct-writer removal, and the
+> JetBrains/VS Code WatchService demotion (`#pcp7`) — is the live-gated, out-of-cycle remainder
+> described in the Status section. Do **not** re-queue `#pcpc1`–`#pcpc4` as actionable backlog ids.
 
 The "fresh, unsaturated session" requirement is a **focus/size** constraint, not a hard block. Most
 of this work is pure-Rust + SimWorld and can be picked up in any focused (non-degraded) session

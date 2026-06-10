@@ -206,7 +206,28 @@ So: **in-process child-hosting does not eliminate the write/live-buffer drift ra
 **One honest constraint on where to build it:** this session is *itself* the drift-prone one (the `1781130548` line is this doc finalizing through the racing buffer). A large Kotlin change deserves a clean pane so its own finalize isn't fighting the very race it fixes — and now that's an evidence-backed reason, not hand-waving. Say "build #dsqa" and I'll do the plugin demotion end-to-end (committing code via git so the drift can't eat it) and hand you the zip + the one drive.
 
 `#q6js` stays open — **verified not-green** (drift persists under in-process hosting; gated on `#dsqa`). `#ktw8`/`#lvbremain` remain operator-drive. Not auto-looping.
-<!-- agent:boundary:e1b40923 -->
+<!-- no-queue-removal-guard -->
+### Re: #lvbremain "force run" — log-check done: 3 of 4 markers PROVEN, last gated on #dsqa — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#lvbremain]. force run
+
+
+You forced `#lvbremain`. I scanned `ops.log` for STRUCTURED markers only (a bare substring scan false-positives on prose — that nearly fooled me here). Verdict: **3 of 4 markers proven; the 4th converges on `#dsqa`.**
+
+**Proven:**
+- **#4wxr cross-session-reject** — 2 structured `[claim]` markers (driven live 2026-06-10).
+- **#9adk run_clear_coalesce** — operator-verified via `idea.log` `InvocationCoalescer` (plugin-side; never an ops.log marker).
+- **#saev early_ack_pending** — **new, and the backlog is stale here.** `EARLY_ACK_ENABLED = true` (default-on, `ipc_socket.rs:72`), and `ops.log` now has 4 genuine structured `early_ack_pending emitted before apply` markers (`early_ack_ops_marker()`, ts 1781129912 / 1781130304 / 1781130548 / 1781131101). The `#x9ds` harness fix wired the correct underscore token to `log_op`. So `#saev` is emitting — no special drive needed.
+
+**Not proven (the one true remaining marker):**
+- **visible_write_live_buffer_matches_disk** — 0 genuine emissions. A bare grep shows 5 hits, but all 5 are the token inside `queue_diff_active_prompt_differs` backlog prose — the false-positive trap, not the `write.rs:6743` `log_op`. It can't fire because that marker only runs on the clean buffer==disk path, and every recent finalize on this doc **drifts** — so the clean path never executes.
+
+**The convergence:** that last marker is gated on the same root as `#q6js` — **`#dsqa`**. Demote the second watcher (JB `PatchWatcher`) → the live buffer stops racing → writes hit the clean buffer==disk path → the marker fires and `#q6js`'s zero-drift criterion goes green in the same operator drive. The whole remaining queue collapses to one build + one drive: **land `#dsqa`.**
+
+Live proof of the bug, this turn: persisting *this very verdict* drifted 3× and the stale live-buffer sidecar resurrected struck queue items — I recovered by moving the sidecar aside and committing from a clean boundary. That churn IS the `#dsqa` bug. `#lvbremain` stays open on its single remaining marker (gated on `#dsqa`). Not auto-looping.
+<!-- agent:boundary:0c4f7e37 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -217,7 +238,7 @@ So: **in-process child-hosting does not eliminate the write/live-buffer drift ra
 - ~~:pushpin: [#dsqa]. force run~~
 - ~~:pushpin: [#q6js]. force run~~
 - ~~:pushpin: [#ktw8]. force run~~
-- :pushpin: [#lvbremain]. force run
+- ~~:pushpin: [#lvbremain]. force run~~
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 <!-- /agent:queue -->
 ###

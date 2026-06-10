@@ -35,7 +35,7 @@ complete
 Compacted content:
 - Archived 7 response topic(s): close the review items via logging-provable backlog tasks (no live-verify); How can agent-doc support opportunistic gated review item verification?; Do the PCP; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1ba36a66 -->
+<!-- agent:boundary:e1942933 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -75,7 +75,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#reviewrm] #agent-doc-bug agent:review has no clean removal/resolve flag — agent-doc write exposes only --review-add/--review-edit, so a stale or DUPLICATE review item (the two identical [/] #saevon entries preflight flags as preset_item_id_collision, from an earlier finalize interleave) cannot be deduped or converted to backlog without an ambiguous edit-by-id. Add --review-remove <id> / --review-resolve <id> and dedupe identical same-id review entries during finalize. Files: write.rs review flag parsing; template.rs review component ops; preflight collision warning.
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
@@ -85,7 +84,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 - [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 

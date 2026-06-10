@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -187,12 +187,14 @@ Every apparent hit (e.g. 43× `cross-session-reject`, 228× `early-ack`) is a `q
 `#lvbremain` **stays open** as an actionable backlog item — not a gate, just blocked on you driving the 4 actions. The install blocker is gone; concrete unblock is now just: run the recipe, I re-scan.
 
 (Session size note, no stall: exchange is at accretion `warn` — restart-heavy. Queue is active so I'm continuing the drain rather than asking to compact.)
-<!-- agent:boundary:fd871bee -->
+<!-- agent:boundary:135e9196 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#lvbremain]
+- do [#s760wire]
 <!-- /agent:queue -->
 ###
 <!--

@@ -54,12 +54,12 @@ Compacted content:
 - Verification: this is a queue-state repair for an accidental recommendation promotion; no code tests run.
 - Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc admin inspect`, `agent-doc admin queue pause`, `agent-doc session-check` attempt, and queue/backlog behavior inspection.
 - Changed paths: session document state only; no `src/tsift` implementation/spec edits.
-<!-- agent:boundary:542f7dd0 -->
+<!-- agent:boundary:ae634441 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

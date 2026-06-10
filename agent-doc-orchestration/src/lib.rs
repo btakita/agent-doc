@@ -68,6 +68,7 @@ pub mod checkpoint;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
+pub mod context_pct;
 pub mod cycle_state;
 pub mod dashboard;
 pub mod debounce;

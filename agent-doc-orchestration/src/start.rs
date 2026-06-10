@@ -3715,6 +3715,38 @@ pub fn run_with_reap_policy(
         &resolved_model,
     );
 
+    // #pcpc5e1 / #dav9 — 08b supervisor-host cutover gate (observe rung).
+    // This out-of-process `agent-doc start` process hosts the harness child in
+    // the run loop below. `AGENT_DOC_SUPERVISOR=off` (default) is silent — zero
+    // change to shipped users. A non-off mode reports the configured cutover
+    // target so an operator can confirm the wiring before the hosting-swap rung
+    // flips authority onto `supervisor::in_process::InProcessSupervisor`. The
+    // `in-process` rung is accepted but not yet hosted here (the swap is the
+    // gated #pcpc5 follow-on); this rung always hosts out-of-process, so setting
+    // the flag early never strands a session.
+    {
+        let supervisor_mode = crate::supervisor_authority::current_mode();
+        if !matches!(supervisor_mode, crate::supervisor_authority::SupervisorMode::Off) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "supervisor_host_gate file={} mode={} hosting=out-of-process swap_pending={}",
+                    file.display(),
+                    supervisor_mode.as_str(),
+                    supervisor_mode.hosts_in_process()
+                ),
+            );
+            log_event(
+                &mut session_log,
+                &format!(
+                    "supervisor_host_gate mode={} hosting=out-of-process swap_pending={}",
+                    supervisor_mode.as_str(),
+                    supervisor_mode.hosts_in_process()
+                ),
+            );
+        }
+    }
+
     // --- Snapshot integrity validation ---
     // If file was moved (JB plugin respawn after rename), the old path hash
     // won't match — migrate state files or bootstrap a fresh snapshot before

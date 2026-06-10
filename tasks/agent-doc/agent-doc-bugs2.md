@@ -35,14 +35,36 @@ complete
 Compacted content:
 - Archived 13 response topic(s): do [#pcpc5cut]; do [#opsproof-falsepos]; Do not use memory to recover; 10 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:18051a77 -->
+
+### Re: do [#xdotool-lvbatch] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#xdotool-lvbatch]
+
+
+Shipped both halves of the deliverable (`#spec-test-build-install-commit-push`).
+
+**Reusable harness — `src/agent-doc/scripts/xdotool-live-verify.sh`** (309 lines). Drives the `#lvbatch` operator batch via xdotool keystroke injection, with every plan safety guard enforced in code:
+- **Scratch-doc-only** — operates exclusively on `.agent-doc/live-repro/xdotool-<case>.md`, auto-scaffolded; never the real working doc.
+- **Focus-guard** — re-reads `getactivewindow`/`getwindowname` immediately before every `type`/`key` and aborts on any title mismatch.
+- **Fresh-session gate** — counts restart/self-race markers in recent `ops.log`; refuses to drive keystrokes from a degraded session (`--dry-run` overrides).
+- **Marker-timed** — waits for the IPC-apply sentinel in `ops.log` instead of `sleep`, so edits land in the mid-finalize drift window.
+- Per-case recipes for `exch-intermix`, `postcommit-worktree`, `saevon`, `tmux-switch`, `lvbatch-markers`, plus `check-env`/`list`. No document logic in the script — it only injects input and greps the binary's own markers.
+
+**Offline-assertable half — deterministic SimWorld coverage** (`src/sim_world.rs`). New `PostCommitIpcRepositionSignal` command models the live IPC listener firing the post-commit boundary-reposition signal at the working tree; the scoped idempotency check enforces **working-tree == HEAD after a committed closeout** (`#postcommit-ipc-worktree-corruption`), since repositioning an already-clean committed boundary must not mutate the tree. `(HEAD)`/boundary-id artifacts normalize equal; a negative control proves a spliced buffer is detectable as drift. Wired into the fast + medium seed corpus and spec 12.
+
+**Verification:** `make check` green (clippy clean, medium corpus + full suite pass, exit 0); release build + `cargo install` done. CI run `27244285700` for commit `a6285afe` is in-progress — local evidence stands. Submodule `a6285afe` pushed; superproject pointer `ed88e0432` pushed.
+
+The genuinely-live timing (`live_prompt_drift_auto_recovered`, `early-ack pending emitted before apply`, the `#lvbatch` markers) is now agent-runnable through this harness from a **fresh** session — the remaining live-run work stays tracked under the existing `#exch-intermix-verify`, `#postcommit-ipc-worktree-corruption`, `#saevon`, and `#lvbatch` items, which can now be driven by `scripts/xdotool-live-verify.sh` rather than hand-typed. `#saevon` still needs its `EARLY_ACK_ENABLED=true` flip + lib-install before its recipe asserts.
+<!-- agent:boundary:61f6ad73 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#s760wire]~~
-- :pushpin: do [#xdotool-lvbatch]
+- ~~:pushpin: do [#xdotool-lvbatch]~~
 - :round_pushpin: do [#lvbatch]
 - :pushpin: :round_pushpin: do [#saevon]
 - :round_pushpin: do [#bkx9perid]
@@ -51,6 +73,7 @@ Compacted content:
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - ~~do [#dropqueue-consumed-falsecount]~~
 - :round_pushpin: do [#lvbatch]
+- :round_pushpin: do [#pcpc5live]
 - Automatically add the env vars to ~/ so I can test. I can restart.
 <!-- /agent:queue -->
 ###
@@ -81,7 +104,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#xdotool-lvbatch] Automate the #lvbatch live-verification batch with xdotool keystroke injection so the agent can drive AND verify the IPC/CRDT live-load items without a human typing. Plan: tasks/agent-doc/plan-xdotool-live-verification.md. Verified env: X11 reachable (DISPLAY=:0, no Wayland), xdotool 4.x at /usr/bin/xdotool, live IntelliJ editor targetable by doc-basename title. Guards: type ONLY into a throwaway .agent-doc/live-repro/xdotool-<case>.md scratch doc (never the real working doc), focus-guard active window before every type, run from a FRESH session, time keystrokes by ops.log IPC-apply marker not sleep. Covers #exch-intermix-verify (live_prompt_drift_auto_recovered), #postcommit-ipc-worktree-corruption (assert worktree==HEAD post-closeout), #saevon (flip EARLY_ACK_ENABLED + build/lib-install, expect early-ack pending before apply, no false-success), and the #lvbatch markers. Does NOT cover #s760wire (code, not typing). Deliverable: reusable harness script + SimWorld coverage for offline-assertable parts.
 - [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Pre-emptive /clear: predicate ContextResetDecision.shouldClearBeforeDispatch + clear_threshold_for_doc + agent_doc_queue_context_reset opt-in ALL SHIPPED. Blocker = live context-usage % source. SubmitAction.kt is a thin dispatcher (no ctx%); per Shared Foundation it belongs in route.rs. Observed footers vary by harness+config (Claude custom statusline 'ctx:NN%', Codex 'Context NN% used') so TUI-scrape is wrong for the shipped product — derive ctx% from session transcript token usage / context window instead. Remaining (CLI-side, no JB install): add harness-aware transcript-based ctx% reader in route.rs, gate dispatch via shouldClearBeforeDispatch, emit '[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..', send /clear when true; live-verify.

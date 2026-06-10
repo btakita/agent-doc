@@ -162,7 +162,24 @@ Symmetric to #2: `notify_borrower_of_admin_message_` always sends the borrower a
 **Reply-by-email (#3)** is the only one that needs real implementation, not just config. Say the word and I'll queue it as a concrete backlog item with the three steps above.
 
 **Queue housekeeping:** the queue is currently **inactive**, so `#eyp0`/`#6r8v` aren't auto-running. They were duplicate entries of the same item (the deferred *investor* accreditation-control follow-up — unrelated to this messaging work), so I folded the endpoint detail into **#eyp0** and closed **#6r8v** as a duplicate. Note: preflight flagged #eyp0 as possibly-done against `#pipeline-dialog-controls-scope` — that's a false positive; #eyp0 is the genuinely-not-yet-built follow-up, not the shipped loan/payment dropdowns. Want me to build #eyp0, or enable the messaging email round-trip? Activate the queue or just say which.
-<!-- agent:boundary:38e318e1 -->
+
+### Re: go — built the Investor Pipeline stacked profile dialog (#b0wq) — opus-4-8
+
+Done, per `#spec-test-commit-push`. On the Investor Pipeline board, **"Open investor profile"** now opens the editable profile as a **stacked dialog on top of** the card modal instead of navigating away to `/portal-admin/users/:id`.
+
+**Shipped (EFS `6542d9d`, pointer `ef3d28999`):**
+- Extracted the editable account+address form out of the full-page `UserDetail` into a shared **`UserProfileEditor`** (same fetch / edit / Save / Delete logic), so the page and the dialog render the *same* form — no duplication.
+- New **`UserProfileModal`** renders that editor stacked at `z-[1100]` above the card's `z-[1000]`. `PortalModal` already handles stacking correctly (Esc closes only the topmost). Delete from the dialog closes the dialog; an **"Open full page"** link is retained for the standalone account view.
+- The card's profile action is now a button (`set_profile_open(true)`), not an `<a href>`.
+
+**Verification:** `bun test` **502 pass / 0 fail** (updated `#vtx8`, added `#b0wq` coverage for the stacked dialog + shared editor); `build` + `build:worker` clean (browser bundle compiled the new TSX — no circular import). Committed + pushed, pointer bumped. No deploy this cycle (say "deploy" / `#spec-test-commit-push-deploy` to ship).
+
+**Queue (still inactive — staged, not auto-running):**
+- **`#eyp0`** — investor accreditation Accredit/Pending control. Codeable next; say "go" to build it.
+- **`enable email round trip`** — captured as **`#emrt`**. This one is **config-only, no code**, but blocked on **`#f4rq`** (verify an EFS-owned Resend sending domain) + setting the production flag/secrets, which need Robert's domain access. I can't safely flip production secrets from here. Want me to draft the exact wrangler secret commands + the Resend domain-verification steps for Robert?
+
+Next, or activate the queue and I'll keep draining.
+<!-- agent:boundary:4b4ed31f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -171,13 +188,16 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
 - [#eyp0]
+- ~~[#b0wq]~~
+- enable email round trip
+- https://equityfundingsource.brian-takita.workers.dev/portal-admin/investor-pipeline Open Investor Profile should open another dialog on top with the investor form.
 - ~~[#6r8v]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#b0wq] Investor Pipeline: "Open Investor Profile" (admin investor-pipeline page, e.g. /portal-admin/investor-pipeline) should open a stacked dialog on top of the current one containing the investor form/profile, rather than navigating away. From 2026-06-09 session.
+- [ ] [#emrt] Enable the borrower-messaging email round-trip (#2/#4 from the messaging answer): config-only, no code. Set MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true, configure delivery (Cloudflare Email Service token/account or Resend) + MESSAGE_NOTIFICATION_FROM, on an EFS-verified sending domain. Gated on #f4rq (verify the Resend sending domain) — needs Robert domain access. Reply-by-email INTO chat (#3) is separate (scaffold at POST /api/email/inbound, needs inbound routing + sender-auth + append wiring).
 - [ ] [#eyp0] [recommended] Investor dialog editable action: the investor pipeline lifecycle stage is DERIVED (furthest stage from accreditation + lender account + active/pending funds), so it has no settable status. The real editable investor action is the accreditation decision — wire an Accredit/Pending control in the Investor Pipeline card dialog to the existing POST /api/admin/investor-accreditation/:id/decision endpoint (admin_investor_accreditation_by_id_decision_POST_). Follow-up to #pipeline-dialog-controls-scope (loan + payment status dropdowns shipped EFS d4b7e55).
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

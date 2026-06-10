@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -141,11 +141,29 @@ Since `lazily` is taken and the project is multi-language (Python-first), the na
 - **`lazily-signal`** — ties to the reactive signals concept, but longer.
 
 If `lazily-hub` is available, go with it. `lazily-dev` is the only shorter alternative worth considering — everything else either adds noise or is too niche.
-<!-- agent:boundary:c5d06868 -->
 - **`lazily-signal`** — ties to the reactive signals concept, but longer.
 - **`lazily-dev`** — common GitHub pattern for dev-tooling orgs (concise, 10 chars).
 - **`lazily-hub`** — clear, conveys ecosystem/hub purpose. Best of the remaining options.
-<!-- agent:boundary:ddd4177b -->
+
+### Re: lazily-hub vs lazily-dev — glm-5-1
+
+> **Queue prompt:**
+>
+> lazily-hub vs lazily-dev
+
+
+Both are available (404 on GitHub org/user API for each).
+
+| Criteria | `lazily-hub` | `lazily-dev` |
+|----------|-------------|-------------|
+| Length | 10 chars | 9 chars |
+| Connotation | Ecosystem hub, central repo collection | Developer tooling, project org |
+| Clarity | Immediately says "this is where all lazily stuff lives" | Could be confused with a dev-blog or dev-tools org |
+| Multi-lang fit | Strong — hub is language-agnostic | Strong — dev is language-agnostic |
+| Uniqueness | Distinctive, unlikely to conflict | Generic suffix (`-dev` is overused) |
+
+**Recommendation: `lazily-hub`** — it's more specific about purpose (ecosystem hub for all lazily bindings) and less generic than `-dev`, which is widely used and may not stand out. The 1-char difference is negligible.
+<!-- agent:boundary:dd61e707 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,7 +172,6 @@ If `lazily-hub` is available, go with it. `lazily-dev` is the only shorter alter
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- Create a lazily-hub org
 <!-- /agent:queue -->
 
 ## Backlog

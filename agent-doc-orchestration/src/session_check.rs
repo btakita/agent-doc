@@ -436,8 +436,20 @@ fn normalized_queue_line_for_match(line: &str) -> String {
         .strip_prefix("- ")
         .or_else(|| trimmed.strip_prefix("* "))
         .or_else(|| trimmed.strip_prefix("+ "))
+        .unwrap_or(trimmed)
+        .trim();
+    // #queue-user-edit-overwrite false positive: a consumed queue head is
+    // struck in place (`~~text~~`, legacy `~text~`) and queue maintenance may
+    // pin lines (`:round_pushpin:` / `:pushpin:`), so strip both before
+    // identity matching — a struck or re-pinned line visibly reached the
+    // document and was not silently lost.
+    let unstruck = trimmed
+        .strip_prefix("~~")
+        .and_then(|s| s.strip_suffix("~~"))
+        .or_else(|| trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
         .unwrap_or(trimmed);
-    normalized_prompt_for_match(trimmed)
+    let unpinned = crate::queue::strip_priority_markers(unstruck);
+    normalized_prompt_for_match(&unpinned)
 }
 
 fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
@@ -2891,6 +2903,12 @@ fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
         .or_else(|| normalized.strip_prefix("+ "))
         .unwrap_or(normalized)
         .trim();
+    // Queue priority pins (`:round_pushpin:` / `:pushpin:` / 📌) are cosmetic
+    // annotations on the directive, not part of it: `:round_pushpin: [#id]`
+    // targets `#id` exactly like the unpinned spelling
+    // (#queue-user-edit-overwrite consumed-head accounting).
+    let unpinned = crate::queue::strip_priority_markers(normalized);
+    let mut normalized = unpinned.as_str();
     // Optional-`do` Stage 2: a `re [#id]` / `re #id` reference never targets a
     // tracked id — it is inert (no execute, no reap). Skip it before any id
     // extraction so the closeout guards do not expect a reference to be resolved.
@@ -9333,6 +9351,20 @@ Body\n\
     }
 
     #[test]
+    fn do_directive_target_ids_strips_queue_priority_pins() {
+        // Queue maintenance pins lines with `:round_pushpin:` / `:pushpin:`;
+        // the pinned spelling targets the same id as the unpinned one
+        // (#queue-user-edit-overwrite consumed-head accounting).
+        let prompts = vec![
+            ":round_pushpin: [#pinned]".to_string(),
+            "- :pushpin: do [#opin]".to_string(),
+            "📌 #emoji proceed".to_string(),
+        ];
+        let ids = do_directive_target_ids(&prompts);
+        assert_eq!(ids, vec!["pinned", "opin", "emoji"]);
+    }
+
+    #[test]
     fn do_directive_target_ids_optional_do_stage2_bare_and_reference_forms() {
         // Optional-`do` Stage 2: the `do` verb is optional for a bare leading id
         // token, and a `re` reference never targets an id.
@@ -10653,6 +10685,40 @@ Body\n\
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head was consumed this cycle"
+        );
+    }
+
+    #[test]
+    fn session_check_clears_dropped_queue_marker_when_head_struck_in_place() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // The pinned head was consumed and struck in place (`~~...~~`), and the
+        // pending id was reaped this cycle — the user edit visibly reached the
+        // document, so neither the strike nor the pin is a silent deletion
+        // (#queue-user-edit-overwrite false positive on a consumed head).
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: do [#gscaccess] — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n- ~~:round_pushpin: [#gscaccess]~~\n- do [#existing]\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_dropped_queue_prompts(
+            &doc,
+            &[":round_pushpin: [#gscaccess]".to_string()],
+        )
+        .unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard should clear when the dropped queue head is struck in place"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .expect("state")
+                .dropped_queue_prompts
+                .is_empty(),
+            "resolved marker should be cleared"
         );
     }
 

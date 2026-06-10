@@ -57,17 +57,36 @@ Shipped. Root cause confirmed exactly as filed: scan_ops_log matched bare substr
 **Side finding:** preflight's stuck_captured_cycle warning this cycle was a false alarm — capture cycle-1781108818351 (the #lvbremain audit response) committed fine and was then compacted out of HEAD; its body is preserved in the 165015 archive. Do not run the suggested write --commit recovery. Filed as a new backlog item.
 
 This fix also unblocks the auto-proof half of #ktw8/#lvbremain: structured markers now prove gates without prose false-positives, so operator-driven markers can be checked reliably next cycles.
-<!-- agent:boundary:947604fb -->
+
+### Re: monsterrodholders IPC-drift hiccups + completing the 08b cut-over — fable-5
+
+> **Queue prompt:**
+>
+> :pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.
+
+
+**Diagnosis: known class, not the next queue items.** The monsterrodholders.md hiccups (boost-client ops.log, last hour: ipc_socket_already_applied_live_buffer_diverged, finalize_typing_during_write with content_ours_adopted, live_prompt_drift_after_preflight, crdt_merge_base_overlay_stale) are the #ipc-crdt-response-drift editor-boundary class — the same family as the queue-item-deletion churn you saw. They are unrelated to #ktw8 / #lvbremain (those are verification tasks). Two concrete causes:
+
+1. **Stale supervisor process.** The monsterrodholders supervisor (PID 1816910) has been running since yesterday 19:03 — it predates every fix shipped since (x9ds ops.log markers, the UTF-8 closeout panic fix, today's gate-verify prose-exclusion #gng8, and a #queue-user-edit-overwrite guard fix that directly addresses "deleting a queue item that I added"). A running process keeps its old binary image; installing a new binary does not touch it.
+2. **The genuinely remaining cut-over rung (#pcpc5e).** Write-authority is NOT the gap: rungs pcpc5a–d are shipped and AGENT_DOC_WRITE_AUTHORITY=authority is already live everywhere via ~/.zshenv — both this session and monsterrodholders log "write_authority gate=authority action=routed". What remains is retiring the **out-of-process supervisor** itself and demoting the plugin WatchService: the in-process adapter (supervisor::in_process, pcpc2) is built and SimWorld-tested, but start.rs has zero call sites for it, so a separate supervisor process still writes the doc across a process boundary — exactly the interleave window the editor-boundary hiccups live in. This item had been reaped to the done archive as a residual note and was no longer tracked in the live backlog; that tracking gap is fixed this cycle.
+
+**Should you restart? Yes — restart the monsterrodholders.md session now** (and ideally the other long-lived agent-doc panes: equityfundingsource, tsift, corky, lazily-rs, agent-loop — all started before today's 13:15 binary). That alone should remove most of the day-to-day churn because the supervisors pick up the current binary with authority routing + the convergence fixes. No IntelliJ restart and no JB plugin install needed today — the cdylib was hot-reloaded via lib-install and no Kotlin changed.
+
+**Completing the full cut-over:** queued as three actionable, dependency-ordered phases at the top of the backlog — #pcpc5e1 (start.rs cut-over to the in-process supervisor behind a rollback flag; binary-side, SimWorld-provable), #pcpc5e2 (plugin WatchService read-only demotion; I will tell you exactly when to install the JB plugin update), #pcpc5e3 (operator-driven live proof on monsterrodholders.md, agent checks ops.log; then delete the out-of-process writer paths). No review gates — all three are actionable backlog items per your no-more-gates directive. Your own recorded scoping constraint (plan Safety section + prior session decision) is that this surgery runs in a FRESH focused session, not at the tail of a drain session — the items are queued so the next fresh /agent-doc session starts at #pcpc5e1 immediately.
+
+Also shipped mid-turn while closing the previous cycle: the #queue-user-edit-overwrite session-check guard no longer false-positives on a consumed struck/pinned queue head (submodule commit after 7320a875, both binaries + cdylib reinstalled, pushed, CI green for the first commit and in progress for the second).
+<!-- agent:boundary:e0207cc4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: [#gng8]~~
-- :pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.
+- ~~:pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.~~
 - :round_pushpin: [#ktw8]
 - :round_pushpin: [#lvbremain]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
+- do [#8j86]
 <!-- /agent:queue -->
 ###
 <!--
@@ -97,6 +116,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#dav9] pcpc5e1 08b cut-over residual phase 1 (binary-side, SimWorld-provable): cut agent-doc start over to the in-process supervisor adapter. supervisor::in_process (pcpc2) is fully built + SimWorld-tested but start.rs has ZERO call sites — the out-of-process supervisor is still the live writer. Host the harness child PTY/stdin/restart/heartbeat as a controller-managed task behind a rollback flag (e.g. AGENT_DOC_SUPERVISOR=in-process, default off, same ladder pattern as AGENT_DOC_WRITE_AUTHORITY), preserve the Unix-socket IPC boundary for CLI/editor callers. SimWorld + CLI integration proof. Run in a FRESH focused session (operator-scoped constraint; plan Safety section). Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#dsqa] pcpc5e2 08b cut-over residual phase 2 (plugin-side, depends on pcpc5e1): demote JB plugin WatchService to read-only buffer reporting (pcp7/vbk7) so the single controller-owned watcher is the only event source. Kotlin change: bump pluginVersion, build signed+unsigned zips, then tell the operator to install the JB plugin update. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#q6js] pcpc5e3 08b cut-over completion proof (operator drives, agent checks logs): restart live sessions with the in-process supervisor flag on, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows serialized writes and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Then flip the flag default and delete the out-of-process supervisor writer paths. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#8j86] agent-doc-bug (stuck_captured_cycle compaction false-alarm): preflight warns stuck_captured_cycle when a committed captured response was legitimately removed from HEAD by exchange compaction (body preserved under .agent-doc/archives/). The warning prescribes a write --commit recovery that would re-inject an archived response into the live exchange. Fix: before warning, check whether the capture body / response_sha256 appears in an archive for the doc hash (or a compaction landed after committed_at) and skip or downgrade to an informational line. Seen 2026-06-10 on agent-doc-bugs2.md capture cycle-1781108818351 right after compact.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked on the gate-verify prose false-positive bug. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).

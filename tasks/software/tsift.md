@@ -129,7 +129,7 @@ CI:
 Note: pushing the superproject pointer also published eight pre-existing local agent-doc commits that were already ahead of `origin/main`. The exchange is large, but the queue remains active, so I continued draining it.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:ef6572fa -->
+<!-- agent:boundary:483b21d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,7 +145,6 @@ Note: pushing the superproject pointer also published eight pre-existing local a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#token-actions-rewrite] Promote session-review next_token_actions into exact rewrite commands for token-heavy behavior: repeated raw source/session/log reads, repeated command bundles, oversized prompt turns, and high cached-resend ratios should map to concrete tsift rewrite/source-read/session-review/context-pack commands.
 - [ ] [#pcache-fixture-drift] Extend real-session prompt-cache fixtures with regression cases for volatile timestamps/generated headers in cached prefixes, cold standalone compaction, OpenAI prompt_cache_key churn, and replica routing churn; fail under when cache reads no longer beat creation work.
 - [ ] [#pcache-scorecard] Add a compact prompt-cache ROI scorecard to session-cost/session-review: per provider/session show net cached-read tokens, read/create ratio, trend, suspected invalidation cause, and the one next command to run before the next long agent-doc cycle.
 <!-- /agent:backlog -->
@@ -156,9 +155,9 @@ Note: pushing the superproject pointer also published eight pre-existing local a
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
-- Can we increase max-hop caps?
-- Could FalkorDB help with performance?
+- [ ] [#g5kw] What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
+- [ ] [#4z0w] Can we increase max-hop caps?
+- [ ] [#cg52] Could FalkorDB help with performance?
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

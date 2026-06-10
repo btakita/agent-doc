@@ -259,7 +259,30 @@ Did the unambiguous half of `#8tkq` and held the other half on a real decision y
 So before I build a borrower panel, pick one: **(a)** enable Stripe online pay (I'd wire the secrets/flow, needs Robert's Stripe), **(b)** build a borrower payment-wire reveal panel, or **(c)** both / neither. I refined `#8tkq` to record part 1 done + this decision.
 
 **Verification:** `bun test` **507 pass / 0 fail** (+1 for the loan-detail issuance); `build` + `build:worker` clean. Committed + pushed. No deploy (say "deploy" to ship part 1 + the earlier `#eyp0`/`#emrt`).
-<!-- agent:boundary:2cbc6afe -->
+❯ Do both. Ensure the Stripe config, borrower wire instructions, borrower ACH instructions, lender ACH instructions, lender wire instructions are all configurable in the admin. Allow the admin to enable/disable all forms of payment.
+
+### Re: Do both — admin-configurable payments + borrower reveal panel — opus-4-8
+
+Did both, and made every form of payment admin-configurable. Shipped in EFS `c790ed3` (pushed; not deployed).
+
+**What's now configurable in admin (Platform Settings):**
+- **Online payments (Stripe)** — a master enable toggle plus per-method toggles for **card** and **online ACH**, a non-secret publishable key, and a statement descriptor.
+- **Manual payment methods** — enable/disable toggles for **borrower wire**, **borrower ACH**, and **check**.
+- **Borrower payment wire instructions** and **Borrower payment ACH instructions** — the remittance details the borrower pays *into* (servicing trust), distinct from the lender funding wire.
+- **Lender ACH instructions** — funding-side ACH, alongside the existing lender funding wire.
+
+So all five things you listed (Stripe config, borrower wire, borrower ACH, lender ACH, lender wire) are admin-editable, and the admin can switch each form of payment on or off.
+
+**Both halves of "do both" are built:**
+- **(a) Online pay** — checkout now combines the server secret with the admin toggles; it restricts Stripe to exactly the enabled methods (card and/or bank ACH) and applies the statement descriptor.
+- **(b) Borrower reveal panel** — a bank-style **click-to-reveal** panel in the borrower portal shows their payment wire/ACH instructions. Values are fetched on demand only (never in the page HTML), gated per method, and carry the verify-with-servicing anti-fraud reminder.
+
+**Security choice (flagging it explicitly):** the Stripe **secret key + webhook secret stay in Cloudflare secrets**, never in D1 — only the non-secret config (publishable key, descriptor) and the enable toggles live in the database. So enabling online pay needs Robert's Stripe account set once via `wrangler secret`; after that the admin flips everything from the UI without a redeploy.
+
+**Verification:** `bun test` **517 pass / 0 fail** (+10 new); `build` + `build:worker` clean. No CI is configured on this repo, so that's the bar. Committed + pushed.
+
+**Closed `#8tkq`** (part 2 shipped). Added **`#efspgo`** for the one-time go-live config (set the Stripe secrets + fill the instruction values + flip toggles + deploy). The deferred `#cm3e` stays gated only on Robert's Stripe account and the TMO payment-write endpoint — the collection + reveal path itself is now done. Say **"deploy"** to ship this plus the earlier `#eyp0`/`#emrt`.
+<!-- agent:boundary:08ac9934 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -273,7 +296,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#8tkq] Wire-link surfaces — PART 1 SHIPPED (EFS 4538963): admin per-loan funding-wire-link issuance on the loan detail page (issue/list/revoke, bound to loan_id, reuses #wir3 bank-style /w/:token reveal). PART 2 PENDING A DECISION: borrower-portal reveal panel. Reshaped by the online-pay question — Stripe Checkout (card/ACH) is BUILT but OFF in prod (STRIPE_PAYMENTS_ENABLED + STRIPE_SECRET_KEY unset). If we enable online pay, a borrower wire panel is largely redundant (they click Pay). If not, a borrower panel should show their PAYMENT remittance wire (NOT the funding wire). Decide: (a) enable Stripe online pay vs (b) build borrower payment-wire panel vs (c) both/neither.
+- [ ] [#efspgo] [recommended] EFS online-payment go-live config (after Robert provides Stripe account): set Cloudflare secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + var STRIPE_PAYMENTS_ENABLED=true (wrangler secret put / wrangler.toml), point a Stripe webhook at /api/stripe/webhook, then in admin Platform Settings fill the borrower payment wire/ACH + lender ACH values and flip the per-method enable toggles. Deploy with bun run deploy:worker. Capability is BUILT + admin-configurable (EFS c790ed3); this is config + deploy only.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

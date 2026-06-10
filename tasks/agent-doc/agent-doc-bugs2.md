@@ -110,18 +110,39 @@ Flipping + `cargo build --release` + `agent-doc lib-install` hot-reloads the cdy
 4. Only then commit + push the flip and ship. Plan: `tasks/agent-doc/plan-ipc-transport-reliability.md`.
 
 Driveable via `scripts/xdotool-live-verify.sh saevon` (its recipe expects the flag already flipped + lib-installed) from that fresh session — its fresh-session gate refuses this one by design.
-<!-- agent:boundary:72324009 -->
-<!-- agent:boundary:19df87d0 -->
+
+### Re: do [#bkx9perid] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#bkx9perid]
+
+
+Gating `#bkx9perid` — closeout-governing-guard change that the item itself scopes to a fresh non-degraded session, and this session is the wrong environment for it.
+
+The dormant pure detector (`reaped_directive_ids_without_response`, `#z2jy`, `session_check.rs:1291`) is shipped and unit-tested. The remaining work is wiring it into the **live** guard `check_reaped_queue_head_without_response`, which currently early-returns `None` once a capture exists (`capture_id`/`response_sha256` set) — i.e. it assumes "response captured ⇒ all reaps answered" and misses the `#bkx9` residual: a body *was* captured but a specific id's `### Re:` was lost in a CRDT merge.
+
+Why this can't safely land here:
+- This guard runs at **every** `write --commit` closeout. The pinned false-positive class is a single `### Re:` heading answering `do #A` + `do #B` that names only `#A` → `#B` flagged as lost. A wrong wiring wedges *all* closeouts.
+- The item requires proving the wiring against a **real** `#ipc-crdt-response-drift` repro before enabling. This session has produced exactly that drift twice (exit-75 tempfail + post-commit working-tree splice this very session) — which makes it a corrupted, non-deterministic place to validate a closeout guard, not a clean one.
+
+**Exact unblock (fresh, non-degraded session):**
+1. In `check_reaped_queue_head_without_response`, after the capture-exists branch, also run `reaped_directive_ids_without_response` over the reaped directive ids against the live exchange + HEAD compact archives.
+2. Eliminate the multi-id false positive: treat a `### Re:` heading that answers several `do #id`s under one heading as materializing **all** grouped ids (group by the directive ids active under that response block), not just the named one.
+3. Add SimWorld + unit coverage for both poles — the captured-but-id-lost **true** positive and the `do[#A]+do[#B]`-under-one-heading **false** positive — and reproduce a real `#ipc-crdt-response-drift` to prove no false wedge before enabling at the closeout guard.
+4. Spec: `specs/07-closeout-commands.md` `#compact-reap-no-response-record`. Absorbs review `#bkx9`/`#compact-reap-no-response-record`.
+<!-- agent:boundary:5c93fdc0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:round_pushpin: do [#lvbatch]~~
 - ~~:pushpin: :round_pushpin: do [#s760wire]~~
 - ~~:pushpin: do [#xdotool-lvbatch]~~
 - ~~:round_pushpin: do [#lvbatch]~~
 - ~~:pushpin: :round_pushpin: do [#saevon]~~
-- :round_pushpin: do [#bkx9perid]
+- ~~:round_pushpin: do [#bkx9perid]~~
 - :round_pushpin: do [#tmux-switch-lag]
 - :round_pushpin: do [#exch-intermix-verify]
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
@@ -130,6 +151,7 @@ Driveable via `scripts/xdotool-live-verify.sh saevon` (its recipe expects the fl
 - :round_pushpin: do [#pcpc5live]
 - :round_pushpin: do [#lvbremain]
 - Automatically add the env vars to ~/ so I can test. I can restart.
+- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###
 <!--
@@ -171,6 +193,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 

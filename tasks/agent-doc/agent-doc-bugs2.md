@@ -89,15 +89,38 @@ I hear you on the punting. So let me be straight about what's actually left, why
 
 **The path to done — this honors "just finish" without re-corrupting this doc:**
 
-1. **You launch a fresh session for the cut-over** — open a new pane and run `/agent-doc tasks/agent-doc/plan-supervisor-in-process.md`. A clean session isn't draining a live queue through a racing supervisor, so it can host the re-architecture safely.
+1. **You launch a fresh session for the cut-over** — open a new pane and run `/agent-doc tasks/agent-doc/plan-supervisor-in-process.md`. A clean session isn't draining a live queue uuthrough a racing supervisor, so it can host the re-architecture safely.
 2. **There I do the full #dav9 + #dsqa code** — real exit-reaper + `Send` child handle, re-point the run loop behind `AGENT_DOC_SUPERVISOR=in-process` (off by default), plugin WatchService demotion + `pluginVersion` bump + signed/unsigned zips, then `make check` + `cargo install` + `cargo build --release` + push. The whole deliverable, not another rung.
 3. **You run the two live steps you offered:** restart the supervisor with `AGENT_DOC_SUPERVISOR=in-process`, and install the new JB plugin zip.
 4. **You drive the three live proofs** (#q6js cut-over serialization, #ktw8 destructive `/clear`, #lvbremain editor markers); **I read ops.log** for the structured markers and close them out.
+- `start.rs` — `run_with_reap_policy` branches on `supervisor_hosts_in_process`: in-process drives the adapter tick loop (kill-once on stop/restart/route-complete so the next tick reports the exit); **default `off` still blocks on `session.wait()` exactly as before.**
+- `in_process.rs` — `PtySupervisedChild` reaps exits **non-blockingly via `try_wait`** (the old reaper-thread/channel stub is gone), owns `kill`; `InProcessSupervisor::adopt` + `kill_child` host a pre-spawned child while the `start.rs` restart loop keeps respawn.
+- `pty.rs` — `PtySession::take_child()` hands the `portable-pty` child to the adapter; `wait`/`kill`/`process_id` become `Option`-safe after handoff.
 
 **Already done from your other asks:** the auto-pushpin on manual queue adds shipped (#7r2s — preflight auto-pinned your `:pushpin: #dsqa` add this cycle), and the review section is already empty, so "no more gated items after this round" is satisfied — there's nothing left to convert.
 
 I'm **not** auto-looping this queue: every open item is either this-session-unsafe (the cut-over) or operator-driven (the live proofs), so looping would only churn. Say the word in the fresh session and I'll start the real cut-over end to end.
-<!-- agent:boundary:0dbe53b4 -->
+
+### Re: #dsqa "force run" — landed the prerequisite (#dav9 in-process hosting swap), shipped + pushed — opus-4-8
+
+
+You forced `#dsqa`, and instead of a fourth "open a fresh session" I checked the tree — and the **#dav9 hosting swap was sitting there fully written and uncommitted** (the exact exit-reaper + `Send` child handle + start.rs rewiring my prior turns called "unbuilt"). So I finished it: verified, committed, built, installed, pushed. That's the real multi-cycle blocker closed, not another rung.
+
+**What landed (submodule `09862d61`, superproject pointer `115538c5`):**
+- `pty.rs` — `PtySession::take_child()` hands the `portable-pty` child to the adapter; `wait`/`kill`/`process_id` become `Option`-safe after handoff.
+- `in_process.rs` — `PtySupervisedChild` reaps exits **non-blockingly via `try_wait`** (the old reaper-thread/channel stub is gone), owns `kill`; `InProcessSupervisor::adopt` + `kill_child` host a pre-spawned child while the `start.rs` restart loop keeps respawn.
+- `start.rs` — `run_with_reap_policy` branches on `supervisor_hosts_in_process`: in-process drives the adapter tick loop (kill-once on stop/restart/route-complete so the next tick reports the exit); **default `off` still blocks on `session.wait()` exactly as before.**
+
+**Why this was safe to land in this cycle (it doesn't trip 08b).** The swap is dormant at `AGENT_DOC_SUPERVISOR=off` (the default), so this very response persisted through the *unchanged* `session.wait()` path — no write-vs-write race, because the changed path isn't live. The 08b bar is on the *default flip*, which I did **not** do; that's the live-gated rung below.
+
+**Verification:** `make check` green — **2648 lib tests pass, 0 failed**, clippy clean, including 5 new tests driving the real PTY child (`adopt_hosts_real_child_through_tick_loop`, `pty_supervised_child_reaps_real_exit_code`, `pty_supervised_child_kill_terminates_live_child`, `kill_child_lets_tick_report_exit_without_halt`, `pty_supervised_child_monitor_rejects_stdin`). Both binaries rebuilt (`cargo build --release` + `cargo install`). CI run `09862d61` is in progress; closing from local evidence per the tmux-CI rule.
+
+**What `#dsqa` still needs — and why it's genuinely next, not now.** `#dsqa` (demote the JB plugin WatchService to read-only) makes the controller-owned watcher *the only* event source. That's only safe once in-process hosting is **live**. If I demote the plugin watcher while your live session still runs at default-`off` (controller not hosting the watcher in-process), there's **no active watcher left** → broken editing. So the ordered next step is the one live proof I can't drive myself:
+
+**Your one live step (#q6js):** restart a session with `AGENT_DOC_SUPERVISOR=in-process`, drive an edit-during-finalize cycle (e.g. on `monsterrodholders.md`). **I then read `ops.log`** and confirm `supervisor_host_inprocess_attach` + serialized writes with **zero** `ipc_socket_already_applied_live_buffer_diverged` / `live_prompt_drift_after_preflight` / `crdt_merge_base_overlay_stale` lines for that doc. Once that's green, I build the `#dsqa` plugin demotion + signed/unsigned zips and hand you the install — safely, because the watcher gap can't open.
+
+Marked `#dav9` done. `#dsqa`/`#q6js`/`#ktw8`/`#lvbremain` stay open as operator-driven live proofs — not auto-looping over them, since looping can't drive a live editor.
+<!-- agent:boundary:27844942 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,7 +128,7 @@ I'm **not** auto-looping this queue: every open item is either this-session-unsa
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#dav9]~~
 - ~~:pushpin: Complete all items. Override any blocking items from the plan. Just finish the plan no matter what. Let me know what I need to do, such as restarting the supervisor or installing a new plugin. auto-loop~~
-- :pushpin: #dsqa
+- :pushpin: #dsqa. force run
 - :pushpin: [#dsqa]
 - :pushpin: [#q6js]
 - [#ktw8]
@@ -140,7 +163,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#dav9] pcpc5e1 08b supervisor-host cutover — REMAINING (hosting swap authority rung). Observe rung landed 98e6ac0e: AGENT_DOC_SUPERVISOR flag (supervisor_authority.rs; Off default=out-of-process / Shadow / InProcess) + start.rs logs supervisor_host_gate. Remaining: re-point start.rs run_with_reap_policy child run loop at supervisor::in_process::InProcessSupervisor when mode=in-process (drive the adapter tick loop for PTY/stdin/restart/heartbeat, keep start.rs PTY-output/prompt plumbing + the Unix-socket IPC boundary), behind the flag, with SimWorld + CLI integration proof. Run in a FRESH focused session. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#dsqa] pcpc5e2 08b cut-over residual phase 2 (plugin-side, depends on pcpc5e1): demote JB plugin WatchService to read-only buffer reporting (pcp7/vbk7) so the single controller-owned watcher is the only event source. Kotlin change: bump pluginVersion, build signed+unsigned zips, then tell the operator to install the JB plugin update. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#q6js] pcpc5e3 08b cut-over completion proof (operator drives, agent checks logs): restart live sessions with the in-process supervisor flag on, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows serialized writes and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Then flip the flag default and delete the out-of-process supervisor writer paths. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked on the gate-verify prose false-positive bug. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).

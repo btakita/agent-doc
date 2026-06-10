@@ -147,6 +147,8 @@ You forced `#dsqa` again. I'm not punting — I checked the wiring this turn, an
 Once that's green, `#dsqa` is no longer a "fresh session" item — it's a normal build: I demote `PatchWatcher` to read-only, bump `pluginVersion`, build signed+unsigned zips, and hand you the install. The watcher gap can't open because the controller is provably the live host.
 
 **Queue status.** `#dsqa` stays open — not gated, not punted: its code is genuinely unwritten and its only safe path is the `#q6js` proof above, which you can run right now. `#q6js`/`#ktw8`/`#lvbremain` remain operator-drive live proofs I can't fire myself. The trailing "auto-pushpin manual queue adds" item already shipped (`#7r2s`). Not auto-looping — every open item needs your live editor, and looping would only re-emit this. Say the word after the drive and I'll read the logs.
+
+<!-- no-queue-removal-guard -->
 <!-- agent:boundary:54968e16 -->
 <!-- /agent:exchange -->
 

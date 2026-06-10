@@ -31,66 +31,12 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-043424.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-153617.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Rename Investor Pipeline → Lender Pipeline + fold in Lenders tab
+- Archived 3 response topic(s): Does /portal-admin/documents cover Lender Pipeline documents too?; Documents tabs + pages for Deal Pipeline and Lender Pipeline; do [#b0w3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Does /portal-admin/documents cover Lender Pipeline documents too? — opus-4-8
-
-It covers **both** — it is not Deal-Pipeline-only. The admin Documents section (`/portal-admin/documents`) has three tabs, two of which are lender/investor-side:
-
-- **Loan Documents** (default tab) — **Deal Pipeline**. `GET /api/admin/documents` reads `loan_documents JOIN loans`, grouped per loan / TMO loan number. Borrower-loan documents only.
-- **Document Requests** — **Lender Pipeline** (investor/lender). `GET /api/admin/investor-document-requests` reads the investor document-request records, with admin fulfill/reject + an `investor-documents-provided` notification email. This is the lender-side document flow.
-- **Public Documents** — neither pipeline specifically; public-site documents (investor-facing published materials, e.g. funded-deal docs) via `public_documents` + the investor_documents publish/archive endpoints.
-
-So: borrower/loan docs and lender (investor) document requests both live in this one admin section under separate tabs. The Document Requests + Public Documents tabs are wired to the `investor_management` handlers (`app/equityfundingsource/lib/admin/investor_management/index.ts`).
-
-Note: per-lender *lifecycle* documents that are NOT requests — e.g. an investor's accreditation submission — are surfaced on the **investor portal** side (`portal/investor/documents.tsx`, `accreditation.tsx`) and via the user/lender detail, not as a tab in `/portal-admin/documents`.
-
-No code change — informational answer; the `#spec-test-commit-push` preset attached to the queue item is moot for a question.
-
-### Re: Documents tabs + pages for Deal Pipeline and Lender Pipeline — opus-4-8
-
-> **Queue prompt:**
->
-> I would like to have a Documents page as a tab under the Deal Pipeline and the Lender Pipeline. Make a Documents (Deal Documents) tab in the Deal Pipeline. Make a Documents (Lender Documents) tab in the Lender Pipeline. Create pages for both Deal Documents and Lender Documents. Does a Lender have its Lender Documents in the Lender dialog and page? If not add. Does the Borrower have Borrower Documents? If not add. deploy
-
-
-Done and deployed to production (EFS Worker, migration `0060` applied to remote D1, commit `cf66667`).
-
-**What shipped**
-
-- **Deal Pipeline → Documents tab** — a new deal-scoped document store. Pick a deal, then view / upload / remove documents attached to it. New `deal_documents` table (migration `0060`) + repo + admin API (`/api/admin/deal-documents` list, upload, patch, delete, download). Deal documents are *not* owned by a single investor (unlike lender docs), so I gave them their own table modeled on the existing `public_documents` shape plus a `deal_id` link.
-- **Lender Pipeline → Documents tab** — pick a lender, then view / upload / archive their documents (category + private/shared visibility). Reuses the already-deployed `investor_documents` API; I added the missing admin download route so admins can open the files.
-- **Lender page** — yes, the Lender detail page now has a **Lender Documents** section (list + upload), fixed to that lender. It did *not* have one before.
-- **Borrower Documents** — already present. The Borrower (loan) detail page has had a Documents grid (`/api/admin/documents`) all along, so no change was needed there.
-
-**One open question on the Lender "dialog"**
-
-Lender documents are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender). The in-pipeline card *modal* (the pop-up when you click a lender card) doesn't yet show documents inline — I queued that as a recommended follow-up. Say the word if you want it surfaced there too.
-
-**Verification**: 520/520 tests pass · worker build clean · remote migration applied (none pending) · live site 200 · `/api/admin/deal-documents` returns 401 (admin-auth gated, route live).
-
-### Re: do [#b0w3] — Surface lender documents inline in the card dialog — opus-4-8
-
-> **Queue prompt:**
->
-> do [#b0w3]
-
-
-Done. Lender documents are now reachable inline in the Lender Pipeline card dialog (`InvestorCardModal`), so admins manage a lender's docs without leaving the board.
-
-The semantic-completion warning flagged #b0w3 as possibly already done by #289x, but I verified the code: #289x shipped the **Documents tab** and **lender-page** docs surfaces — the card modal itself still had no documents section. So #b0w3 was genuinely distinct.
-
-**Change** (EFS `21e1802`):
-- Added a collapsible **Documents** toggle button to `InvestorCardModal`, beside *Open investor profile*.
-- When open, it renders `AdminLenderDocuments` in fixed-user embedded mode (`user_id={card.user_id}`, `lender_name={card.title}`) — the same per-lender list + upload the Documents tab and Lender detail page already use, now scoped to this card's lender.
-- Modal widens to `max-w-2xl` while docs are open; collapses back to `max-w-lg`.
-
-**Verification:** added `#b0w3` test to `admin-investor-pipeline.test.ts` (29 pass). Full suite green (521 pass, 0 fail); worker build succeeds.
-<!-- agent:boundary:2c738515 -->
+<!-- agent:boundary:64307419 -->
 <!-- /agent:exchange -->
 ###
 <!--

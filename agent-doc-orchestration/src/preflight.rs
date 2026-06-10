@@ -3859,6 +3859,25 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             mutated = true;
         }
 
+        // #reviewrm: collapse identical same-id entries an interleaved finalize
+        // can leave behind (the duplicate `[/] #id` pair preflight flags as
+        // preset_item_id_collision). Only exact duplicates are removed; distinct
+        // items that merely share an id are preserved so the ambiguity warning
+        // still surfaces.
+        let (after_dedupe, deduped_ids) =
+            crate::pending::op_dedupe_identical_items(&current_body);
+        if !deduped_ids.is_empty() {
+            eprintln!(
+                "[preflight] {}: deduped {} duplicate same-id entr{}: {}",
+                surface_label,
+                deduped_ids.len(),
+                if deduped_ids.len() == 1 { "y" } else { "ies" },
+                deduped_ids.join(", ")
+            );
+            current_body = after_dedupe;
+            mutated = true;
+        }
+
         if should_reap_already_done_mirrors(surface) && !already_done_ids.is_empty() {
             let (after_mirror_reap, mirror_items) =
                 crate::pending::op_take_active_items_by_ids(&current_body, &already_done_ids);

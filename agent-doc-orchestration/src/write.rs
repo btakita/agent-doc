@@ -269,6 +269,11 @@ pub struct CommandOptions {
     pub pending_set_gate_type: Vec<String>,
     pub review_add: Vec<String>,
     pub review_edit: Vec<String>,
+    /// `#reviewrm`: ids to delete from `agent:review` (clears stale/duplicate
+    /// entries, including same-id collisions, without an ambiguous edit-by-id).
+    pub review_remove: Vec<String>,
+    /// `#reviewrm`: ids to resolve out of `agent:review` into `agent:done`.
+    pub review_resolve: Vec<String>,
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<String>,
@@ -1417,7 +1422,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         || !options.pending_resolve_gate.is_empty()
         || !options.pending_set_gate_type.is_empty()
         || !options.review_add.is_empty()
-        || !options.review_edit.is_empty();
+        || !options.review_edit.is_empty()
+        || !options.review_remove.is_empty()
+        || !options.review_resolve.is_empty();
 
     if options.pending_only && !has_pending_ops {
         anyhow::bail!("--pending-only requires at least one --pending-* flag");
@@ -1529,6 +1536,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 .split_once('=')
                 .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
             crate::pending_cmd::review_edit(file, id, text)?;
+        }
+        for id in &options.review_resolve {
+            crate::pending_cmd::review_resolve(file, id)?;
+        }
+        for id in &options.review_remove {
+            crate::pending_cmd::review_remove(file, id)?;
         }
         for id in &options.pending_ungate {
             crate::pending_cmd::ungate(file, id)?;

@@ -197,6 +197,10 @@ The backlog is a **priority-ordered pool with id-based consumption** (`--done` /
 | `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
 | `--review-add "text"` | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--pending-gate`. |
 | `--review-edit <id> "new text"` | Rewrite text in `agent:review`, preserving hash and state. |
+| `--review-resolve <id>` | Resolve an `agent:review` item: remove it and archive to `agent:done`. The completion path for finished gated work. Errors if no review component or no matching id. |
+| `--review-remove <id>` | Delete an `agent:review` item by id, removing **every** entry sharing the id. For stale/duplicate review entries (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged `preset_item_id_collision`) that cannot be deduped via an ambiguous edit-by-id. Errors if no review component or no matching id. |
+
+Closeout pending-maintenance (commit-required `finalize` / `write --commit`) also auto-dedupes **identical** same-id review entries (same id, state, gate type, text, continuation) to a single representative; distinct items sharing an id are left intact so the `preset_item_id_collision` ambiguity warning still surfaces.
 
 For every id-based pending flag except `--pending-add`, the binary normalizes
 the id by trimming whitespace, stripping one optional leading `#`, and

@@ -261,6 +261,14 @@ struct WriteArgs {
     /// Edit a review item: `id=new text` (repeatable).
     #[arg(long = "review-edit")]
     review_edit: Vec<String>,
+    /// Remove a review item by id, deleting every entry that shares the id
+    /// (clears stale or duplicate review entries; repeatable).
+    #[arg(long = "review-remove")]
+    review_remove: Vec<String>,
+    /// Resolve a review item by id: remove from `agent:review` and archive to
+    /// `agent:done` (the completion path; repeatable).
+    #[arg(long = "review-resolve")]
+    review_resolve: Vec<String>,
     /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
     /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
     #[arg(
@@ -2333,6 +2341,8 @@ fn main() -> anyhow::Result<()> {
                     pending_set_gate_type: args.pending_set_gate_type,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
+                    review_remove: args.review_remove,
+                    review_resolve: args.review_resolve,
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
                     status: args.status,
@@ -2380,6 +2390,8 @@ fn main() -> anyhow::Result<()> {
                     pending_set_gate_type: args.pending_set_gate_type,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
+                    review_remove: args.review_remove,
+                    review_resolve: args.review_resolve,
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
                     status: args.status,

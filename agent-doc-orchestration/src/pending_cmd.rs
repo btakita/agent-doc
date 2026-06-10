@@ -563,6 +563,75 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Remove a review item by id, deleting every entry that shares the id.
+///
+/// This is the clean-removal flag the review list previously lacked: a stale or
+/// duplicate `agent:review` entry (e.g. the identical `[/]` pair an interleaved
+/// finalize leaves behind, which preflight flags as `preset_item_id_collision`)
+/// can be deleted outright without an ambiguous edit-by-id. Errors when the
+/// document has no review component or no item matches the id.
+pub fn review_remove(file: &Path, id: &str) -> Result<()> {
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let comp = find_review_component_in_content(&full_content)?
+        .context("document has no review component")?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let (new_content, removed) = pending::op_take_all_by_id(existing, id);
+    if removed.is_empty() {
+        anyhow::bail!(
+            "review item not found: #{}",
+            pending::normalize_pending_id(id)
+        );
+    }
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    std::fs::write(file, &new_doc)?;
+    eprintln!(
+        "[pending] review-remove: removed {} entr{} for #{}",
+        removed.len(),
+        if removed.len() == 1 { "y" } else { "ies" },
+        pending::normalize_pending_id(id)
+    );
+    Ok(())
+}
+
+/// Resolve a review item by id: remove it from `agent:review` and archive it to
+/// `agent:done`. Use this when a gated review item's work is actually complete
+/// (the proper completion path, as opposed to [`review_remove`] which discards a
+/// stale/duplicate entry). Errors when the document has no review component or
+/// no item matches the id.
+pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let comp = find_review_component_in_content(&full_content)?
+        .context("document has no review component")?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let (new_content, mut removed) = pending::op_take_all_by_id(existing, id);
+    if removed.is_empty() {
+        anyhow::bail!(
+            "review item not found: #{}",
+            pending::normalize_pending_id(id)
+        );
+    }
+    // Archive as Done so the canonical agent:done entry renders `[x]`, regardless
+    // of the review item's prior gated/open state.
+    for item in &mut removed {
+        item.state = pending::PendingState::Done;
+        item.gate_type = None;
+    }
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed)
+        .context("failed to archive resolved review item(s) to agent:done")?
+        .unwrap_or(new_doc);
+    std::fs::write(file, &archived)?;
+    eprintln!(
+        "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
+        removed.len(),
+        if removed.len() == 1 { "y" } else { "ies" },
+        pending::normalize_pending_id(id)
+    );
+    Ok(())
+}
+
 /// Transition an item back to `Open` (`[ ]`) by id.
 /// Errors on `Open` or `Done` items — the source must be `[/]`.
 pub fn ungate(file: &Path, id: &str) -> Result<()> {
@@ -1370,5 +1439,92 @@ mod tests {
         let tagged = list_review_items(&doc, &f).unwrap();
         assert_eq!(tagged.len(), 1);
         assert_eq!(tagged[0].id, "bb22");
+    }
+
+    fn doc_with_review(items: &str) -> (TempDir, PathBuf) {
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n- [ ] [#keep1] unrelated open item\n<!-- /agent:backlog -->\n\n<!-- agent:review -->\n{items}\n<!-- /agent:review -->\n"
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        (tmp, doc)
+    }
+
+    #[test]
+    fn review_remove_deletes_all_entries_sharing_an_id() {
+        // #reviewrm: the duplicate `[/] #saevon` shape an interleaved finalize
+        // leaves behind clears in one pass, with the unrelated item preserved.
+        let (_tmp, doc) = doc_with_review(concat!(
+            "- [/] [#saevon] activate early-ack\n",
+            "- [/] [#saevon] activate early-ack\n",
+            "- [/] [#other] keep me\n",
+        ));
+        review_remove(&doc, "saevon").unwrap();
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(!after.contains("#saevon"), "{after}");
+        assert!(after.contains("[#other]"), "{after}");
+        assert!(after.contains("[#keep1]"), "{after}");
+    }
+
+    #[test]
+    fn review_remove_errors_when_id_absent() {
+        let (_tmp, doc) = doc_with_review("- [/] [#aa11] only item\n");
+        let err = review_remove(&doc, "nope99").unwrap_err();
+        assert!(format!("{err:#}").contains("#nope99"), "{err:#}");
+        // Document is untouched on a miss.
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("[#aa11]"), "{after}");
+    }
+
+    #[test]
+    fn review_resolve_archives_to_done_and_removes_from_review() {
+        let (_tmp, doc) = doc_with_review(concat!(
+            "- [/] [#aa11] finished work\n",
+            "- [/] [#bb22] still open\n",
+        ));
+        review_resolve(&doc, "aa11").unwrap();
+        let after = fs::read_to_string(&doc).unwrap();
+        // Removed from review.
+        let review_body = find_review_component_in_content(&after)
+            .unwrap()
+            .unwrap()
+            .content(&after)
+            .to_string();
+        assert!(!review_body.contains("[#aa11]"), "{review_body}");
+        assert!(review_body.contains("[#bb22]"), "{review_body}");
+        // Archived as done.
+        assert!(after.contains("<!-- agent:done -->"), "{after}");
+        let done_body = after
+            .split("<!-- agent:done -->")
+            .nth(1)
+            .unwrap_or_default();
+        assert!(done_body.contains("[#aa11]"), "{after}");
+        assert!(done_body.contains("finished work"), "{after}");
+    }
+
+    #[test]
+    fn run_pending_maintenance_dedupes_identical_review_entries() {
+        // #reviewrm: finalize closeout collapses identical same-id review
+        // entries (the preset_item_id_collision shape) to a single entry.
+        let (_tmp, doc) = doc_with_review(concat!(
+            "- [/] [#saevon] activate early-ack\n",
+            "- [/] [#saevon] activate early-ack\n",
+        ));
+        crate::preflight::run_pending_maintenance(&doc).unwrap();
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(after.matches("[#saevon]").count(), 1, "{after}");
+    }
+
+    #[test]
+    fn run_pending_maintenance_preserves_distinct_same_id_entries() {
+        // Only exact duplicates collapse; distinct items sharing an id stay so
+        // the ambiguity warning still surfaces for the operator.
+        let (_tmp, doc) = doc_with_review(concat!(
+            "- [/] [#saevon] first meaning\n",
+            "- [/] [#saevon] second meaning\n",
+        ));
+        crate::preflight::run_pending_maintenance(&doc).unwrap();
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(after.matches("[#saevon]").count(), 2, "{after}");
     }
 }

@@ -988,6 +988,51 @@ pub fn op_take_item(body: &str, id: &str) -> Result<(String, PendingItem)> {
     Ok((rewritten.render(), item))
 }
 
+/// Remove every item whose id matches `id`, returning the rewritten body and
+/// the removed items. Unlike [`op_take_item`] (which keeps a single
+/// representative and errors on a miss), this collapses duplicate-id entries in
+/// one pass and returns them all — used by `--review-remove` so a duplicated
+/// review id (e.g. an interleaved finalize that wrote the same `#id` twice) can
+/// be cleared without an ambiguous edit-by-id.
+pub fn op_take_all_by_id(body: &str, id: &str) -> (String, Vec<PendingItem>) {
+    let id = normalize_pending_id(id);
+    let layout = PendingLayout::parse(body);
+    let mut taken = Vec::new();
+    let rewritten = layout.replace_items(|item| {
+        if item.id == id {
+            taken.push(item.clone());
+            None
+        } else {
+            Some(item.clone())
+        }
+    });
+    (rewritten.render(), taken)
+}
+
+/// Collapse runs of identical same-id entries to a single representative,
+/// preserving first-seen order. Two items are "identical" when their id, state,
+/// gate type, text, and continuation all match — this targets the exact-dup
+/// shape an interleaved finalize produces, never distinct items that merely
+/// share an id (those remain so an ambiguity warning still surfaces). Returns
+/// the rewritten body and the ids that had duplicates removed.
+pub fn op_dedupe_identical_items(body: &str) -> (String, Vec<String>) {
+    let layout = PendingLayout::parse(body);
+    let mut seen: Vec<PendingItem> = Vec::new();
+    let mut deduped_ids: Vec<String> = Vec::new();
+    let rewritten = layout.replace_items(|item| {
+        if seen.iter().any(|prev| prev == item) {
+            if !deduped_ids.contains(&item.id) {
+                deduped_ids.push(item.id.clone());
+            }
+            None
+        } else {
+            seen.push(item.clone());
+            Some(item.clone())
+        }
+    });
+    (rewritten.render(), deduped_ids)
+}
+
 /// Insert an existing tracked item at the first item slot of a component body.
 pub fn op_insert_item_first(body: &str, item: PendingItem) -> String {
     let mut layout = PendingLayout::parse(body);

@@ -193,6 +193,8 @@ fn finalize_input_schema() -> Value {
         "pending_set_gate_type",
         "review_add",
         "review_edit",
+        "review_remove",
+        "review_resolve",
         "commit_sibling",
         "commit_sibling_message",
     ] {
@@ -445,6 +447,8 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         pending_set_gate_type: string_vec_arg(args, "pending_set_gate_type")?,
         review_add: string_vec_arg(args, "review_add")?,
         review_edit: string_vec_arg(args, "review_edit")?,
+        review_remove: string_vec_arg(args, "review_remove")?,
+        review_resolve: string_vec_arg(args, "review_resolve")?,
         allow_replace_pending: bool_arg(args, "allow_replace_pending", false)?,
         pending_only: false,
         status: optional_string_arg(args, "status")?,
@@ -675,6 +679,8 @@ mod tests {
             "pending_set_gate_type",
             "review_add",
             "review_edit",
+            "review_remove",
+            "review_resolve",
             "commit_sibling",
             "commit_sibling_message",
         ] {

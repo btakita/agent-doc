@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -47,14 +47,14 @@ Got the new queued directive — swapping the prior "Move /portal-admin/messages
 - Preset `#spec-test-commit-push` (update spec + tests, commit + push), then Deploy
 
 The queue is currently **inactive** (`queue: stop` in frontmatter; preflight flags `inactive_queue_residue`), so this is staged but not yet authorized to run. Activate it (flip `queue:` to a go state / add a `go` token) and I'll execute the rename, spec/test updates, commit+push, and deploy.
-<!-- agent:boundary:44a8b548 -->
+<!-- agent:boundary:9092f86a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 - Rename /portal-admin/investor-pipeline to /portal-admin/lender-pipeline. Rename "Investor Pipeline" to "Lender Pipeline". Rename "Investor Deals" to "Lender Deals". Remove "Lender Management" from main nav and add "Lenders" (/portal-admin/lenders) tab in /portal-admin/lender-pipeline. Deploy
 <!-- /agent:queue -->
 

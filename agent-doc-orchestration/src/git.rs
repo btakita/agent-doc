@@ -2291,6 +2291,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             }
         }
 
+        // Emit the live worktree==HEAD proof line after post-commit cleanup +
+        // transient-drift repair have run, so it reflects the residual visible
+        // state. `match=false` is the #postcommit-ipc-worktree-corruption signal.
+        emit_postcommit_worktree_check(file);
+
         // Submodule pointer update: if we just committed inside a submodule,
         // stage the new submodule HEAD in the parent and partial-commit it.
         if in_submodule {
@@ -3138,6 +3143,64 @@ fn repair_clean_head_if_only_transient_worktree_drift(
         &format!("transient_cleanup file={} basis=head", file.display()),
     );
     Ok(Some((Some(head_doc.clone()), head_doc)))
+}
+
+/// `#postcommit-ipc-worktree-corruption`: emit a live worktree==HEAD proof line
+/// after each successful committed closeout so the corruption class (a late IPC
+/// reposition / stale-patch replay that splices the latest `### Re:` response
+/// into an earlier block and duplicates queue-prompt blockquotes) is provable
+/// from `ops.log` without a dedicated live-verify session.
+///
+/// The comparison is taken modulo the legitimate transient churn the working
+/// tree intentionally keeps relative to the clean committed blob — boundary
+/// markers, `(HEAD)` annotations, guard markers, the managed pipeline block, and
+/// independent `agent:queue` maintenance — via [`normalize_for_replay_hash`], the
+/// same normalizer the replay/repair paths use. So `match=true` means the visible
+/// document is structurally equal to HEAD, and `match=false` is the corruption
+/// signal for the operator to file (the SimWorld `worktree==HEAD` guard already
+/// asserts the invariant; this adds the live log marker).
+///
+/// Best-effort and non-fatal: a missing HEAD blob (untracked doc) or an unreadable
+/// working tree skips the check rather than failing the commit.
+fn emit_postcommit_worktree_check(file: &Path) {
+    let head_doc = match show_head(file) {
+        Ok(Some(head)) => head,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("[commit] postcommit worktree check: HEAD read failed (non-fatal): {e}");
+            return;
+        }
+    };
+    let working = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!(
+                "[commit] postcommit worktree check: working-tree read failed (non-fatal): {e}"
+            );
+            return;
+        }
+    };
+    let head_norm = normalize_for_replay_hash(&head_doc);
+    let tree_norm = normalize_for_replay_hash(&working);
+    let head_sha = crate::ops_log::content_hash(&head_norm);
+    let tree_sha = crate::ops_log::content_hash(&tree_norm);
+    let matches = head_norm == tree_norm;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "postcommit_worktree_check file={} head={} tree={} match={}",
+            file.display(),
+            &head_sha[..head_sha.len().min(12)],
+            &tree_sha[..tree_sha.len().min(12)],
+            matches
+        ),
+    );
+    if !matches {
+        eprintln!(
+            "[commit] WARNING postcommit_worktree_check match=false for {} — working tree drifted from HEAD (#postcommit-ipc-worktree-corruption)",
+            file.display()
+        );
+    }
 }
 
 fn ensure_active_capture_materialized_for_head_current_noop(
@@ -6384,6 +6447,94 @@ Done.
         assert!(
             !log.contains("commit_noop file=") && !log.contains("commit_already_current file="),
             "terminal prompt handoff must not emit closeout lifecycle noop markers:\n{log}"
+        );
+    }
+
+    #[test]
+    fn postcommit_worktree_check_logs_match_true_for_transient_only_drift() {
+        // `#postcommit-ipc-worktree-corruption`: a clean closeout whose working
+        // tree differs from HEAD only by the legitimate transient `(HEAD)` /
+        // boundary markers must log match=true — the visible document is
+        // structurally equal to HEAD, so this is NOT the corruption class.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        // Working tree keeps the transient `(HEAD)` annotation + repositioned
+        // boundary the user sees post-commit — stripped by the replay normalizer.
+        let working = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic (HEAD)\n\
+            response body\n\
+            <!-- agent:boundary:abc123 -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, working).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_worktree_check file=") && log.contains("match=true"),
+            "transient-only working-tree drift must log a worktree==HEAD proof (match=true):\n{log}"
+        );
+        assert!(
+            !log.contains("match=false"),
+            "transient-only drift must not be flagged as corruption:\n{log}"
+        );
+    }
+
+    #[test]
+    fn postcommit_worktree_check_logs_match_false_for_real_corruption() {
+        // The catch: a late IPC reposition / stale-patch replay deletes the
+        // latest `### Re:` response from the visible file and splices its body
+        // into an earlier block. HEAD stays correct; the working tree drifts in
+        // a way the replay normalizer cannot explain → match=false for the
+        // operator to file.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        // Corrupted working tree: the latest `### Re: second` block is deleted
+        // and its body spliced into the earlier `### Re: first` block.
+        let corrupted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, corrupted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_worktree_check file=") && log.contains("match=false"),
+            "spliced/deleted-response working-tree corruption must log match=false:\n{log}"
         );
     }
 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: opencode
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -64,7 +64,30 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
 
 **Top of backlog: `#lzinvmod`**
-<!-- agent:boundary:ffca2bdc -->
+
+### Re: next steps to fix bugs in lazily-rs — gpt-5
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix bugs in lazily-rs?
+
+
+No additional backlog items are needed right now; the existing backlog already captures the follow-up work in dependency order. Work from the architectural invariants outward:
+
+1. **`#r5an` / `#lzinvmod`** — Fix invalidation first by preserving slots and marking them dirty instead of destroying cached state.
+2. **`#ce90` / `#lznodevec`** — Bring storage in line with the spec: sequential SlotId-backed node storage with free-list reuse.
+3. **`#dtmx` / `#lzmemo`** — Add memo equality guards once dirty recomputation can preserve cached values.
+4. **`#1xk0` / `#lzeffect`** — Implement effects after memo/dependency propagation is stable.
+5. **`#qhn6` / `#lzbatch`** — Add batching and deferred effect flushing on top of stable effect scheduling.
+6. **`#39xb` / `#lzcellguard`** — Add Cell.set() equality no-op behavior.
+7. **`#p2pc` / `#lzslotops`** — Fill in missing slot API surface: clear(), is_set(), clear_dependents(), computed alias.
+8. **`#6965` / `#lzthreadsafe`** — Add ThreadSafeContext after the single-threaded semantics are correct.
+9. **`#9evs` / `#lzasync`** — Add async context support after core invalidation/effect semantics are proven.
+10. **`#74c7` / `#lzipc`** — Add IPC last, since it depends on stable snapshots/deltas over the core model.
+
+Top of backlog: **`#r5an`**.
+
+<!-- agent:boundary:c0c89662 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,16 +96,17 @@ Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation mo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- do [#r5an]
-- do [#ce90]
-- do [#dtmx]
-- do [#1xk0]
-- do [#qhn6]
-- do [#39xb]
-- do [#p2pc]
-- do [#6965]
-- do [#9evs]
-- do [#74c7]
+- ~~What are #next-steps to fix bugs in lazily-rs?~~
+- [#r5an]
+- [#ce90]
+- [#dtmx]
+- [#1xk0]
+- [#qhn6]
+- [#39xb]
+- [#p2pc]
+- [#6965]
+- [#9evs]
+- [#74c7]
 <!-- /agent:queue -->
 
 ## Backlog

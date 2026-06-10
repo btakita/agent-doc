@@ -254,14 +254,38 @@ Also: **`scripts/xdotool-live-verify.sh` — the recipe script the item has poin
 **So #lvbremain was never operator-blocked the way it claimed; it's harness-blocked.** I captured the fix as **`#lvbverify`** (top of backlog, with exact file:line and the concrete fix: emit `log_op` alongside the stderr markers using the predicate tokens, wire `run_clear_coalesce`, align the `#saev` token). I reduced `#lvbremain` to its true residual: `#4wxr` verified, the rest blocked on `#lvbverify` + live-editor driving.
 
 **Not auto-looping.** `#lvbverify` is a multi-file Rust change needing `make check` + CI, and this session just took post-commit worktree corruption last cycle. It should be done clean, not inside this drain.
-<!-- agent:boundary:73f03958 -->
+
+### Re: do #s760wire — scoped #s760c, halting for a fresh session (your call) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#s760wire]
+
+
+> **Queue prompt:**
+>
+> [#s760wire]
+
+
+I scoped `#s760c` before touching it, and confirmed it's the fresh-session feature the plan says it is — not a quick wire. You chose a fresh session; I'm halting the drain here.
+
+**What I found (now recorded on `#s760wire` for the next session):**
+- The existing context-reset is a **soft instruction**, injected at `codex_hook.rs:613` via `queue_context_reset_reason_if_opted_in` into the Codex Stop-hook closeout text. It does not send `/clear`.
+- `#s760c` wants a **new `route.rs` dispatch-time gate**: resolve harness/model/transcript at send time → `transcript_context_pct` → if `opted_in && pct >= threshold`, emit `[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..` to ops.log and fire the **tracked `/clear`** only when `clear==true`, idempotent via `last_context_clear_at`.
+- The source APIs are ready (`context_pct::transcript_context_pct`, `session_accretion::{queue_context_reset_opted_in, clear_threshold_for_doc}`); the open design choice is the exact insertion point near `enqueue_route_dispatch_prompt` (~`route.rs:2012`) and the tracked-clear path (~983–1010, ~1283–1293).
+
+**Why fresh, concretely:** `/clear` wipes the agent's context — destructive-if-wrong — and this session corrupted the working tree on **every finalize** this turn (each recovered via `git checkout HEAD`). Grafting a safety-critical send into a sprawling `route.rs` while the doc closeout itself is racing is the wrong place for it. It ships default-off either way, but the wiring deserves a clean session with `make check` + CI.
+
+**State:** `#s760wire` stays open with the scope above. `#x9ds` (the ops.log gate-marker harness fix from last cycle) is also clean-session work. Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in a fresh Claude Code session and the queue resumes at `#s760wire` with this scoping already in place.
+<!-- agent:boundary:3a853505 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#lvbremain]~~
-- do [#s760wire]
+- ~~do [#s760wire]~~
+- do [#x9ds]
 <!-- /agent:queue -->
 ###
 <!--
@@ -293,7 +317,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#x9ds] agent-doc-bug (root cause of #lvbremain always-0): the ops.log gate-verify harness is broken — 3 of 4 #lvbremain markers are NEVER written to ops.log, so the scan is always 0 regardless of operator driving. (1) cross-session-reject (#4wxr): claim.rs:182 eprintln!s "[claim] cross-session-reject ..." to STDERR only (plugin branch signal), never ops.log — DRIVEN LIVE 2026-06-10 via claim --pane %43 (session 5 vs configured 9): behavior CORRECT (reject before register, no ownership change). (2) run_clear_coalesce (#9adk): ZERO emission sites in the whole codebase — phantom marker, never wired. (3) early_ack_pending (#saev): ipc_socket.rs:444 eprintln!s "[ipc-socket] early-ack pending emitted before apply" to STDERR; gate predicate expects ops.log token early_ack_pending — wrong stream AND wrong string. Only visible_write_live_buffer_matches_disk (write.rs:6675) actually log_ops to ops.log (and needs a live editor buffer==disk write). FIX: add ops_log::log_op alongside the stderr eprintln! for cross-session-reject + early-ack using the exact predicate tokens; wire run_clear_coalesce in route.rs/sync.rs (or repoint the predicate to an existing coalesce marker); align the #saev predicate token. Multi-file + needs make check + CI = do in a CLEAN session. NOTE: scripts/xdotool-live-verify.sh referenced by #lvbremain DOES NOT EXIST.
 - [ ] [#lvbremain] OPERATOR-DRIVE residual. #4wxr cross-session-reject DRIVEN + VERIFIED live 2026-06-10 (behavior correct; marker is stderr-only so ops.log scan cannot see it). Remaining markers are NOT verifiable via ops.log as currently coded — see #lvbverify (harness fix): #9adk run_clear_coalesce has no emission site; #saev early_ack_pending is stderr-only with a mismatched token; only visible_write_live_buffer_matches_disk hits ops.log. visible_write + #saev also need a live editor / JB SOCKET-IPC session driven by operator. Blocked on #lvbverify, not on operator driving. Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
-- [ ] [#s760wire] s760c+s760d RESIDUAL. SHIPPED 2026-06-10 (submodule 2d2d0ce3, context_pct.rs): #s760a transcript locator + Claude-JSONL token reader (Codex/OpenCode unsupported -> None) + #s760b model->context-window table (Claude 200k; unknown -> None+warn) + context_pct/transcript_context_pct, fail-safe to None (never clear), 12 unit tests. REMAINING: #s760c wire transcript_context_pct into the route.rs dispatch gate (if queue_context_reset_opted_in AND pct >= clear_threshold_for_doc -> tracked /clear; emit [s760] clear-decision optIn/threshold/pct/clear to ops.log) — pure code, no live gate, do in a fresh session; #s760d operator live-verify the destructive /clear on a throwaway opted-in doc. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
+- [ ] [#s760wire] s760c+s760d RESIDUAL (s760a/b SHIPPED 2026-06-10, context_pct.rs: transcript_context_pct + model->window table + opt-in/threshold resolvers, 12 tests). SCOPED 2026-06-10 (operator chose FRESH SESSION): s760c is NOT a trivial wire. Existing context-reset is a SOFT instruction injected at codex_hook.rs:613 (queue_context_reset_reason_if_opted_in) into the Codex Stop-hook closeout text; the plan wants a NEW route.rs dispatch-time gate that resolves harness/model/transcript at send time, emits "[s760] clear-decision optIn/threshold/pct/clear" to ops.log, fires the tracked /clear ONLY when clear==true, idempotent via last_context_clear_at, all behind the default-off agent_doc_queue_context_reset opt-in (destructive-if-wrong). Ready APIs: context_pct::transcript_context_pct, session_accretion::queue_context_reset_opted_in / clear_threshold_for_doc. Likely insertion near route.rs enqueue_route_dispatch_prompt (~2012) and the tracked-clear path (~983-1010, ~1283-1293). s760d: operator live-verify destructive /clear on a throwaway opted-in doc. DO IN A CLEAN SESSION. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -50,7 +50,7 @@ So: borrower/loan docs and lender (investor) document requests both live in this
 Note: per-lender *lifecycle* documents that are NOT requests — e.g. an investor's accreditation submission — are surfaced on the **investor portal** side (`portal/investor/documents.tsx`, `accreditation.tsx`) and via the user/lender detail, not as a tab in `/portal-admin/documents`.
 
 No code change — informational answer; the `#spec-test-commit-push` preset attached to the queue item is moot for a question.
-<!-- agent:boundary:d559b248 -->
+<!-- agent:boundary:d756088f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +58,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Is /portal-admin/documents only relating to the "Deal Pipeline" or does it also include "Lender Pipeline" documents?
+- I would like to have a Documents page as a tab under the Deal Pipeline and the Lender Pipeline. Make a Documents (Deal Documents) tab in the Deal Pipeline. Make a Documents (Lender Documents) tab in the Lender Pipeline. Create pages for both Deal Documents and Lender Documents. Does a Lender have its Lender Documents in the Lender dialog and page? If not add. Does the Borrower have Borrower Documents? If not add. deploy
 <!-- /agent:queue -->
 
 ## Backlog

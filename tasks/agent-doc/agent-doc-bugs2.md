@@ -112,8 +112,22 @@ Done — wired the dormant per-id response-loss detector into the live reaped-qu
 **Coverage:** existing pure-detector tests (reap-only loss, captured-but-id-lost residual, archive materialization, multi-id false-positive class) stay green; added `directive_response_source_resolves_found_and_source_for_bkx9_diagnostic` pinning the three emitted shapes. Full suite: 183 session_check tests pass, `make check` clean.
 
 CI note: the submodule commit is local (not pushed), so CI hasn't run it; closing on local `make check` evidence. This is a pure closeout-guard change — no tmux/route surface touched.
-<!-- agent:boundary:6b02f742 -->
-<!-- agent:boundary:2a3de9c2 -->
+
+### Re: do #saevon — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#saevon]
+
+
+`#saevon` is "activate early-ack": flip `EARLY_ACK_ENABLED false → true` in `ipc_socket.rs`. I'm **gating** it `[/]`, not flipping it in this session — this is a live-gated activation, not a pure-code task like `#bkx9wire`, and three things make flipping-here wrong:
+
+1. **Its correctness gate is live verification I can't produce.** The source comment (`ipc_socket.rs:62`) keeps the flag dormant *"until the two-phase flow is verified end-to-end in a live IntelliJ/Codex session under real typing load (`#xkpf`)"* — confirm the `pending` ack fires **before** the blocking apply (`[ipc-socket] early-ack pending emitted before apply`), with no false-success and no false ack-timeout. The backlog item says the same: flip → run `#lvb-run` → ship. A degraded, non-editor drain session cannot generate that proof.
+2. **Flipping + committing now ships unverified protocol activation to every user.** The flag is the ship switch; turning it on here bypasses the documented safety gate, and it also breaks the `early_ack_tagging_is_dormant_by_default` unit test — so it's a flag **plus test** change that must land together with the live proof, not a dangling one-liner.
+3. **This session's IPC is actively drifting** (exit-75 on every finalize, `#postcommit-ipc-worktree-corruption`). Activating a new two-phase ack on the same socket my own closeout rides is the worst place to switch it on.
+
+**Unblock:** one clean (non-degraded, live-editor) session that (a) flips the flag, (b) updates the dormant-default test, (c) drives the `#lvb-run` batch under real typing load to capture the `pending`-before-apply marker with no false ack, then (d) ships. Same `#xkpf` live-gate cohort as `#pcpc5live` / `#lvbremain` — it belongs there, not in this drain.
+<!-- agent:boundary:38635a75 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -121,13 +135,14 @@ CI note: the submodule commit is local (not pushed), so CI hasn't run it; closin
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Do the PCP~~
 - ~~:pushpin: do [#bkx9wire]~~
-- :round_pushpin: do [#saevon]
+- ~~:round_pushpin: do [#saevon]~~
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - :round_pushpin: do [#pcpc5live]
 - :round_pushpin: do [#lvbremain]
 - :round_pushpin: do [#s760wire]
 - ~~:round_pushpin: do [#bkx9perid]~~
 - :pushpin: [#optverify]
+- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###
 <!--
@@ -168,6 +183,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

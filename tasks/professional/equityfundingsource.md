@@ -108,7 +108,22 @@ Done, tested, pushed, and deployed.
 - **Spec + tests** (`#spec-test-commit-push`): added three contract tests to `tests/portal-table-dialog.test.ts` — Esc-to-close wiring + topmost-only stack, the shared `ModalCloseButton` primitive, and a guard that **every** PortalModal dialog exposes a visible close affordance (so a future dialog can't ship without one).
 
 **Verification:** `bun test` **498 pass / 0 fail** (3 new); `build` + `build:worker` clean. Pushed to `btakita/equityfundingsource-dev@1854dbd` and superproject pointer `2d2fb2410`. Deployed Worker version **`2bf66430-b229-469c-ae59-25f0ac274817`**. Smoke test green: `/` → 200, `/apply` → 200, `/portal-admin/pipeline` → 303→login, `/portal-admin/payments` → 303→login.
-<!-- agent:boundary:3fc9e564 -->
+
+### Re: Better Lead-dialog format — use horizontal space (img_5) + deploy — opus-4-8
+
+Done and deployed. The Lead dialog (and the other pipeline detail dialogs) now use the dialog's horizontal width instead of stacking everything on the left half.
+
+**The problem (img_5):** the Deal Pipeline controls — Status, Staff email, Resend-invite — were three full-width rows pinned to the left, leaving the entire right half of the dialog empty.
+
+**What changed (EFS `b64d2a0`, pointer `2c45901f4`):** applied the lead data grid's responsive two-column guideline consistently across all pipeline detail dialogs:
+- **`lead_pipeline_controls.tsx`** — Status and Staff email now sit **side-by-side** in an `auto-fit` grid (label-above-field), with the invite action row below.
+- **Loan dialog** (`pipeline.tsx`) and **Investor dialog** (`investor_pipeline.tsx`) — their field rows now flow through the same `repeat(auto-fit,minmax(240px,1fr))` two-column grid the lead data section already used, so they're wide-and-short rather than a tall single column.
+- All collapse to one column on narrow/mobile via `auto-fit`.
+
+**Spec/tests:** added a contract test (`#dialog-horizontal-format`) locking the two-column grid guideline for the pipeline dialogs + shared controls, so a future dialog can't regress to single-column stacking.
+
+**Verification:** `bun test` **498 pass / 0 fail** (+ the new guideline test, 8 in the dialog suite); `build` + `build:worker` clean. Pushed `equityfundingsource-dev@b64d2a0` + pointer `2c45901f4`. Deployed Worker version **`df29318f-c556-43cc-afc3-0946cf072e54`**. Smoke test green: `/` → 200, `/apply` → 200, `/portal-admin/pipeline` → 303→login.
+<!-- agent:boundary:391a3771 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,13 +131,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- In all dialogs, including pipeline dialogs, ensure there is a close button. Make the `Esc` key close the dialog. deploy 
+- Provide a better format for the Lead dialog ![img_5.png](img_5.png). Use the horizontal space more efficiently. Use the same guidelines for all dialogs. deploy 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#hetz1] [recommended] Hetzner US-East (Ashburn) migration evaluation for EFS: EFS is a Cloudflare Workers app (D1, R2 x3, Durable Objects, Workers AI, CF Access, cron) with NO Dockerfile — a move to Hetzner Docker+nginx is a full replatform off CF primitives, not a container relocation. Confirm the driver (cost / data residency / long-running processes) and whether 'our Docker container' means EFS or monsterrodholders before scoping.
 - [ ] [#pipeline-dialog-controls-scope] Confirm scope of 'all dialog types' for the Deal Pipeline controls: shipped on the lead pipeline dialog + full-page lead detail. The loan/deal pipeline dialog already has its own inline controls (publish/close deal, delete, open). If admin loan/deal cards or other admin detail modals should gain an editable pipeline-status dropdown, that needs its own status-write endpoint per entity — confirm which dialogs and which actions.
 - [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

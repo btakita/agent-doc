@@ -495,12 +495,55 @@ fn safe_passive_registry_pane_state(focus_path: &Path, session_id: &str) -> Opti
     crate::sessions::lookup_in(&base_dir, session_id).ok()
 }
 
+/// Move-before-select for the passive fast-handoff focus path
+/// (`#tmux-switch-lag`). If the actor pane is parked in a `stash` window,
+/// reparent it into the working `agent-doc` window *before* selecting it, so the
+/// doc-to-doc switch never shows an intermediate stash frame (the visible flash
+/// the operator sees mid-switch). tmux preserves the pane id across the
+/// `join-pane`/`break-pane` move, so the caller keeps selecting the same id.
+/// Best-effort: a non-stashed pane or a failed promote leaves the later
+/// `select_pane` to surface it in place, exactly as before.
+fn promote_stashed_pane_before_focus(tmux: &Tmux, focus_path: &Path, pane_id: &str) {
+    if !pane_in_stash_window(tmux, pane_id) {
+        return;
+    }
+    match promote_pane_to_agent_doc_window(tmux, pane_id) {
+        Ok(true) => sync_log(&format!(
+            "safe_passive_move_before_select_promoted file={} pane={} (#tmux-switch-lag)",
+            focus_path.display(),
+            pane_id
+        )),
+        Ok(false) => sync_log(&format!(
+            "safe_passive_move_before_select_noop file={} pane={} (#tmux-switch-lag)",
+            focus_path.display(),
+            pane_id
+        )),
+        Err(err) => {
+            eprintln!(
+                "[sync] warning: move-before-select promote of pane {} for {} failed: {}",
+                pane_id,
+                focus_path.display(),
+                err
+            );
+            sync_log(&format!(
+                "warning: safe_passive_move_before_select_failed file={} pane={} err={}",
+                focus_path.display(),
+                pane_id,
+                err
+            ));
+        }
+    }
+}
+
 fn safe_passive_select_prelock_pane(
     tmux: &Tmux,
     focus_path: &Path,
     pane_id: &str,
     source: &str,
 ) -> Option<String> {
+    // Move-before-select: surface the pane out of stash before selecting it so
+    // the switch shows no intermediate stash frame (#tmux-switch-lag).
+    promote_stashed_pane_before_focus(tmux, focus_path, pane_id);
     if let Err(err) = tmux.select_pane(pane_id) {
         eprintln!(
             "[sync] warning: failed safe-passive pre-lock focus of actor pane {} for {}: {}",
@@ -697,6 +740,9 @@ fn safe_passive_focus_actor_after_sync_lock(
         )?;
         (record.pane_id, Some(record.generation), "controller")
     };
+    // Move-before-select: surface the pane out of stash before selecting it so
+    // the switch shows no intermediate stash frame (#tmux-switch-lag).
+    promote_stashed_pane_before_focus(tmux, &focus_path, &pane_id);
     if let Err(err) = tmux.select_pane(&pane_id) {
         eprintln!(
             "[sync] warning: failed safe-passive post-lock focus of actor pane {} for {}: {}",

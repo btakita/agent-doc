@@ -162,6 +162,7 @@ enum SimCommand {
     SyncVisibleFocusPreserve,
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
+    SyncFocusStashedMoveBeforeSelect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -359,6 +360,35 @@ impl SyncProjection {
         }
         SyncOutcome::ReplacedDetachable(replacement_count)
     }
+
+    /// Move-before-select focus (`#tmux-switch-lag`). The passive fast-handoff
+    /// path must surface a stashed actor pane *out* of the stash window before
+    /// selecting it, so the doc-to-doc switch never shows an intermediate stash
+    /// frame. Model that ordering: when the focus target is stashed, perform the
+    /// move (remove from `stashed`, add to `visible`) FIRST, then the select (set
+    /// `active`). Selecting a still-stashed pane is the bug — the
+    /// `active`-not-in-`stashed` structural invariant catches it.
+    fn focus_doc_move_before_select(&mut self, doc: &str) {
+        if self.stashed.remove(doc) {
+            // Move: promote the pane into the working layout before selecting.
+            if !self.visible.iter().any(|d| d == doc) {
+                self.visible.push(doc.to_string());
+            }
+        }
+        // Select only after the move has surfaced the pane.
+        self.active = Some(doc.to_string());
+    }
+
+    /// The focus target is parked in the stash window. Used by the move-before-
+    /// select coverage to prove the switch promotes before selecting.
+    fn stashed_focus_case() -> Self {
+        Self {
+            visible: vec!["agent-doc".to_string()],
+            protected_open_cycle: BTreeSet::new(),
+            stashed: BTreeSet::from(["requested".to_string()]),
+            active: Some("agent-doc".to_string()),
+        }
+    }
 }
 
 impl Default for SyncProjection {
@@ -450,6 +480,7 @@ struct Coverage {
     harness_matrix_edges: BTreeSet<(HarnessKind, HarnessMatrixEdge)>,
     commits: usize,
     post_commit_worktree_checks: usize,
+    sync_move_before_select_focuses: usize,
 }
 
 impl Coverage {
@@ -570,6 +601,7 @@ impl Coverage {
         self.harness_matrix_edges.extend(other.harness_matrix_edges);
         self.commits += other.commits;
         self.post_commit_worktree_checks += other.post_commit_worktree_checks;
+        self.sync_move_before_select_focuses += other.sync_move_before_select_focuses;
     }
 }
 
@@ -610,7 +642,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(59) {
+            let command = match rng.next_usize(60) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -664,6 +696,7 @@ impl SimWorld {
                 55 => SimCommand::AdminReapStale,
                 56 => SimCommand::SupervisorHeartbeatReattach,
                 57 => SimCommand::PostCommitIpcRepositionSignal,
+                58 => SimCommand::SyncFocusStashedMoveBeforeSelect,
                 _ => SimCommand::SupervisorHeartbeatStale,
             };
             world.apply(command)?;
@@ -994,6 +1027,11 @@ impl SimWorld {
             }
             SimCommand::SyncRerequestVisibleEditorPassive => {
                 self.apply_sync_rerequest_visible_editor(SyncMode::SafePassive);
+            }
+            SimCommand::SyncFocusStashedMoveBeforeSelect => {
+                self.sync = SyncProjection::stashed_focus_case();
+                self.sync.focus_doc_move_before_select("requested");
+                self.coverage.sync_move_before_select_focuses += 1;
             }
         }
         Ok(())
@@ -1889,6 +1927,20 @@ impl SimWorld {
                 );
             }
         }
+        // Move-before-select ordering invariant (#tmux-switch-lag): the active
+        // (selected) pane must never still be parked in the stash window — that is
+        // the intermediate stash-frame flash. Focus must promote out of stash
+        // before selecting.
+        if let Some(active) = &self.sync.active
+            && self.sync.stashed.contains(active)
+        {
+            bail!(
+                "sync projection selected a still-stashed pane `{active}` (#tmux-switch-lag move-before-select violation): stashed={:?}; seed={} trace={:?}",
+                self.sync.stashed,
+                self.seed,
+                self.trace
+            );
+        }
         Ok(())
     }
 
@@ -2405,6 +2457,10 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         coverage.post_commit_worktree_checks > 0,
         "seed corpus must exercise the post-commit IPC reposition working-tree==HEAD guard (#postcommit-ipc-worktree-corruption)"
     );
+    assert!(
+        coverage.sync_move_before_select_focuses > 0,
+        "seed corpus must exercise move-before-select stash focus (#tmux-switch-lag)"
+    );
 }
 
 #[test]
@@ -2589,6 +2645,40 @@ fn post_commit_ipc_reposition_signal_keeps_worktree_equal_to_head() {
         normalize_committed_worktree(&world.doc),
         normalize_committed_worktree(&world.snapshot),
         "post-commit IPC reposition signal must not drift the working tree from HEAD"
+    );
+}
+
+#[test]
+fn move_before_select_promotes_stashed_pane_before_focus() {
+    // `#tmux-switch-lag`: focusing a doc whose pane is parked in stash must move
+    // it out of stash (into visible) BEFORE selecting it, so the switch never
+    // shows an intermediate stash frame. The active pane must end up visible and
+    // not in stash; the structural invariant rejects a still-stashed selection.
+    let mut world = SimWorld::new(733);
+    world
+        .apply(SimCommand::SyncFocusStashedMoveBeforeSelect)
+        .unwrap();
+    world.assert_structural_invariants().unwrap();
+    assert_eq!(world.sync.active.as_deref(), Some("requested"));
+    assert!(
+        !world.sync.stashed.contains("requested"),
+        "focused pane must be promoted out of the stash window"
+    );
+    assert!(
+        world.sync.visible.iter().any(|d| d == "requested"),
+        "promoted pane must be visible in the working layout"
+    );
+    assert_eq!(world.coverage.sync_move_before_select_focuses, 1);
+
+    // Negative control: a select that leaves the pane in stash (the flash bug)
+    // must fail the move-before-select ordering invariant.
+    let mut bug = SimWorld::new(734);
+    bug.sync = SyncProjection::stashed_focus_case();
+    bug.sync.active = Some("requested".to_string()); // selected while still stashed
+    let err = bug.assert_structural_invariants().unwrap_err();
+    assert!(
+        err.to_string().contains("#tmux-switch-lag"),
+        "unexpected ordering error: {err}"
     );
 }
 

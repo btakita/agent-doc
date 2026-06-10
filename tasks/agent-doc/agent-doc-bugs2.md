@@ -125,9 +125,38 @@ CI note: the submodule commit is local (not pushed), so CI hasn't run it; closin
 1. **Its correctness gate is live verification I can't produce.** The source comment (`ipc_socket.rs:62`) keeps the flag dormant *"until the two-phase flow is verified end-to-end in a live IntelliJ/Codex session under real typing load (`#xkpf`)"* — confirm the `pending` ack fires **before** the blocking apply (`[ipc-socket] early-ack pending emitted before apply`), with no false-success and no false ack-timeout. The backlog item says the same: flip → run `#lvb-run` → ship. A degraded, non-editor drain session cannot generate that proof.
 2. **Flipping + committing now ships unverified protocol activation to every user.** The flag is the ship switch; turning it on here bypasses the documented safety gate, and it also breaks the `early_ack_tagging_is_dormant_by_default` unit test — so it's a flag **plus test** change that must land together with the live proof, not a dangling one-liner.
 3. **This session's IPC is actively drifting** (exit-75 on every finalize, `#postcommit-ipc-worktree-corruption`). Activating a new two-phase ack on the same socket my own closeout rides is the worst place to switch it on.
+- **`#saevon` looks already activated in HEAD:** `EARLY_ACK_ENABLED = true` in `ipc_socket.rs` (commit `c6c883ee` "activate early-ack (#saevon)"), so the *flip* half of the `#saevon` gate is satisfied; only the `#lvbremain` live `#saev` marker remains. The two `#saevon` review items read as stale relative to HEAD.
+- **`#saevon` review collision:** preflight warns the same `#saevon` id resolves twice in `agent:review` (two identical `[/]` entries). There's no `--review-remove` flag, and resolving `#saevon` is a separate live-gate decision, so I left it — recommend deduping those stragglers.
+- Best-effort + non-fatal: a missing HEAD blob (untracked doc) or unreadable working tree skips the check rather than failing the commit.
+- The comparison is taken **modulo legitimate transient churn** via the existing `normalize_for_replay_hash` (boundary / `(HEAD)` / guard markers, the managed pipeline block, and independent `agent:queue` maintenance). So `match=true` means the visible doc is structurally equal to HEAD; `match=false` is the corruption class (latest `### Re:` deleted/spliced into an earlier block, duplicate queue-prompt blockquotes) for you to file. A `match=false` also prints a `[commit] WARNING ...` stderr line referencing `#postcommit-ipc-worktree-corruption`.
+- New `emit_postcommit_worktree_check(file)` runs at the end of every **successful** committed closeout — after post-commit cleanup + the transient-drift repair, so it reflects the residual visible state. It logs `postcommit_worktree_check file=<f> head=<12sha> tree=<12sha> match=<bool>` to `ops.log`.
 
 **Unblock:** one clean (non-degraded, live-editor) session that (a) flips the flag, (b) updates the dormant-default test, (c) drives the `#lvb-run` batch under real typing load to capture the `pending`-before-apply marker with no false ack, then (d) ships. Same `#xkpf` live-gate cohort as `#pcpc5live` / `#lvbremain` — it belongs there, not in this drain.
-<!-- agent:boundary:126b984b -->
+
+### Re: do #postcommit-ipc-worktree-corruption — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#postcommit-ipc-worktree-corruption]
+
+Done — shipped the log-provable completion you scoped on line 51 ("emit `postcommit_worktree_check file=<f> head=<sha> tree=<sha> match=<bool>` right after each closeout; `match=false` is the bug, logged for you to file"). No live-verify; the marker is the proof.
+
+**What changed** (`git.rs`, committed `c9bf3492`, pushed to `origin/main`):
+- New `emit_postcommit_worktree_check(file)` runs at the end of every **successful** committed closeout — after post-commit cleanup + the transient-drift repair, so it reflects the residual visible state. It logs `postcommit_worktree_check file=<f> head=<12sha> tree=<12sha> match=<bool>` to `ops.log`.
+- The comparison is taken **modulo legitimate transient churn** via the existing `normalize_for_replay_hash` (boundary / `(HEAD)` / guard markers, the managed pipeline block, and independent `agent:queue` maintenance). So `match=true` means the visible doc is structurally equal to HEAD; `match=false` is the corruption class (latest `### Re:` deleted/spliced into an earlier block, duplicate queue-prompt blockquotes) for you to file. A `match=false` also prints a `[commit] WARNING ...` stderr line referencing `#postcommit-ipc-worktree-corruption`.
+- Best-effort + non-fatal: a missing HEAD blob (untracked doc) or unreadable working tree skips the check rather than failing the commit.
+
+**Coverage:** the SimWorld `worktree==HEAD` guard (`post_commit_ipc_reposition_signal_keeps_worktree_equal_to_head`) already asserts the invariant; this turn adds two `git.rs` unit tests against a real `commit`/`show_head` repo — `postcommit_worktree_check_logs_match_true_for_transient_only_drift` (no false positive when the working tree differs only by `(HEAD)`/boundary markers) and `postcommit_worktree_check_logs_match_false_for_real_corruption` (the catch: a spliced/deleted `### Re:` block logs `match=false`). `make check` green; binary + `target/release` rebuilt and `cargo install`ed at 0.34.0.
+
+CI: run `27248934375` is `in_progress` on this exact commit (`c9bf3492`) — recording it pending and closing on local `make check` evidence per the test-bearing-turn rule. This is a pure closeout-guard diagnostic; no tmux/route surface touched.
+
+Marking `#postcommit-ipc-worktree-corruption` **done** — the live marker is the completion criterion you set.
+
+**Two things to flag (not touched this turn, scoped to other items):**
+- **`#saevon` review collision:** preflight warns the same `#saevon` id resolves twice in `agent:review` (two identical `[/]` entries). There's no `--review-remove` flag, and resolving `#saevon` is a separate live-gate decision, so I left it — recommend deduping those stragglers.
+- **`#saevon` looks already activated in HEAD:** `EARLY_ACK_ENABLED = true` in `ipc_socket.rs` (commit `c6c883ee` "activate early-ack (#saevon)"), so the *flip* half of the `#saevon` gate is satisfied; only the `#lvbremain` live `#saev` marker remains. The two `#saevon` review items read as stale relative to HEAD.
+<!-- agent:boundary:30489b22 -->
+<!-- agent:boundary:c0d96a7e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -136,13 +165,13 @@ CI note: the submodule commit is local (not pushed), so CI hasn't run it; closin
 - ~~:pushpin: Do the PCP~~
 - ~~:pushpin: do [#bkx9wire]~~
 - ~~:round_pushpin: do [#saevon]~~
-- :round_pushpin: do [#postcommit-ipc-worktree-corruption]
+- ~~:round_pushpin: do [#postcommit-ipc-worktree-corruption]~~
 - :round_pushpin: do [#pcpc5live]
 - :round_pushpin: do [#lvbremain]
 - :round_pushpin: do [#s760wire]
 - ~~:round_pushpin: do [#bkx9perid]~~
 - :pushpin: [#optverify]
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+- test 
 <!-- /agent:queue -->
 ###
 <!--
@@ -173,7 +202,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
-- [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
 - [ ] [#s760wire] Pre-emptive /clear gated on REAL transcript-token context-%. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md (phases #s760a locator+token reader, #s760b model→context-window table + pct, #s760c route-dispatch gate + '[s760] clear-decision' diagnostic + tracked /clear send, #s760d operator live-verify). Shipped infra: session_accretion::{queue_context_reset_opted_in (default OFF), clear_threshold_for_doc, queue_context_reset_reason*}. Remaining = the transcript-token ctx% SOURCE (no JB install). Gated: destructive /clear must be live-verified; harness-aware (Claude JSONL usage / Codex / OpenCode) + model context-window table is plan-worthy; run as a fresh focused session, NOT this degraded drain.

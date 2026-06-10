@@ -72,12 +72,30 @@ Captured as `#optverify`. The idea: gated `[/]` items almost always have a **log
 This generalizes your "no live-verify / adequate logging / I file bugs" model into the tool, and makes the per-item logging I'm adding to each backlog item double as the opportunistic proof source. Flag `do [#optverify]` and I'll write the plan + implement.
 
 Used `--force-disk` to bypass the IPC listener that's been corrupting this session's closeouts, and restored the actionable `#bkx9perid` entry that the earlier dedup over-removed.
-<!-- agent:boundary:01b73793 -->
+
+### Re: Do the PCP — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Do the PCP
+
+
+"Do the PCP" is the supervisor-in-process consolidation (`tasks/agent-doc/plan-supervisor-in-process.md`, `#pcpc1`→`#pcpc5`) — the root fix for the IPC self-race / exit-75 / working-tree corruption family. I'm **not** starting it in this session, and the plan itself is why.
+
+**This session is degraded.** Preflight just resync'd **12 stale sessions across 3 tmux sessions** (session drift), the active exchange notes it used `--force-disk` to bypass an IPC listener that's been corrupting closeouts here, and `#postcommit-ipc-worktree-corruption` is an open bug about *this* doc's working tree being mangled post-commit. The plan's **Safety** section says verbatim: *"Do NOT attempt in a saturated session"*; the **Actionability (2026-06-09)** note scopes phases 1–4 to *"any focused (**non-degraded**) session."* Rewriting `session_actor.rs` into a real actor inside a session whose own writes are corrupting is the exact failure mode #pcpc fixes.
+
+**What's actually actionable (and where):**
+- `#pcpc1`→`#pcpc4` (actor runtime → supervisor adapter → ordered write queue → controller-owned watcher core) are **pure-Rust + SimWorld, no live editor needed** — but multi-day and dependency-ordered. These belong in a **fresh dedicated session at `#pcpc1`**, `make check` + `cargo install` + `cargo build --release` per phase.
+- `#pcpc5` cutover (08b gate ladder: shadow→dual-write→read-switch→authority→removal) + the `#pcpc4` plugin WatchService read-only demote (`#pcp7`) are **operator-run live-gated** — they need a live IntelliJ/Codex pane to prove the editor boundary. Steps 1–2 already proven (`#pcpc5live`); only step 3 (pcpc5d/e) remains and is spec-08b-blocked from any response cycle.
+
+**To start it:** open a fresh Claude Code window and run `/agent-doc tasks/agent-doc/plan-supervisor-in-process.md` (or a plain session pointed at that plan), beginning at `#pcpc1`. I've queued `#pcpc1` as an actionable backlog item here so the entry point is concrete. I'm leaving the rest of this doc's degraded queue alone rather than draining it underneath you.
+<!-- agent:boundary:608e9a7e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Do the PCP~~
 - :round_pushpin: do [#saevon]
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - :round_pushpin: do [#pcpc5live]
@@ -85,6 +103,7 @@ Used `--force-disk` to bypass the IPC listener that's been corrupting this sessi
 - :round_pushpin: do [#s760wire]
 - ~~:round_pushpin: do [#bkx9perid]~~
 - :pushpin: [#optverify]
+- do [#bkx9wire]
 <!-- /agent:queue -->
 ###
 <!--

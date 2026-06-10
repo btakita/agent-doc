@@ -131,7 +131,24 @@ Why this can't safely land here:
 2. Eliminate the multi-id false positive: treat a `### Re:` heading that answers several `do #id`s under one heading as materializing **all** grouped ids (group by the directive ids active under that response block), not just the named one.
 3. Add SimWorld + unit coverage for both poles — the captured-but-id-lost **true** positive and the `do[#A]+do[#B]`-under-one-heading **false** positive — and reproduce a real `#ipc-crdt-response-drift` to prove no false wedge before enabling at the closeout guard.
 4. Spec: `specs/07-closeout-commands.md` `#compact-reap-no-response-record`. Absorbs review `#bkx9`/`#compact-reap-no-response-record`.
-<!-- agent:boundary:5c93fdc0 -->
+
+### Re: do [#tmux-switch-lag] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#tmux-switch-lag]
+
+
+Fixed and shipped (submodule `9fd09ac0`, superproject `0016bad24`).
+
+**Root cause.** The passive editor-sync fast-handoff path selected the actor pane directly: both `safe_passive_select_prelock_pane` and `safe_passive_focus_actor_after_sync_lock` (`sync.rs`) called `tmux.select_pane(pane_id)` with no stash check. When the target doc's pane was parked in a `stash` window, selecting it surfaced editor focus *inside the stash* — the brief stash-layout flash you saw mid doc-to-doc switch — until a later reconciler swapped it into `0:agent-doc`.
+
+**Fix — move-before-select.** New `promote_stashed_pane_before_focus` runs before both `select_pane` calls: if `pane_in_stash_window`, it reparents the pane into the `agent-doc` window via the existing `promote_pane_to_agent_doc_window` (tmux preserves the pane id across `join-pane`/`break-pane`), *then* the caller selects it — so the switch never shows an intermediate stash frame. Non-stashed panes and failed promotes fall through to select-in-place exactly as before (best-effort, errors logged, never swallowed).
+
+**Deterministic coverage.** Live tmux pane mechanics aren't offline-assertable (the sync tests are all `IsolatedTmux`/`#[ignore]`), so the ordering is pinned in the SimWorld `SyncProjection`: `focus_doc_move_before_select` models move-then-select, and a new structural invariant rejects an `active` pane that is still in `stashed` (the flash bug). Negative control included; wired into the fast + medium seed corpus.
+
+**Verified:** `make check` green (clippy clean, medium corpus + full suite, exit 0); `cargo build --release` + `cargo install` + `agent-doc lib-install` (FFI-reachable sync path → live JB plugin picks up the fix). This was a pure-code fix needing no live verification, so it's `--done`, not gated.
+<!-- agent:boundary:6d807e12 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -143,7 +160,7 @@ Why this can't safely land here:
 - ~~:round_pushpin: do [#lvbatch]~~
 - ~~:pushpin: :round_pushpin: do [#saevon]~~
 - ~~:round_pushpin: do [#bkx9perid]~~
-- :round_pushpin: do [#tmux-switch-lag]
+- ~~:round_pushpin: do [#tmux-switch-lag]~~
 - :round_pushpin: do [#exch-intermix-verify]
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - ~~do [#dropqueue-consumed-falsecount]~~
@@ -186,7 +203,6 @@ What are #next-steps to fix bugs?
 - [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Pre-emptive /clear: predicate ContextResetDecision.shouldClearBeforeDispatch + clear_threshold_for_doc + agent_doc_queue_context_reset opt-in ALL SHIPPED. Blocker = live context-usage % source. SubmitAction.kt is a thin dispatcher (no ctx%); per Shared Foundation it belongs in route.rs. Observed footers vary by harness+config (Claude custom statusline 'ctx:NN%', Codex 'Context NN% used') so TUI-scrape is wrong for the shipped product — derive ctx% from session transcript token usage / context window instead. Remaining (CLI-side, no JB install): add harness-aware transcript-based ctx% reader in route.rs, gate dispatch via shouldClearBeforeDispatch, emit '[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..', send /clear when true; live-verify.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
-- [ ] [#tmux-switch-lag] #agent-doc-bug Slow tmux pane switch when switching between agent docs in the editor: the target doc pane is briefly visible in the stash window before it swaps into 0:agent-doc, so the operator sees a flash of the stash layout mid-switch. Likely the passive editor-sync fast-handoff path (sync.rs sync --no-autostart) selects/raises the hidden actor pane before moving it out of stash. Actionable, fresh session: make the stash->agent-doc pane move atomic (move first, then select) so no intermediate stash frame is shown; add SimWorld coverage for the switch ordering. Files: sync.rs passive fast-handoff path.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 <!-- /agent:backlog -->
 

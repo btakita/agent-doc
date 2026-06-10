@@ -4519,10 +4519,17 @@ fn push_materialization_segment(out: &mut String, segment: &str) {
 }
 
 pub fn response_materialization_probe_from_response(response: &str) -> String {
-    match template::parse_patches(response) {
+    let probe = match template::parse_patches(response) {
         Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
         Err(_) => response.to_string(),
-    }
+    };
+    // Ephemeral per-cycle guard markers (`<!-- no-pending-done-guard -->`,
+    // `<!-- no-pending-capture -->`) are stripped from committed blobs by
+    // `git::strip_guard_markers`, so a captured response body that still carries
+    // them would never match the committed HEAD/archive content and
+    // `stuck_captured_cycle` would false-alarm on a response that is in fact
+    // committed (#8j86). Strip them from the probe so the match mirrors commit.
+    crate::git::strip_guard_markers(&probe)
 }
 
 pub fn response_materialized_in_content(response: &str, content: &str) -> bool {

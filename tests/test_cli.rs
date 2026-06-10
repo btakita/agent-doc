@@ -774,7 +774,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // and `guard_no_stale_snapshot_reset_drift` guards to explain the wedge
         // they recover. No new guard flow token — the recovery reuses the existing
         // commit-time `guard_no_stale_snapshot_reset_drift` boundary.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 87,
+        // +2 (#8j86) for the audited `crate::git::strip_guard_markers(&probe)` call
+        // in `response_materialization_probe_from_response` plus its doc-comment
+        // cross-reference: the materialization probe strips the same ephemeral
+        // guard markers `git::commit` strips, so a captured response body carrying
+        // `<!-- no-pending-done-guard -->` still matches the committed HEAD/archive
+        // blob and `stuck_captured_cycle` stops false-alarming. Reuses the existing
+        // `git::strip_guard_markers` helper — no new flow guard token.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 89,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

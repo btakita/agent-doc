@@ -717,6 +717,59 @@ pub fn annotate_operator_priority_reorders(
     changed.then_some(out)
 }
 
+/// Auto-pin freshly operator-added queue prompts with the operator priority
+/// marker (`#7r2s`).
+///
+/// `annotate_operator_priority_reorders` only pins an *existing* prompt that
+/// moved earlier; a brand-new line the operator just typed into the queue is
+/// ignored, so the subsequent backlog-priority recompute can sort it below
+/// `queue`-attr backlog items and silently deprioritize the line the operator
+/// just placed. Treat a prompt present in `current` but absent from `snapshot`
+/// (by pin-independent identity) whose `do [#id]` id is NOT one the binary just
+/// appended from the backlog this cycle (`synced_ids`) as an operator-authored
+/// addition, and prefix it with `:pushpin:` so it is position-locked at its
+/// authored slot. Binary-synced backlog entries and already-pinned prompts are
+/// left untouched.
+pub fn annotate_manual_queue_additions(
+    snapshot: &[QueueEntry],
+    current: &[QueueEntry],
+    synced_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    let snapshot_identities: std::collections::HashSet<String> = snapshot
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => Some(strip_priority_markers(&prompt.text)),
+            _ => None,
+        })
+        .collect();
+    let synced_lc: std::collections::HashSet<String> =
+        synced_ids.iter().map(|id| id.to_ascii_lowercase()).collect();
+    let mut changed = false;
+    let mut out = current.to_vec();
+    for entry in &mut out {
+        let do_id = entry_do_id(entry);
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        let identity = strip_priority_markers(&prompt.text);
+        if snapshot_identities.contains(&identity) {
+            continue; // not new this cycle
+        }
+        if do_id
+            .as_deref()
+            .is_some_and(|id| synced_lc.contains(&id.to_ascii_lowercase()))
+        {
+            continue; // binary appended it from the backlog, not an operator add
+        }
+        if is_prioritized(&prompt.text) || is_agent_prioritized(&prompt.text) {
+            continue; // operator/agent already pinned it
+        }
+        prompt.text = format!("{} {}", PRIORITIZED_MARKER, prompt.text.trim_start());
+        changed = true;
+    }
+    changed.then_some(out)
+}
+
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
 /// unpinned. Tier 0 (operator pin) is position-locked by
 /// `sort_prompts_by_priority` (`#queue-operator-pin-position-lock`); among the
@@ -1425,6 +1478,37 @@ mod tests {
         let current = parse("- do [#new]\n- do [#b]\n- do [#a]\n").unwrap();
 
         assert!(annotate_operator_priority_reorders(&snapshot, &current).is_none());
+    }
+
+    #[test]
+    fn annotate_manual_queue_additions_pins_operator_added_unpinned_line() {
+        // #7r2s: the operator typed a brand-new `do [#manual]` line with no pin.
+        // It is absent from the snapshot and was NOT appended by the backlog sync,
+        // so it is auto-pinned with operator priority and stays at its slot.
+        let snapshot = parse("- do [#a]\n").unwrap();
+        let current = parse("- do [#manual]\n- do [#a]\n").unwrap();
+        let synced: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let marked = annotate_manual_queue_additions(&snapshot, &current, &synced)
+            .expect("a new operator-added line must be auto-pinned");
+        assert_eq!(render(&marked), "- :pushpin: do [#manual]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn annotate_manual_queue_additions_skips_backlog_synced_and_pinned() {
+        // A new line the binary appended from the backlog this cycle (#synced) is
+        // NOT auto-pinned; an already-pinned new line is left as-is; an existing
+        // (snapshot) line is untouched.
+        let snapshot = parse("- do [#a]\n").unwrap();
+        let current =
+            parse("- do [#synced]\n- :round_pushpin: do [#pinned]\n- do [#a]\n").unwrap();
+        let synced: std::collections::HashSet<String> =
+            ["synced".to_string()].into_iter().collect();
+
+        assert!(
+            annotate_manual_queue_additions(&snapshot, &current, &synced).is_none(),
+            "binary-synced and already-pinned new lines must not be auto-pinned"
+        );
     }
 
     #[test]

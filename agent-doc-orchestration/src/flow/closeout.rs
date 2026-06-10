@@ -1240,6 +1240,42 @@ mod tests {
     }
 
     #[test]
+    fn stuck_captured_cycle_ignores_committed_cycle_when_only_guard_marker_stripped() {
+        // #8j86: the captured response body carries an ephemeral
+        // `<!-- no-pending-done-guard -->` guard marker that `git::strip_guard_markers`
+        // removes from the committed blob. The materialization probe must mirror
+        // that strip, otherwise stuck_captured_cycle false-alarms on a response
+        // that IS in HEAD (seen live 2026-06-10 on agent-doc-bugs2.md capture
+        // cycle-1781112407668 — no compact archive involved, body already in HEAD).
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        // Capture stores the raw patch-wrapped body including the guard marker.
+        let captured = "<!-- patch:exchange -->\n<!-- no-pending-done-guard -->\n### Re: hello — gpt-5\n\nCommitted response.\n<!-- /patch:exchange -->\n";
+        // Committed HEAD has the guard marker stripped (as `git::commit` does).
+        let committed_response = "### Re: hello — gpt-5\n\nCommitted response.\n";
+        let full_doc = format!("{base}\n{committed_response}");
+        let (dir, doc) = setup_git_project_with_doc(base);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, captured).unwrap();
+        std::fs::write(&doc, &full_doc).unwrap();
+        crate::snapshot::save(&doc, &full_doc).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&full_doc),
+            Some(&full_doc),
+        )
+        .unwrap();
+
+        assert!(
+            stuck_captured_cycle(&doc).is_none(),
+            "a committed response whose only HEAD difference is the stripped guard marker must not be flagged stuck"
+        );
+    }
+
+    #[test]
     fn recovery_command_maps_each_state_to_one_instruction() {
         use CloseoutRecoveryState::*;
         let f = Path::new("tasks/doc.md");

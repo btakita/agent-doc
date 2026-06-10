@@ -2704,7 +2704,12 @@ fn strip_head_markers(content: &str) -> String {
 /// These markers (`<!-- no-pending-capture -->`, `<!-- no-pending-done-guard -->`)
 /// are ephemeral per-cycle signals for `session-check` and should not persist
 /// in committed blobs. The check reads from the capture file, not the document.
-fn strip_guard_markers(content: &str) -> String {
+///
+/// Also used by the response-materialization probe (`write::response_materialized_*`)
+/// so a captured response body carrying these ephemeral markers still matches the
+/// committed (marker-stripped) HEAD/archive blob — otherwise `stuck_captured_cycle`
+/// false-alarms on a response that *is* committed (#8j86).
+pub(crate) fn strip_guard_markers(content: &str) -> String {
     const MARKERS: &[&str] = &[
         "<!-- no-pending-capture -->",
         "<!-- no-pending-done-guard -->",

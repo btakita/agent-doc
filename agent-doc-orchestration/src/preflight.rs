@@ -5046,8 +5046,8 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
         {
             let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
-            if let Ok(snap_entries) = crate::queue::parse(snap_body)
-                && let Some(pinned) =
+            if let Ok(snap_entries) = crate::queue::parse(snap_body) {
+            if let Some(pinned) =
                     crate::queue::annotate_operator_priority_reorders(&snap_entries, &entries)
             {
                 let new_body = crate::queue::render(&pinned);
@@ -5061,6 +5061,31 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 );
                 entries = pinned;
                 mutated = true;
+            }
+            // #7r2s: a brand-new queue line the operator just typed (absent from
+            // the snapshot, not one the binary appended from the backlog this
+            // cycle) carries no pin, so the priority sort below would sink it
+            // under `queue`-attr backlog items. Auto-pin it with operator
+            // priority so it stays at its authored slot.
+            let synced_set: std::collections::HashSet<String> =
+                synced_queue_ids.iter().cloned().collect();
+            if let Some(pinned_new) = crate::queue::annotate_manual_queue_additions(
+                &snap_entries,
+                &entries,
+                &synced_set,
+            ) {
+                let new_body = crate::queue::render(&pinned_new);
+                current_content = {
+                    let comps = crate::component::parse(&current_content)?;
+                    let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                    q.replace_content(&current_content, &new_body)
+                };
+                eprintln!(
+                    "[preflight] queue: auto-pinned manually-added prompt(s) with operator priority (#7r2s)"
+                );
+                entries = pinned_new;
+                mutated = true;
+            }
             }
         }
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency

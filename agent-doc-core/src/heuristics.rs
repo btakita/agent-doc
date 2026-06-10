@@ -153,7 +153,11 @@ fn has_quantified_remaining_work(line: &str) -> bool {
     let keywords = [" remaining", " left to ", " outstanding", " unfinished"];
     for kw in keywords {
         if let Some(pos) = lower.find(kw) {
-            let start = pos.saturating_sub(30);
+            // `pos` is a char boundary (keyword start), but `pos - 30` is a raw
+            // byte offset that can land inside a multibyte char (e.g. an em-dash
+            // in the response prose), which would panic the slice. Round the
+            // window start down to the nearest char boundary first.
+            let start = lower.floor_char_boundary(pos.saturating_sub(30));
             let prefix = &lower[start..pos];
             if prefix.chars().any(|c| c.is_ascii_digit() && c != '0') {
                 return true;
@@ -355,6 +359,22 @@ fn normalize_header_text(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quantified_remaining_work_handles_multibyte_char_in_window() {
+        // Regression: `pos - 30` is a raw byte offset that can land inside a
+        // multibyte char (em-dash). Place the em-dash so `pos - 30` falls in its
+        // middle byte, reproducing the panic that crashed session-check.
+        // 33 ASCII bytes, then "—" (bytes 33..36), 28 bytes, then " remaining"
+        // at byte 64 → pos-30 = 34, inside the em-dash.
+        let line = format!("{}—{} remaining tail", "x".repeat(33), "y".repeat(28));
+        // Must not panic; no qualifying non-zero digit precedes the keyword.
+        assert!(!has_quantified_remaining_work(&line));
+        // The true branch still works when a digit precedes the keyword, even
+        // with a multibyte char in the window.
+        let hit = format!("{}— 7 items remaining now", "x".repeat(33));
+        assert!(has_quantified_remaining_work(&hit));
+    }
 
     #[test]
     fn no_recommendations_no_signal() {

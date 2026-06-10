@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Fix UTF-8 char-boundary panic in closeout heuristics (`#heurpanic`).**
+  `heuristics::has_quantified_remaining_work` computed a 30-byte look-back window
+  start as a raw byte offset (`pos - 30`) and sliced `&lower[start..pos]`. When a
+  response line placed a multibyte char (e.g. an em-dash `—`) so that `pos - 30`
+  landed inside it, the slice panicked (`byte index … is not a char boundary`),
+  crashing `finalize`/`session-check` (`rc=134`) on otherwise-valid responses and
+  wedging closeout. The window start now rounds down with `floor_char_boundary`.
+  Regression test `quantified_remaining_work_handles_multibyte_char_in_window`.
 - **`#lvbremain` verification markers now reach `ops.log` (`#x9ds`).** Two of the
   marker emissions the `#lvbremain` ops.log scan expects were stderr-only and so
   always scanned 0. The cross-session-reject reject path (`claim.rs`) now also

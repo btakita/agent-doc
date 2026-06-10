@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 3 response topic(s): Does /portal-admin/documents cover Lender Pipeline documents too?; Documents tabs + pages for Deal Pipeline and Lender Pipeline; do [#b0w3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:64307419 -->
+<!-- agent:boundary:d66b7d2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +44,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- For all boolean form fields, use a checkbox ![img_6.png](img_6.png). If the boolean is read-only, make the checkbox disabled. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -196,6 +196,71 @@ pub fn transcript_context_pct(harness: Harness, transcript: &Path, model: &str) 
     context_pct(used.total(), model)
 }
 
+/// Outcome of the `#s760c` dispatch-time pre-emptive `/clear` gate. `clear` is
+/// whether the caller should fire the destructive `/clear`; `diagnostic` is the
+/// canonical `[s760] clear-decision …` line the caller emits to ops.log so the
+/// decision is observable in production without re-deriving it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClearDecision {
+    pub clear: bool,
+    pub diagnostic: String,
+}
+
+/// Decide whether the route/supervisor dispatch gate should pre-emptively
+/// `/clear` before sending a queue head (`#s760c`). Pure over the resolved
+/// inputs so it is unit-testable; the caller resolves `opted_in`, the live
+/// transcript ctx% (`pct`), and `threshold`, then emits [`ClearDecision::diagnostic`]
+/// to ops.log and only sends the destructive `/clear` when [`ClearDecision::clear`]
+/// is true.
+///
+/// Fails safe per the `plan-s760` invariants: an unknown ctx% (`pct = None`, from
+/// an unknown model / missing transcript / unsupported harness) never clears, and
+/// a disabled opt-in never clears regardless of `pct`. The diagnostic always
+/// renders so a `clear=false` decision (and its reason) is still observable.
+pub fn clear_decision(opted_in: bool, pct: Option<f64>, threshold: u8) -> ClearDecision {
+    let clear = opted_in && pct.is_some_and(|p| p >= f64::from(threshold));
+    let pct_field = match pct {
+        Some(p) => format!("{p:.1}"),
+        None => "none".to_string(),
+    };
+    let diagnostic = format!(
+        "[s760] clear-decision optIn={opted_in} threshold={threshold} pct={pct_field} clear={clear}"
+    );
+    ClearDecision { clear, diagnostic }
+}
+
+/// Compose the `~/.claude/projects/<project-hash>/` directory that holds a
+/// project's Claude Code session transcripts (`#s760c`). The per-session
+/// transcript file lives inside this directory.
+pub fn claude_projects_subdir(home: &Path, project_dir: &Path) -> PathBuf {
+    home.join(".claude")
+        .join("projects")
+        .join(claude_project_hash(project_dir))
+}
+
+/// Locate the active Claude Code session transcript as the most-recently-modified
+/// `*.jsonl` under `projects_subdir` (`#s760c` live locator). The supervisor does
+/// not track the managed harness's session id, so newest-mtime is the live signal
+/// for "the transcript this session is writing". Returns `None` when the directory
+/// is absent/unreadable or holds no `.jsonl` file, so the caller fails safe and
+/// never clears.
+pub fn latest_claude_transcript(projects_subdir: &Path) -> Option<PathBuf> {
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(projects_subdir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if newest.as_ref().is_none_or(|(best, _)| modified > *best) {
+            newest = Some((modified, path));
+        }
+    }
+    newest.map(|(_, path)| path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +401,86 @@ mod tests {
         assert_eq!(Harness::parse("codex"), Some(Harness::Codex));
         assert_eq!(Harness::parse("opencode"), Some(Harness::OpenCode));
         assert!(Harness::parse("junie").is_none());
+    }
+
+    #[test]
+    fn clear_decision_clears_only_when_opted_in_and_at_or_above_threshold() {
+        // Opted in, at threshold → clear, with the canonical diagnostic.
+        let d = clear_decision(true, Some(50.0), 50);
+        assert!(d.clear);
+        assert_eq!(
+            d.diagnostic,
+            "[s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true"
+        );
+        // Above threshold → clear.
+        assert!(clear_decision(true, Some(83.4), 50).clear);
+        // Below threshold → no clear.
+        let below = clear_decision(true, Some(49.9), 50);
+        assert!(!below.clear);
+        assert_eq!(
+            below.diagnostic,
+            "[s760] clear-decision optIn=true threshold=50 pct=49.9 clear=false"
+        );
+    }
+
+    #[test]
+    fn clear_decision_fails_safe_on_unknown_pct_and_disabled_opt_in() {
+        // Unknown ctx% never clears, even far past any threshold.
+        let unknown = clear_decision(true, None, 50);
+        assert!(!unknown.clear);
+        assert_eq!(
+            unknown.diagnostic,
+            "[s760] clear-decision optIn=true threshold=50 pct=none clear=false"
+        );
+        // Disabled opt-in never clears, even at 100%.
+        let off = clear_decision(false, Some(100.0), 50);
+        assert!(!off.clear);
+        assert_eq!(
+            off.diagnostic,
+            "[s760] clear-decision optIn=false threshold=50 pct=100.0 clear=false"
+        );
+    }
+
+    #[test]
+    fn claude_projects_subdir_composes() {
+        assert_eq!(
+            claude_projects_subdir(
+                Path::new("/home/brian"),
+                Path::new("/home/brian/work/btakita/agent-loop"),
+            ),
+            Path::new("/home/brian/.claude/projects/-home-brian-work-btakita-agent-loop")
+        );
+    }
+
+    #[test]
+    fn latest_claude_transcript_picks_newest_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .jsonl yet → None (fail safe).
+        assert!(latest_claude_transcript(dir.path()).is_none());
+
+        let older = dir.path().join("old-session.jsonl");
+        let newer = dir.path().join("new-session.jsonl");
+        std::fs::write(&older, b"{}").unwrap();
+        std::fs::write(&newer, b"{}").unwrap();
+        // Force `newer` to have a strictly later mtime regardless of fs resolution.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(&newer, filetime::FileTime::from_system_time(later)).unwrap();
+
+        assert_eq!(latest_claude_transcript(dir.path()), Some(newer));
+
+        // A non-.jsonl file is ignored even if it is newest.
+        let txt = dir.path().join("zzz.txt");
+        std::fs::write(&txt, b"x").unwrap();
+        let even_later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        filetime::set_file_mtime(&txt, filetime::FileTime::from_system_time(even_later)).unwrap();
+        assert_eq!(
+            latest_claude_transcript(dir.path()).unwrap().extension(),
+            Some(std::ffi::OsStr::new("jsonl"))
+        );
+    }
+
+    #[test]
+    fn latest_claude_transcript_missing_dir_is_none() {
+        assert!(latest_claude_transcript(Path::new("/no/such/projects/dir")).is_none());
     }
 }

@@ -1959,6 +1959,36 @@ fn clear_cooldown_blocks_auto_dispatch(
 /// - Never injects while the pane is mid-turn (no-inject-into-active-turn).
 /// - Dedups on the head text so a stuck/undrained head cannot hot-loop.
 /// - Respects the managed capability-proof gate, same as the auto-trigger.
+///
+/// `#s760c`: live context-usage % for the pre-emptive `/clear` gate. Resolves the
+/// harness, the configured model, and the active Claude session transcript from
+/// the environment, then computes the real transcript-token ctx%. Returns `None`
+/// (caller never clears) on any unresolved input — unknown/unsupported harness,
+/// no model in frontmatter, missing `$HOME`/cwd, or no transcript yet — per the
+/// destructive-`/clear` fail-safe invariant in `plan-s760`.
+fn live_transcript_context_pct(
+    file: &Path,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<f64> {
+    let harness_kind = crate::context_pct::Harness::parse(&harness.binary)?;
+    // Model from document frontmatter (generic `model:` falls back via the
+    // resolver). `claude` binary maps to the `claude-code` harness model key.
+    let content = std::fs::read_to_string(file).ok()?;
+    let (fm, _) = crate::frontmatter::parse(&content).ok()?;
+    let harness_name = match harness.binary.as_str() {
+        "claude" => "claude-code",
+        other => other,
+    };
+    let model = fm.resolve_harness_model(harness_name)?.to_string();
+    // Active transcript: newest `*.jsonl` under `~/.claude/projects/<hash(cwd)>/`.
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    let project_dir = std::env::current_dir().ok()?;
+    let subdir =
+        crate::context_pct::claude_projects_subdir(Path::new(&home), &project_dir);
+    let transcript = crate::context_pct::latest_claude_transcript(&subdir)?;
+    crate::context_pct::transcript_context_pct(harness_kind, &transcript, &model)
+}
+
 fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -2141,31 +2171,63 @@ fn spawn_idle_queue_watch_thread(
                 // `Run Agent Doc` or auto-loop drain does not churn the session
                 // or hit `/clear` rejected mid-turn. Deferred *operator* clears
                 // (an explicit `session clear`) are a separate path and stay live.
+                // `#s760c`: the real context-usage signal is the harness
+                // transcript token %, NOT exchange size (footers vary by
+                // harness, and document size is not loaded-context size). When
+                // opted in and idle, compute the live transcript ctx%, emit the
+                // canonical `[s760] clear-decision …` line to ops.log so the
+                // decision is observable in production, and fire the tracked
+                // `/clear` only when ctx% crosses the resolved threshold. The
+                // compaction-after-clear safety case is preserved separately: a
+                // compaction shrinks the document but not the already-loaded
+                // conversation, so it still warrants a reset. Everything stays
+                // behind the default-off `agent_doc_queue_context_reset` opt-in,
+                // and an unknown ctx% (`pct=None`) never clears (fail safe).
                 let context_reset_reason = if clear_cooldown_active
                     || !crate::session_accretion::queue_context_reset_opted_in(&path)
                 {
                     None
                 } else {
-                    match crate::session_accretion::queue_context_reset_reason(
-                        &path,
-                        last_context_clear_at,
-                    ) {
-                        Ok(reason) => reason,
-                        Err(err) => {
-                            log_event(
-                                &mut session_log,
-                                &format!(
-                                    "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
-                                    harness.binary,
-                                    path.display(),
-                                    err.to_string()
-                                ),
-                            );
-                            eprintln!(
-                                "[agent-doc] idle-queue watch: failed to inspect queue context reset policy for {}: {err:#}",
-                                path.display()
-                            );
-                            None
+                    let pct = live_transcript_context_pct(&path, &harness);
+                    let threshold = crate::session_accretion::clear_threshold_for_doc(&path);
+                    let decision = crate::context_pct::clear_decision(true, pct, threshold);
+                    crate::ops_log::log_op(&path, &decision.diagnostic);
+                    if crate::input_diag::verbose_enabled() {
+                        eprintln!("[agent-doc] idle-queue watch: {}", decision.diagnostic);
+                    }
+                    if decision.clear {
+                        Some(format!(
+                            "transcript context {:.1}% >= clear threshold {}% (#s760c)",
+                            pct.unwrap_or_default(),
+                            threshold
+                        ))
+                    } else {
+                        match crate::session_accretion::recent_exchange_compaction_timestamp(&path) {
+                            Ok(Some(compaction_ts))
+                                if last_context_clear_at.unwrap_or(0) < compaction_ts =>
+                            {
+                                Some(
+                                    "exchange was compacted after the last tracked context clear (#s760c)"
+                                        .to_string(),
+                                )
+                            }
+                            Ok(_) => None,
+                            Err(err) => {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
+                                        harness.binary,
+                                        path.display(),
+                                        err.to_string()
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: failed to inspect queue context reset policy for {}: {err:#}",
+                                    path.display()
+                                );
+                                None
+                            }
                         }
                     }
                 };

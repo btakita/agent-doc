@@ -6,6 +6,23 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Transcript-token context-% pre-emptive `/clear` gate (`#s760c`).** The
+  supervisor idle-queue watch now derives its pre-emptive `/clear` decision from
+  the **real** harness context-usage % (cumulative session-transcript tokens ÷
+  model context window, via the `#s760a`/`#s760b` `context_pct` source) instead of
+  the exchange-size accretion heuristic. On each idle gap, when the default-off
+  `agent_doc_queue_context_reset` opt-in is set, it locates the active Claude
+  transcript (newest `*.jsonl` under `~/.claude/projects/<project-hash>/`), computes
+  ctx%, emits the canonical `[s760] clear-decision optIn=.. threshold=.. pct=..
+  clear=..` line to `ops.log`, and fires the tracked `/clear` only when
+  `pct >= clear_threshold_for_doc` (`agent_doc_clear_threshold`, default 50). New
+  pure, unit-tested `context_pct::{clear_decision, claude_projects_subdir,
+  latest_claude_transcript}`. Fails safe per the destructive-`/clear` invariant: an
+  unknown model, missing/empty transcript, or unsupported harness (Codex/OpenCode)
+  yields `pct=None` and **never** clears; the compaction-after-clear safety case is
+  preserved; everything stays behind the opt-in (default off). Operator live-verify
+  of the destructive path on a throwaway opted-in doc remains `#s760d`. Plan:
+  `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`.
 - **Opportunistic gated-review auto-verification (`#optverify`).** A gated `[/]`
   `agent:review` item can now carry a typed proof/disproof predicate so the binary
   auto-proves or auto-disproves it from `ops.log` markers during the normal

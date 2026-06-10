@@ -66,8 +66,23 @@ Both parent rows are still real links — clicking the label navigates to the pi
 I read "move under" as **reposition + group**, not literal 3-level nesting: your follow-up said each pipeline is its own page with its own submenu and listed each submenu's contents separately, so they're two sibling collapsible groups with Investor Pipeline placed right below Deal Pipeline. Contact Messages, Payments, Documents, etc. stay as top-level items.
 
 **Verification:** `bun test` **519 pass / 0 fail** (added a nav-structure test; updated the nav-highlight + ordering tests for the new tree); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root returns 200. No D1 migrations (UI + CSS only).
-<!-- agent:boundary:f4c17438 -->
-<!-- agent:boundary:c566ffa0 -->
+
+### Re: Website rename + tab-menu pipelines + drop nav submenus — opus-4-8
+
+Done and deployed (EFS `001034c`, version `7c983e32`). Three changes:
+
+**1. Public Content → Website.** Renamed the section + label + page title, and moved the route `/portal-admin/public-contents` → `/portal-admin/website`. Old URLs **301-redirect** to the new ones (verified live). The data API (`/api/admin/public-content`) is untouched.
+
+**2. Website-style tab menu on both pipeline pages.** Reused the same "Pages | Blog Posts | Funded Deals" segmented menu (extracted as a shared `PortalTabs` + `?tab=` sync helper):
+- **Deal Pipeline** → `Pipeline` · `Application Leads` · `Loan Applications`
+- **Investor Pipeline** → `Pipeline` · `Investor Deals` · `Funding Commits`
+
+The lists render in-page (added an `embedded` mode to Application Leads, Investor Deals, Funding Commits; Loan Applications already had one), so the active tab is remembered across reloads via the URL.
+
+**3. Removed the left-nav submenus.** The sidebar is flat again — **Deal Pipeline** and **Investor Pipeline** are single items; the four sub-lists are now tabs rather than nav entries. Their pages (and detail pages like a lead or funding detail) highlight their parent pipeline item.
+
+**Verification:** `bun test` **519 pass / 0 fail** (updated the nav/route/section tests for the new structure); `build` + `build:worker` clean. Deployed — root 200, `/portal-admin/website` reachable, `/portal-admin/public-contents` → 301 → `/portal-admin/website`. No D1 migrations.
+<!-- agent:boundary:3b26a91d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +90,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- Move "Investor Pipeline" under "Deal Pipeline". "Investor Pipeline" and "Deal Pipeline" are both pages and have a collapsed submenu. "Deal Pipeline" submenu contains "Application Leads", "Loan Applications" and "Deal Pipeline" submenu contains "Investor Deals", "Funding Commits"...since Deal Pipeline and Investor Pipeline already cover these items. deploy
+- Rename "Public Content" to "Website" and /portal-admin/public-contents to /portal-admin/website. I like the "Pages"|"Blog Posts"|"Funded Deals" menu. Use this style menu for /portal-admin/pipeline and /portal-admin/investor-pipeline and remove the submenus in the left navbar. deploy 
 <!-- /agent:queue -->
 
 ## Backlog

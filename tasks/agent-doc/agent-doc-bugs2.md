@@ -219,7 +219,30 @@ Gating `#lvbremain` — these are the four `#lvbatch` markers that need a specif
 I can only *check* logs for these (your model); I can't fabricate the live actions, and the harness that drives them (`scripts/xdotool-live-verify.sh`) refuses this degraded session by design. So this is a true operator-live gate, not effort-avoidance.
 
 **Unblock (fresh session):** drive each action via `scripts/xdotool-live-verify.sh` (`lvbatch-markers` after a cross-session claim + a run/clear; `saevon` only after `#saevon`'s flag flip + `lib-install`), then I check the markers. Already proven and not part of this gate: `live_buffer_classify`, `visible_write_deferred_current_changed`, `live_prompt_drift_auto_recovered`.
-<!-- agent:boundary:2c78507a -->
+
+### Re: Automatically add the env vars to ~/ so I can test — opus-4-8
+
+> **Queue prompt:**
+>
+> Automatically add the env vars to ~/ so I can test. I can restart.
+
+
+Done. Updated `~/.zshenv` (line 5) — advanced the 08b write-authority gate from the already-present `dual-write` to `authority`, per your choice:
+
+```sh
+# 08b write-authority migration rung (off→shadow→dual-write→authority→removed).
+# dual-write proven (ops.log event 1781047338); advanced to `authority` to test
+# the in-process write queue as the sole serializer (#pcpc5live). Revert to
+# `dual-write` (or unset for `off`) for instant rollback.
+export AGENT_DOC_WRITE_AUTHORITY=authority
+```
+
+`authority` is a valid gate token (`write_authority.rs:97`); the binary re-reads `AGENT_DOC_WRITE_AUTHORITY` on every write and falls back to `off` on any unknown value, so a typo can't fail-close a write.
+
+**Restart to apply:** `~/.zshenv` is read by every new shell, so restart your shells / tmux sessions (or `source ~/.zshenv`) and relaunch the agent-doc sessions you want on the new rung. To test the next stage later, change the line to `removed`; to roll back instantly, set it back to `dual-write` (or comment it out for `off`).
+
+What `authority` exercises: the session-actor ordered write queue becomes the sole in-process serializer for editor-visible document writes. Note it does **not** by itself stop `#postcommit-ipc-worktree-corruption` — that needs the `removed` rung plus the pcpc5d/e plugin-writer demotion (still gated under `#pcpc5live`). So if you keep seeing post-commit working-tree splices under `authority`, that's expected until the removal rungs land.
+<!-- agent:boundary:bb11088d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -238,7 +261,7 @@ I can only *check* logs for these (your model); I can't fabricate the live actio
 - ~~:round_pushpin: do [#lvbatch]~~
 - ~~:round_pushpin: do [#pcpc5live]~~
 - ~~:round_pushpin: do [#lvbremain]~~
-- Automatically add the env vars to ~/ so I can test. I can restart.
+- ~~Automatically add the env vars to ~/ so I can test. I can restart.~~
 - This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###

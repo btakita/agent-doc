@@ -72,7 +72,7 @@ Done and deployed to production (EFS Worker, migration `0060` applied to remote 
 Lender documents are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender). The in-pipeline card *modal* (the pop-up when you click a lender card) doesn't yet show documents inline — I queued that as a recommended follow-up. Say the word if you want it surfaced there too.
 
 **Verification**: 520/520 tests pass · worker build clean · remote migration applied (none pending) · live site 200 · `/api/admin/deal-documents` returns 401 (admin-auth gated, route live).
-<!-- agent:boundary:0dfba007 -->
+<!-- agent:boundary:63d4e32b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +85,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#289x] [recommended] Surface Lender Documents inside the Lender Pipeline card dialog (InvestorCardModal) — lender docs are currently reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender), but not inline in the pipeline card modal.
 - [ ] [#b0w3] [recommended] Surface Lender Documents inside the Lender Pipeline card dialog (InvestorCardModal) — currently lender docs are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender), but not inline in the pipeline card modal itself.
 - [ ] [#efspgo] [recommended] EFS online-payment go-live config (after Robert provides Stripe account): set Cloudflare secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + var STRIPE_PAYMENTS_ENABLED=true (wrangler secret put / wrangler.toml), point a Stripe webhook at /api/stripe/webhook, then in admin Platform Settings fill the borrower payment wire/ACH + lender ACH values and flip the per-method enable toggles. Deploy with bun run deploy:worker. Capability is BUILT + admin-configurable (EFS c790ed3); this is config + deploy only.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

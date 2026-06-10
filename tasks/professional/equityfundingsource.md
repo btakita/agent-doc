@@ -31,65 +31,12 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-153617.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260610-161847.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Does /portal-admin/documents cover Lender Pipeline documents too?; Documents tabs + pages for Deal Pipeline and Lender Pipeline; do [#b0w3]
+- Archived 3 response topic(s): Boolean form fields as checkboxes (read-only → disabled); Human-readable lender field labels + lender-request documents link; Table row name opens the quick-view dialog (not a page jump)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Boolean form fields as checkboxes (read-only → disabled) — opus-4-8
-
-> **Queue prompt:**
->
-> For all boolean form fields, use a checkbox ![img_6.png](img_6.png). If the boolean is read-only, make the checkbox disabled. deploy
-
-
-Done and deployed. Boolean fields that used to display as the words **true/false** (the `img_6.png` case — the TMO vendor data: `SEND1099`, `USEPAYEE`, `ISVENDOR`) now render as checkboxes. Every boolean surface I converted is read-only, so the checkboxes are **disabled** (checked/unchecked but non-interactive), matching your instruction.
-
-**Approach** (EFS `c2a0b9d`): added a shared `bool_or_null_` helper + `BoolCheckbox` component (`disabled` by default) in `shared/ui.tsx`, then routed the boolean display surfaces through them:
-- **`CopyRow`** (shared) — fixes the image directly: the lender-request vendor-data grid (`lender_management`) feeds `SEND1099`/`USEPAYEE`/`ISVENDOR` through `CopyRow`. The copy button is suppressed for booleans (nothing useful to copy).
-- **`lender_detail`** — "Submitted lender data" raw rows.
-- **`full_application_detail`** — Step 5 declarations + Step 6 e-sign consent (passed as raw booleans instead of pre-stringified Yes/No).
-- **`tmo_loan_details`** — payment-schedule `Prepaid` cell.
-- *Should the admin be able to change them here?* No — I kept them read-only (the disabled checkboxes from last cycle). The booleans are fixed EFS conventions (`Send1099=true`, `UsePayee=false`, `IsVendor=false`, set in `deal_marketplace`). Letting admins edit the cached snapshot in EFS would silently diverge from TMO with no sync. "Follow TMO with our cache" → treat our copy as a read-only mirror of what was submitted; TMO stays the system of record. Making these editable (with real TMO write-back) is gated on TMO access being restored (already tracked under #xt4d / the TMO roadmap), so I didn't add a duplicate item.
-- *Can these values be changed in TMO?* Yes, in TMO's lender management UI. EFS has **no write-back** for these fields today.
-- *Is there a record of these values in TMO?* Not as a live mirror. `lender_data` is the snapshot the **investor submitted** when requesting a lender account — it's the data the admin keys **into** TMO when creating the lender. After creation, TMO holds them; EFS does not poll them back.
-- Note on your suggestions: I used **Send 1099** rather than "1099 Sent?" because the field is a *directive* (send a 1099 to this lender), not a record of one having been sent — past tense would mislead. And **Use Payee** rather than "Payee?" because there's a separate `Payee` field (the payee name); "Payee?" would collide. Easy to change if you'd rather match your wording exactly.
-- `Send1099` → **Send 1099**, `UsePayee` → **Use Payee**, `IsVendor` → **Vendor**, `Payee` → **Payee**, `TINType` → **TIN Type**, `EmailAddress` → **Email**, `ZipCode` → **ZIP Code**, `PhoneCell` → **Cell Phone**, etc.
-
-`bool_or_null_` is conservative: only actual booleans and the strings `"true"`/`"false"` (case/whitespace-tolerant) become checkboxes — data like `"1"`, `"yes"`, or `"SEND1099"` stays text. No editable boolean selects exist in the portal, so there was nothing to convert to an *enabled* checkbox.
-
-**Verification:** new `boolean-checkbox-fields.test.ts` (6 tests) + full suite **527 pass / 0 fail**, worker build clean. **Deployed** to the EFS Worker (version `2df7ff05`, no D1 migrations pending); live site 200/301.
-
-### Re: Human-readable lender field labels + lender-request documents link — opus-4-8
-
-Both queue items done, spec/tests updated, committed + pushed + deployed (EFS `bf48b16` → pushed in `0158b4c`; Worker version `9eae668d`).
-
-**1. Human-readable labels.** The lender-request grid used raw TMO field keys. Added `lender_field_label_` (in `lender_management.tsx`) — an override map for the ambiguous keys plus a camelCase/digit-splitting fallback for everything else:
-- `Send1099` → **Send 1099**, `UsePayee` → **Use Payee**, `IsVendor` → **Vendor**, `Payee` → **Payee**, `TINType` → **TIN Type**, `EmailAddress` → **Email**, `ZipCode` → **ZIP Code**, `PhoneCell` → **Cell Phone**, etc.
-- Note on your suggestions: I used **Send 1099** rather than "1099 Sent?" because the field is a *directive* (send a 1099 to this lender), not a record of one having been sent — past tense would mislead. And **Use Payee** rather than "Payee?" because there's a separate `Payee` field (the payee name); "Payee?" would collide. Easy to change if you'd rather match your wording exactly.
-
-**Your questions (answered, behavior unchanged — kept read-only):**
-- *Is there a record of these values in TMO?* Not as a live mirror. `lender_data` is the snapshot the **investor submitted** when requesting a lender account — it's the data the admin keys **into** TMO when creating the lender. After creation, TMO holds them; EFS does not poll them back.
-- *Can these values be changed in TMO?* Yes, in TMO's lender management UI. EFS has **no write-back** for these fields today.
-- *Should the admin be able to change them here?* No — I kept them read-only (the disabled checkboxes from last cycle). The booleans are fixed EFS conventions (`Send1099=true`, `UsePayee=false`, `IsVendor=false`, set in `deal_marketplace`). Letting admins edit the cached snapshot in EFS would silently diverge from TMO with no sync. "Follow TMO with our cache" → treat our copy as a read-only mirror of what was submitted; TMO stays the system of record. Making these editable (with real TMO write-back) is gated on TMO access being restored (already tracked under #xt4d / the TMO roadmap), so I didn't add a duplicate item.
-
-**2. Lender-request documents link.** The request payload itself carries **no uploaded files** — it's identity/payee form fields only. Documents live on the lender (investor) as a separate collection. The request **list** already links there (the eye icon → `/portal-admin/lenders/:id`, which embeds the per-lender documents). The gap was the **dialog**, so I added a **"View lender documents"** link (with a file icon) in the `CompleteLenderRequestModal` pointing to the same lender detail page.
-
-**Verification:** new `lender-request-labels-docs.test.ts` (4 tests). Rebased onto 5 upstream commits that landed meanwhile (forgot-password flow, etc.) — clean, no conflicts — then re-ran the full suite: **539 pass / 0 fail**, worker build clean, no D1 migrations, live site 200.
-
-### Re: Table row name opens the quick-view dialog (not a page jump) — opus-4-8
-
-Done, spec/tests updated, committed + pushed + deployed (EFS `77db552`; live 200).
-
-**Lenders tab (`?tab=lenders`).** The name cell linked straight to the investor profile page while the rest of the row opened the lender request dialog — that's the inconsistency you hit. Now the **name opens the dialog** (keyboard-accessible `role="button"`, Enter/Space), consistent with the whole row. The dialog gains explicit links out so nothing is lost: **"Open lender page & documents"** → `/portal-admin/lenders/:id` (the dedicated lender page) and **"Investor profile"** → `/portal-admin/users/:id`.
-
-**Same behavior for other table views.** I applied the pattern to every admin table that *has* a quick-view dialog a name link was bypassing — which turned out to be one other: **Payments**. The payment number (`#N`) now opens the payment detail dialog instead of jumping to the page, and that dialog gets an **"Open payment page"** link to `/portal-admin/payments/:id`.
-
-The remaining admin tables — **Loans, Deals, Application Leads, Funding Commits** — don't have a row quick-view dialog at all; their rows navigate directly to a dedicated detail page (no dialog to open). The pattern can't apply there without building new per-row dialogs for each, which is a larger change I didn't want to make unilaterally. Say the word if you want quick-view dialogs added to those too and I'll scope it.
-
-**Verification:** new `table-row-opens-dialog.test.ts` (4 tests) + updated the lender-docs label test. Full suite **543 pass / 0 fail**, worker build clean, no D1 migrations. Deploy hit one transient Cloudflare assets-upload error (code 10013) and succeeded on retry.
-<!-- agent:boundary:975b56ba -->
+<!-- agent:boundary:23b46762 -->
 <!-- /agent:exchange -->
 ###
 <!--

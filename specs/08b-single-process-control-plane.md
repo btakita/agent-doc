@@ -136,7 +136,10 @@ The document-write authority rung of this ladder is realized by the
 `AGENT_DOC_WRITE_AUTHORITY` environment gate, read on each write by
 `write_authority::current_gate` and applied at the single `write::atomic_write`
 chokepoint for editor-visible documents (`.agent-doc/` sidecar and snapshot
-writes are never routed):
+writes are never routed). Both same-process document writers reach that one
+chokepoint: the IPC/finalize/queue `write.rs::atomic_write` directly, and the
+direct-run `run.rs::atomic_write` by delegating to `write::atomic_write_pub`
+(`pcpc5d`). There is no parallel direct-disk writer that bypasses the gate.
 
 - `off` (default) — bare `atomic_write`, no observation, no routing. This is the
   unchanged shipped behavior and the rollback target for every later rung.
@@ -151,9 +154,15 @@ writes are never routed):
   at the root.
 - `authority` (`pcpc5c`) — same routing as `dual-write`; the ordered write queue
   is the sole in-process serializer (`flock` is only a foreign-process backstop).
-- `removed` (`pcpc5d`/`pcpc5e`) — reserved for deleting the out-of-process
-  supervisor direct-disk writers and demoting the editor plugin WatchService to
-  read-only buffer reporting. Those rungs additionally require live IntelliJ/VS
+- `removed` (`pcpc5d`/`pcpc5e`) — deleting the same-process direct-disk writers
+  and demoting the editor plugin WatchService to read-only buffer reporting.
+  `pcpc5d` deletes the surviving direct-run direct-disk writer by routing
+  `run.rs::atomic_write` through the shared gated chokepoint (above), so under
+  `dual-write`+ a direct-run write serializes through the ordered write queue
+  exactly like the finalize path — no direct-run write can bypass it. The
+  remaining `pcpc5e` rungs — retiring the out-of-process `agent-doc start`
+  supervisor in favor of the in-process adapter (`supervisor::in_process`) and
+  the WatchService read-only demotion — additionally require live IntelliJ/VS
   Code/Codex editor-boundary proof and stay in review `#xkpf`; at this
   write-routing layer `removed` behaves like `authority`.
 

@@ -1714,27 +1714,30 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
-/// Write content to a file atomically via write-to-temp + rename.
+/// Write content to a file atomically, routed through the `#pcpc5cut` 08b
+/// document write-authority gate ladder.
 ///
-/// This eliminates the partial-write window where another process (e.g., an
-/// editor or the watch daemon) could read a half-written file. The rename is
-/// atomic on POSIX filesystems when source and destination are on the same
-/// filesystem (guaranteed here since the temp file is a sibling).
+/// Delegates to [`crate::write::atomic_write_pub`] — the single gated chokepoint
+/// shared with the IPC/finalize `write.rs::atomic_write` path — rather than being
+/// a parallel direct-disk writer. The underlying raw write still uses
+/// write-to-temp + rename (atomic on POSIX when source and destination share a
+/// filesystem, guaranteed here since the temp file is a sibling).
+///
+/// `#pcpc5d` (08b removal rung): previously this wrote the visible `.md` straight
+/// to disk and only recorded provenance, so under `dual-write`/`authority`/
+/// `removed` a direct-run write still bypassed the session actor's ordered write
+/// queue — a *surviving direct-disk writer* the cutover must delete. After this
+/// change every same-process document writer flows through one gate:
+/// - `off` (default): bare atomic write + provenance — byte-identical to the
+///   prior behavior, so no response cycle persisting through this path changes;
+/// - `shadow`: raw write + would-route observation to `ops.log`;
+/// - `dual-write`/`authority`/`removed`: serialized through the ordered write
+///   queue, removing the in-process direct-run vs finalize interleave at the root.
+///
+/// Provenance (`#ipc-drift-writeprovenance`) is still recorded inside the shared
+/// raw writer (`write.rs::atomic_write_raw`) on both the raw and queued paths.
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    use std::io::Write;
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    tmp.write_all(content.as_bytes())
-        .with_context(|| "failed to write temp file")?;
-    tmp.persist(path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    // #ipc-drift-writeprovenance: the direct-run document-write path must tag the
-    // same write-provenance as `write.rs::atomic_write`, so a subsequent
-    // visible-write reconcile guard positively attributes this foreign-looking
-    // disk change to agent-doc instead of inferring from the mtime heuristic.
-    crate::write::record_document_write_provenance(path, content);
-    Ok(())
+    crate::write::atomic_write_pub(path, content)
 }
 
 #[cfg(test)]
@@ -2665,6 +2668,44 @@ old status\n\
         assert_eq!(prov.hash, crate::debounce::content_hash("direct run body"));
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
+    }
+
+    /// #pcpc5d (08b removal rung): the direct-run document-write path is no longer
+    /// a parallel direct-disk writer — under `dual-write`+ it routes through the
+    /// session actor's ordered write queue, the SAME chokepoint as the
+    /// IPC/finalize path. The routed write re-enters `atomic_write` on the owner
+    /// thread; the owner-scope re-entrancy guard keeps that inner write on the raw
+    /// path, so this must not deadlock, the content must land, and the routed
+    /// decision must be reported to `ops.log` (proving no surviving direct-disk
+    /// writer bypasses the queue at this gate).
+    #[test]
+    fn direct_run_atomic_write_routes_through_queue_under_authority() {
+        let _guard = crate::test_support::env_lock();
+        let key = crate::write_authority::ENV_VAR;
+        let prev = std::env::var(key).ok();
+        unsafe { std::env::set_var(key, "dual-write") };
+
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
+        let path = dir.path().join("routed-direct-run.md");
+        atomic_write(&path, "routed direct-run body").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "routed direct-run body"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc").join("logs").join("ops.log"))
+                .unwrap_or_default();
+        assert!(
+            ops.contains("write_authority gate=dual-write action=routed"),
+            "direct-run write under dual-write must route through the queue and \
+             report it to ops.log: {ops:?}"
+        );
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
     }
 
     #[test]

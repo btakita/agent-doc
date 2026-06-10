@@ -3716,48 +3716,18 @@ pub fn run_with_reap_policy(
         &resolved_model,
     );
 
-    // #pcpc5e1 / #dav9 — 08b supervisor-host cutover gate.
-    // `AGENT_DOC_SUPERVISOR=off` (default) is silent — the inline blocking
-    // `session.wait()` in the run loop below hosts the harness child exactly as
-    // before (zero change to shipped users). `shadow` still hosts out-of-process
-    // but reports the configured cutover target. `in-process` (authority rung)
-    // hosts the child through `supervisor::in_process::InProcessSupervisor`:
-    // `start.rs` keeps the PTY-output/prompt plumbing and the Unix-socket IPC
-    // boundary, but the run loop drives the adapter's tick loop for exit
-    // reaping / heartbeat / crash-policy instead of blocking on `session.wait()`.
-    let supervisor_mode = crate::supervisor_authority::current_mode();
-    let supervisor_hosts_in_process = supervisor_mode.hosts_in_process();
-    {
-        if !matches!(supervisor_mode, crate::supervisor_authority::SupervisorMode::Off) {
-            let hosting = if supervisor_hosts_in_process {
-                "in-process"
-            } else {
-                "out-of-process"
-            };
-            // `swap_pending` = the configured cutover target (in-process) is not
-            // yet the live host. True for `shadow`; false once `in-process` hosts.
-            let swap_pending = !supervisor_hosts_in_process;
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "supervisor_host_gate file={} mode={} hosting={} swap_pending={}",
-                    file.display(),
-                    supervisor_mode.as_str(),
-                    hosting,
-                    swap_pending
-                ),
-            );
-            log_event(
-                &mut session_log,
-                &format!(
-                    "supervisor_host_gate mode={} hosting={} swap_pending={}",
-                    supervisor_mode.as_str(),
-                    hosting,
-                    swap_pending
-                ),
-            );
-        }
-    }
+    // 08b supervisor-host end state (`#pcpc5e1` / `#dav9`, cutover complete):
+    // `agent-doc start` always hosts the harness child through
+    // `supervisor::in_process::InProcessSupervisor`. `start.rs` keeps the
+    // PTY-output/prompt plumbing and the Unix-socket IPC boundary; the run loop
+    // drives the adapter's tick loop for exit reaping / heartbeat / crash-policy.
+    // The old out-of-process `session.wait()` host path and the
+    // `AGENT_DOC_SUPERVISOR` rollback flag were removed at the removal rung.
+    crate::ops_log::log_op(
+        file,
+        &format!("supervisor_host_gate file={} hosting=in-process", file.display()),
+    );
+    log_event(&mut session_log, "supervisor_host_gate hosting=in-process");
 
     // --- Snapshot integrity validation ---
     // If file was moved (JB plugin respawn after rename), the old path hash
@@ -4190,16 +4160,16 @@ pub fn run_with_reap_policy(
 
         // Block until child exits.
         //
-        // Default (out-of-process host): block on `session.wait()` exactly as
-        // before. `#pcpc5e1` in-process authority rung: hand the child to the
-        // in-process supervisor adapter (`PtySession::take_child`) and drive its
-        // tick loop for non-blocking exit reaping + heartbeat + crash policy.
-        // `start.rs` keeps the reader/writer/resize/auto-trigger/idle-watch
-        // plumbing (set up above) and the Unix-socket IPC boundary; only *who
-        // reaps the child* moves into the adapter. The outer restart loop still
-        // owns respawn (it rebuilds the I/O plumbing per generation), so the
-        // adapter's factory is wired to refuse an in-adapter respawn.
-        let status = if supervisor_hosts_in_process {
+        // 08b end state: hand the child to the in-process supervisor adapter
+        // (`PtySession::take_child`) and drive its tick loop for non-blocking exit
+        // reaping + heartbeat + crash policy. `start.rs` keeps the
+        // reader/writer/resize/auto-trigger/idle-watch plumbing (set up above) and
+        // the Unix-socket IPC boundary; only *who reaps the child* lives in the
+        // adapter. The outer restart loop still owns respawn (it rebuilds the I/O
+        // plumbing per generation), so the adapter's factory refuses an in-adapter
+        // respawn. The old out-of-process `session.wait()` host path was removed
+        // at the removal rung.
+        let status = {
             let child_pid = session.process_id();
             let pty_child = PtySupervisedChild::monitor(
                 session
@@ -4256,10 +4226,6 @@ pub fn run_with_reap_policy(
                 ),
             );
             portable_pty::ExitStatus::with_exit_code(exit_code as u32)
-        } else {
-            session
-                .wait()
-                .with_context(|| format!("failed waiting on {}", harness.binary))?
         };
         first_run = false;
 

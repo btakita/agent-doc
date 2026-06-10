@@ -2670,21 +2670,16 @@ old status\n\
         assert!(!prov.write_id.is_empty());
     }
 
-    /// #pcpc5d (08b removal rung): the direct-run document-write path is no longer
-    /// a parallel direct-disk writer — under `dual-write`+ it routes through the
-    /// session actor's ordered write queue, the SAME chokepoint as the
-    /// IPC/finalize path. The routed write re-enters `atomic_write` on the owner
-    /// thread; the owner-scope re-entrancy guard keeps that inner write on the raw
-    /// path, so this must not deadlock, the content must land, and the routed
-    /// decision must be reported to `ops.log` (proving no surviving direct-disk
-    /// writer bypasses the queue at this gate).
+    /// 08b end state (removal rung complete): the direct-run document-write path
+    /// is no longer a parallel direct-disk writer — it routes through the session
+    /// actor's ordered write queue, the SAME chokepoint as the IPC/finalize path
+    /// (no flag). The routed write re-enters `atomic_write` on the owner thread;
+    /// the owner-scope re-entrancy guard keeps that inner write on the raw path,
+    /// so this must not deadlock, the content must land, and the routed decision
+    /// must be reported to `ops.log` (proving no surviving direct-disk writer
+    /// bypasses the queue).
     #[test]
-    fn direct_run_atomic_write_routes_through_queue_under_authority() {
-        let _guard = crate::test_support::env_lock();
-        let key = crate::write_authority::ENV_VAR;
-        let prev = std::env::var(key).ok();
-        unsafe { std::env::set_var(key, "dual-write") };
-
+    fn direct_run_atomic_write_routes_through_queue() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
         let path = dir.path().join("routed-direct-run.md");
@@ -2697,15 +2692,10 @@ old status\n\
             std::fs::read_to_string(dir.path().join(".agent-doc").join("logs").join("ops.log"))
                 .unwrap_or_default();
         assert!(
-            ops.contains("write_authority gate=dual-write action=routed"),
-            "direct-run write under dual-write must route through the queue and \
+            ops.contains("write_authority action=routed"),
+            "direct-run write must route through the queue and \
              report it to ops.log: {ops:?}"
         );
-
-        match prev {
-            Some(v) => unsafe { std::env::set_var(key, v) },
-            None => unsafe { std::env::remove_var(key) },
-        }
     }
 
     #[test]

@@ -6,6 +6,26 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **08b cutover COMPLETE — removed the out-of-process writers and flipped all three authority
+  defaults (removal rung).** This retires the gate ladders now that in-process hosting + ordered
+  write queue + plugin read-only are the only behavior; **there is no rollback flag.**
+  - **Write authority:** every editor-visible `.md` write routes through the session actor's single
+    ordered write queue unconditionally. Removed `AGENT_DOC_WRITE_AUTHORITY`, the `WriteAuthorityGate`
+    enum, `current_gate`, and the bare-`atomic_write` `off` bypass. `.agent-doc/` sidecar/snapshot
+    writes and owner-thread-reentrant writes still take the raw path. The process-wide session-actor
+    runtime lazily spawns a per-document owner thread on first write, so standalone `agent-doc write`
+    serializes correctly without a running `start` session.
+  - **Supervisor host:** `agent-doc start` always hosts the harness child through
+    `supervisor::in_process::InProcessSupervisor`. Removed `AGENT_DOC_SUPERVISOR`,
+    `supervisor_authority.rs`, and the out-of-process `session.wait()` host branch in `start.rs`. The
+    external Unix-socket IPC boundary (CLI/editor callers) is unchanged.
+  - **Plugin watch:** the JB plugin WatchService file-apply path is unconditionally read-only.
+    Removed `AGENT_DOC_PLUGIN_WATCH` and the `active` path; `agent_doc_plugin_watch_readonly` always
+    reports read-only (`watch_authority::plugin_watch_is_readonly`). The 0.2.159 plugin already calls
+    this export, so no plugin rebuild is required — the cdylib refresh (`lib-install`) flips it live.
+  - `make check` green; gate-flag unit/SimWorld tests rewritten to the unconditional end state.
+  - **BREAKING CHANGE:** removes the `AGENT_DOC_WRITE_AUTHORITY` / `AGENT_DOC_SUPERVISOR` /
+    `AGENT_DOC_PLUGIN_WATCH` rollback flags. Setting them now has no effect.
 - **Demote the JetBrains plugin WatchService to read-only buffer reporting (`#dsqa` / `#pcp7` —
   08b cut-over residual phase 2).** New `AGENT_DOC_PLUGIN_WATCH` rollback flag
   (`watch_authority.rs`, mirroring the `#dav9` / `AGENT_DOC_SUPERVISOR` ladder):

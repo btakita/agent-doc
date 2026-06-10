@@ -132,61 +132,44 @@ flag and must not lose committed controller rows. Behavior changes here must
 never be landed in the same cycle that persists a live session response through
 the write path being changed.
 
-The document-write authority rung of this ladder is realized by the
-`AGENT_DOC_WRITE_AUTHORITY` environment gate, read on each write by
-`write_authority::current_gate` and applied at the single `write::atomic_write`
-chokepoint for editor-visible documents (`.agent-doc/` sidecar and snapshot
-writes are never routed). Both same-process document writers reach that one
-chokepoint: the IPC/finalize/queue `write.rs::atomic_write` directly, and the
-direct-run `run.rs::atomic_write` by delegating to `write::atomic_write_pub`
-(`pcpc5d`). There is no parallel direct-disk writer that bypasses the gate.
+The document-write authority cutover is **complete**. It is applied at the
+single `write::atomic_write` chokepoint for editor-visible documents
+(`.agent-doc/` sidecar and snapshot writes are never routed). Both same-process
+document writers reach that one chokepoint: the IPC/finalize/queue
+`write.rs::atomic_write` directly, and the direct-run `run.rs::atomic_write` by
+delegating to `write::atomic_write_pub`. There is no parallel direct-disk writer
+that bypasses the queue.
 
-- `off` (default) — bare `atomic_write`, no observation, no routing. This is the
-  unchanged shipped behavior and the rollback target for every later rung.
-- `shadow` (`pcpc5a`) — the real write still runs through bare `atomic_write`;
-  after a successful editor-visible write the binary reports the would-route
-  decision (gate, content length, content hash) to `ops.log`, so an operator can
-  confirm the routing target before flipping authority. Observe-only.
-- `dual-write` (`pcpc5b`) — the real editor-visible write is routed through the
-  session actor's single ordered write queue
-  (`write_queue::serialized_atomic_write`). The cross-process advisory `flock`
-  remains a backstop. This removes the in-process supervisor/finalize interleave
-  at the root.
-- `authority` (`pcpc5c`) — same routing as `dual-write`; the ordered write queue
-  is the sole in-process serializer (`flock` is only a foreign-process backstop).
-- `removed` (`pcpc5d`/`pcpc5e`) — deleting the same-process direct-disk writers
-  and demoting the editor plugin WatchService to read-only buffer reporting.
-  `pcpc5d` deletes the surviving direct-run direct-disk writer by routing
-  `run.rs::atomic_write` through the shared gated chokepoint (above), so under
-  `dual-write`+ a direct-run write serializes through the ordered write queue
-  exactly like the finalize path — no direct-run write can bypass it. The
-  remaining `pcpc5e` rungs — retiring the out-of-process `agent-doc start`
-  supervisor in favor of the in-process adapter (`supervisor::in_process`) and
-  the WatchService read-only demotion — additionally require live IntelliJ/VS
-  Code/Codex editor-boundary proof and stay in review `#xkpf`; at this
-  write-routing layer `removed` behaves like `authority`.
+Every editor-visible document write now routes through the session actor's
+single ordered write queue (`write_queue::serialized_atomic_write`)
+unconditionally; a write already executing on the session-actor owner thread
+(`write_authority::within_owner_scope`) takes the raw path to avoid re-entering
+its own blocking mailbox. The cross-process advisory `flock` remains only a
+foreign-process backstop. This removes the in-process supervisor/finalize
+interleave at the root.
 
-The editor-plugin filesystem-watch demotion rung of this ladder is realized by
-the `AGENT_DOC_PLUGIN_WATCH` environment gate, read on each observed patch by
-`watch_authority::current_mode` and surfaced to the editor plugin through the
-`agent_doc_plugin_watch_readonly` FFI export. The flag lives in the binary (not
-the IDE process), so an operator opts in once on the `agent-doc` session and
-every plugin instance honors it via FFI rather than depending on the IDE's
-inherited environment.
+This shipped through the `AGENT_DOC_WRITE_AUTHORITY` rollback flag ladder
+(`off → shadow → dual-write → authority → removed`). At the removal rung the
+flag, the `WriteAuthorityGate` enum, and the bare-`atomic_write` `off` bypass
+were deleted, so routing is now unconditional — there is no rollback flag.
+The companion supervisor-host cutover (retiring the out-of-process `agent-doc
+start` host in favor of the in-process adapter `supervisor::in_process`, and the
+WatchService read-only demotion) is likewise complete; see the filesystem-watch
+authority note below.
 
-- `active` (default) — the plugin's autonomous NIO `WatchService` thread keeps
-  applying file-IPC patches it observes under `.agent-doc/patches/`. Unchanged
-  shipped behavior and the rollback target.
-- `read-only` (`#dsqa`/`#pcp7`) — the plugin `WatchService` file-apply path is
-  demoted to read-only buffer reporting: it no longer applies observed patches.
-  The single controller-owned watcher plus the socket IPC command channel (the
-  controller's writer arm into the editor) become the sole writer to the live
-  buffer, removing the second-watcher race that mutates the live buffer between
-  an agent finalize's preflight and commit. The export emits a structured
-  `plugin_watch_readonly` `ops.log` marker so the cut-over is log-verifiable. The
-  gate fails safe back to `active` on an unrecognized value so a typo can never
-  strand a live editor without an applier. This rung still requires live
-  IntelliJ/VS Code editor-boundary proof.
+The editor-plugin filesystem-watch demotion (`#dsqa`/`#pcp7`) is **complete**.
+It shipped through the `AGENT_DOC_PLUGIN_WATCH` rollback flag (`active →
+read-only`); at the removal rung the flag and the `active` (plugin-applies) path
+were removed, so the plugin's autonomous NIO `WatchService` file-apply path is
+**unconditionally** read-only. The plugin no longer applies file-IPC patches it
+observes under `.agent-doc/patches/`; the single controller-owned watcher plus
+the socket IPC command channel (the controller's writer arm into the editor) are
+the sole writer to the live buffer, removing the second-watcher race that
+mutated the live buffer between an agent finalize's preflight and commit. The
+plugin reads this end state through the `agent_doc_plugin_watch_readonly` FFI
+export (`watch_authority::plugin_watch_is_readonly`, always true), which emits a
+structured `plugin_watch_readonly` `ops.log` marker so the demotion is
+log-verifiable. The plugin's socket IPC apply path stays active.
 
 Routing a write through the queue re-enters `atomic_write` on the session-actor
 owner thread; the thread-local owner-scope re-entrancy guard

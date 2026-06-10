@@ -925,17 +925,11 @@ pub unsafe extern "C" fn agent_doc_patch_content_already_committed(
 
 /// Report whether the editor plugin's own `WatchService` file-apply path is
 /// demoted to read-only buffer reporting (`#dsqa` / `#pcp7` — 08b cut-over
-/// residual phase 2). Returns `1` when the plugin must NOT apply file-IPC
-/// patches it observes on disk (the controller-owned watcher + socket IPC are
-/// the sole writer), `0` when the plugin keeps today's apply behavior.
-///
-/// The flag (`AGENT_DOC_PLUGIN_WATCH`) lives in the binary, read fresh on every
-/// call via [`agent_doc_orchestration::watch_authority::current_mode`], so an
-/// operator sets it once on the `agent-doc` session and every plugin instance
-/// honors it through FFI instead of depending on the IDE's inherited
-/// environment. When read-only, this emits a structured `plugin_watch_readonly`
-/// marker to that document's `ops.log` so the cut-over can be verified from the
-/// logs (the `#q6js` / `#lvbremain` proof). `active` (default) is silent.
+/// complete). Always returns `1`: post-cutover the plugin must NOT apply
+/// file-IPC patches it observes on disk — the controller-owned watcher + socket
+/// IPC are the sole writer to the live buffer. Emits a structured
+/// `plugin_watch_readonly` marker to that document's `ops.log` so the demotion
+/// is verifiable from the logs (the `#q6js` / `#lvbremain` proof).
 ///
 /// # Safety
 ///
@@ -946,10 +940,10 @@ pub unsafe extern "C" fn agent_doc_plugin_watch_readonly(file_path: *const c_cha
         Ok(s) => s,
         Err(_) => return 0,
     };
-    if agent_doc_orchestration::watch_authority::current_mode().is_readonly() {
+    if agent_doc_orchestration::watch_authority::plugin_watch_is_readonly() {
         agent_doc_orchestration::ops_log::log_op(
             std::path::Path::new(file),
-            "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) gate=read-only #dsqa",
+            "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) #dsqa",
         );
         1
     } else {
@@ -2196,14 +2190,14 @@ mod ack_content_tests {
     }
 
     #[test]
-    fn plugin_watch_readonly_default_active_returns_zero() {
-        // Default (no AGENT_DOC_PLUGIN_WATCH) keeps the plugin applying file-IPC
-        // patches — read-only demotion is strictly opt-in (#dsqa rollback-safe).
-        unsafe { std::env::remove_var("AGENT_DOC_PLUGIN_WATCH") };
+    fn plugin_watch_readonly_always_demotes_post_cutover() {
+        // 08b cutover complete: the plugin WatchService file-apply path is
+        // unconditionally read-only — the controller-owned watcher + socket IPC
+        // are the sole writer (#dsqa / #pcp7).
         let tmp = TempDir::new().unwrap();
         let file = CString::new(tmp.path().join("plan.md").to_str().unwrap()).unwrap();
         let readonly = unsafe { agent_doc_plugin_watch_readonly(file.as_ptr()) };
-        assert_eq!(readonly, 0, "default must keep the plugin applier active");
+        assert_eq!(readonly, 1, "post-cutover the plugin must never apply file-IPC patches");
     }
 
     #[test]

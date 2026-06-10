@@ -314,8 +314,8 @@ pub fn heartbeat_lost(previous: u64, current: u64, min_advance: u64) -> bool {
 // neither a reaper thread nor a channel — `try_exit_code` calls `try_wait`
 // directly and caches the first exit. The owning `PtySession` keeps the master
 // (reader/writer/resize handles) so `start.rs` retains its PTY-output/prompt
-// plumbing while this adapter owns child lifecycle. Wired into `agent-doc start`
-// behind `AGENT_DOC_SUPERVISOR=in-process`.
+// plumbing while this adapter owns child lifecycle. This is the sole production
+// host for the harness child in `agent-doc start` (08b cutover complete).
 // ---------------------------------------------------------------------------
 
 use std::io::Write;

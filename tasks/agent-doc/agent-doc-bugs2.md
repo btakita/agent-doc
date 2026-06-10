@@ -35,10 +35,6 @@ complete
 Compacted content:
 - Archived 9 response topic(s): #optverify; #optverify; #lvbremain; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- **visible_write_live_buffer_matches_disk** — already `log_op`s (`write.rs`), unchanged.
-- **run_clear_coalesce (`#9adk`)** — this one was a **category error in the item**, not a missing emission. There is no `run_clear_coalesce` behavior in the binary: `#9adk` is the JetBrains-plugin `InvocationCoalescer` (Run/Clear dedup), whose marker goes to **idea.log** and is operator-verified via `#lvbatch`. There's nothing to wire in Rust; I dropped the false ops.log expectation rather than invent a phantom emission.
-- **early_ack_pending (`#saev`)** — `ipc_socket.rs` emitted `[ipc-socket] early-ack pending emitted before apply` to stderr; that hyphenated text never contained the `early_ack_pending` **token** the predicate scans for. Now it also `log_op`s a marker carrying the exact token (new testable `early_ack_ops_marker()`).
-- **cross-session-reject (`#4wxr`)** — `claim.rs` emitted the structured reject marker to **stderr only** (the plugin-branch channel). Now it also `log_op`s `[claim] cross-session-reject pane_id=.. pane_session=.. configured=..` to `ops.log` (threaded the doc path into `enforce_cross_session_claim`).
 
 ### Re: do #5b28 — fixed ops-proof same-cycle auto-completion — opus-4-8
 

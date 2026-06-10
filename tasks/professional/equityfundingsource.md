@@ -189,8 +189,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" -->
 - [#eyp0]
 - ~~[#b0wq]~~
-- enable email round trip
-- https://equityfundingsource.brian-takita.workers.dev/portal-admin/investor-pipeline Open Investor Profile should open another dialog on top with the investor form.
 - ~~[#6r8v]~~
 <!-- /agent:queue -->
 

@@ -36,14 +36,29 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 14 response topic(s): Deal Pipeline controls in the admin dialog (+ deploy); Wider/shorter Deal Pipeline dialog + mobile scroll; deploy; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:04d07d39 -->
+
+### Re: "Open Investor Profile" → full investor profile in the 2nd-level dialog — opus-4-8
+
+Done and deployed. The "Open investor profile" button on the admin Investor Pipeline card already opened a stacked 2nd-level dialog (`#b0wq`), but it only carried the **account + address** editor. It now shows the **entire investor profile**. Shipped EFS `b3e9ddd`, deployed (version `9652f4ab`).
+
+**What the 2nd-level dialog shows now** (investor role only):
+- **Account + Address** — the existing editable form (unchanged, still saves via `PUT /api/admin/users/:id`).
+- **Investor profile** (new section): **lender account**, **accreditation status**, **verification type**, **accreditation evidence on file**, **verified-on** / **renews-or-expires** dates, and **accreditation notes** — read from the existing `GET /api/admin/users/:id/investor-accreditation`.
+
+**Why those parts are read-only here:** the lender account is assigned through the lender-account request/approval flow, and accreditation has an Accredit/Reject decision workflow that already lives on the pipeline card (one level up, with reviewer + timestamp). Making them free-text fields in the generic profile form would bypass those flows, so the dialog surfaces them in full but routes edits to the right place (noted inline in the dialog).
+
+**Verification:** `bun test` **518 pass / 0 fail** (+1 new); `build` + `build:worker` clean. Deployed to `https://equityfundingsource.brian-takita.workers.dev` — root and the borrower payments-config endpoint both return 200. No new D1 migrations (this is UI + an existing read endpoint).
+
+This deploy also shipped the previously-pushed **admin-configurable payments + borrower reveal panel** (`c790ed3`) and the earlier `#eyp0`/`#emrt` work that was awaiting a deploy.
+<!-- agent:boundary:b993f72a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- "Open Investor Profile" button in https://equityfundingsource.brian-takita.workers.dev/portal-admin/investor-pipeline should open a 2nd level dialog with the entire investor profile form. deploy
 <!-- /agent:queue -->
 
 ## Backlog

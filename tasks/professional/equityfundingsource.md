@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -72,7 +72,25 @@ Done and deployed to production (EFS Worker, migration `0060` applied to remote 
 Lender documents are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender). The in-pipeline card *modal* (the pop-up when you click a lender card) doesn't yet show documents inline — I queued that as a recommended follow-up. Say the word if you want it surfaced there too.
 
 **Verification**: 520/520 tests pass · worker build clean · remote migration applied (none pending) · live site 200 · `/api/admin/deal-documents` returns 401 (admin-auth gated, route live).
-<!-- agent:boundary:f17e0959 -->
+
+### Re: do [#b0w3] — Surface lender documents inline in the card dialog — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#b0w3]
+
+
+Done. Lender documents are now reachable inline in the Lender Pipeline card dialog (`InvestorCardModal`), so admins manage a lender's docs without leaving the board.
+
+The semantic-completion warning flagged #b0w3 as possibly already done by #289x, but I verified the code: #289x shipped the **Documents tab** and **lender-page** docs surfaces — the card modal itself still had no documents section. So #b0w3 was genuinely distinct.
+
+**Change** (EFS `21e1802`):
+- Added a collapsible **Documents** toggle button to `InvestorCardModal`, beside *Open investor profile*.
+- When open, it renders `AdminLenderDocuments` in fixed-user embedded mode (`user_id={card.user_id}`, `lender_name={card.title}`) — the same per-lender list + upload the Documents tab and Lender detail page already use, now scoped to this card's lender.
+- Modal widens to `max-w-2xl` while docs are open; collapses back to `max-w-lg`.
+
+**Verification:** added `#b0w3` test to `admin-investor-pipeline.test.ts` (29 pass). Full suite green (521 pass, 0 fail); worker build succeeds.
+<!-- agent:boundary:2c738515 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,13 +98,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#b0w3]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#b0w3] [recommended] Surface Lender Documents inside the Lender Pipeline card dialog (InvestorCardModal) — currently lender docs are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender), but not inline in the pipeline card modal itself.
 - [ ] [#efspgo] [recommended] EFS online-payment go-live config (after Robert provides Stripe account): set Cloudflare secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + var STRIPE_PAYMENTS_ENABLED=true (wrangler secret put / wrangler.toml), point a Stripe webhook at /api/stripe/webhook, then in admin Platform Settings fill the borrower payment wire/ACH + lender ACH values and flip the per-method enable toggles. Deploy with bun run deploy:worker. Capability is BUILT + admin-configurable (EFS c790ed3); this is config + deploy only.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document

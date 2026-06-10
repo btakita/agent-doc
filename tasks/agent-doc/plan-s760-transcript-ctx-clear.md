@@ -17,6 +17,16 @@ existing default-off opt-in until live-verified.
 - Predicate plumbing (`ContextResetDecision.shouldClearBeforeDispatch`) exists;
   `SubmitAction.kt` is a thin dispatcher with no ctx% — per Shared Foundation the
   ctx% source belongs in `route.rs`, not the JB plugin.
+- **`#s760a` + `#s760b` shipped (`context_pct.rs`, 2026-06-09).** Pure
+  transcript-token ctx% source: `parse_claude_jsonl_used_tokens` /
+  `read_used_tokens` (Claude JSONL; Codex/OpenCode → `None`/unsupported),
+  `claude_transcript_path` locator, `context_window_for_model` (Claude family
+  200k; unknown → `None`), `context_pct` (clamped), `transcript_context_pct`.
+  Fails safe to `None` (never clear) on unknown model / missing transcript /
+  unsupported harness. 12 unit tests over fixtures. **Remaining: `#s760c`** (wire
+  `transcript_context_pct` into the `route.rs` dispatch gate, emit
+  `[s760] clear-decision …`) and **`#s760d`** (operator live-verify the
+  destructive `/clear`).
 
 ## Why not a TUI scrape
 

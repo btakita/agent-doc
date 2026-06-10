@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -65,13 +65,42 @@ Proof:
 - Commands: `tsift status`, `agent-doc --version`, `agent-doc preflight/plan/read`, `rg ... agent-doc`, `cargo tree -i tsift-agent-doc --workspace`, targeted source reads.
 - Verification: no tests run because this was an architecture assessment with no code changes.
 - Confidence: medium-high.
-<!-- agent:boundary:fa57b0e4 -->
+
+### Re: x5fw — gpt-5
+
+> **Queue prompt:**
+>
+> [#x5fw]
+
+
+Implemented and pushed `#x5fw` in the `src/tsift` submodule.
+
+What changed:
+- Added exported `tsift-agent-doc::session_markdown` helpers for agent-doc markdown/log recognition, session id extraction, backlog row parsing, and queue row parsing.
+- Updated `session-review`, traversal graph projection, and rewrite session-digest routing to consume those helpers instead of duplicating marker-level parsing in `tsift-cli`.
+- Updated `specs/architecture.md`, `specs/digests-sessions.md`, and `VERSIONS.md` to record the ownership boundary.
+
+Commit/push:
+- `src/tsift` commit `ea2a988` (`refactor: centralize agent-doc session parsing`) pushed to `origin/main`.
+- The superproject now shows the `src/tsift` submodule pointer advanced from `13c6069` to `ea2a988`; I did not stage unrelated superproject changes.
+
+Verification:
+- `cargo test -p tsift-agent-doc session_markdown -- --nocapture` passed.
+- `cargo test -p tsift-cli agent_doc -- --nocapture` passed.
+- `make check` passed: clippy, workspace tests, opencode tests, and npm pack dry-run.
+- `cargo install --path .` passed and installed `tsift 0.1.67`.
+- Latest pushed GitHub Actions CI run for `ea2a988` was `in_progress` at closeout, so local verification is the completion evidence for this turn.
+
+Preflight note: `agent-doc preflight` reported a stale installed `agent-doc` binary/cdylib for the superproject (`src/agent-doc`), which is unrelated to this tsift change.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:2bdf24d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#x5fw]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -80,7 +109,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#x5fw] [recommended] Move CLI-side agent-doc session markdown/backlog/queue parsing into typed helpers exported by `packages/tsift-agent-doc`, then update traversal/context-pack/rewrite to consume those helpers.
 <!-- /agent:backlog -->
 
 ## Review

@@ -42,6 +42,11 @@ Compacted content:
 
 Implemented and pushed.
 
+> **Queue prompt:**
+>
+> [#pcache-fixture-drift]
+
+
 Changes:
 - Added `prompt_cache_plan.analytics.prefix_drift` to `session-cost`, comparing adjacent prompt-cache calls by `stable_prefix_fingerprint`, cache key, explicit breakpoints, routing affinity, and provider.
 - Drift entries now report trigger/severity, first changed field, all changed fields, before/after cached-input ratios, and cache-creation ratio.
@@ -129,7 +134,43 @@ CI:
 Note: pushing the superproject pointer also published eight pre-existing local agent-doc commits that were already ahead of `origin/main`. The exchange is large, but the queue remains active, so I continued draining it.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:483b21d6 -->
+Implemented and pushed.
+
+Changes:
+- Extended `fixtures/real-session-prompt-cache-effectiveness.json` from 2 to 6 passing real-session-style cases.
+- Added required drift-mode coverage for volatile generated prefix headers, cold standalone compaction, OpenAI `prompt_cache_key` churn, and replica routing churn.
+- Added fixture schema fields for `required_regression_scenarios`, per-case `regression_scenarios`, `required_prefix_drift_fields`, and `required_diagnostics`.
+- `session-cost --fixture` now reports required/covered/missing scenario coverage and fails closed when required coverage disappears, even if individual token thresholds still pass.
+- Churn-specific cases can intentionally accept `prompt_cache_key_churn` / `routing_affinity_churn` adapter states, but still require the matching prefix-drift field and positive cache economics.
+- Compact and human fixture output now show scenario coverage; specs and version notes are updated.
+
+Verification:
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-agent-doc prompt_cache_effectiveness_fixture`
+- `cargo test -p tsift-cli --test exit_code session_cost_prompt_cache_fixture_passes_fail_under`
+- `cargo test -p tsift-cli --test exit_code session_cost_prompt_cache_fixture_fail_under_rejects_missing_adapter_evidence`
+- `cargo test -p tsift-cli --test exit_code session_cost_reports_prompt_cache_invalidation_diagnostics`
+- `cargo run -p tsift-cli -- session-cost --fixture fixtures/real-session-prompt-cache-effectiveness.json --json`
+- `cargo run -p tsift-cli -- session-cost --fixture fixtures/real-session-prompt-cache-effectiveness.json --compact`
+- `git diff --check`
+- `make check`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.67`
+
+Commits pushed:
+- `btakita/tsift` `88a41d4` (`feat: extend prompt cache fixture drift coverage`)
+- `btakita/agent-loop` `c7720feef` (`chore: update tsift submodule`)
+
+CI:
+- `btakita/tsift` run `27250019494`: success.
+- `agent-loop` has no workflow named `CI`.
+
+Notes:
+- Pushing the superproject pointer also published pre-existing local agent-doc commits that were already ahead of `origin/main`.
+- Broad `cargo fmt --check` is not a clean verification target right now because unrelated pre-existing files report rustfmt diffs; `make check` does not include that target. The exchange is large, but the queue remains active, so I continued draining it.
+
+<!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:feb0dd37 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -138,14 +179,13 @@ Note: pushing the superproject pointer also published eight pre-existing local a
 - ~~[#pcache-prefix-drift]~~
 - ~~[#contextpack-queue-slim]~~
 - ~~[#token-actions-rewrite]~~
-- [#pcache-fixture-drift]
+- ~~[#pcache-fixture-drift]~~
 - [#pcache-scorecard]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcache-fixture-drift] Extend real-session prompt-cache fixtures with regression cases for volatile timestamps/generated headers in cached prefixes, cold standalone compaction, OpenAI prompt_cache_key churn, and replica routing churn; fail under when cache reads no longer beat creation work.
 - [ ] [#pcache-scorecard] Add a compact prompt-cache ROI scorecard to session-cost/session-review: per provider/session show net cached-read tokens, read/create ratio, trend, suspected invalidation cause, and the one next command to run before the next long agent-doc cycle.
 <!-- /agent:backlog -->
 

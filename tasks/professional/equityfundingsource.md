@@ -225,7 +225,25 @@ Enabled, per `#spec-test-commit-push`. And a correction to what I said earlier: 
 2. **Sender is `info@briantakita.me`** until `info@equityfundingsource.com` is verified in Cloudflare Email (still tracked as `#f4rq`). Functionally fine; just not EFS-branded yet.
 
 Queue drained — that was the last item (`#eyp0` + `#emrt` both done; `#b0wq` done earlier).
-<!-- agent:boundary:1aac1fe1 -->
+
+### Re: #8tkq — showing wire-link instructions on the website "like a bank" — opus-4-8
+
+Short answer: **the bank-style reveal already exists** — what's missing is putting it *inside the logged-in portal* and scoping issuance per-loan. And there's one wire-fraud nuance worth nailing down first.
+
+**What's already shipped (#wir3):** the secure wiring-instructions delivery is already exactly the bank pattern. There's a public landing page at **`/w/:token`** where the wire values stay **hidden until the recipient clicks "Reveal wiring instructions"** (the values are never in the page HTML — they only come back from the reveal API call). Links are **single-use by default, expiring** (72h default, 14-day max), **revocable**, and every reveal shows the mandatory **"verify wiring with the title company directly"** anti-fraud (BEC) reminder. That's the same click-to-reveal model a bank uses for account/routing numbers.
+
+**What "on the website" would add — this is the open `#8tkq`:**
+1. **A logged-in borrower-portal panel.** Today the link is a standalone token you send out; the borrower portal's make-payment section just says "contact us for wiring instructions" — there's no in-portal reveal. A bank-style **authenticated** reveal panel (click-to-reveal, same expiry/anti-fraud reminder, scoped to the logged-in user's loan) is a clean build on top of the existing reveal endpoint.
+2. **Per-loan issuance.** Right now links are issued only from the global admin **Settings** card with the global wire values. `#8tkq` is about issuing them **bound to a specific loan/borrower** from the admin loan + wire-confirmation surfaces.
+
+**The nuance to decide first (wire fraud):** there are two different wires, with two different audiences —
+- the **funding** wire (title/escrow → EFS → lender) is for the **title company**, not the borrower;
+- the borrower's relevant wire is their **payment remittance / payoff**.
+
+So "show it on the website like a bank" means different things depending on who's logged in. For a **borrower** portal panel, that should be their **payment** wiring; the **funding** wiring stays admin/title-facing. Showing the wrong wire to the wrong party is exactly the BEC risk the reveal flow is built to reduce.
+
+**So:** yes, we can — and the secure plumbing is done. Tell me which surface you want (borrower-portal payment-wire panel? admin per-loan funding-wire issuance? both?) and I'll build it. I've refined `#8tkq` to capture both display surfaces + the audience split.
+<!-- agent:boundary:0ffdeb8a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -233,12 +251,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+- re [#8tkq], can we show the wire-link instructions on the website like a bank?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing: generate secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces (not just the global Settings card), and model the title/escrow -> EFS -> lender delivery routing. Builds on the #wir3 delivery mechanism.
+- [ ] [#8tkq] Loan/borrower-scoped wire-link issuance + routing (builds on the shipped #wir3 bank-style reveal at /w/:token). Two parts: (1) issue secure wire-links bound to a specific loan/borrower from the admin loan + wire-confirmation surfaces, not just the global Settings card; (2) surface them "on the website like a bank" — a logged-in borrower-portal reveal panel (authenticated, click-to-reveal, single-use/expiring, anti-BEC "verify with title" reminder), reusing the wire_link reveal endpoint gated on the borrower session + their loan. AUDIENCE NUANCE: the FUNDING wire (title/escrow -> EFS -> lender) is for the title company, NOT the borrower; the borrower-facing wire is their PAYMENT remittance/payoff. Decide which surface shows which wire before building.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

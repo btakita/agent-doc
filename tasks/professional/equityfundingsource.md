@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -200,8 +200,32 @@ Built, per `#spec-test-commit-push`. The Investor Pipeline card dialog now has a
 **Verification:** `bun test` **504 pass / 0 fail** (+2: the card control + endpoint guard); `build` + `build:worker` clean. Committed + pushed, pointer bumped. No deploy (say "deploy" to ship).
 
 Next in the queue: **`#emrt`** (enable the messaging email round-trip) — that one's config-only but blocked on `#f4rq` (Resend domain) + Robert's access, so I'll surface it rather than flip production secrets.
-<!-- agent:boundary:e19b2980 -->
-<!-- agent:boundary:0bbafc73 -->
+
+### Re: #emrt — enabled the borrower-messaging email round-trip — opus-4-8
+
+> **Queue prompt:**
+>
+> [#emrt]
+
+
+Enabled, per `#spec-test-commit-push`. And a correction to what I said earlier: this was **not** actually blocked on Resend / `#f4rq`.
+
+**What I found:** the borrower-messaging email goes through the **Cloudflare Email Sending API** — the exact same path and token (`CLOUDFLARE_EMAIL_API_TOKEN`, already a production secret) that the `/contact` form and application-lead notifications already use successfully. The `RESEND_API_KEY` in the code/PRD was never wired into the actual send path. So enabling was just two vars, not a new provider + domain.
+
+**Shipped (EFS `83c1875`, pointer `f4cdd3a58`):**
+- `wrangler.toml`: `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED = "true"` + `MESSAGE_NOTIFICATION_FROM = "Equity Funding Source <info@briantakita.me>"`. I set the From to the **already-verified** Cloudflare sender (`info@briantakita.me`, same as the contact form) — the code's default `info@equityfundingsource.com` is **not** verified in Cloudflare Email yet, so leaving it default would have failed delivery.
+- Now live on deploy: admin gets emailed when a borrower messages (#2), borrower gets emailed when an admin replies (#4). Each links into the respective portal thread.
+- Inbound email→chat (#3) stays **off** — that one genuinely needs new code (the `/api/email/inbound` scaffold returns 501).
+- Corrected the PRD line (it claimed Resend + "stay off until domain verified").
+
+**Verification:** `bun test` **506 pass / 0 fail** (added the prod-enablement assertion; also rebased onto a teammate's `#zjbe` investor-email change that landed mid-cycle); `build` + `build:worker` clean. Committed + pushed.
+
+**Two things to know:**
+1. **It goes live on the next deploy** — this cycle was commit+push only (no deploy per the preset). Say "deploy" to ship it.
+2. **Sender is `info@briantakita.me`** until `info@equityfundingsource.com` is verified in Cloudflare Email (still tracked as `#f4rq`). Functionally fine; just not EFS-branded yet.
+
+Queue drained — that was the last item (`#eyp0` + `#emrt` both done; `#b0wq` done earlier).
+<!-- agent:boundary:4219ad87 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -209,8 +233,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~[#eyp0]~~
-- [#emrt]
 <!-- /agent:queue -->
 
 ## Backlog

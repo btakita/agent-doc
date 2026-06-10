@@ -59,7 +59,20 @@ Per-item log proof (the line that proves/disproves it):
 1. **Attach a machine-readable proof predicate to the gate.** Reuse the existing typed-gate plumbing (`--pending-set-gate-type`): a gated item carries `verify=ops_log:<marker>` (proof) and optionally `disproof=ops_log:<marker>`. Example for `#exch-intermix-verify`: `verify=ops_log:live_prompt_drift_auto_recovered`, `disproof=ops_log:"looks like a manual cleanup"`.
 
 Next: with the queue active again, I'll drive these as actionable tasks, leading with the PCP (`#pcpc5live`) since it root-fixes the working-tree corruption that's been disrupting this very session. Cleaning the duplicate `#bkx9perid` entry as part of this.
-<!-- agent:boundary:18e19273 -->
+
+### Re: How can agent-doc support opportunistic gated review item verification? — opus-4-8
+
+Captured as `#optverify`. The idea: gated `[/]` items almost always have a **log marker** that proves or disproves them, so instead of a dedicated live-verify session, agent-doc opportunistically checks those markers during normal operation and resolves the gate when proof appears.
+
+1. **Machine-readable proof predicate on the gate** via the existing typed-gate plumbing (`--pending-set-gate-type`): `verify=ops_log:<marker>` (+ optional `disproof=ops_log:<marker>`). E.g. `#exch-intermix-verify` → `verify=ops_log:live_prompt_drift_auto_recovered`, `disproof=ops_log:"looks like a manual cleanup"`.
+2. **Scan opportunistically at preflight/closeout** (which already read `ops.log`/`session_log`): for each gated item, look for its proof marker emitted **after the gate timestamp**. Proof present + disproof absent → `optverify item=#X provable marker=<Y>` and offer `[/]→[x]`.
+3. **Disproof surfaces a bug, never silently passes**: `match=false` / `ack_timeout` / `false_success` → `optverify item=#X FAILED` for you to file.
+4. **No live session needed** — markers fire during *any* normal activity. `#exch-intermix-verify` already proved this: it self-verified from this session's own closeout markers.
+
+This generalizes your "no live-verify / adequate logging / I file bugs" model into the tool, and makes the per-item logging I'm adding to each backlog item double as the opportunistic proof source. Flag `do [#optverify]` and I'll write the plan + implement.
+
+Used `--force-disk` to bypass the IPC listener that's been corrupting this session's closeouts, and restored the actionable `#bkx9perid` entry that the earlier dedup over-removed.
+<!-- agent:boundary:271dad3b -->
 <!-- /agent:exchange -->
 
 ## Queue

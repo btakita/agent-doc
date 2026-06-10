@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -54,17 +54,12 @@ Compacted content:
 - Verification: this is a queue-state repair for an accidental recommendation promotion; no code tests run.
 - Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc admin inspect`, `agent-doc admin queue pause`, `agent-doc session-check` attempt, and queue/backlog behavior inspection.
 - Changed paths: session document state only; no `src/tsift` implementation/spec edits.
-<!-- agent:boundary:a1b4ac54 -->
+<!-- agent:boundary:542f7dd0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#hdrccr]
-- do [#hdrsmart]
-- do [#hdrcache]
-- do [#hdrlearn]
-- do [#hdrmcp]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

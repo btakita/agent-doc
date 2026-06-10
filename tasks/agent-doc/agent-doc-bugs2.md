@@ -52,13 +52,37 @@ None are genuinely complete, so I won't fabricate `--done`. The semantic-complet
 **Recommended next step:** open a FRESH focused session for the supervisor-in-process migration (the stated priority) starting at `#pcpc1` per `tasks/agent-doc/plan-supervisor-in-process.md`; `#pcpc5live` is its final cutover gate.
 
 **Heads-up (stale install):** preflight flagged `~/.cargo/bin` cdylib predating source commit `388ac300` — live tmux/JetBrains sessions may run pre-`388ac300` code at an unchanged version. Run `make install` in `src/agent-doc` when convenient to refresh the binary + cdylib.
-<!-- agent:boundary:61f45616 -->
+❯ do #pcpc5live. #spec-test-build-install-commit-push
+### Re: do #pcpc5live — pcpc5d shipped (direct-run writer routed); pcpc5e stays live-gated — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#pcpc5live]
+
+
+Forced the cutover as you directed, and dug into the actual code. The framing "delete the supervisor direct-disk writers" didn't match the source, so here's the ground truth plus what I actually shipped.
+
+**Ground truth from the code:**
+- The out-of-process supervisor (`supervisor/`) has **no `.md` writers** to delete — it owns the PTY/stdin/heartbeat, not document writes. The plan's own "current state" note confirms this.
+- The editor **WatchService read-only demotion is already done** (`#vbk7`/`#pcpc4b`, in the done archive).
+- The write-authority gate ladder was already complete through `removed`, with `removed` deliberately == `authority` at the write layer.
+
+**What I found and fixed (pcpc5d — real, shipped):** `run.rs::atomic_write` was a *surviving direct-disk writer* — it wrote the visible `.md` straight to disk and recorded provenance but **never consulted the write-authority gate**. So under `dual-write`/`authority`/`removed`, a direct-run document write still bypassed the session actor's ordered write queue. I routed it through the shared gated chokepoint (`write::atomic_write_pub`), so now every same-process document writer flows through one gate. At `off` (default) it's byte-identical — which is exactly why finalizing through this path this cycle is safe.
+
+- `run.rs`: `atomic_write` delegates to the gated chokepoint; provenance still recorded in the shared raw writer.
+- New SimWorld test `direct_run_atomic_write_routes_through_queue_under_authority` proves the routed decision lands in `ops.log` with no re-entrant-mailbox deadlock.
+- `specs/08b`: documents that both write paths reach the single chokepoint; pcpc5d deletes the surviving direct-run writer.
+
+**Verification:** `make check` green — 2609 orchestration lib tests pass, 0 failed. Binaries refreshed (`~/.cargo/bin/agent-doc`, `target/release` for the `.bin` symlink, cdylib via `lib-install`) — clears the stale-install warning. Submodule `6f588d45` pushed; superproject pointer bumped (`2f4a4faeb`).
+
+**Why one gate genuinely remains (pcpc5e):** the residual is retiring the out-of-process `agent-doc start` supervisor in favor of the in-process adapter (`supervisor::in_process`, already SimWorld-complete but its own contract gates the live `start.rs` cutover) + the WatchService demote, **proven in a live IntelliJ/Codex pane**. That editor-boundary proof can't be manufactured by an agent — it's your "I test, you check logs" step. I narrowed `#pcpc5live` to just that residual and gated it with the exact `ops.log` marker to look for. This is the one gate I couldn't dissolve without a live editor; everything code-side is done.
+<!-- agent:boundary:ccfd7463 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#pcpc5live]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- ~~:round_pushpin: do [#pcpc5live]~~
 - :round_pushpin: do [#lvbremain]
 - :round_pushpin: do [#s760wire]
 - :pushpin: [#optverify]
@@ -93,7 +117,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
-- [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
 - [ ] [#s760wire] Pre-emptive /clear gated on REAL transcript-token context-%. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md (phases #s760a locator+token reader, #s760b model→context-window table + pct, #s760c route-dispatch gate + '[s760] clear-decision' diagnostic + tracked /clear send, #s760d operator live-verify). Shipped infra: session_accretion::{queue_context_reset_opted_in (default OFF), clear_threshold_for_doc, queue_context_reset_reason*}. Remaining = the transcript-token ctx% SOURCE (no JB install). Gated: destructive /clear must be live-verified; harness-aware (Claude JSONL usage / Codex / OpenCode) + model context-window table is plan-worthy; run as a fresh focused session, NOT this degraded drain.
 <!-- /agent:backlog -->
@@ -101,6 +124,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#pcpc5live] pcpc5e RESIDUAL (live-gated, folds prior #xkpf): retire the out-of-process agent-doc start supervisor in favor of supervisor::in_process + demote editor WatchService to read-only, then prove the editor boundary in a live IntelliJ/Codex pane. pcpc5d SHIPPED 2026-06-09 (submodule 6f588d45): run.rs::atomic_write now routes through the shared write-authority gate chokepoint, deleting the surviving direct-run direct-disk writer. To verify: drive a live pane with AGENT_DOC_WRITE_AUTHORITY=dual-write set and check ops.log for write_authority gate=dual-write action=routed on a direct-run write. Plan: tasks/agent-doc/plan-supervisor-in-process.md.
 - [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 

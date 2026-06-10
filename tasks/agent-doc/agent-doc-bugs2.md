@@ -266,7 +266,27 @@ Heard. I'll own the churn — you've watched me hit drift over and over and I'm 
 3. You flip the flag + drive one edit-during-finalize cycle. I watch ops.log: demotion correct → `visible_write_live_buffer_matches_disk` fires, `#q6js` zero-drift goes green, `#lvbremain` closes — **all three at once.** Wrong → flip the flag off, zero harm.
 
 That's not another "fresh pane" deflection — it's the only path where I can *prove* I'm not silently eating your writes. Drive `#ktw8` whenever (it's independent). I'm not auto-looping this broken session.
-<!-- agent:boundary:8c27c484 -->
+
+### Re: push — opus-4-8
+
+> **Queue prompt:**
+>
+> push
+
+
+Pushed. The committed 08b-cutover work and its superproject pointer are now on `origin/main`:
+
+- **agent-doc submodule**: `09862d61..79d46c0b` → `origin/main` — the removal rung `79d46c0b` (out-of-process writers deleted, all three rollback flags gone; in-process hosting + ordered write queue + plugin read-only are now the only behavior) plus the dsqa WatchService read-only demotion `616ef21f`.
+- **agent-loop superproject**: `115538c59..0988792ee` → `origin/main` (32 commits, including the submodule pointer for the cutover).
+
+That `push` is the only active queue item I can close this cycle. The other three are operator-drive — I can't agent-complete them and I'm not auto-looping:
+
+- **#q6js** — code is live on origin; the only remaining work is your live zero-drift proof. Restart a session, drive one edit-during-finalize cycle, and I read ops.log for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` with zero drift lines.
+- **#ktw8** — destructive `/clear` drive on a throwaway doc with `agent_doc_queue_context_reset: true`; I check ops.log for the structured `[s760] clear-decision` marker.
+- **#lvbremain** — the last two markers (`#saev` early-ack + `visible_write_live_buffer_matches_disk`) need a live socket-IPC drive.
+
+Code's shipped to origin. The rest is yours to drive; I'll check the logs.
+<!-- agent:boundary:8ced1d82 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -280,6 +300,7 @@ That's not another "fresh pane" deflection — it's the only path where I can *p
 - ~~:pushpin: [#lvbremain]. force run~~
 - ~~[#dsqa]~~
 - ~~Just finish the items. I don't care if they are "destructive". Complete the work. This in between state while running agent-doc is confusing. I'll just restart after you finish. Implement and install everything.~~
+- ~~push~~
 - [#q6js]
 - [#ktw8]
 - ~~[#lvbremain]~~
@@ -313,8 +334,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [x] [#dsqa] pcpc5e2 08b cut-over residual phase 2 — DONE + CUTOVER LANDED. JB plugin WatchService demoted to read-only buffer reporting (pcp7/vbk7). Shipped flag-gated at submodule 616ef21f (JB 0.2.159), then made UNCONDITIONAL at the removal rung (submodule 79d46c0b): `AGENT_DOC_PLUGIN_WATCH` flag removed, `agent_doc_plugin_watch_readonly` always reports read-only, controller-owned watcher + socket IPC are the sole writer. cdylib refreshed via `lib-install`. The 0.2.159 plugin already calls the export so no plugin rebuild is needed.
-- [~] [#q6js] pcpc5e3 08b cut-over — CODE LANDED (removal rung, submodule 79d46c0b): the three authority defaults were flipped and the out-of-process supervisor host branch + bare-write bypass + all three rollback flags were DELETED (in-process hosting + ordered write queue + plugin read-only are now the only behavior). REMAINING = operator live zero-drift proof only (agent cannot drive a live editor): restart a session, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Plan: tasks/agent-doc/plan-supervisor-in-process.md
+- [ ] [#g0qb] [~] [#q6js] pcpc5e3 08b cut-over — CODE LANDED (removal rung, submodule 79d46c0b): the three authority defaults were flipped and the out-of-process supervisor host branch + bare-write bypass + all three rollback flags were DELETED (in-process hosting + ordered write queue + plugin read-only are now the only behavior). REMAINING = operator live zero-drift proof only (agent cannot drive a live editor): restart a session, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked on the gate-verify prose false-positive bug. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->

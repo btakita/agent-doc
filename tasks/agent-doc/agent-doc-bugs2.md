@@ -148,7 +148,24 @@ Fixed and shipped (submodule `9fd09ac0`, superproject `0016bad24`).
 **Deterministic coverage.** Live tmux pane mechanics aren't offline-assertable (the sync tests are all `IsolatedTmux`/`#[ignore]`), so the ordering is pinned in the SimWorld `SyncProjection`: `focus_doc_move_before_select` models move-then-select, and a new structural invariant rejects an `active` pane that is still in `stashed` (the flash bug). Negative control included; wired into the fast + medium seed corpus.
 
 **Verified:** `make check` green (clippy clean, medium corpus + full suite, exit 0); `cargo build --release` + `cargo install` + `agent-doc lib-install` (FFI-reachable sync path → live JB plugin picks up the fix). This was a pure-code fix needing no live verification, so it's `--done`, not gated.
-<!-- agent:boundary:6d807e12 -->
+
+### Re: do [#exch-intermix-verify] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#exch-intermix-verify]
+
+
+Done — verified live, by this session's own closeouts. The `#exch-intermix` auto-recovery reproduced naturally here (no synthetic repro needed), satisfying all three of the item's conditions:
+
+1. **A closeout hit `live_prompt_drift_after_preflight`** — the `#xdotool-lvbatch` finalize logged `[write] IPC proof insufficient ... invariant=live_prompt_drift_after_preflight` (IPC listener active, snapshot bytes > visible file).
+2. **`agent-doc commit` landed the response with no "manual cleanup" wedge** — `[commit] auto-recovered live_prompt_drift wedge ... wrote adopted snapshot (12185 bytes) to disk so the response lands instead of failing closed as a manual cleanup`. `session-check` confirmed the cycle `committed` and the `### Re:` response was present at HEAD.
+3. **ops.log shows `live_prompt_drift_auto_recovered`** — `[1781050557] live_prompt_drift_auto_recovered file=.../agent-doc-bugs2.md snap_len=12185` (matches the 12185-byte adopted snapshot above), with the paired `flow_event ... stage=ipc_snapshot_adoption outcome=completed`.
+
+It reproduced again on the `#saevon` and `#bkx9perid` closeouts (`disk_missing_response_probe` → CRDT-merge recovery), each landing correctly at HEAD. The `723b998c` / 0.34.0 auto-recovery is doing exactly what it should: drift wedges adopt the `content_ours` snapshot and commit instead of failing closed.
+
+One caveat worth separating: the auto-recovery reliably saves the **commit/HEAD**, but in several of these same cycles the post-commit IPC listener then corrupted the **working tree** (recovered via `git checkout HEAD`) — that's the distinct, still-open `#postcommit-ipc-worktree-corruption`, not this item.
+<!-- agent:boundary:6f78fb6f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -161,7 +178,7 @@ Fixed and shipped (submodule `9fd09ac0`, superproject `0016bad24`).
 - ~~:pushpin: :round_pushpin: do [#saevon]~~
 - ~~:round_pushpin: do [#bkx9perid]~~
 - ~~:round_pushpin: do [#tmux-switch-lag]~~
-- :round_pushpin: do [#exch-intermix-verify]
+- ~~:round_pushpin: do [#exch-intermix-verify]~~
 - :round_pushpin: do [#postcommit-ipc-worktree-corruption]
 - ~~do [#dropqueue-consumed-falsecount]~~
 - ~~:round_pushpin: do [#lvbatch]~~
@@ -200,7 +217,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
 - [ ] [#postcommit-ipc-worktree-corruption] #agent-doc-bug After a clean finalize/commit (session-check OK, HEAD correct), the live IPC listener rewrites the WORKING TREE with a stale/spliced buffer: the latest ### Re: response is deleted from the visible file and its body bullets are spliced into an EARLIER ### Re: block, plus duplicate queue-prompt blockquotes appear. HEAD stays correct; the NEXT preflight misreads the corruption as user content_edit prompt_targets (user_intent_prompt_changes non-empty), risking a response built on a corrupted exchange. Repro: live IntelliJ/IPC-active session, finalize a response that consumes a queue do[#id]; git show HEAD is clean but the working tree drifts post-commit. Commit logs show "IPC reposition boundary signal sent" + "skipping working-tree boundary reposition - IPC listener active". Likely the post-commit boundary-reposition IPC signal or JB PatchWatcher re-applying a stale .agent-doc/patches entry at the wrong buffer offset. Same family as #adoc-queue-ipc-buffer-divergence / supervisor self-race; root fix is the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md). Files: write.rs commit reposition signal path; editors/jetbrains PatchWatcher; ffi.rs IPC listener. Add SimWorld coverage asserting working-tree == HEAD after a committed closeout.
-- [ ] [#exch-intermix-verify] [recommended] Live-verify the #exch-intermix auto-recovery in a real IPC-listener-active drift repro: drive a closeout that hits live_prompt_drift_after_preflight, confirm agent-doc commit lands the response (no 'manual cleanup' wedge) and the session-log/ops.log shows 'live_prompt_drift_auto_recovered'. Pairs with the #lvb-run operator batch. Submodule 723b998c, binary 0.34.0.
 - [ ] [#s760wire] Pre-emptive /clear: predicate ContextResetDecision.shouldClearBeforeDispatch + clear_threshold_for_doc + agent_doc_queue_context_reset opt-in ALL SHIPPED. Blocker = live context-usage % source. SubmitAction.kt is a thin dispatcher (no ctx%); per Shared Foundation it belongs in route.rs. Observed footers vary by harness+config (Claude custom statusline 'ctx:NN%', Codex 'Context NN% used') so TUI-scrape is wrong for the shipped product — derive ctx% from session transcript token usage / context window instead. Remaining (CLI-side, no JB install): add harness-aware transcript-based ctx% reader in route.rs, gate dispatch via shouldClearBeforeDispatch, emit '[s760] clear-decision optIn=.. threshold=.. pct=.. clear=..', send /clear when true; live-verify.
 - [ ] [#bkx9perid] Enable per-id response-loss detection at closeout. The dormant pure detector shipped (#z2jy, session_check.rs). Remaining actionable work, fresh NON-DEGRADED session: route captured cycles through a per-id directive_response_materialized check (fire only when a reaped do#id head has no ### Re: in content or any HEAD compact archive) WITHOUT false-positiving a cycle that answers do[#A]+do[#B] under one ### Re: heading; test against a real #ipc-crdt-response-drift repro before enabling at the closeout-governing guard. Spec: specs/07-closeout-commands.md #compact-reap-no-response-record. Absorbs review #bkx9/#compact-reap-no-response-record.
 - [ ] [#pcpc5live] OPERATOR-RUN 08b cutover. STEP 1 (shadow) + STEP 2 (dual-write) PROVEN 2026-06-09: ops.log has write_authority gate=shadow action=would-route AND gate=dual-write action=routed (event 1781047338). REMAINING: step 3 pcpc5d/e — delete out-of-process supervisor direct-disk writers + demote editor WatchService to read-only; needs live IntelliJ/Codex editor-boundary proof per spec 08b 131-133. This IS the supervisor-in-process migration (tasks/agent-doc/plan-supervisor-in-process.md, #pcpc1..#pcpc5); run as a fresh focused session.

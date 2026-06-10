@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -72,7 +72,7 @@ Done and deployed to production (EFS Worker, migration `0060` applied to remote 
 Lender documents are reachable from the Lender detail page and the Lender Pipeline → Documents tab (pick a lender). The in-pipeline card *modal* (the pop-up when you click a lender card) doesn't yet show documents inline — I queued that as a recommended follow-up. Say the word if you want it surfaced there too.
 
 **Verification**: 520/520 tests pass · worker build clean · remote migration applied (none pending) · live site 200 · `/api/admin/deal-documents` returns 401 (admin-auth gated, route live).
-<!-- agent:boundary:63d4e32b -->
+<!-- agent:boundary:f17e0959 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,6 +80,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#b0w3]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -75,7 +75,46 @@ This fix also unblocks the auto-proof half of #ktw8/#lvbremain: structured marke
 **Completing the full cut-over:** queued as three actionable, dependency-ordered phases at the top of the backlog — #pcpc5e1 (start.rs cut-over to the in-process supervisor behind a rollback flag; binary-side, SimWorld-provable), #pcpc5e2 (plugin WatchService read-only demotion; I will tell you exactly when to install the JB plugin update), #pcpc5e3 (operator-driven live proof on monsterrodholders.md, agent checks ops.log; then delete the out-of-process writer paths). No review gates — all three are actionable backlog items per your no-more-gates directive. Your own recorded scoping constraint (plan Safety section + prior session decision) is that this surgery runs in a FRESH focused session, not at the tail of a drain session — the items are queued so the next fresh /agent-doc session starts at #pcpc5e1 immediately.
 
 Also shipped mid-turn while closing the previous cycle: the #queue-user-edit-overwrite session-check guard no longer false-positives on a consumed struck/pinned queue head (submodule commit after 7320a875, both binaries + cdylib reinstalled, pushed, CI green for the first commit and in progress for the second).
-<!-- agent:boundary:e0207cc4 -->
+### Re: #ktw8 — destructive /clear live-verify (operator-drive log check) — opus-4-8
+
+> **Queue prompt:** :round_pushpin: [#ktw8]
+
+I can't fire a destructive `/clear` myself, so per the "you check the logs" split, here is the ops.log status. This item stays OPEN (pending, operator-drive) — not done, not gated.
+
+**Logging: adequate.** `start.rs:2178` emits the structured `[s760] clear-decision optIn=… threshold=… pct=… clear=…` line to ops.log via `ops_log::log_op` on every idle-queue-watch decision (gated on the `agent_doc_queue_context_reset` opt-in). The decision predicate is unit-tested in `context_pct.rs`. The prove/disprove signal exists.
+
+**ops.log: 0 genuine markers.** A scan of this project's ops.log finds exactly one `[s760] clear-decision` substring, and it is prose — it sits inside a `queue_diff_active_prompt_differs … prompt_changes=["…"]` line (the backlog text describing this very item). That is the #gng8 false-positive class, correctly excludable. No structured emission has fired.
+
+**To drive it:** throwaway doc with `agent_doc_queue_context_reset: true`, drive the exchange past the clear threshold (default 50%) while idle with an active queue head. You should then see a structured `[s760] clear-decision optIn=true threshold=50 pct=… clear=true` line at the boundary, exactly one `/clear`, and no false fire below threshold. Ping me and I will confirm the line. Stays pinned/pending until then.
+
+### Re: #lvbremain — operator-drive live-verify residual (log check) — opus-4-8
+
+> **Queue prompt:** :round_pushpin: [#lvbremain]
+
+Two markers remain; both now have adequate ops.log logging after #x9ds. This item stays OPEN (pending, operator-drive).
+
+- **#saev early_ack_pending** — `ipc_socket.rs:460` now calls `ops_log::log_op(project_root, "[ipc-socket] early_ack_pending emitted before apply")` (was stderr-only with a mismatched token before #x9ds). Fires only when the inbound message carries `early_ack:true` (i.e. `EARLY_ACK_ENABLED`/#saevon flipped on) over a live socket-IPC drive. ops.log currently: 0 structured hits (the only `early_ack_pending` line is, again, prose inside a queue_diff).
+- **visible_write_live_buffer_matches_disk** — needs a live editor buffer==disk write; 0 in ops.log.
+
+Both await your live drive; I will check the structured lines once you have run them. (#4wxr cross-session-reject and #9adk run_clear_coalesce were already resolved/reclassified in #x9ds — nothing more to check there.)
+
+### Re: auto-pushpin manually-queued items — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#ktw8]
+
+
+> **Queue prompt:** If I manually place an item onto the queue, automatically place a `:pushpin:` so it doesn't unexpectedly get deprioritized.
+
+Filed as an actionable backlog item: when a user manually adds a queue line with no pushpin prefix, queue-sync should auto-prefix `:pushpin:` so the backlog→queue priority re-sync does not reorder it below `queue`-attr backlog items. Your `:round_pushpin: [#ktw8]` edit this cycle is exactly that case.
+
+### Not run here: #dav9 / #dsqa / #q6js (supervisor in-process cut-over)
+
+These three (pcpc5e1/2/3, the 08b cut-over) carry your own recorded constraint — repeated in the backlog text and the prior response — that they run in a **fresh focused session**, not at the tail of a drain. This session is flagged degraded (warn-level accretion: 2 no-op closeouts + 2 restart-heavy events in the last 30 min). I am deliberately **not** draining them or marking them done. Start a fresh `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` session and it will begin at #dav9/pcpc5e1.
+
+**Not auto-looping:** the rest of the queue is either operator-drive (can't self-complete) or fresh-session-gated, so continuing the go-mode drain here would only churn the same heads. Handing back to you.
+<!-- agent:boundary:b9089d48 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -83,10 +122,13 @@ Also shipped mid-turn while closing the previous cycle: the #queue-user-edit-ove
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: [#gng8]~~
 - ~~:pushpin: monsterrodholders.md is having "IPC-drift hiccups". Do they relate to the next items or something new? I want to complete the full cut-over because the in-between state is causing too much churn. Just do it. Let me know if I should restart.~~
-- :round_pushpin: [#ktw8]
+- ~~:round_pushpin: [#ktw8]~~
 - :round_pushpin: [#lvbremain]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - do [#8j86]
+- do [#dav9]
+- do [#dsqa]
+- do [#q6js]
 <!-- /agent:queue -->
 ###
 <!--
@@ -116,6 +158,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#7r2s] queue-sync auto-pushpin: when a user manually adds a queue line that has no pushpin/round_pushpin emoji prefix, queue-sync should auto-prefix a pushpin so the backlog->queue priority re-sync does not deprioritize the manual item below queue-attr backlog items. Repro 2026-06-10: operator manually added the #ktw8 queue line. Touch the queue sync/priority path in agent-doc-orchestration.
 - [ ] [#dav9] pcpc5e1 08b cut-over residual phase 1 (binary-side, SimWorld-provable): cut agent-doc start over to the in-process supervisor adapter. supervisor::in_process (pcpc2) is fully built + SimWorld-tested but start.rs has ZERO call sites — the out-of-process supervisor is still the live writer. Host the harness child PTY/stdin/restart/heartbeat as a controller-managed task behind a rollback flag (e.g. AGENT_DOC_SUPERVISOR=in-process, default off, same ladder pattern as AGENT_DOC_WRITE_AUTHORITY), preserve the Unix-socket IPC boundary for CLI/editor callers. SimWorld + CLI integration proof. Run in a FRESH focused session (operator-scoped constraint; plan Safety section). Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#dsqa] pcpc5e2 08b cut-over residual phase 2 (plugin-side, depends on pcpc5e1): demote JB plugin WatchService to read-only buffer reporting (pcp7/vbk7) so the single controller-owned watcher is the only event source. Kotlin change: bump pluginVersion, build signed+unsigned zips, then tell the operator to install the JB plugin update. Plan: tasks/agent-doc/plan-supervisor-in-process.md
 - [ ] [#q6js] pcpc5e3 08b cut-over completion proof (operator drives, agent checks logs): restart live sessions with the in-process supervisor flag on, drive monsterrodholders.md through an edit-during-finalize cycle, agent verifies ops.log shows serialized writes and ZERO ipc_socket_already_applied_live_buffer_diverged / live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale lines for that doc. Then flip the flag default and delete the out-of-process supervisor writer paths. Plan: tasks/agent-doc/plan-supervisor-in-process.md

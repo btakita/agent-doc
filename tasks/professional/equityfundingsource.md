@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,7 @@ EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af
 Compacted content:
 - Archived 14 response topic(s): Deal Pipeline controls in the admin dialog (+ deploy); Wider/shorter Deal Pipeline dialog + mobile scroll; deploy; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:5dc4439f -->
+<!-- agent:boundary:04d07d39 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +44,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#vd8s]. deploy
 <!-- /agent:queue -->
 
 ## Backlog

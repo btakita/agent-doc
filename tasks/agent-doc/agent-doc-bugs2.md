@@ -52,7 +52,23 @@ Landed the first, safe rung of the 08b supervisor-host cutover (submodule `98e6a
 **What this rung deliberately does NOT do:** re-point `start.rs`'s child run loop at `supervisor::in_process::InProcessSupervisor`. That adapter (`#pcpc2`, already SimWorld-tested) is the lifecycle *core* (`tick_at`/restart/heartbeat/reattach over `SupervisedChild`), not a drop-in for start.rs's 7300-line inline PTY-output/stdin/prompt-detection foreground loop — so the hosting swap is genuine careful work. I re-scoped `#dav9` to that remaining authority rung.
 
 **Not pushed** (manual-testing gate). I'm stopping here, not auto-looping into `#dsqa` (plugin-side, needs a live IntelliJ install) or `#q6js` (operator-drive live proof) — both need surfaces this session can't drive. The honest recommendation stands: the *hosting swap itself is what fixes the commit-race you keep hitting*, and it deserves the fresh focused session your constraint calls for.
-<!-- agent:boundary:014bb468 -->
+### Re: do [#dsqa] — pcpc5e2 plugin WatchService read-only demotion — opus-4-8
+
+> **Queue prompt:** :pushpin: [#dsqa]
+
+Not landing this in this session — and the reason is concrete, not a punt. I verified two things first.
+
+**1. The code is genuinely unbuilt (so this is NOT a duplicate of done #vbk7).** Preflight flagged a semantic match to #vbk7 (2.028), but #vbk7 only archived the *plan/scope* — the Kotlin change is not in the tree. `PatchWatcher.kt:277` still calls `FileSystems.getDefault().newWatchService()`, and the class header (lines 31–40) still describes it as an autonomous event source with "its own WatchService thread, its own FFI socket listener, and its own applied-" tracking. Plugin is still `0.2.158`. So #dsqa is real remaining work.
+
+**2. It cannot be landed in a normal agent-doc response cycle — two independent hard blocks:**
+
+- **Spec 08b prohibition.** `specs/08b-single-process-control-plane.md` forbids landing a write/watch-authority change "in the same cycle that persists a live session response through the write path being changed." Demoting the plugin WatchService *is* a watch-authority change, and this turn persists through exactly that path. Same constraint that hard-blocks the whole #pcpc5 cutover.
+- **Ordering safety vs. incomplete #dav9.** #dsqa depends on #dav9 (pcpc5e1), and only #dav9's **observe rung** landed (98e6ac0e — the `AGENT_DOC_SUPERVISOR` flag + gate logging). The controller is **not yet** the in-process single watcher. Demote the plugin watcher *before* the controller-owned watcher is hosting in-process and there is **no active watcher left** → it breaks live sessions, including this one.
+
+**What unblocks it:** the FRESH, non-saturated focused session the plan and spec 08b both call for — land #dav9's hosting swap (re-point `start.rs` `run_with_reap_policy` at `supervisor::in_process::InProcessSupervisor`) first, *then* the plugin demotion + `pluginVersion` bump + signed/unsigned zips + operator install. #dsqa stays open for that session; I'm not gating it (the blocker is "needs a different session," not "awaiting review").
+
+**Not auto-looping.** The rest of the queue — #q6js (operator-drive cutover proof), #ktw8 (operator-drive destructive `/clear`), #lvbremain (operator-drive live editor markers) — are all operator-driven live-verify items I can't agent-complete. Pushpins preserved; queue untouched. (Exchange is post-compaction and small — no compaction needed.)
+<!-- agent:boundary:9c7ce2a9 -->
 <!-- /agent:exchange -->
 
 ## Queue

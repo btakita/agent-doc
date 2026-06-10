@@ -76,14 +76,39 @@ Forced the cutover as you directed, and dug into the actual code. The framing "d
 **Verification:** `make check` green — 2609 orchestration lib tests pass, 0 failed. Binaries refreshed (`~/.cargo/bin/agent-doc`, `target/release` for the `.bin` symlink, cdylib via `lib-install`) — clears the stale-install warning. Submodule `6f588d45` pushed; superproject pointer bumped (`2f4a4faeb`).
 
 **Why one gate genuinely remains (pcpc5e):** the residual is retiring the out-of-process `agent-doc start` supervisor in favor of the in-process adapter (`supervisor::in_process`, already SimWorld-complete but its own contract gates the live `start.rs` cutover) + the WatchService demote, **proven in a live IntelliJ/Codex pane**. That editor-boundary proof can't be manufactured by an agent — it's your "I test, you check logs" step. I narrowed `#pcpc5live` to just that residual and gated it with the exact `ops.log` marker to look for. This is the one gate I couldn't dissolve without a live editor; everything code-side is done.
-<!-- agent:boundary:5455e089 -->
+
+### Re: do #lvbremain — agent half done (logs checked); review cleared; rest is operator-drive — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#lvbremain]
+
+
+Did the agent-actionable half of #lvbremain — checked the logs — and executed your standing instruction to clear the review gates. Here's the honest status.
+
+**Review is now CLEAR.** The only review item, `#saevon`, was a **stale gate**: it said "flip EARLY_ACK_ENABLED true," but `EARLY_ACK_ENABLED` is already `const = true` in `ipc_socket.rs`, shipped live in 0.34.0. The flip is done. I removed it from review and folded its one remaining piece — live confirmation that early-ack fires before apply with no false-success — into `#lvbremain` (4). No more gates.
+
+**#lvbremain log check (I checked, per "you check the logs"):** all four target markers have **zero real `ops.log` emissions** — they haven't been driven yet (the substring hits in prior scans were the marker *names* echoed inside logged document-diffs, not real events):
+- `#4wxr` cross-session-reject — 0
+- `#9adk` run/clear coalesce — 0
+- `visible_write_live_buffer_matches_disk` — 0
+- `#saev` early-ack pending — 0 (this one can't fire here: the socket-IPC path it lives on is being skipped because this saturated session keeps falling back to file-IPC; it needs a live JB-plugin socket session)
+
+**This item is yours to drive — re-invoking me won't advance it.** I've done everything the agent can; the markers only appear once *you* drive the live actions. The exact commands are now in the `#lvbremain` backlog text (claim from a 2nd pane; run-then-clear; a live buffer-matches-disk write; a live socket-IPC session for early-ack).
+
+**JB plugin: no install needed** — plugin 0.2.158 unchanged, binary 0.34.0 + cdylib current (rebuilt to HEAD last turn).
+
+**Bonus signal:** `write_authority gate=authority action=routed` *does* have real live emissions in ops.log — so the write-authority routing is exercised live at the `authority` gate, and after my pcpc5d the direct-run path now routes through it too. That's the closest live proof we have that the in-process write-queue cutover holds.
+
+**Halting the auto-loop** — the remaining queue (`#lvbremain` drive, `#s760wire` fresh session, `#optverify` feature) is operator-drive / fresh-session work, not unattended-drain work.
+<!-- agent:boundary:e38688dc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~:round_pushpin: do [#pcpc5live]~~
-- :round_pushpin: do [#lvbremain]
+- ~~:round_pushpin: do [#lvbremain]~~
 - :round_pushpin: do [#s760wire]
 - :pushpin: [#optverify]
 - ~~do [#reviewrm]~~
@@ -117,14 +142,13 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#optverify] [feature] Opportunistic gated-review verification: let agent-doc auto-prove/disprove gated [/] items from ops.log markers during normal preflight/closeout, no dedicated live-verify session. (1) Typed proof predicate on the gate via --pending-set-gate-type, e.g. verify=ops_log:live_prompt_drift_auto_recovered (proof) + disproof=ops_log:'looks like a manual cleanup'. (2) preflight (already reads ops.log/session_log) scans each gated item's marker since the gate timestamp; proof seen + disproof absent → surface 'review #X provable (marker Y @ t)' and offer [/]→[x]. (3) disproof seen → surface 'review #X FAILED: marker' for the operator to file a bug. (4) since markers fire during ANY session activity, items verify opportunistically as the tool is used. Implements operator's 'no live-verify / adequate logging / I file bugs' model. Plan-worthy; spec under specs/07-closeout-commands.md. Also: dedupe the stale duplicate #bkx9perid backlog entry when #bkx9perid is implemented.
-- [ ] [#lvbremain] #lvbatch remaining live markers NOT yet proven in ops.log (operator drives, agent checks logs). Drive via scripts/xdotool-live-verify.sh from a FRESH session: (1) #4wxr claim cross-session-reject — claim this doc from a 2nd tmux session/pane, expect the reject marker on the claim.rs/ClaimAction.kt path; (2) #9adk run/clear coalesced — drive a run then a clear, expect the coalesce marker in route.rs/sync.rs; (3) visible_write_live_buffer_matches_disk (write.rs) — 0 real emissions, needs a live write where the buffer already matches disk; (4) #saev early-ack — blocked on #saevon flipping EARLY_ACK_ENABLED first. ALREADY PROVEN in live ops.log: live_buffer_classify (10x), visible_write_deferred_current_changed (3x), live_prompt_drift_auto_recovered incl this session evt 1781050557 (#exch-intermix-verify / #ipc-crdt-response-drift closeout repro).
+- [ ] [#lvbremain] OPERATOR-DRIVE live verification (agent checks logs; absorbs ex-review #saevon early-ack). EARLY_ACK already flipped: EARLY_ACK_ENABLED=true in ipc_socket.rs, live in shipped 0.34.0 — code-side done, only live confirmation remains. Log status 2026-06-09: all 4 markers have ZERO real ops.log emissions, so none of these live actions have been driven yet. DRIVE from a fresh session (scripts/xdotool-live-verify.sh): (1) #4wxr cross-session-reject — claim this doc from a 2nd tmux pane, expect cross-session-reject marker (claim.rs/ClaimAction.kt); (2) #9adk run/clear coalesce — drive a run then a clear, expect run_clear_coalesce (route.rs/sync.rs); (3) visible_write_live_buffer_matches_disk — a live editor write where the buffer already matches disk (write.rs); (4) #saev early-ack — drive a live JB-plugin SOCKET-IPC session (not the file-IPC fallback this drain keeps hitting), expect early-ack pending emitted before apply with no false-success / false ack-timeout. No JB install needed (plugin 0.2.158 unchanged, binary+cdylib current). Plans: plan-supervisor-in-process.md / plan-ipc-transport-reliability.md.
 - [ ] [#s760wire] Pre-emptive /clear gated on REAL transcript-token context-%. Plan: tasks/agent-doc/plan-s760-transcript-ctx-clear.md (phases #s760a locator+token reader, #s760b model→context-window table + pct, #s760c route-dispatch gate + '[s760] clear-decision' diagnostic + tracked /clear send, #s760d operator live-verify). Shipped infra: session_accretion::{queue_context_reset_opted_in (default OFF), clear_threshold_for_doc, queue_context_reset_reason*}. Remaining = the transcript-token ctx% SOURCE (no JB install). Gated: destructive /clear must be live-verified; harness-aware (Claude JSONL usage / Codex / OpenCode) + model context-window table is plan-worthy; run as a fresh focused session, NOT this degraded drain.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#saevon] Activate early-ack: the protocol is landed + dormant (EARLY_ACK_ENABLED=false in ipc_socket.rs) and now logs "[ipc-socket] early-ack pending emitted before apply" on a successful emit. Remaining: flip EARLY_ACK_ENABLED true, run the live batch (#lvb-run) to confirm the pending ack fires before apply with no false-success / false ack-timeout, then ship. Plan: tasks/agent-doc/plan-ipc-transport-reliability.md. Absorbs review #ipc-early-ack + the early-ack half of #pcp5.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

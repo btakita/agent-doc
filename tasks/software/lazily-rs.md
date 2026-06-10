@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -64,7 +64,7 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
 
 **Top of backlog: `#lzinvmod`**
-<!-- agent:boundary:69d4aeda -->
+<!-- agent:boundary:ffca2bdc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +73,16 @@ Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation mo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
+- do [#r5an]
+- do [#ce90]
+- do [#dtmx]
+- do [#1xk0]
+- do [#qhn6]
+- do [#39xb]
+- do [#p2pc]
+- do [#6965]
+- do [#9evs]
+- do [#74c7]
 <!-- /agent:queue -->
 
 ## Backlog

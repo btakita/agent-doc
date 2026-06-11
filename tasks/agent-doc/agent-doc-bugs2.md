@@ -35,13 +35,31 @@ completed
 Compacted content:
 - Archived 5 response topic(s): do [#q6js]; monsterrodholders.md IPC drift; #ktw8; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0cbe7d38 -->
+
+### Re: do [#clearcodex] (spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#clearcodex]
+
+
+**Root cause.** The supervisor idle-queue watch (`start.rs`, `#s760c`) emits the canonical `[s760] clear-decision …` line to `ops.log` before a pre-emptive `/clear`, but the **Codex Stop-hook continuation** decided its `/clear` instruction with *no* observable marker — so an operator driving a Codex queue drain could never confirm or deny that a queue-turn boundary requested a reset. Compounding it: Codex transcript token reading is unsupported (`context_pct::read_used_tokens` → `None` for Codex), so the ctx% gate can never fire on its own.
+
+**Fix** (`codex_hook.rs`, submodule `2ddab5bd`, pushed to origin/main):
+- New `codex_continuation_clear_reason()` routes all four Codex continuation call sites through one decision point. When opted into `agent_doc_queue_context_reset`, it emits the canonical `[s760] clear-decision optIn=… threshold=… pct=none clear=false` line **plus** a `[clearcodex] codex-continuation optIn=true reason=… clear_instructed=…` companion recording the accretion/compaction reason that actually drives the `/clear`.
+- Stopped swallowing the reason-resolution error (was `.ok().flatten()`).
+- 2 new unit tests: proof present when opted-in + compaction; silent when not opted-in. Spec updated (`specs/07-core-commands.md` `#clearcodex`).
+
+**Verification:** `make check` clean (EXIT=0); `cargo install` + `cargo build --release` both done (new binary live). CI run `27316385221` in progress for this commit; prior run green.
+
+**Operator live-verify** (drives the remaining proof): in a Codex session with `agent_doc_queue_context_reset = true`, drain a queue past a compaction boundary, then `grep '\[clearcodex\]\|\[s760\] clear-decision' .agent-doc/logs/ops.log` — expect `[s760] clear-decision optIn=true … pct=none clear=false` and `[clearcodex] codex-continuation optIn=true … clear_instructed=true`.
+<!-- agent:boundary:2e518f64 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#clearcodex]
+- ~~[#clearcodex]~~
 - [#jbstalecache]
 - [#respdel]
 - [#mrhpcdrift]
@@ -85,7 +103,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#clearcodex] agent-doc-bug: `/clear` is not being called between active queue turns in Codex. Repro came from tasks/agent-doc/agent-doc-bugs2.md queue drain on 2026-06-10 after context-reset related work: operator reports queue turns continue without the expected Codex `/clear` boundary. Verify whether idle-queue continuation calls the Codex clear path when agent_doc_queue_context_reset is enabled and threshold is crossed; add a live/log proof for structured [s760] clear-decision and actual /clear dispatch.
 - [ ] [#jbstalecache] agent-doc-bug: JetBrains still shows `Stale File Cache` dialogs and operator typing can be lost during agent-doc closeout/live-buffer sync. Repro reported during tasks/agent-doc/agent-doc-bugs2.md recovery on 2026-06-10 while IPC/live-buffer drift was present. Root-cause JB plugin cache invalidation and socket ACK/live document adoption so editor-visible content, disk, snapshot, and user typing converge without stale-cache prompts or lost input.
 - [ ] [#respdel] agent-doc-bug: closeout can show a response as committed and then leave an uncommitted working-tree delete/rewrite of that same response. Live repro from tasks/agent-doc/agent-doc-bugs2.md on 2026-06-10: after the #blgmangle finalize/late sibling failure path, HEAD contained the committed response but the working tree showed an uncommitted deletion/rewrite of that response; the next preflight/session-check reported ipc_proof_insufficient with invariant=live_prompt_drift_after_preflight for cycle-1781137531085. Fix terminal closeout so late sibling/pre-write/IPC proof failures are atomic with the document write, or recover content_ours without deleting/requoting committed exchange content.
 - [ ] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.

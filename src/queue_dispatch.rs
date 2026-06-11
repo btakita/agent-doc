@@ -132,6 +132,35 @@ impl DispatchContext {
     }
 }
 
+fn sanitize_progress_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '%' | '=') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn item_fingerprint(item: &QueueItem) -> String {
+    format!(
+        "command={} bytes={} sha256={}",
+        sanitize_progress_field(item.command.as_deref().unwrap_or("prompt")),
+        item.raw.len(),
+        agent_doc_orchestration::ops_log::content_hash(&item.raw)
+    )
+}
+
+fn log_dispatch_progress(ctx: &DispatchContext, event: String) {
+    agent_doc_orchestration::ops_log::log_op(&ctx.file, &event);
+    if agent_doc_orchestration::input_diag::verbose_enabled() {
+        eprintln!("[queue_dispatch] {event}");
+    }
+}
+
 /// Dispatch a command item through the available paths.
 ///
 /// Returns `DispatchResult::ModelOverride` for `/model` commands so the caller
@@ -169,7 +198,14 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
                 .args
                 .first()
                 .ok_or_else(|| anyhow::anyhow!("/model requires a tier argument"))?;
-            eprintln!("[queue_dispatch] /model {} — updating local override", tier);
+            log_dispatch_progress(
+                ctx,
+                format!(
+                    "queue_dispatch_progress transport=inline_model tier={} {}",
+                    sanitize_progress_field(tier),
+                    item_fingerprint(item)
+                ),
+            );
             Ok(DispatchResult::ModelOverride(tier.clone()))
         }
         "compact" => {
@@ -179,9 +215,13 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
                 .first()
                 .map(|s| s.as_str())
                 .unwrap_or(&default_file);
-            eprintln!(
-                "[queue_dispatch] /compact {} — running subprocess",
-                file_arg
+            log_dispatch_progress(
+                ctx,
+                format!(
+                    "queue_dispatch_progress transport=inline_compact target={} {}",
+                    sanitize_progress_field(file_arg),
+                    item_fingerprint(item)
+                ),
             );
             let exe =
                 std::env::current_exe().context("failed to resolve current agent-doc binary")?;
@@ -201,9 +241,12 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
                 .status()
                 .context("failed to run agent-doc commit after compact")?;
             if !commit_status.success() {
-                eprintln!(
-                    "[queue_dispatch] warning: commit after compact exited with {}",
-                    commit_status.code().unwrap_or(-1)
+                log_dispatch_progress(
+                    ctx,
+                    format!(
+                        "queue_dispatch_warning transport=inline_compact phase=commit_after_compact status={}",
+                        commit_status.code().unwrap_or(-1)
+                    ),
                 );
             }
             Ok(DispatchResult::Ok)
@@ -227,9 +270,13 @@ fn try_supervisor_dispatch(
         return Ok(None);
     }
 
-    eprintln!(
-        "[queue_dispatch] dispatching `{}` via supervisor IPC",
-        item.raw
+    log_dispatch_progress(
+        ctx,
+        format!(
+            "queue_dispatch_progress transport=supervisor_ipc destination={} {}",
+            sanitize_progress_field(&format!("socket:{}", sock.display())),
+            item_fingerprint(item)
+        ),
     );
 
     // Use `inject` method to send the command text to the harness stdin.
@@ -263,9 +310,13 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         None => return Ok(None),
     };
 
-    eprintln!(
-        "[queue_dispatch] dispatching `{}` via tmux send-keys to pane {}",
-        item.raw, pane_id
+    log_dispatch_progress(
+        ctx,
+        format!(
+            "queue_dispatch_progress transport=tmux_send_keys destination={} {}",
+            sanitize_progress_field(&format!("pane:{pane_id}")),
+            item_fingerprint(item)
+        ),
     );
 
     let tmux = sessions::Tmux::default();
@@ -297,18 +348,24 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
                 .any(|line| line.contains(&item.raw));
 
             if !still_visible {
-                eprintln!(
-                    "[queue_dispatch] command accepted after single submit ({:.1}s)",
-                    start.elapsed().as_secs_f64()
+                log_dispatch_progress(
+                    ctx,
+                    format!(
+                        "queue_dispatch_progress transport=tmux_send_keys outcome=accepted elapsed_ms={}",
+                        start.elapsed().as_millis()
+                    ),
                 );
                 return Ok(Some(DispatchResult::Ok));
             }
         }
     }
 
-    eprintln!(
-        "[queue_dispatch] warning: command may not have been accepted after {:.1}s (single-submit path only)",
-        start.elapsed().as_secs_f64()
+    log_dispatch_progress(
+        ctx,
+        format!(
+            "queue_dispatch_warning transport=tmux_send_keys outcome=acceptance_unconfirmed elapsed_ms={}",
+            start.elapsed().as_millis()
+        ),
     );
     Ok(Some(DispatchResult::Ok))
 }
@@ -325,6 +382,38 @@ fn lookup_pane(_project_root: &Path, session_uuid: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn remove(key: &'static str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn classify_prompt_item() {
@@ -423,7 +512,14 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_supervisor_injects_command_with_normalized_submit_text() {
+    fn dispatch_supervisor_injects_command_and_logs_redacted_progress_without_foreground_diag() {
+        let _diag_guard = EnvGuard::remove("AGENT_DOC_TMUX_INPUT_DIAG");
+        let _stdin_guard = EnvGuard::remove("AGENT_DOC_DEBUG_STDIN");
+        assert!(
+            !agent_doc_orchestration::input_diag::verbose_enabled(),
+            "non-verbose queue dispatch must not mirror progress into the foreground TUI"
+        );
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("doc.md");
@@ -457,6 +553,25 @@ mod tests {
         assert_eq!(
             captured.lock().unwrap().as_slice(),
             &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear")]
+        );
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_dispatch_progress transport=supervisor_ipc"),
+            "{ops}"
+        );
+        assert!(ops.contains("command=clear bytes=6"), "{ops}");
+        assert!(
+            ops.contains(&agent_doc_orchestration::ops_log::content_hash("/clear")),
+            "{ops}"
+        );
+        assert!(
+            ops.contains("tmux_input_event source=queue_dispatch.supervisor_ipc"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("/clear"),
+            "ops progress must not contain raw queue command text:\n{ops}"
         );
 
         ipc.stop();

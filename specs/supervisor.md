@@ -129,6 +129,11 @@ The supervisor is a single process that:
   (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) so normal supervisor
   filtering cannot print diagnostics into the managed TUI while the operator is
   typing.
+- Queue-dispatch progress follows the same foreground-safety contract. Dispatch
+  attempts record redacted `queue_dispatch_progress` / `queue_dispatch_warning`
+  events in `.agent-doc/logs/ops.log` with command byte counts and SHA-256, but
+  they must not mirror raw command text or progress lines into the foreground
+  OpenCode TUI unless verbose input diagnostics are explicitly enabled.
 
 ### Actor lifecycle reporting
 

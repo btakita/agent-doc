@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,12 +46,13 @@ Compacted content:
 
 
 Closeout recovery note for the already-visible queue responses. `#tsbugidx` and `#tsbugcache` are answered above, the backlog is empty, and no new actionable items are being added.
-<!-- agent:boundary:4dbe22b2 -->
+<!-- agent:boundary:d34f350a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Can tsift compress logs more effectively?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

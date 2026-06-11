@@ -106,7 +106,7 @@ I checked the actual `monsterrodholders.md` runtime evidence instead of treating
 
 No source files changed and I did not run `make check`. Commands run included `agent_doc_preflight`/`plan`/`read`, targeted `rg` scans of root and `src/boost-client` ops logs, `agent-doc session status src/boost-client/tasks/monsterrodholders.md`, `agent_doc_session_check` for the monsterrodholders document, and focused git status/diff/log checks for `tasks/monsterrodholders.md`.
 
-### Re: monsterrodholders.md IPC drift — gpt-5 (HEAD)
+### Re: monsterrodholders.md IPC drift — gpt-5
 
 This is related to the `#q6js` / IPC-CRDT cut-over family, but it is not resolved by the code that already landed. The Monster Rod Holders local ops log has post-cutover drift evidence after in-process hosting was active.
 
@@ -146,7 +146,7 @@ I captured the new actionable reports as backlog items: `#clearcodex` for `/clea
 
 No source files changed in this recovery cycle. Verification was `agent-doc preflight`, `agent-doc repair --apply-recovery`, and `agent_doc_session_check` showing the unresolved prompt-tail condition before this closeout.
 <!-- no-queue-removal-guard -->
-<!-- agent:boundary:6ba776bb -->
+<!-- agent:boundary:6702fe31 -->
 <!-- /agent:exchange -->
 
 ## Queue

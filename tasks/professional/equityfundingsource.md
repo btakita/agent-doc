@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -85,51 +85,79 @@ I did not make source changes in this cycle. `gh run list --workflow CI --limit 
 
 > **Queue prompt:**
 >
-> In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
-
-
-> **Queue prompt:**
->
 > The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy
-
 
 Done, committed, pushed, and deployed (EFS `5af3c7d`; Worker version `675e2475-7351-4632-b17d-d9ce405cd532`).
 
 The admin Management sidebar badge for **Lender Pipeline** now counts active board items: one investor card per `users.role = 'investor'` row, matching what `/portal-admin/lender-pipeline` displays. It no longer shows `0` just because there are no pending lender requests or pending wires.
 
-Changed paths in `src/equityfundingsource-dev`:
-- `app/equityfundingsource/lib/admin/nav_counts/index.ts`
-- `tests/admin-investor-pipeline.test.ts`
-- `prds/investor-pipeline-admin.md`
-- `docs/current_progress.md`
-
 Verification:
 - `bun test tests/admin-investor-pipeline.test.ts tests/admin-dashboard.test.ts` — 50 pass / 0 fail.
-- `bun run check` before rebase — 543 pass / 0 fail, app build clean, worker build clean.
-- Remote moved with unrelated EFS commit `2dcb1ae` (`fix(tmo): keep loan cache diffs on detail payloads`), so I rebased and reran `bun run check` — 545 pass / 0 fail, app build clean, worker build clean.
+- `bun run check` after rebase — 545 pass / 0 fail, app build clean, worker build clean.
 - `bun run deploy:worker` — no D1 migrations to apply; Worker deployed successfully.
 - Live smoke: `/` returns HTTP 200; `/portal-admin/lender-pipeline` redirects to admin login with HTTP 303; `/api/admin/nav-counts` rejects unauthenticated access with HTTP 401.
 - GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
-- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
-- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
-- `bun run deploy:worker` — deployed; no D1 migrations to apply.
-- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
-- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
-- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
-- `bun run deploy:worker` — deployed; no D1 migrations to apply.
-- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
-- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
 
-CI note: `gh run list --workflow CI --limit 1` still cannot find a workflow named `CI`, and `gh workflow list` returns no configured workflows for this repo. The EFS repo is clean and synced with `origin/main`; unrelated dirty superproject files/submodule pointers were left untouched.
-<!-- agent:boundary:b36745a6 -->
+### Re: Lender Pipeline document modal stack — gpt-5
+
+> **Queue prompt:**
+>
+> In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
+
+Implemented and deployed.
+
+The lender document `View` action now opens an in-app stacked document preview modal instead of a new tab. The preview modal uses `PortalModal` with `z="z-[1200]"`, so it layers above the existing lender/card dialog; the existing topmost-only Escape stack closes only the document modal and leaves the lender dialog open. The modal previews the document inline and still offers a direct `Download` link.
+
+Backend support now lets the admin investor-document download route honor `?disposition=inline|attachment`, so preview and download behavior are explicit.
+
+EFS commit: `5c655ba` (`admin docs: stack lender document preview`), pushed to `origin/main`.
+Worker deploy: `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac`.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
+- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
+- `bun run deploy:worker` — deployed; no D1 migrations to apply.
+- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+
+### Re: Admin dashboard attention items — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> Add items that need attentention to the admin dashboard. Sort by priority/urgency.
+
+Implemented and pushed.
+
+The admin dashboard now has a `Needs attention` panel above the metric cards. The backend returns `attention_items` for nonzero operational work, sorted by explicit priority/urgency:
+
+1. Pending funding commits
+2. Open applications
+3. New application leads
+4. Open document requests
+5. Pending lender requests
+6. Recent uploads
+
+Each item carries `priority`, `urgency`, `count`, `detail`, and a filtered admin link. The UI renders the sorted list with urgency badges and count links.
+
+EFS commit: `e6310d1` (`admin dashboard: surface priority attention items`), pushed to `origin/main`.
+
+Verification:
+- `bun test tests/admin-dashboard.test.ts` — 23 pass / 0 fail.
+- `bun run check` — 549 pass / 0 fail, app build clean, worker build clean.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+
+This queue item used `#spec-test-commit-push`, so I did not deploy a new Worker.
+
+No new actionable follow-up items were found for the backlog.
+<!-- no-pending-capture -->
+<!-- agent:boundary:1b93d78a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- Add items that need attentention to the admin dashboard. Sort by priority/urgency.
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

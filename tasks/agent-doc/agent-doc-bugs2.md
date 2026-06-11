@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -174,12 +174,14 @@ Heads-up on what the binary did and how I corrected it:
 - The `priority go` queue auto-pulled **#mrhpcdrift2** (a fresh-focused-session task) as the next head. I kept it open with a do-not-auto-drain note and **I'm not auto-looping**. Halt the queue (drop `go`) or run #mrhpcdrift2 in a fresh session when you're ready.
 
 Note: this doc's supervisor is rewriting the working tree on every commit (`postcommit_worktree_check match=false`); I recover via `git checkout HEAD` each cycle, but a fresh session for this doc is advisable.
-<!-- agent:boundary:5771898f -->
+<!-- agent:boundary:b17a149b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#opsproofgate]
+- [#mrhpcdrift2]
 <!-- /agent:queue -->
 ###
 <!--
@@ -217,7 +219,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority --> 
+<!-- agent:backlog priority queue --> 
 - [ ] [#opsproofgate] agent-doc-bug: preflight review ops-proof auto-completion falsely completed a live-verify GATE (#ktw8) on evidence=commit — it treated a submodule/commit hash referenced in the gate text as proof and archived the UNDRIVEN item to done (auto_complete_ops_proof id=ktw8 surface=review evidence=commit, while ktw8 had 0 genuine structured [s760] clear-decision emissions). Fix: items tagged live-verify/operator-drive must be excluded from evidence=commit auto-completion; require the actual structured ops.log marker (anchored ^[epoch] line, NOT prose). Distinct from #zwn5 (queue-head strike disposition) and #x9ds (prose false-positive scan). Repro 2026-06-10 agent-doc-bugs2.md.
 - [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Plan tasks/agent-doc/plan-ipc-crdt-response-drift.md. (stays open: FRESH focused session ONLY — do NOT auto-drain here; the priority go queue auto-pulled this head into a degraded session where it should not run.)
 <!-- /agent:backlog -->

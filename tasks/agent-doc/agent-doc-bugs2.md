@@ -63,7 +63,13 @@ I repaired the live backlog invariant by restoring `#lvbremain` to `agent:backlo
 I repaired the document-state blocker. `#lvbremain` was already present in `tasks/agent-doc-bugs2.done.md`, so the live queue copy was a stale open mirror. I marked the queue-side copy complete; preflight then recognized it as already resolved from the done archive and drained the queue.
 
 No new implementation work was started in this recovery cycle. The document is back on the normal agent-doc closeout path.
-<!-- agent:boundary:cacb1595 -->
+
+### Re: IPC drift closeout — gpt-5
+
+The IPC drift root-cause fix is implemented, installed, committed, and pushed. The earlier detailed response in this exchange has the full path/verification list; the durable code commits are `src/agent-doc` `5a2beca4` and superproject pointer `6f6ac7bcb`.
+
+I also consumed the follow-up queue note about the continuation prompt being entered into Codex input but not submitted. That is not the same root cause as this IPC convergence fix, so I captured it as a new backlog item instead of silently folding it into this code change.
+<!-- agent:boundary:c0d8e5ef -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,6 +116,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#fhza] Investigate and fix Codex auto-queue continuation prompt insertion without submission: the continuation prompt was entered into the Codex input but required manual submit; capture route/Stop-hook logs, add regression coverage, and ensure active queue continuations are actually submitted from the owner pane.
 <!-- /agent:backlog -->
 
 ## Review

@@ -123,3 +123,18 @@
 - 2026-06-09 [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 - 2026-06-09 [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - 2026-06-09 [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
+- 2026-06-09 [#n994] #proto-extract=Extract wire protocol spec into standalone lazily-spec repo with language-agnostic schema (protobuf/flatbuffers/JSON Schema)
+- 2026-06-09 [#pz3k] #ffi-derive=Add cdylib crate type + build targets; consider safer-ffi or diplomat for auto-generated headers
+- 2026-06-09 [#9qce] #ipc-docs=Standalone protocol docs page (not inside SPEC.md) with examples per transport
+- 2026-06-09 [#kavj] #ipc-binary=Add optional binary serialization (bincode/postcard) alongside JSON for performance-critical paths
+- 2026-06-09 [#ms7x] #cross-lang-tests=Shared conformance test suite against the spec repo — run in CI for each binding
+- 2026-06-10 [#r5an] #lzinvmod=Refactor Slot invalidation model from destroy-and-recreate to dirty-state (fresh/dirty/unset) with lazy recomputation. This is the critical architectural blocker — memo guards, effects, and batching all depend on it.
+- 2026-06-10 [#ce90] #lznodevec=Refactor node storage from HashMap(usize, *Slot) to Vec(?Option(Node)) indexed by sequential SlotId with free-list reuse per spec.
+- 2026-06-10 [#dtmx] #lzmemo=Implement Memo (ctx.memo) with PartialEq guard — dirty recomputation producing equal value suppresses downstream invalidation.
+- 2026-06-10 [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.
+- 2026-06-10 [#qhn6] #lzbatch=Implement Batch system — nested batches, outermost-boundary flush, coalesced updates, deferred effect scheduling.
+- 2026-06-10 [#39xb] #lzcellguard=Add PartialEq change detection to Cell.set() — no-op on equal value per spec.
+- 2026-06-10 [#p2pc] #lzslotops=Add missing slot operations: clear(), is_set(), cell.clear_dependents(), computed alias.
+- 2026-06-10 [#6965] #lzthreadsafe=Implement ThreadSafeContext with per-slot read-mostly sidecars, in-flight dedup, optimistic reads, InvalidationPlan.
+- 2026-06-10 [#9evs] #lzasync=Implement AsyncContext — async computed/memo/effect, AsyncSlotNode state machine, cancellation.
+- 2026-06-10 [#74c7] #lzipc=Implement IPC layer — Snapshot, Delta, DeltaOp, IpcSink/Source, ShmBlobArena.

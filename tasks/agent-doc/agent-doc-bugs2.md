@@ -112,7 +112,44 @@ CI:
 - `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:23fde425 -->
+
+### Re: #opstdout
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#opstdout]
+
+
+Fixed the queue-dispatch progress path that could bleed in front of a foreground OpenCode TUI.
+
+Root cause: `src/queue_dispatch.rs` wrote dispatch progress directly with `eprintln!`, including raw queue command text, before sending through supervisor IPC or tmux. In a full-screen OpenCode pane that stderr/progress surface can interleave with the TUI instead of staying in durable diagnostics.
+
+What changed:
+- Replaced queue-dispatch progress `eprintln!` calls with redacted `queue_dispatch_progress` / `queue_dispatch_warning` ops-log events.
+- Kept optional foreground mirroring only behind the existing verbose input-diagnostic gate: `AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`.
+- Redacted queue command payloads to command name, byte count, and SHA-256 so proof stays durable without writing raw prompt/command text.
+- Added a supervisor-IPC regression proving non-verbose dispatch still logs redacted progress plus `tmux_input_event`, while the raw `/clear` command text does not appear in ops progress.
+- Updated `specs/supervisor.md` with the foreground-safety contract for queue-dispatch progress.
+
+Verification:
+- `cargo test dispatch_supervisor_injects_command_and_logs_redacted_progress_without_foreground_diag` passed.
+- `cargo test queue_dispatch::tests` passed.
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
+- `cargo fmt --check -- src/queue_dispatch.rs` passed.
+- `git diff --check -- src/queue_dispatch.rs specs/supervisor.md` passed.
+- `make check` passed: clippy, 4265 nextest tests, doctests, and the ignored medium closeout sim. Existing unrelated warnings remain in `agent-doc-core` for an unused test import and duplicated `#[test]` attributes.
+- `make install` passed and updated both `/home/brian/.cargo/bin/agent-doc` and `libagent_doc-0.34.0.so`.
+
+Commits pushed:
+- `btakita/agent-doc@f33c662c` (`fix: keep queue dispatch progress out of TUI`)
+- `btakita/agent-loop@2491f4f67` (`chore: update agent-doc submodule`)
+
+CI:
+- `btakita/agent-doc` CI run `27357648241` for `f33c662c` was `in_progress` at the last poll.
+- `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:f9e78ec4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -121,9 +158,9 @@ Escalation: none. Confidence: high.
 - ~~[#jblive160]~~
 - ~~[#queueeditloss]~~
 - ~~[#eqrecovery]~~
-- The response is still being comingled with previous responses. Please fix root cause(s).
-- [#opstdout]
-- [#fencestrip]
+- ~~:round_pushpin: [#opstdout]~~
+- :pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).
+- :round_pushpin: [#fencestrip]
 <!-- /agent:queue -->
 ###
 <!--
@@ -154,7 +191,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
-- [ ] [#opstdout] Fix console stdout bleeding in front of the OpenCode TUI; capture a regression that proves agent-doc progress output cannot corrupt the foreground TUI surface.
 - [ ] [#fencestrip] Reproduce and fix the code-fence stripping path so agent-doc preserves fenced blocks across finalize, compaction, IPC, and repair.
 <!-- /agent:backlog -->
 

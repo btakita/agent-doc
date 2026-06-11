@@ -178,7 +178,32 @@ This queue item used `#spec-test-commit-push`, so I did not deploy a new Worker.
 
 No new actionable follow-up items were found for the backlog.
 No new queue item was present. Preflight repaired and committed the recovered closeout, drained the leftover `deploy` queue token, and reported no remaining document changes.
-<!-- agent:boundary:7ca7d959 -->
+
+### Re: Needs attention across portal dashboards — gpt-5
+
+> **Queue prompt:**
+>
+> I don't see the "Needs attention" in the admin dashboard. Add "Needs attention" with the other funder/broker/borrower portal dashboards.
+
+Implemented, pushed, and deployed.
+
+The dashboard action panel is now consistent across the role portals:
+
+- Admin: the existing `attention_items` panel is a more visible `Needs attention` card above metrics, with a red left border and count badge.
+- Borrower: the dashboard now shows `Needs attention` above metrics when an application needs documents, linking to borrower documents.
+- Broker: the dashboard now shows `Needs attention` above metrics when deals are in docs-needed state, linking to the broker documents checklist.
+- Investor/funder: the old urgent `Action required` panel is now labeled `Needs attention`, still bubbling wire/document work above the deal pipeline.
+
+EFS commit: `7d0ce71` (`portal dashboards: add needs attention panels`), pushed to `origin/main`.
+Worker deploy: `789cfa3d-4dc8-404e-9628-00327159f4d6`.
+
+Verification:
+- `bun test tests/admin-dashboard.test.ts tests/investor-portal-e2e.test.ts tests/broker-portal.test.ts` — 88 pass / 0 fail.
+- `bun run check` — 550 pass / 0 fail, app build clean, worker build clean.
+- `bun run deploy:worker` — deployed; no D1 migrations to apply.
+- Worker smoke checks: `/` 200; `/portal-admin/dashboard`, `/portal-broker/dashboard`, `/portal-borrower/dashboard`, and `/portal-investor/dashboard` each 303 to the correct role login when unauthenticated.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+<!-- agent:boundary:61e99771 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,6 +211,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+- I don't see the "Needs attention" in the admin dashboard. Add "Needs attention" with the other funder/broker/borrower portal dashboards.
 <!-- /agent:queue -->
 
 ## Backlog

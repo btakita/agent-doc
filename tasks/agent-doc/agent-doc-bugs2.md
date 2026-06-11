@@ -44,13 +44,19 @@ agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent
 ### Re: document repair — gpt-5
 
 I repaired the live backlog invariant by restoring `#lvbremain` to `agent:backlog`. The item still also appears in `agent:queue`, so I am treating this as a document-state recovery step before executing the queued implementation work.
-<!-- agent:boundary:1c14e7cf -->
+
+### Re: queue mirror recovery — gpt-5
+
+I repaired the document-state blocker. `#lvbremain` was already present in `tasks/agent-doc-bugs2.done.md`, so the live queue copy was a stale open mirror. I marked the queue-side copy complete; preflight then recognized it as already resolved from the done archive and drained the queue.
+
+No new implementation work was started in this recovery cycle. The document is back on the normal agent-doc closeout path.
+<!-- agent:boundary:feb8ecc8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- [ ] [#lvbremain] Replace the visible_write_live_buffer_matches_disk live gate with actionable JB/live-buffer logging work: ensure the IntelliJ live-editor edit-during-finalize path emits a structured ^[epoch] visible_write_live_buffer_matches_disk marker with enough fields to distinguish buffer==disk from queue_diff prose, add/update regression coverage where possible, ship any JB plugin changes with version/install notes, and after the user tests, inspect ops.log and file/fix bugs from any missing or false marker.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [x] [#lvbremain] Replace the visible_write_live_buffer_matches_disk live gate with actionable JB/live-buffer logging work: ensure the IntelliJ live-editor edit-during-finalize path emits a structured ^[epoch] visible_write_live_buffer_matches_disk marker with enough fields to distinguish buffer==disk from queue_diff prose, add/update regression coverage where possible, ship any JB plugin changes with version/install notes, and after the user tests, inspect ops.log and file/fix bugs from any missing or false marker.
 <!-- /agent:queue -->
 ###
 <!--

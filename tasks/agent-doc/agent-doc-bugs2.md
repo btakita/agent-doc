@@ -101,13 +101,12 @@ Compacted content:
 **Unblocks when:** you open a fresh focused agent-doc session on the socket/IPC path (root-cause `ipc_socket_already_applied_live_buffer_diverged` + add SimWorld regression coverage), and drive one live monsterrodholders edit-during-finalize cycle for the recovery proof.
 
 I'm **halting the auto-drain here.** The remaining queue (`#ktw8`, `#lvbremain`) are operator-drive live-verify items I cannot agent-complete — drive them live and I'll check the logs, or halt the queue.
-<!-- agent:boundary:bbff8f6d -->
+<!-- agent:boundary:5c46b0b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#mrhpcdrift]~~
 --- stop
 - [#ktw8]
 - [#lvbremain]

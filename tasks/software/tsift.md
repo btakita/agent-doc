@@ -61,13 +61,40 @@ The bigger win is semantic compression, not byte compression. Today the weak spo
 I added three recommended backlog items for the implementation path: `#logfam`, `#logchunk`, and `#loggate`.
 
 Proof: changed paths are limited to the agent-doc session write; no tsift source code changed. Commands run: root/submodule `tsift status`, targeted `tsift` source/search reads for `log_digest`, `context_pack` log preview, versions, and digest specs. Verification: no test suite run because this was a planning/answer cycle only. Confidence: high. Escalation: none.
-<!-- agent:boundary:d986fc0a -->
+
+### Re: #logfam log compression P1 (semantic line families) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#logfam]
+
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):** update spec + tests. build + install for local testing. commit + push
+
+Done. `log-digest` now folds near-duplicate lines into **semantic line families**, the gap P1 targeted: exact-line collapsing only merges byte-identical lines, so cargo/build/install progress and repeated harness lifecycle lines that vary by one path, count, timestamp, version, or crate name slipped through as noise.
+
+**How it works** (`tsift-digest/src/log_digest.rs`): each whitespace-normalized line is reduced to a template by replacing variable tokens with stable placeholders — bracketed epoch timestamps (`[<ts>]`), file paths (`<path>`), semantic versions (`<ver>`), hex hashes (`<hash>`), numbers/durations/sizes/percentages (`<n>`), the value side of `key=value` structured fields, and the cargo-style crate name immediately before a bare version (`<name>`). Lines sharing a template fold into a family carrying the template, occurrence count, distinct-variant count, and first/last raw samples. Only multi-variant families (genuine near-duplicates exact collapsing misses) are reported, ranked by occurrences, bounded to the top 8, with the full `line_family_groups` count preserved. `line_families` is omitted from JSON when empty.
+
+**Live proof** (installed binary):
+
+```
+Line families (near-duplicate folds):
+  3x (3 variants) Compiling <name> <ver>
+    first: Compiling serde v1.0.130
+    last:  Compiling tsift-cli v0.1.67
+  2x (2 variants) [<ts>] commit_staging file=<path> snap_len=<n> file_len=<n>
+```
+
+**Scope discipline:** the tsift working tree carried 17 unrelated in-flight files (graph-db / surrealdb / token-gate). I staged and committed only my four: `log_digest.rs`, `tsift-cli/src/lib.rs`, `specs/digests-sessions.md`, `VERSIONS.md`.
+
+Proof — changed paths: those 4 files only. Commands: `make check` (exit 0, no masked FAILED), `cargo install --path .` (ok), live `tsift log-digest` smoke test, `git push` (`756b44d..88a7f46`). Verification: 5/5 `tsift-digest` log_digest tests pass incl. the new `log_digest_folds_near_duplicate_line_families`; full suite green. CI run 27323995205 is **pending** (just triggered by the push) — recording it, proceeding on local evidence per policy. Confidence: high. Escalation: none. Next queue item: `#logchunk` (P2 — persist raw chunks as artifact handles).
+<!-- agent:boundary:a677873b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#logfam]
+- ~~[#logfam]~~
 - [#logchunk]
 - [#loggate]
 <!-- /agent:queue -->
@@ -78,7 +105,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logfam] [recommended] Log compression P1: add semantic line-family folding for near-duplicate build/test/install progress lines, with counts plus first/last samples instead of exact-line-only repeats.
 - [ ] [#logchunk] [recommended] Log compression P2: persist raw log chunks/groups as artifact handles and emit expansion commands from log-digest/context-pack instead of inlining bulky groups.
 - [ ] [#loggate] [recommended] Log compression P3: add fixture-backed token-savings and false-negative gates for cargo, pytest, npm/pnpm, and agent-doc runtime logs.
 <!-- /agent:backlog -->

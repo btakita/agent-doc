@@ -80,32 +80,87 @@ issues with the rest of the project control pane."
   cannot affect this turn's own closeout. This is the hard/risky read-authority
   logic; the remaining rungs are the mechanical wiring + the buffer feed.
 
-- **Rung 2 — feed the durable editor-buffer snapshot (`#rtwfeed`).** Source a
-  `BufferState { content, dirty, generation }` from the socket IPC layer
-  (`ipc_socket.rs` / `ffi.rs`): the plugin already reports buffer state over IPC;
-  expose a query that returns the current buffer content + dirty flag +
-  monotonic generation, debounced and off the project-control-pane hot path
-  (design points 1 + 4). Durable across controller restart. NEEDS live verify.
+- **Rung 2 — feed the durable editor-buffer snapshot (`#rtwfeed`, LANDED
+  2026-06-11).** Instead of a *new* IPC query, the durable buffer feed already
+  exists: the plugin persists the editor's full buffer text on every change to
+  the `.agent-doc/live-buffer/<hash>` sidecar (`debounce::LiveBufferSnapshot`,
+  `#pcp6` content path), and `debounce::live_buffer_diverges_from_content` is the
+  hard-won, staleness-suppressing classifier (`#pcp2` write-provenance + `#pcp6`
+  content-match + mtime skew) that proves whether the editor holds genuine
+  *unsaved edits ahead of disk*. Rung 2 is the bridge that promotes that durable
+  sidecar to a `BufferState` **only** through that classifier:
+  `realtime_model::durable_buffer_state(file, disk) -> Option<BufferState>` plus
+  the single cycle entry point `realtime_model::resolve_current_doc(file, disk)
+  -> Reconciliation` (read disk + reconcile against the gated feed + emit a
+  `realtime_doc_resolve authority=… reason=… diverged=…` ops.log marker). Gating
+  on the classifier — not the raw `dirty`/`version` digest — is the safety
+  property: a stale buffer or agent-doc's own just-written disk content can never
+  win, so this cannot clobber-in-reverse. Path keyed via the same canonicalize
+  convention as `guard_visible_write_reconcile` so the sidecar hash matches the
+  plugin's reported absolute path. 6 new deterministic evals (pure
+  divergence→BufferState mapping + FS-sidecar in-sync/ahead/no-feed cases);
+  `make check` green; built + installed (+ `lib-install`). Durable across
+  controller restart (reads the persisted sidecar, not in-memory state). Live
+  verify still confirms the plugin keeps feeding the sidecar under real typing.
 
-- **Rung 3 — wire the cycle read sites (`#rtwwire`).** Replace the direct
-  `std::fs::read_to_string(file)` "current document" reads at the cycle entry
-  points (`preflight.rs`, `write.rs`, `session_check.rs`) with
-  `realtime_model::current_doc(disk, buffer)` so the agent reads
-  newest-of(disk, buffer) (design point 3). This is the rung that removes the
-  `differs from disk` write-block whack-a-mole — and the rung that touches the
-  closeout path, so it MUST run in a dedicated stable turn with live
-  edit-during-finalize verification (cannot be done in an affected session).
+- **Rung 3 — wire the cycle read sites (`#rtwwire`).**
+  - **3a — classification reads (LANDED 2026-06-11).** Rerouted the two cycle
+    *classification* baselines through `realtime_model::resolve_current_doc`:
+    `preflight.rs` `run_with_options` (the frontmatter/diff baseline) and
+    `session_check.rs` (the `rc.set_doc_content` guard-sweep cache seed). This is
+    the half that removes the `differs from disk` false-block whack-a-mole — the
+    dropped-prompt / contamination guards now reason about what the user actually
+    sees (newest-of disk vs unsaved buffer) instead of a staler disk view — and
+    it changes **no committed output** (preflight commits the snapshot, not this
+    read; guards only classify). With no editor attached (the common/CI case)
+    `resolve_current_doc` returns disk unchanged, so all 2677 existing
+    orchestration tests stay green. `make check` green; built + installed.
+  - **3b — write-merge baselines (LANDED 2026-06-11, needs live verify).** Wired
+    the two write "current document" merge baselines through
+    `resolve_current_doc`: `run_ipc`'s current-doc read (the IPC/template write
+    path the live JB plugin uses — its queue/exchange component patch is now
+    normalized + parsed against the buffer the user sees, so a patchback cannot
+    drop a buffer-only queue item) and the inline `run()` merge "theirs" read (the
+    3-way merge incorporates buffer-only edits). Both staleness-gated: the buffer
+    wins only when provably unsaved-ahead-of-disk, so agent-doc's own fresh write
+    can never be overridden, and `guard_no_stale_snapshot_reset_drift` fails
+    closed on a large unsaved deletion (recovery message) rather than clobbering.
+    No editor attached returns disk unchanged → all 2677 orchestration tests
+    green; `make check` green; built + installed (+ `lib-install`). Commit
+    `320a21d5`. **Live verify pending** — the IPC path is exercised by the next
+    `agent-doc-bugs2.md` turn (`#rtwverify` queued at its backlog top): type an
+    unsaved edit in IDEA, finalize, grep ops.log for `realtime_doc_resolve
+    authority=editor_buffer reason=editor_unsaved_newer` + the edit surviving the
+    commit.
 
-## Verification (rungs 2–3 need a dedicated stable turn — CANNOT be done in the affected session)
+## Verification
 
-- Deterministic SimWorld coverage: editor-buffer-newer-than-disk → model reflects
-  buffer; agent write does not drop buffer-only queue items; saved buffer → disk
-  authoritative.
-- Live: type a queue item in IDEA without saving, run a finalize cycle, confirm
-  the item survives (no `#queue-user-edit-overwrite`).
-- This turn is itself the live repro: every agent write got clobbered or blocked
-  by the live buffer. Fix + verify must run where the buffer does not race the
-  writer (doc closed in IDEA, or a stable dedicated turn).
+### Done deterministically (rungs 1, 2, 3a) — `make check` green, 2026-06-11
+
+- `realtime_model` evals (12): authority decision (rung 1) + durable-feed bridge
+  (rung 2): editor-buffer-ahead-of-disk → feed reflects buffer; saved/in-sync
+  buffer → disk authoritative; no editor feed → disk; len/hash-only digest (no
+  full content) → disk (cannot fabricate buffer text); `#queue-user-edit-overwrite`
+  buffer-only queue item surfaced via the feed.
+- No-regression: all 2677 orchestration tests stay green because
+  `resolve_current_doc` returns disk unchanged with no editor sidecar present
+  (the common/CI path), so the 3a classification rewires are inert without a live
+  editor.
+
+### Remaining — operator live verify (CANNOT be agent-done; needs a live editor)
+
+- **3a live proof:** with the new binary installed (`cargo install` + `lib-install`
+  done 2026-06-11; restart the session so the supervisor picks up the new binary,
+  IDE hot-reloads the cdylib by mtime), type a queue/exchange item in IDEA
+  **without saving**, run `agent-doc session-check`/`preflight`, and confirm the
+  guards do NOT false-block on `differs from disk`. Grep `ops.log` for
+  `realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer` paired
+  with `live_buffer_classify decision=diverges`.
+- **3b (write-merge) is still staged** — only wire the `write.rs` merge baselines
+  in a dedicated stable turn, then live-verify: type a queue item in IDEA without
+  saving, run a finalize cycle, confirm the item survives in the commit (no
+  `#queue-user-edit-overwrite`). Fix + verify must run where the buffer does not
+  race the writer (doc closed in IDEA, or a stable dedicated turn).
 
 ## Files (anticipated)
 

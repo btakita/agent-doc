@@ -32,91 +32,12 @@ EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badge
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-052806.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-150905.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Deal Pipeline queue-head closeout
+- Archived 2 response topic(s): Admin dashboard Needs Attention accordion; Dashboard attention collapsed closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Admin dashboard Needs Attention accordion — gpt-5
-
-> **Queue prompt:**
->
-> In the admin dashboard "Needs Attention" section, if there are items that need attention, create an accordion to show each item and link to the pipeline opening the dialog for that item. deploy
-
-
-Implemented and deployed the admin dashboard Needs attention accordion for Deal Pipeline work items.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
-
-What changed:
-- The admin dashboard API now derives concrete Deal Pipeline `needs_attention` loan/lead summaries from the same card builders used by the pipeline.
-- The dashboard Needs attention section now renders an accordion when concrete items exist; each row links back to `/portal-admin/pipeline` with `loan_id` or `lead_id`.
-- The Deal Pipeline now reads `attention=deal-pipeline`, `loan_id`, and `lead_id` query params and opens the exact matching loan/lead dialog after loading.
-- Existing category-level attention links remain as a fallback if item detail loading fails.
-
-Verification:
-- `bun test tests/admin-dashboard.test.ts` passed: 24 tests.
-- `make check` passed: 552 tests plus browser and worker builds.
-- `git diff --check` passed.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
-
-Deployment:
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy: no pending migrations.
-- `make deploy` succeeded; Worker version `1979f913-31ed-4e4c-aa16-c6a9fdb85f28` is live.
-- Post-deploy D1 migration check: no pending migrations.
-- Live smoke checks: `/` returned 200, `/portal-admin/dashboard` returned 303, `/portal-admin/pipeline` returned 303.
-
-Escalation: none. Confidence: high.
-
-Note: I did not create a git commit because this queue item asked to deploy but did not explicitly ask to commit. The four app files above remain modified in `src/equityfundingsource-dev`.
-
-Suggested commit message:
-
-```txt
-feat(admin): add dashboard pipeline attention accordion
-
-Show concrete Deal Pipeline items in the admin dashboard Needs attention section, deep-link each row back to the pipeline with loan/lead ids, and open the matching dialog after the pipeline loads. Covers the dashboard API payload, dashboard accordion UI, pipeline query handling, and admin dashboard tests.
-```
-Implemented and deployed the admin dashboard Needs attention accordion change.
-
-> **Queue prompt:**
->
-> The admin dashboard "Needs Attention" accordion should be collapsible and collapsed by default. deploy
-
-
-What changed:
-- `lib/ui--browser--efs/portal/admin/dashboard.tsx`: the admin Needs attention panel now starts collapsed, keeps the header/count visible, and expands/collapses with `admin-needs-attention-toggle` using `aria-expanded`/`aria-controls`.
-- Nested attention detail rows no longer force `<details open>`, so they are collapsed by default when the panel is opened.
-- `tests/admin-dashboard.test.ts`: updated assertions to cover the collapsed-by-default accordion behavior.
-
-Verification:
-- `bun test tests/admin-dashboard.test.ts` passed.
-- `make check` passed.
-- Pre-deploy D1 migration check: no migrations to apply.
-- `make deploy` succeeded.
-- Deployed Worker version: `fbf57803-ae85-4d49-8f7a-ca16ffa37b92`.
-- Post-deploy D1 migration check: no migrations to apply.
-- Live smoke checks: `/` returned `200`; `/portal-admin/dashboard` returned `303` through Cloudflare Access.
-- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
-
-Note: the exchange is large, but the active queue was drained without compacting per queue instructions.
-
-Suggested commit message:
-```txt
-fix(admin): collapse dashboard attention accordion by default
-
-Make the admin dashboard Needs attention panel start collapsed while preserving the count summary, leave nested attention detail rows collapsed by default, and update dashboard tests for the accordion behavior. Verified with the focused admin dashboard test, full make check, and production Worker deploy fbf57803-ae85-4d49-8f7a-ca16ffa37b92.
-```
-
-### Re: Dashboard attention collapsed closeout — gpt-5
-
-Confirmed closeout for the current active turn: the admin dashboard Needs attention accordion is collapsed by default, deployed as Worker version `fbf57803-ae85-4d49-8f7a-ca16ffa37b92`, and verified with the focused dashboard test, `make check`, D1 migration checks, and live smoke checks.
-<!-- agent:boundary:3e616181 -->
+<!-- agent:boundary:e09f14f1 -->
 <!-- /agent:exchange -->
 ###
 <!--

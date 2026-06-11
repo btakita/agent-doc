@@ -164,7 +164,27 @@ Verification I ran this cycle:
 I did not repair or drive the live `src/boost-client/tasks/monsterrodholders.md` session from this pane. The remaining live proof/repro is still represented by the separate open item `#mrhpcdrift`; `#mrhipcdrift` is complete as the implemented socket-ACK response-repair fix.
 
 Changed paths this cycle: no source edits by me; install artifacts only. Existing unrelated dirt remains in `src/agent-doc/AGENTS.md` and other root submodules. Confidence: medium-high. Escalation: use `#mrhpcdrift` for the live Monster Rod Holders proof if it still reproduces after the installed `17c20732` binary/cdylib.
-<!-- agent:boundary:f6630f24 -->
+### Correction: #mrhipcdrift closeout — gpt-5
+
+The earlier `#mrhipcdrift` closeout understated this turn. I did make and ship source changes for the socket `already_applied` missing-disk-response path.
+
+Actual shipped work:
+- `btakita/agent-doc@17c20732` changes `agent-doc-orchestration/src/write.rs` so an `already_applied` socket ACK with a missing visible disk response materializes the expected response into the current `agent:exchange` under the visible-write guard, keeps the committed snapshot on `content_ours`, and avoids the stale file-IPC fallback.
+- `tests/test_cli.rs` carries the FlowCore hot-path guard budget audit for that visible-write guard reuse.
+- `btakita/agent-loop@5da9cc72` updated the `src/agent-doc` submodule pointer; current parent HEAD still records `src/agent-doc` at `17c20732` after concurrent session commits.
+
+Verification completed:
+- `cargo test -p agent-doc-orchestration already_applied_socket` passed.
+- `cargo test -p agent-doc-orchestration file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot` passed.
+- `cargo test -p agent-doc finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_not_duplicate_response` passed.
+- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
+- `make check` passed locally: clippy, 4,248 nextest tests, doctests, and the ignored medium SimWorld run.
+- `cargo build -p agent-doc` passed.
+- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/agent-doc`.
+- GitHub Actions `btakita/agent-doc` CI run `27315421938` passed, including remote `make check` and `make tmux-ci`.
+
+I left unrelated dirty work untouched, including `src/agent-doc/AGENTS.md` and the broader dirty root/submodule/task-doc state. `#mrhpcdrift` remains open as the separate live Monster Rod Holders proof/repro item if the product workflow still reproduces after the installed `17c20732` binary.
+<!-- agent:boundary:74c3c42f -->
 <!-- /agent:exchange -->
 
 ## Queue

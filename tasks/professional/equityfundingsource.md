@@ -23,9 +23,7 @@ queue: stop
 ## Status
 
 <!-- agent:status patch=replace -->
-
-EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badges using `Aging Nd` (amber background/border matching Lender Pipeline) for open Leads and active loan stages; pushed to origin/main, parent submodule pointer committed as `4e3f10829`, and deployed as Worker version `cb9184c9-a67c-41f4-97e8-b33a04b20fd6` on 2026-06-11. Remote D1 reports no pending migrations; smoke checks returned `/` 200 and `/portal-admin/pipeline` 303 auth redirect. GitHub Actions `Agent Doc` run `27324496154` did not start because of account billing/spending-limit restrictions, not a test failure.
-<!-- /agent:status -->
+EFS deployed Worker 823c5cd2-5761-4755-86a9-c67ff1d1111b on 2026-06-11: borrower/broker full-application boolean answer selects now render as initially unselected Yes/No radio groups. make check passed; remote D1 has no pending migrations; smoke checks returned / 200 and /portal-borrower/new-application 303 unauthenticated redirect. CI workflow check is unavailable because this repo has no workflow named CI and no runs listed.<!-- /agent:status -->
 
 ## Exchange
 
@@ -38,11 +36,6 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
 
 ### Re: Boolean application radios — gpt-5
-
-> **Queue prompt:**
->
-> Make all boolean selections in /portal-borrower/new-application a radio button (Yes|No label) with the initial state unseleted in /portal-borrower/new-application. Same with similar form selections in other portals. Deploy 
-
 
 Implemented and deployed.
 
@@ -77,14 +70,14 @@ fix(application): render boolean answers as Yes/No radios
 
 Replace the borrower and broker full-application boolean dropdowns with initially unselected Yes/No radio groups, preserve saved yes/no reload behavior, and cover the UI contract with a focused source-level regression test.
 ```
-<!-- agent:boundary:21526eff -->
+<!-- agent:boundary:62dd8b11 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

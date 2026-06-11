@@ -102,21 +102,36 @@ You struck `do [#2v7b]` (the JB→Codex fix is gated, awaiting your live proof).
 - `#qt32` — restart a session, drive one edit-during-finalize cycle; I check `ops.log` for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` + zero drift lines.
 
 Run those two live and I'll read the logs; then it's tag time. I'm halting the auto-loop here — nothing left that I can complete without your live editor.
-<!-- agent:boundary:c611f59f -->
+
+### Re: queue flooding + JB File Cache Conflict — halted + captured — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `File Cache Conflict` occurred while I was entering in queue items during finalize. Also `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` accumulated into the Claude Code session queue as I was typing during finalize. I manually deleted the prompt from the Claude Code session queue.
+
+
+You interrupted into an active flooding bug. I stopped it and captured the reports rather than auto-looping (which would have made it worse).
+
+**Flooding halted.** `agent-doc admin queue pause` on this document (controller receipt_id=5) stops further queue dispatch, so no more `agent-doc …` triggers get pushed into this session. Resume later with `agent-doc admin queue resume` once the fix lands. I did **not** edit the queue block by hand (that races the live IPC supervisor).
+
+**Two bugs captured (plans written, backlog items added):**
+
+1. **`#qflood` [TOP] — queue dispatch floods the running harness session.** As the queue drains (and during finalize while you type), the continuation dispatcher re-submits the routed trigger into the *already-running* pane, stacking copies you must delete by hand. You confirmed it cross-harness — `lazily-rs.md` under Codex reproduced it — so it's not Codex- or Claude-specific. Likely root cause: the dispatcher doesn't gate on proven pane-idle and doesn't dedupe an already-pending trigger. I did **not** fix it live — it's a concurrency/busy-gate change that needs careful design plus your cross-harness live repro, and fixing it from inside the flooding session is exactly the wrong place. Plan: `tasks/agent-doc/plan-queue-dispatch-flood.md`.
+2. **`#jbcompactconflict` — JB `Compact Exchange` / finalize-while-typing raises `File Cache Conflict`.** Same class as the `#q7jm` fix already shipped for `live_prompt_drift` auto-recovery: compact should converge through editor IPC/CRDT when a JB listener is active instead of a direct disk write that diverges from the open buffer. Plan: `tasks/agent-doc/plan-jb-compact-crdt.md`.
+
+**Why I'm not auto-looping or fixing now:** real user prompts arrived mid-loop (these reports), and the active bug is *the dispatch loop itself*. The responsible move is to halt, capture, and hand back. Nothing here is safely agent-fixable without your live repro and a deliberate design pass — I'd rather not change dispatch concurrency code while the dispatch is misfiring.
+
+**State:** queue paused; `#qflood` (top) + `#jbcompactconflict` in backlog with plans; `#2v7b` and `#qt32` still gated awaiting your live proofs; agent-doc submodule clean on `origin/main`. Tell me which to pick up first in a fresh, unpaused turn and I'll start from the plan — or run the gated live proofs and I'll read the logs.
+<!-- agent:boundary:0fdfe16e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~What are #next-steps to fix bugs? I want to release soon.~~
-- ~~:pushpin: JB `Run Agent Doc` on Codex still did not submit the prompt to Codex. The prompt was entered into the input, but I had to manually submit it to start the queue.~~
-- ~~:pushpin: do [#2v7b]~~
-- ~~:pushpin: do [#qt32]~~
-- ~~:pushpin: do [#02bw]~~
+- ~~:pushpin: JB `File Cache Conflict` occurred while I was entering in queue items during finalize. Also `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` accumulated into the Claude Code session queue as I was typing during finalize. I manually deleted the prompt from the Claude Code session queue.~~
 - JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - The lazily-rs.md session running Codex reproduced the error.
-- test test test test test
 <!-- /agent:queue -->
 ###
 <!--
@@ -146,6 +161,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc/`/agent-doc` trigger submissions while the queue drains and during finalize-while-typing; operator must manually delete the stacked prompts. Cross-harness (Claude Code + Codex on lazily-rs.md). Suspected: continuation dispatcher does not gate on proven pane-idle / does not dedupe an already-pending trigger. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md. MITIGATED this turn via admin queue pause (receipt_id=5).
+- [ ] [#w42v] #jbcompactconflict JB Compact Exchange (and finalize concurrent with operator typing) raises a File Cache Conflict; compact should converge through editor IPC/CRDT like the #q7jm live_prompt_drift fix instead of a direct disk write that diverges from the JB buffer. Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
 <!-- /agent:backlog -->
 
 ## Review

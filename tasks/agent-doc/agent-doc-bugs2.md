@@ -16,6 +16,9 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
+agent_doc_pipeline:
+  run_id: cycle-1781203425577
+  step: committed
 ---
 
 ## Status
@@ -51,13 +54,108 @@ The substantive part: I pulled real `ops.log` ground truth this turn and it **co
 **What I did this turn:** paused the queue (`receipt_id=7`, observed-generation 300) so the supervisor stops re-injecting triggers into your live pane while this is fixed. **Not auto-looping** — there's no new prompt (only the struck item), the queue floods on drain, and the actual fix needs a dedicated stable turn with live multi-process verification that **cannot** happen from inside this affected session (the supervisor races my writes here).
 
 `#nzmc` still network-blocked (crates.io offline). `#sjwm`/`#kqr6` still need that same clean turn. The review items remain operator-drive live proofs.
-<!-- agent:boundary:55b29ada -->
+
+### Re: realtime editor watcher — you're right, the model lags the buffer — opus-4-8
+
+You're right, and that `test test` re-add was a failure — I'll own it plainly.
+
+**Why it happened (and why it proves your point).** `session-check` is fail-closed: it flagged `test test` as a "user queue edit dropped during the content_ours merge" and told me to re-add it. But you had **deliberately deleted** `test test`, so "preserving" it was wrong. The deeper cause is exactly what you diagnosed: my whole cycle computed against **preflight's pre-compact baseline + a stale IPC candidate**, both of which lagged your live IDEA buffer. So every write I made was reasoning about a staler document than the one you were editing — and overwrote your legitimate queue content. The binary's model is not realtime with your editor.
+
+This turn is itself the **live repro** of `#queue-user-edit-overwrite` / `#ipcdrift`: I tried IPC write, `--force-disk` write, and queue replace — each got clobbered or blocked (`visible editor buffer differs from disk`) by your unsaved buffer. The protective guard is correct; the missing piece is that nothing feeds your buffer's newer state into the model the agent reads.
+
+**Your directive captured as `#rtwatch` (now the top backlog item), with a design:**
+- **Editor watcher → realtime model.** Bring back a durable editor watcher in the FFI layer (`ffi.rs` / `ipc_socket.rs`) that ingests buffer deltas into the realtime CRDT on **every change**, not only on save.
+- **Two durable watchers, reconciled by recency.** Keep the file watcher *and* the editor watcher; stamp each with a version so the merge picks the newest — editor wins while it holds unsaved state (it's "more recent than disk," as you said), disk wins once saved/closed. Both survive controller restart.
+- **Cycle reads the model, not stale disk.** `preflight`/`write`/`finalize`/`session-check` source "current document" from newest-of(disk, buffer), so agent writes can't clobber buffer-only edits and the `differs from disk` whack-a-mole disappears.
+- **Perf-bounded.** Debounce deltas; keep ingestion off the project-control-pane hot path. Plan: `tasks/agent-doc/plan-realtime-editor-watcher.md`.
+
+**What I won't do:** implement this from inside this affected session. It's FFI/IPC/watcher work, and as just demonstrated, the live buffer races every write here — I'd be fixing the realtime model on top of the exact non-realtime drift I'm trying to fix, with no trustworthy verification. It needs a dedicated stable turn (doc closed in IDEA, or a non-IDE harness). I restored your full queue from the live buffer and rebuilt the model from it before writing this, so your real items are intact. Not auto-looping.
+<!-- agent:boundary:83039ec0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- test test
+- :round_pushpin: do [#sjwm]
+- :pushpin: The `test test` repair lagged the document, since I had deleted `test test` entirely. It also replaced my legitimate queue content just with `test test`. Utter failure. Our document model must be realtime with the watcher. Any update that occurs should update the model in realtime. Also, the editor has buffer state and does not save to disk right away. Perhaps we should bring back the editor plugin watcher to update the realtime model. Can we make both watchers durable? Where the editor plugin watcher is often more recent than the file on disk? This system needs to act real-time, so edits should update the document model in real-time. These updates should not cause performance issues with the rest of the project control pane. We need to avoid the conflicts, race conditions, and locks that occurred with the dual writable watchers pre-CPC refactor.
+---
+:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+```
+[route] target tmux session: 13
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
+```
+---
+What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
+```
+❯ How do I recover from the IPC-drift? Restart Idea?
+● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
+  helped at all. Let me show you why with the live state.
+● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+      echo "=== who holds the sockets right now ==="…)
+  ⎿  === who holds the sockets right now ===
+     --- .agent-doc/ipc.sock ---
+     COMMAND     PID  USER  FD   TYPE             DEVICE SIZE/OFF       NODE NAME
+     … +86 lines (ctrl+o to expand)
+● Now I have ground truth (my earlier ps | grep idea missed it — RTK/sandbox filtering). The picture is clearer and
+  more useful than "restart IDEA":
+  Two writers are fighting over your doc:
+  1. IDEA holds ipc.sock in LISTEN mode — PID 2144231, FD 325u. It acks its editor buffer as authoritative, which is
+  how content_ours keeps winning.
+  2. Two agent-doc controller serve procs are wedged in --handoff-state preparing — boost-client PID 3767411 and
+  superproject PID 3691684. That's a crashed/interrupted controller handoff; those stuck controllers are the active IPC
+  writers reverting your edits. (The /tmp/adrepro7 one is an unrelated test repo — ignore.)
+  So restarting IDEA is the blunt instrument, not the right first move — it releases ipc.sock, but the wedged
+  controllers are separate processes parented to init that survive an IDE restart, so a restart alone won't fix the
+  re-winning.
+  Let me clear the wedged controllers now (they're lazy-launched and respawn clean on the next agent-doc invoke):
+● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+      kill 3767411 3691684 2>&1 && echo "killed wedged handoff controllers 3767411 (boost-client) + 3691684 (a…)
+  ⎿  killed wedged handoff controllers 3767411 (boost-client) + 3691684 (agent-loop)
+     === remaining controllers ===
+     brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
+     … +8 lines (ctrl+o to expand)
+     … +8 lines (ctrl+o to expand)
+● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
+  (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
+  open; it's no longer fighting a stuck handoff.
+  So here's the actual answer to your question:
+  No — don't restart IDEA (it's the blunt instrument)
+  The drift this session wasn't caused by IDEA per se — it was two agent-doc controller serve procs wedged mid-handoff
+  (--handoff-state preparing), which survive an IDE restart anyway. I just killed them; the problem is cleared.
+  What causes IPC drift
+  A multi-owner race on .agent-doc/ipc.sock:
+  - IDEA holds the socket (LISTEN) and acks its editor buffer (content_ours) as the source of truth.
+  - A crashed/interrupted controller handoff leaves controllers stuck in preparing; those keep writing the stale buffer
+  back over your edits → live_prompt_drift_after_preflight, postcommit_worktree_check match=false.
+  Recovery ladder — least → most invasive
+  1. Working tree only (the common case): finalize usually commits the correct thing to HEAD; only the on-disk copy
+  drifts. Verify with git show HEAD:<file> | grep -c '<Re: topic>' → if 1, just git checkout HEAD -- <file> then
+  agent-doc session-check. One command. (This is exactly what fixed today's cycle.)
+  2. Wedged controllers (what I did): kill the controller serve … --handoff-state preparing PIDs — they're lazy and
+  respawn clean on next invoke.
+  3. IDEA fighting the buffer: close or revert the doc tab in IDEA (File → Revert, or close the
+  tasks/monsterrodholders.md tab). This releases its claim on the buffer — don't kill the whole IDE.
+  4. Restart IDEA: only if 1–3 don't release ipc.sock. Overkill, and it won't clear wedged controllers.
+  The durable fix (recommended)
+  Preflight flagged a stale install: your ~/.cargo/bin agent-doc cdylib predates source commit e6f7538e. Wedged
+  preparing handoffs are exactly the bug class a stale binary produces — the controllers I just respawned are still on
+  the old binary. Rebuild and recycle them:
+  cd /home/brian/work/btakita/agent-loop/src/agent-doc && make install
+  # then recycle so they respawn on the fresh binary:
+  pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
+  Want me to run the make install rebuild now?
+```
+---
+- :pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
+- :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
+- :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
+- :round_pushpin: do [#kqr6]
+- :round_pushpin: do [#nzmc]
+- :round_pushpin: do [#kp5z]
+- :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
+- :pushpin: Upgrade lazily-rs + tsift-* dependencies.
+- :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
+- :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 <!-- /agent:queue -->
 ###
 <!--
@@ -87,6 +185,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#rtwatch] #rtwatch [TOP] Realtime editor watcher -> durable document model. ROOT CAUSE (operator-stated, live-reproduced this turn): the document model lags the live editor buffer. The IDEA buffer holds unsaved edits and is content_ours-authoritative over IPC, but preflight/write/finalize compute against the disk file + snapshot/baseline, which can be staler than the buffer -> agent writes clobber legitimate user queue/exchange content that exists only in the buffer. This is the unifying cause of #queue-user-edit-overwrite, the test-test clobber, and #ipcdrift/#sjwm. FIX (FFI-first): bring back a durable editor watcher (ffi.rs/ipc_socket.rs) that ingests buffer deltas into the realtime CRDT model on every change (not only on save); keep BOTH file + editor watchers durable, reconciled by recency stamp (editor wins when it has unsaved state, disk wins when saved); make preflight/write/finalize/session-check read current-doc from the newest-of(disk, editor buffer); debounce + keep off the project-control-pane hot path for perf. NEEDS a dedicated stable turn + live verify (cannot be done in the affected session: every agent write this turn was clobbered or blocked by the live buffer). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#sjwm] #ipcdrift IPC drift continues post single-Project-Pane-Process / 08b migration. CONFIRMED root cause overlaps #stuckhandoff: controllers wedge in ControllerHandoffState::Preparing and keep writing the stale buffer (multi-owner race on ipc.sock vs the IDEA listener). The handoff state machine stores handoff_started_at but has NO stale-Preparing timeout/reaper (verified in project_controller.rs). Fix = stale-Preparing detect + force-fail/supersede + terminate the wedged live controller + self-heal on invoke. NEEDS a dedicated stable turn + live multi-process verification (cannot be verified from inside the affected session). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md (IPC section TBD).
 - [ ] [#kqr6] #stuckhandoff CONFIRMED: no handoff-timeout scaffold exists (project_controller.rs ControllerHandoffState has Preparing + handoff_started_at but nothing checks staleness). gc.rs reaps stale starting actor PROJECTIONS (>1h) but not wedged Preparing controller PROCESSES, and a projection-close would not stop a live wedged proc from writing. Real fix = detect stale Preparing by handoff_started_at age + terminate/transition the wedged controller + heal on next invoke, with live verification. IMMEDIATE RELIEF (operator-run): pkill the wedged controller serve --handoff-state preparing PIDs; they respawn clean. Operator request 2026-06-11.
 - [ ] [#nzmc] #lazilyup Upgrade lazily-rs (tsift is upgrading; build already resolves lazily 0.10.3 in Cargo.lock). Verify build + commit the lock bump. Operator request 2026-06-11.

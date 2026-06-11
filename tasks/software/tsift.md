@@ -37,13 +37,13 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): do #logsigfp; do #logfixturecov; do #tsinflight
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e4284816 -->
+<!-- agent:boundary:69221c4f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- release + publish
+- upgrade lazily-rs. release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

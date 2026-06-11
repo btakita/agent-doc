@@ -123,7 +123,23 @@ pkill -f 'agent-doc controller serve.*--handoff-state preparing'
 ```
 
 …then reopen/restart and re-drive the queue on the fresh binary. **Not auto-looping** (no new prompt; draining from here just reproduces the flood + churn).
-<!-- agent:boundary:6cdfdff8 -->
+
+### Re: still affected — wedged controller re-wedged to gen 1004 — opus-4-8
+
+No new prompt — the only diff is the `go`-mode queue re-deriving its order (`:round_pushpin:` markers on `#rtwverify`/`#sjwm`/`#nzmc`/`#kp5z`). I checked live state instead of repeating last turn's answer from memory:
+
+- **Two controllers are wedged in `--handoff-state preparing` right now:** `459700` (agent-loop, gen **1004**), `459745` (boost-client, gen 537). Last turn cited gen 1002 — it's now 1004, so the wedge **keeps respawning back into `preparing`**. That is `#kqr6`/`#sjwm` (no stale-`Preparing` reaper) reproducing, not a stale leftover. Those procs race every IPC write here.
+- The four re-queued ids are not new work: `#rtwverify` says rungs 2/3a/3b are **CODE-COMPLETE + installed** (only live-verify remains, which is operator-drive); preflight's semantic-completion check flags `#rtwwire`/`#rtwfeed`/`#rtwbcast` as already resolved by the landed `#rtwatch`. So the queue is re-deriving completed/operator-gated items, not surfacing undone code.
+
+**This loop won't converge from inside the session** — every write re-seeds the churn, and the reaper bug keeps re-wedging the controller. The one-time operator setup is unchanged:
+
+```
+cd src/agent-doc && make install   # rebuild binary + refresh cdylib (the .so is still stale)
+pkill -f 'agent-doc controller serve.*--handoff-state preparing'
+```
+
+…then reopen/restart and re-drive the queue on a fresh binary with no wedged controller. After that the rungs are fully agent-doable + live-verifiable. **Not auto-looping** (no new free-text prompt; draining from here just reproduces the flood + churn).
+<!-- agent:boundary:0037d3a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -201,13 +217,10 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 - :pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
 - :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
-- :round_pushpin: do [#rtwbcast]
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
-- :round_pushpin: do [#rtwwire]
-- :round_pushpin: do [#rtwfeed]
 - :round_pushpin: do [#kqr6]
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->

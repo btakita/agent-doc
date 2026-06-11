@@ -52,7 +52,26 @@ Commits pushed: lazily-rs `43ab553 test: add randomized graph property coverage`
 Notes: `src/lazily-rs/AGENTS.md` remains modified but unstaged as pre-existing work. Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `968aa2b3`; I did not rebuild it because the installed version matches this session's skill contract.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:2250dc0e -->
+
+### Re: lrsasyncstress — gpt-5
+
+> **Queue prompt:**
+>
+> [#lrsasyncstress]
+
+
+Implemented and pushed async race stress coverage for `AsyncContext`.
+
+Proof:
+- Changed paths: `src/lazily-rs/src/async_context.rs`, `src/lazily-rs/tests/async_stress.rs`, `src/lazily-rs/tests/spec_compliance.rs`, `src/lazily-rs/SPEC.md`, plus the parent `src/lazily-rs` submodule pointer.
+- Runtime fix: `AsyncComputeContext` now registers dependency graph edges as soon as `get_cell` / `get_async` reads happen, so source invalidation during an awaited async computation can supersede stale in-flight results before publication.
+- Stress coverage: added cancellation/stale-completion coverage for `get_async`, dynamic dependency replacement across awaited slot reads, and cleanup-before-rerun ordering for async effects.
+- Verification: `cargo fmt --all`; `cargo test --locked --features async --test async_stress`; `cargo test --locked --test spec_compliance spec_documents_async`; `cargo test --locked --features async --test async_integration`; `make check`.
+- Commits pushed: lazily-rs `9efc693` (`fix: register async dependencies before awaits`); parent `0875dc1bb` (`chore: update lazily-rs submodule`).
+- CI: latest lazily-rs CI for `9efc693` was queued at check time; the previous run was still in progress and no failing latest CI was reported.
+
+Note: the pre-existing unstaged `src/lazily-rs/AGENTS.md` change remains untouched. Confidence: high.
+<!-- agent:boundary:017f29c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,14 +81,13 @@ Confidence: high. Escalation: none.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~[#lrsprop]~~
-- [#lrsasyncstress]
+- ~~[#lrsasyncstress]~~
 - [#lrsthreadstress]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#lrsasyncstress] Add async race stress coverage around get_async cancellation, stale future completion, cleanup ordering, and dependency tracking across awaits.
 - [ ] [#lrsthreadstress] Add ThreadSafeContext stress/model coverage for batch/effect/disposal interaction and read-strategy parity under contention.
 <!-- /agent:backlog -->
 

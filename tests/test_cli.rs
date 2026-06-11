@@ -659,7 +659,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
         // FlowEvent.
         ("agent-doc-orchestration/src/route.rs", "guard_") => 12,
-        ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
+        // +2 (#jb-run-agent-doc-submit-diagnostics): the redacted
+        // `route_submit_observation` / `route_submit_issue` helpers can include
+        // dispatch-start proof labels while keeping prompt-submit failures
+        // visible in ops-log review.
+        ("agent-doc-orchestration/src/route.rs", "proof=") => 4,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
         // when the existing agent:queue is polluted/unparseable the route

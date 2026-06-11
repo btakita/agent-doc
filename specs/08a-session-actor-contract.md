@@ -145,6 +145,13 @@ Later phases may refine caller values without changing the field names.
   dispatch stage: route must wait for it to report `ready`, then fail closed if
   it remains `starting` instead of sending tmux or supervisor input into the
   startup window.
+- Accepted actor input is not enough proof that a routed prompt was submitted.
+  The route layer records `route_submit_observation` for direct tmux submit and
+  supervisor-backed dispatch-start proof checks. When the submitted trigger is
+  still visible after the acceptance window, it logs `route_submit_issue
+  issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
+  tracking requires dispatch proof but only acceptance is observed, it logs
+  `route_submit_issue issue=accepted_without_dispatch_start_proof`.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

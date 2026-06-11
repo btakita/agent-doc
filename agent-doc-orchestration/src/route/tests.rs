@@ -3528,6 +3528,92 @@ fn direct_pane_submit_outcome_separates_acceptance_from_dispatch_proof() {
 }
 
 #[test]
+fn route_submit_observation_marks_prompt_not_submitted_without_prompt_text() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "direct_pane_acceptance",
+        observation: RouteSubmitObservation::TriggerStillVisible,
+        trigger_visible: Some(true),
+        elapsed: Duration::from_millis(5123),
+        capture_len: Some(2048),
+        capture_hash: Some("abc123def456"),
+        proof: None,
+    };
+
+    let message = route_submit_observation_message(facts);
+    assert!(message.contains("route_submit_observation"), "{message}");
+    assert!(
+        message.contains("result=trigger_still_visible"),
+        "{message}"
+    );
+    assert!(message.contains("trigger_visible=true"), "{message}");
+    assert!(message.contains("issue=prompt_not_submitted"), "{message}");
+    assert!(message.contains("capture_hash=abc123def456"), "{message}");
+    assert!(!message.contains("agent-doc "), "{message}");
+
+    let issue = route_submit_issue_message(facts).expect("prompt-not-submitted should be an issue");
+    assert!(issue.contains("route_submit_issue"), "{issue}");
+    assert!(issue.contains("issue=prompt_not_submitted"), "{issue}");
+    assert!(issue.contains("result=trigger_still_visible"), "{issue}");
+}
+
+#[test]
+fn route_submit_observation_marks_dispatch_start_proof_without_issue() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "dispatch_start_proof",
+        observation: RouteSubmitObservation::DispatchStartProven,
+        trigger_visible: None,
+        elapsed: Duration::from_millis(800),
+        capture_len: None,
+        capture_hash: None,
+        proof: Some(RoutedDispatchStartProof::HookStateAdvanced),
+    };
+
+    let message = route_submit_observation_message(facts);
+    assert!(
+        message.contains("result=dispatch_start_proven"),
+        "{message}"
+    );
+    assert!(message.contains("proof=submitted"), "{message}");
+    assert!(
+        route_submit_issue_message(facts).is_none(),
+        "dispatch-start proof should not emit an issue"
+    );
+}
+
+#[test]
+fn route_submit_observation_marks_accepted_without_dispatch_proof_as_issue() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "dispatch_start_proof",
+        observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+        trigger_visible: None,
+        elapsed: Duration::from_secs(10),
+        capture_len: None,
+        capture_hash: None,
+        proof: None,
+    };
+
+    let issue =
+        route_submit_issue_message(facts).expect("accepted-only Codex proof should be an issue");
+    assert!(
+        issue.contains("issue=accepted_without_dispatch_start_proof"),
+        "{issue}"
+    );
+    assert!(
+        issue.contains("result=accepted_without_dispatch_start_proof"),
+        "{issue}"
+    );
+}
+
+#[test]
 fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
     let message = route_dispatch_only_sent_log_message(
         Path::new("/tmp/robert-ross.md"),

@@ -732,6 +732,15 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         }
         "commit_noop" => "commit noop".to_string(),
         "route_dispatch_start_proven" => "route dispatch proven".to_string(),
+        "route_submit_issue" if field_eq(&fields, "issue", "prompt_not_submitted") => {
+            "route submit prompt not submitted".to_string()
+        }
+        "route_submit_issue"
+            if field_eq(&fields, "issue", "accepted_without_dispatch_start_proof") =>
+        {
+            "route submit dispatch proof missing".to_string()
+        }
+        "route_submit_issue" => "route submit issue".to_string(),
         "post_commit_user_follow_up" => "expected user follow-up".to_string(),
         "post_commit_local_drift" if field_eq(&fields, "kind", "user_follow_up") => {
             "expected user follow-up".to_string()
@@ -994,6 +1003,7 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
             | "route_cycle_start_missing_optimistic"
             | "ipc_socket_sidecar_timeout"
             | "run_preflight_timeout"
+            | "route_submit_issue"
             | "route_dispatch_only_submit_unproven"
     ) || flow == Some("routed_reopen")
         || category == "accepted-only route proof"
@@ -1176,6 +1186,8 @@ fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String 
         "reason",
         "drift_kind",
         "basis",
+        "issue",
+        "result",
         "pane",
         "source",
         "current_command",
@@ -1184,8 +1196,11 @@ fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String 
         "proof_scope",
         "phase",
         "mode",
+        "trigger_visible",
         "elapsed_ms",
         "budget_ms",
+        "capture_len",
+        "capture_hash",
         "patches",
         "generation",
         "actor_state",
@@ -1227,36 +1242,37 @@ mod tests {
 [102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
 [103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
 [104] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_cr proof=accepted proof_scope=accepted_only timeout_secs=10
-[105] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
-[106] post_commit_user_follow_up file=/repo/tasks/a.md basis=head
-[107] post_commit_local_drift file=/repo/tasks/a.md kind=working_tree_edits basis=head
-[108] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=user_follow_up basis=head
-[109] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=working_tree_edits basis=head
-[110] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=none basis=head
-[111] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[112] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
-[113] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[114] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[115] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
-[116] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
-[117] flow_event file=/repo/tasks/a.md flow=closeout stage=commit outcome=completed reason=already_current
-[118] flow_event file=/repo/tasks/c.md flow=routed_reopen stage=prompt_ready_barrier outcome=failed_closed reason=starting_actor_not_ready
-[119] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=failed_closed reason=malformed_patchback
-[120] flow_event file=/repo/tasks/a.md flow=closeout stage=pre_write_guard outcome=blocked reason=pending_capture_recommendations
-[121] flow_event file=/repo/tasks/a.md flow=closeout stage=terminal_guard outcome=blocked reason=already_committed
-[122] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=completed reason=valid_patch
-[123] flow_event file=/repo/tasks/a.md flow=document_mutation stage=pre_write_guard outcome=blocked reason=visible_write_typing_defer_active_typing:socket_ipc
-[124] flow_event file=/repo/tasks/a.md flow=routed_reopen stage=dispatch_proof outcome=failed_closed reason=accepted_only_dispatch_start_proof
-[125] flow_event file=/repo/tasks/a.md flow=orchestration_batch stage=child_closeout outcome=completed reason=child_patchback:wrapped_plain_response
-[126] flow_event file=/repo/tasks/a.md flow=session_cycle stage=plan outcome=completed reason=normal
-[127] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[105] route_submit_issue file=tasks/b.md pane=%2 harness=codex phase=direct_pane_acceptance issue=prompt_not_submitted result=trigger_still_visible elapsed_ms=5010 trigger_visible=true capture_len=2048 capture_hash=abc123def456
+[106] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
+[107] post_commit_user_follow_up file=/repo/tasks/a.md basis=head
+[108] post_commit_local_drift file=/repo/tasks/a.md kind=working_tree_edits basis=head
+[109] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=user_follow_up basis=head
+[110] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=working_tree_edits basis=head
+[111] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=none basis=head
+[112] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[113] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
+[114] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[115] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[116] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
+[117] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[118] flow_event file=/repo/tasks/a.md flow=closeout stage=commit outcome=completed reason=already_current
+[119] flow_event file=/repo/tasks/c.md flow=routed_reopen stage=prompt_ready_barrier outcome=failed_closed reason=starting_actor_not_ready
+[120] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=failed_closed reason=malformed_patchback
+[121] flow_event file=/repo/tasks/a.md flow=closeout stage=pre_write_guard outcome=blocked reason=pending_capture_recommendations
+[122] flow_event file=/repo/tasks/a.md flow=closeout stage=terminal_guard outcome=blocked reason=already_committed
+[123] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=completed reason=valid_patch
+[124] flow_event file=/repo/tasks/a.md flow=document_mutation stage=pre_write_guard outcome=blocked reason=visible_write_typing_defer_active_typing:socket_ipc
+[125] flow_event file=/repo/tasks/a.md flow=routed_reopen stage=dispatch_proof outcome=failed_closed reason=accepted_only_dispatch_start_proof
+[126] flow_event file=/repo/tasks/a.md flow=orchestration_batch stage=child_closeout outcome=completed reason=child_patchback:wrapped_plain_response
+[127] flow_event file=/repo/tasks/a.md flow=session_cycle stage=plan outcome=completed reason=normal
+[128] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 28);
-        assert_eq!(report.matched_events, 27);
+        assert_eq!(report.scanned_lines, 29);
+        assert_eq!(report.matched_events, 28);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -1278,6 +1294,17 @@ mod tests {
                 bucket.category == "dispatch-only not proven"
                     && bucket.file == "tasks/b.md"
                     && bucket.samples[0].contains("route_dispatch_only_submit_unproven")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "route submit prompt not submitted"
+                    && bucket.file == "tasks/b.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("issue=prompt_not_submitted"))
             }),
             "{report:#?}"
         );
@@ -1451,12 +1478,13 @@ mod tests {
 [208] sqlite_log_counts file=/repo/tasks/a.md session=s1 cycle_id=cycle-a sqlite_documents=3 sqlite_actor_transitions=9 sqlite_cycles=2
 [209] session_review_guard file=/repo/tasks/c.md session=s3 family=prompt_budget count=2
 [210] codex_thread_started file=/repo/tasks/a.md session=s1 cycle_id=cycle-a thread_id=thread-7
+[211] route_submit_issue file=/repo/tasks/b.md session=s2 pane=%2 harness=codex phase=dispatch_start_proof issue=accepted_without_dispatch_start_proof result=accepted_without_dispatch_start_proof elapsed_ms=10000
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.matched_events, 11);
+        assert_eq!(report.matched_events, 12);
         let closeout = report
             .bug_clusters
             .iter()
@@ -1473,7 +1501,7 @@ mod tests {
             .iter()
             .find(|cluster| cluster.family == "route/start replay gap")
             .expect("route cluster");
-        assert_eq!(route.count, 4);
+        assert_eq!(route.count, 5);
         assert_eq!(route.sessions, vec!["s2"]);
 
         let codex = report

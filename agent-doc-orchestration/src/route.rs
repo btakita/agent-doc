@@ -247,6 +247,36 @@ struct CommandDispatchResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteSubmitObservation {
+    Accepted,
+    TriggerStillVisible,
+    CaptureFailed,
+    DispatchStartProven,
+    AcceptedWithoutDispatchProof,
+}
+
+impl RouteSubmitObservation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::TriggerStillVisible => "trigger_still_visible",
+            Self::CaptureFailed => "capture_failed",
+            Self::DispatchStartProven => "dispatch_start_proven",
+            Self::AcceptedWithoutDispatchProof => "accepted_without_dispatch_start_proof",
+        }
+    }
+
+    fn issue(self) -> Option<&'static str> {
+        match self {
+            Self::TriggerStillVisible => Some("prompt_not_submitted"),
+            Self::CaptureFailed => Some("submit_unverified_capture_failed"),
+            Self::AcceptedWithoutDispatchProof => Some("accepted_without_dispatch_start_proof"),
+            Self::Accepted | Self::DispatchStartProven => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteMode {
     Managed,
     DispatchOnly,
@@ -408,6 +438,87 @@ fn route_latency_message(
         harness.binary,
         outcome
     )
+}
+
+fn short_content_hash(content: &str) -> String {
+    let hash = crate::ops_log::content_hash(content);
+    hash[..hash.len().min(12)].to_string()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RouteSubmitObservationFacts<'a> {
+    file: &'a Path,
+    pane: &'a str,
+    harness: &'a HarnessConfig,
+    phase: &'a str,
+    observation: RouteSubmitObservation,
+    trigger_visible: Option<bool>,
+    elapsed: Duration,
+    capture_len: Option<usize>,
+    capture_hash: Option<&'a str>,
+    proof: Option<RoutedDispatchStartProof>,
+}
+
+fn route_submit_observation_message(facts: RouteSubmitObservationFacts<'_>) -> String {
+    let mut message = format!(
+        "route_submit_observation file={} pane={} harness={} phase={} result={} elapsed_ms={}",
+        facts.file.display(),
+        facts.pane,
+        facts.harness.binary,
+        facts.phase,
+        facts.observation.label(),
+        facts.elapsed.as_millis()
+    );
+    if let Some(trigger_visible) = facts.trigger_visible {
+        message.push_str(&format!(" trigger_visible={trigger_visible}"));
+    }
+    if let Some(capture_len) = facts.capture_len {
+        message.push_str(&format!(" capture_len={capture_len}"));
+    }
+    if let Some(capture_hash) = facts.capture_hash {
+        message.push_str(&format!(" capture_hash={capture_hash}"));
+    }
+    if let Some(proof) = facts.proof {
+        message.push_str(&format!(" proof={}", proof.dispatch_stage_label()));
+    }
+    if let Some(issue) = facts.observation.issue() {
+        message.push_str(&format!(" issue={issue}"));
+    }
+    message
+}
+
+fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Option<String> {
+    let issue = facts.observation.issue()?;
+    let mut message = format!(
+        "route_submit_issue file={} pane={} harness={} phase={} issue={} result={} elapsed_ms={}",
+        facts.file.display(),
+        facts.pane,
+        facts.harness.binary,
+        facts.phase,
+        issue,
+        facts.observation.label(),
+        facts.elapsed.as_millis()
+    );
+    if let Some(trigger_visible) = facts.trigger_visible {
+        message.push_str(&format!(" trigger_visible={trigger_visible}"));
+    }
+    if let Some(capture_len) = facts.capture_len {
+        message.push_str(&format!(" capture_len={capture_len}"));
+    }
+    if let Some(capture_hash) = facts.capture_hash {
+        message.push_str(&format!(" capture_hash={capture_hash}"));
+    }
+    if let Some(proof) = facts.proof {
+        message.push_str(&format!(" proof={}", proof.dispatch_stage_label()));
+    }
+    Some(message)
+}
+
+fn log_route_submit_observation(facts: RouteSubmitObservationFacts<'_>) {
+    crate::ops_log::log_op(facts.file, &route_submit_observation_message(facts));
+    if let Some(issue) = route_submit_issue_message(facts) {
+        crate::ops_log::log_op(facts.file, &issue);
+    }
 }
 
 fn log_route_latency(
@@ -6464,22 +6575,79 @@ fn send_command_unchecked(
     // overhead) instead of paying a full poll interval before the first check, and
     // a tighter poll shortens the acceptance floor for slower panes.
     let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
+    let file = Path::new(file_path);
+    let mut last_capture: Option<(bool, usize, String)> = None;
+    let mut capture_failed = false;
     while start.elapsed() < timeout {
-        if let Ok(content) = sessions::capture_pane(tmux, pane) {
-            let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
+        match sessions::capture_pane(tmux, pane) {
+            Ok(content) => {
+                let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
+                let capture_hash = short_content_hash(&content);
+                let capture_len = content.len();
+                last_capture = Some((cmd_still_in_input, capture_len, capture_hash));
 
-            if !cmd_still_in_input {
-                return Ok(CommandDispatchResult {
-                    status: CommandDispatchStatus::Accepted,
-                    elapsed: start.elapsed(),
-                });
+                if !cmd_still_in_input {
+                    let elapsed = start.elapsed();
+                    let capture_hash = last_capture.as_ref().map(|(_, _, hash)| hash.as_str());
+                    log_route_submit_observation(RouteSubmitObservationFacts {
+                        file,
+                        pane,
+                        harness,
+                        phase: "direct_pane_acceptance",
+                        observation: RouteSubmitObservation::Accepted,
+                        trigger_visible: Some(false),
+                        elapsed,
+                        capture_len: Some(capture_len),
+                        capture_hash,
+                        proof: None,
+                    });
+                    return Ok(CommandDispatchResult {
+                        status: CommandDispatchStatus::Accepted,
+                        elapsed,
+                    });
+                }
+            }
+            Err(_) => {
+                capture_failed = true;
             }
         }
         std::thread::sleep(poll_interval);
     }
+    let elapsed = start.elapsed();
+    if let Some((trigger_visible, capture_len, capture_hash)) = last_capture.as_ref() {
+        log_route_submit_observation(RouteSubmitObservationFacts {
+            file,
+            pane,
+            harness,
+            phase: "direct_pane_acceptance",
+            observation: if *trigger_visible {
+                RouteSubmitObservation::TriggerStillVisible
+            } else {
+                RouteSubmitObservation::Accepted
+            },
+            trigger_visible: Some(*trigger_visible),
+            elapsed,
+            capture_len: Some(*capture_len),
+            capture_hash: Some(capture_hash.as_str()),
+            proof: None,
+        });
+    } else if capture_failed {
+        log_route_submit_observation(RouteSubmitObservationFacts {
+            file,
+            pane,
+            harness,
+            phase: "direct_pane_acceptance",
+            observation: RouteSubmitObservation::CaptureFailed,
+            trigger_visible: None,
+            elapsed,
+            capture_len: None,
+            capture_hash: None,
+            proof: None,
+        });
+    }
     Ok(CommandDispatchResult {
         status: CommandDispatchStatus::TimedOut,
-        elapsed: start.elapsed(),
+        elapsed,
     })
 }
 
@@ -6632,6 +6800,18 @@ fn dispatch_via_supervisor_ipc_with_mode(
             harness,
             proof.dispatch_stage_label(),
         );
+        log_route_submit_observation(RouteSubmitObservationFacts {
+            file,
+            pane,
+            harness,
+            phase: "supervisor_dispatch_start_proof",
+            observation: RouteSubmitObservation::DispatchStartProven,
+            trigger_visible: None,
+            elapsed: proof_start.elapsed(),
+            capture_len: None,
+            capture_hash: None,
+            proof: Some(proof),
+        });
         crate::ops_log::log_op(
             file,
             &format!(
@@ -6665,6 +6845,18 @@ fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         ),
     );
+    log_route_submit_observation(RouteSubmitObservationFacts {
+        file,
+        pane,
+        harness,
+        phase: "supervisor_dispatch_start_proof",
+        observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+        trigger_visible: None,
+        elapsed: proof_start.elapsed(),
+        capture_len: None,
+        capture_hash: None,
+        proof: None,
+    });
     if options.print_unproven_progress {
         eprintln!(
             "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s",
@@ -6999,6 +7191,18 @@ fn dispatch_routed_reopen_with_mode(
             harness,
             proof.dispatch_stage_label(),
         );
+        log_route_submit_observation(RouteSubmitObservationFacts {
+            file,
+            pane,
+            harness,
+            phase: "dispatch_start_proof",
+            observation: RouteSubmitObservation::DispatchStartProven,
+            trigger_visible: None,
+            elapsed: proof_start.elapsed(),
+            capture_len: None,
+            capture_hash: None,
+            proof: Some(proof),
+        });
         crate::ops_log::log_op(
             file,
             &format!(
@@ -7043,6 +7247,18 @@ fn dispatch_routed_reopen_with_mode(
                     timeout.as_secs()
                 ),
             );
+            log_route_submit_observation(RouteSubmitObservationFacts {
+                file,
+                pane,
+                harness,
+                phase: "dispatch_start_proof",
+                observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+                trigger_visible: None,
+                elapsed: proof_start.elapsed(),
+                capture_len: None,
+                capture_hash: None,
+                proof: None,
+            });
             if print_unproven_progress {
                 eprintln!(
                     "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s",

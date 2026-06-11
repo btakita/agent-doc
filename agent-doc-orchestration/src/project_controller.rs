@@ -57,6 +57,14 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 
+/// Default staleness threshold for the stuck-handoff reaper (#kqr6 / #sjwm /
+/// #stuckhandoff). A controller handoff should reach `Promoted`/`Stable` within
+/// seconds; a record still `Preparing`/`Promoted` past this age is treated as
+/// wedged and its live process is terminated. Seconds, not the 1h projection GC
+/// window — a wedged controller keeps re-corrupting the working tree every tick.
+const DEFAULT_STALE_PREPARING_CONTROLLER_SECS: u64 = 45;
+const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
+
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {
     pub session_id: String,
@@ -1454,6 +1462,126 @@ pub fn close_stale_starting_actors(
     dry_run: bool,
 ) -> Result<(usize, usize)> {
     close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
+}
+
+/// Resolve the stuck-`Preparing` controller staleness threshold, honoring the
+/// `AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS` env override.
+pub fn stale_preparing_controller_threshold() -> Duration {
+    let secs = std::env::var(STALE_PREPARING_CONTROLLER_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_STALE_PREPARING_CONTROLLER_SECS);
+    Duration::from_secs(secs.max(1))
+}
+
+/// Pure staleness predicate for the stuck-handoff reaper (#kqr6 / #sjwm). A
+/// controller stuck in `Preparing` (or `Promoted`-but-never-finalized) past
+/// `stale_after` is wedged. `Stable`/`Retiring`/`Failed` and records with no
+/// `handoff_started_at` are never stale. Side-effect free for deterministic
+/// unit tests.
+fn preparing_controller_is_stale(
+    handoff_state: ControllerHandoffState,
+    handoff_started_at: Option<u64>,
+    now: u64,
+    stale_after: Duration,
+) -> bool {
+    if !matches!(
+        handoff_state,
+        ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+    ) {
+        return false;
+    }
+    let Some(started) = handoff_started_at else {
+        return false;
+    };
+    now.saturating_sub(started) > stale_after.as_secs()
+}
+
+/// Terminate a controller wedged in `Preparing`/`Promoted` past `stale_after`
+/// (#kqr6 / #sjwm / #stuckhandoff). Unlike `close_stale_starting_actors_for_caller`
+/// — which closes a projection *record* and so cannot stop a live process — this
+/// kills the live wedged controller *process* (via `reap_verified_controller_pid`,
+/// which only SIGTERM/KILLs a verified same-project `controller serve` pid that is
+/// not us) so it stops racing the IDE listener on `ipc.sock`, then transitions the
+/// bootstrap to `Failed` so the next invoke promotes a clean controller. Returns
+/// `(reaped, kept)`.
+///
+/// The single controller bootstrap carries no `document_id`, so the per-document
+/// supervisor-lease gate the starting-actor reaper uses does not transfer here.
+/// The seconds-scale staleness threshold (a healthy handoff completes well under
+/// it) plus the `/proc`-cmdline + not-self verification inside
+/// `reap_verified_controller_pid` are the safety against killing a healthy
+/// mid-handoff.
+pub fn terminate_stale_preparing_controllers_for_caller(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    let Some(bootstrap) = read_bootstrap(project_root)? else {
+        return Ok((0, 0));
+    };
+    let now = timestamp_secs();
+    if !preparing_controller_is_stale(
+        bootstrap.handoff_state,
+        bootstrap.handoff_started_at,
+        now,
+        stale_after,
+    ) {
+        return Ok((0, 1));
+    }
+
+    let pid = bootstrap.pid;
+    let generation = bootstrap.controller_generation;
+    let age = now.saturating_sub(bootstrap.handoff_started_at.unwrap_or(now));
+
+    // Only reap a verified same-project controller process, and never ourselves.
+    if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
+        crate::ops_log::log_op(
+            project_root,
+            &format!(
+                "stale_preparing_controller_reaped_skipped reason=not_same_project_controller pid={pid} generation={generation} age_secs={age} caller={caller}"
+            ),
+        );
+        return Ok((0, 1));
+    }
+
+    if dry_run {
+        eprintln!(
+            "[{caller}] would terminate stale preparing controller: pid={pid} generation={generation} age_secs={age}"
+        );
+        return Ok((1, 0));
+    }
+
+    reap_verified_controller_pid(project_root, pid, generation);
+
+    // Supersede the wedged record with `Failed` so the next bind promotes fresh
+    // instead of re-adopting the stuck generation.
+    let mut next = bootstrap.clone();
+    next.handoff_state = ControllerHandoffState::Failed;
+    if let Err(err) = write_bootstrap_state(&next) {
+        eprintln!(
+            "[{caller}] warning: failed to mark stale preparing controller failed pid={pid} generation={generation}: {err}"
+        );
+    }
+
+    crate::ops_log::log_op(
+        project_root,
+        &format!(
+            "stale_preparing_controller_reaped pid={pid} generation={generation} age_secs={age} caller={caller}"
+        ),
+    );
+    Ok((1, 0))
+}
+
+/// gc/self-heal entry point for the stuck-handoff reaper. See
+/// [`terminate_stale_preparing_controllers_for_caller`].
+pub fn terminate_stale_preparing_controllers(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    terminate_stale_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
 /// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": repair-only
@@ -2904,6 +3032,16 @@ pub fn connect_or_launch(
     }
 
     let _lock = LaunchLock::acquire(project_root)?;
+    // Self-heal: kill any predecessor wedged in `Preparing`/`Promoted` past the
+    // threshold *before* we adopt or promote, so a stuck controller cannot keep
+    // re-corrupting the working tree and respawn the `1002 → 1004 → 1006`
+    // handoff loop (#kqr6 / #sjwm / #stuckhandoff).
+    let _ = terminate_stale_preparing_controllers_for_caller(
+        project_root,
+        stale_preparing_controller_threshold(),
+        false,
+        "connect_or_launch",
+    );
     if let Ok(active_status) = status(project_root)
         && active_status.active
         && controller_status_matches_current_binary(&active_status).unwrap_or(false)
@@ -6881,5 +7019,234 @@ agent:queue\n\
         assert!(message.contains(r#"{"ok":true}"#));
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("controller_response_missing_data command=session_status"));
+    }
+
+    // ── Stuck-`Preparing` controller reaper (#kqr6 / #sjwm / #stuckhandoff) ──
+
+    #[test]
+    fn preparing_controller_staleness_truth_table() {
+        let stale_after = Duration::from_secs(45);
+        let now = 10_000u64;
+        // Preparing + old handoff_started_at + no fresh lease ⇒ reap.
+        assert!(preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 100),
+            now,
+            stale_after,
+        ));
+        // Promoted-but-never-finalized + old ⇒ reap.
+        assert!(preparing_controller_is_stale(
+            ControllerHandoffState::Promoted,
+            Some(now - 100),
+            now,
+            stale_after,
+        ));
+        // Within threshold ⇒ keep (healthy mid-handoff).
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 5),
+            now,
+            stale_after,
+        ));
+        // Exactly at threshold ⇒ keep (strictly greater-than is stale).
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 45),
+            now,
+            stale_after,
+        ));
+        // Stable / Retiring / Failed ⇒ never stale even when old.
+        for state in [
+            ControllerHandoffState::Stable,
+            ControllerHandoffState::Retiring,
+            ControllerHandoffState::Failed,
+        ] {
+            assert!(!preparing_controller_is_stale(
+                state,
+                Some(now - 100),
+                now,
+                stale_after,
+            ));
+        }
+        // No handoff_started_at ⇒ never stale.
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            None,
+            now,
+            stale_after,
+        ));
+    }
+
+    fn write_preparing_bootstrap(
+        project_root: &Path,
+        pid: u32,
+        handoff_started_at: Option<u64>,
+    ) -> ControllerBootstrap {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid,
+            controller_binary: None,
+            controller_generation: 1004,
+            handoff_state: ControllerHandoffState::Preparing,
+            handoff_started_at,
+            previous_controller_pid: Some(1002),
+        };
+        write_bootstrap_state(&bootstrap).unwrap();
+        bootstrap
+    }
+
+    #[test]
+    fn reaper_keeps_fresh_preparing_bootstrap() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // Fresh handoff_started_at (just now) ⇒ healthy mid-handoff, keep.
+        write_preparing_bootstrap(dir.path(), std::process::id(), Some(timestamp_secs()));
+        let (reaped, kept) = terminate_stale_preparing_controllers(
+            dir.path(),
+            Duration::from_secs(45),
+            false,
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (0, 1));
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Preparing);
+    }
+
+    #[test]
+    fn reaper_skips_pid_that_is_not_a_same_project_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // Our own test pid is alive but is NOT an `agent-doc controller serve`
+        // process, so the cmdline gate must refuse to kill it and keep the record.
+        let old = timestamp_secs() - 600;
+        write_preparing_bootstrap(dir.path(), std::process::id(), Some(old));
+        let (reaped, kept) = terminate_stale_preparing_controllers(
+            dir.path(),
+            Duration::from_secs(45),
+            false,
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (0, 1));
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(
+            after.handoff_state,
+            ControllerHandoffState::Preparing,
+            "a non-controller pid must never be killed or marked Failed"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_reaped_skipped"));
+        assert!(ops_log.contains("reason=not_same_project_controller"));
+    }
+
+    #[test]
+    fn reaper_dry_run_reports_without_killing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        let old = timestamp_secs() - 600;
+        write_preparing_bootstrap(dir.path(), pid, Some(old));
+
+        let (reaped, kept) = terminate_stale_preparing_controllers(
+            dir.path(),
+            Duration::from_secs(45),
+            true, // dry-run
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+        assert!(process_is_alive(pid), "dry-run must not kill the sentinel");
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Preparing);
+
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+    }
+
+    #[test]
+    fn reaper_terminates_wedged_same_project_controller_and_marks_failed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(
+            is_same_project_controller_pid(dir.path(), pid),
+            "sentinel must present a matching `controller serve --project-root` cmdline"
+        );
+        let old = timestamp_secs() - 600;
+        write_preparing_bootstrap(dir.path(), pid, Some(old));
+
+        let (reaped, kept) = terminate_stale_preparing_controllers(
+            dir.path(),
+            Duration::from_secs(45),
+            false,
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+
+        // The live wedged process must be dead (the critical difference from the
+        // projection reaper). The sentinel is a child of this test, so a killed
+        // process lingers as a zombie (with `/proc/<pid>` still present) until we
+        // `wait()` it — poll `try_wait` instead of `process_is_alive`.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("wedged sentinel pid must be reaped");
+        assert!(
+            !status.success(),
+            "sentinel must be signal-terminated, not exit cleanly: {status:?}"
+        );
+
+        // The record must be superseded with `Failed` so the next bind promotes fresh.
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_reaped pid="));
+        assert!(ops_log.contains("caller=gc"));
+    }
+
+    /// Spawn a long-sleep sentinel whose `/proc/<pid>/cmdline` matches the
+    /// `agent-doc controller serve --project-root <root>` shape
+    /// `is_same_project_controller_pid` checks, without exec-collapsing the
+    /// shell (the `; :` keeps `sh` resident). The trailing positional params
+    /// after the `-c` script name become `$0..$N` and are ignored by `sleep`.
+    fn spawn_controller_sentinel(project_root: &Path) -> std::process::Child {
+        let argv0 = project_root.join("agent-doc");
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30; :")
+            .arg(argv0.to_string_lossy().to_string())
+            .arg("controller")
+            .arg("serve")
+            .arg("--project-root")
+            .arg(project_root.to_string_lossy().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn controller sentinel");
+        // `/proc/<pid>/cmdline` is not populated the instant `spawn` returns; wait
+        // until the sentinel presents the matching controller cmdline so the
+        // reaper's `is_same_project_controller_pid` gate sees it deterministically.
+        let pid = child.id();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2)
+            && !is_same_project_controller_pid(project_root, pid)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
     }
 }

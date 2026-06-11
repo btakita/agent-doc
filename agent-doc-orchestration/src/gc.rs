@@ -192,6 +192,25 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += actors_closed;
     total_skipped += actors_kept;
 
+    // Terminate any controller wedged in `Preparing`/`Promoted` past the
+    // seconds-scale stuck-handoff threshold (#kqr6 / #sjwm / #stuckhandoff). This
+    // kills the live wedged process (not just a projection record) so it stops
+    // racing the IDE listener on `ipc.sock`.
+    let (preparing_reaped, preparing_kept) =
+        crate::project_controller::terminate_stale_preparing_controllers(
+            &project_root,
+            crate::project_controller::stale_preparing_controller_threshold(),
+            dry_run,
+        )?;
+    if preparing_reaped > 0 {
+        eprintln!(
+            "[gc] controllers: {} stale preparing reaped, {} kept",
+            preparing_reaped, preparing_kept
+        );
+    }
+    total_deleted += preparing_reaped;
+    total_skipped += preparing_kept;
+
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
     if sock_deleted > 0 {

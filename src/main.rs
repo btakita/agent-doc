@@ -565,6 +565,21 @@ enum Commands {
         #[arg(long)]
         isolate: bool,
     },
+    /// Claim (or release) the drain-owner lease for a self-driving harness loop
+    /// (#kp5z / #qflood). The Claude Code `/loop` auto-loop refreshes this lease
+    /// just before re-invoking `/loop` so the supervisor idle-queue watch defers
+    /// instead of double-injecting `agent-doc <FILE>` into the live input queue.
+    #[command(name = "drain-claim")]
+    DrainClaim {
+        /// Path to the session document
+        file: PathBuf,
+        /// Owner tag for the lease (default: claude_loop)
+        #[arg(long, default_value = agent_doc_orchestration::drain_owner::DRAIN_OWNER_CLAUDE_LOOP)]
+        owner: String,
+        /// Release the lease instead of claiming/refreshing it
+        #[arg(long)]
+        release: bool,
+    },
     /// Focus the tmux pane for a session document
     Focus {
         /// Path to the session document
@@ -1314,6 +1329,18 @@ enum AdminAction {
         /// Emit JSON instead of a human-readable report
         #[arg(long)]
         json: bool,
+    },
+    /// Terminate any controller wedged in `Preparing`/`Promoted` past the
+    /// stuck-handoff threshold (#kqr6 / #sjwm / #stuckhandoff). Replaces the
+    /// manual `pkill -f 'controller serve ... --handoff-state preparing'`.
+    #[command(name = "reap-stale-controllers")]
+    ReapStaleControllers {
+        /// Project root to sweep (defaults to the nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Report what would be terminated without killing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Handoff a document actor to another pane after generation verification
     Handoff {
@@ -2181,6 +2208,26 @@ fn main() -> anyhow::Result<()> {
             force,
             isolate,
         ),
+        Commands::DrainClaim {
+            file,
+            owner,
+            release,
+        } => {
+            let file_str = file.to_string_lossy();
+            if release {
+                agent_doc_orchestration::drain_owner::clear_drain_owner_lease(&file_str);
+                println!("released drain-owner lease for {}", file.display());
+            } else {
+                agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(
+                    &file_str, &owner,
+                )?;
+                println!(
+                    "claimed drain-owner lease owner={owner} for {}",
+                    file.display()
+                );
+            }
+            Ok(())
+        }
         Commands::Focus {
             file,
             pane,
@@ -2897,6 +2944,39 @@ fn main() -> anyhow::Result<()> {
                 once,
                 interval,
             ),
+            AdminAction::ReapStaleControllers {
+                project_root,
+                dry_run,
+            } => {
+                let root = match project_root {
+                    Some(r) => r,
+                    None => {
+                        let cwd = std::env::current_dir()?;
+                        agent_doc_orchestration::fs_util::find_project_root(&cwd).ok_or_else(
+                            || {
+                                anyhow::anyhow!(
+                                    ".agent-doc/ project root not found from {}",
+                                    cwd.display()
+                                )
+                            },
+                        )?
+                    }
+                };
+                let threshold =
+                    agent_doc_orchestration::project_controller::stale_preparing_controller_threshold();
+                let (reaped, kept) =
+                    agent_doc_orchestration::project_controller::terminate_stale_preparing_controllers_for_caller(
+                        &root, threshold, dry_run, "admin",
+                    )?;
+                if dry_run {
+                    println!(
+                        "[admin] reap-stale-controllers (dry-run): {reaped} would be terminated, {kept} kept"
+                    );
+                } else {
+                    println!("[admin] reap-stale-controllers: {reaped} terminated, {kept} kept");
+                }
+                Ok(())
+            }
             AdminAction::Queue { action } => match action {
                 AdminQueueAction::Pause {
                     document,

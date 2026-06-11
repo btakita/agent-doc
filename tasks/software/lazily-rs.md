@@ -69,7 +69,21 @@ Notes:
 - `src/lazily-rs/AGENTS.md` remains modified but unstaged; that change pre-existed this work and was intentionally left untouched.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:f95c68ad -->
+
+### Re: lrsprop — gpt-5
+
+Implemented and pushed `#lrsprop`.
+
+Changed paths: `src/lazily-rs/Cargo.toml`, `src/lazily-rs/Cargo.lock`, `src/lazily-rs/SPEC.md`, `src/lazily-rs/tests/property_graph.rs`, plus the parent `src/lazily-rs` submodule pointer.
+
+Verification: `cargo fmt --all`, `cargo test --test property_graph`, and full `make check` all passed locally. The pushed lazily-rs GitHub Actions `CI` run for `43ab553` was still `in_progress` at closeout, so I recorded local verification rather than waiting on CI.
+
+Commits pushed: lazily-rs `43ab553 test: add randomized graph property coverage`; parent `agent-loop` `f0a7fd4ff chore: update lazily-rs submodule`.
+
+Notes: `src/lazily-rs/AGENTS.md` remains modified but unstaged as pre-existing work. Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `968aa2b3`; I did not rebuild it because the installed version matches this session's skill contract.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:b5851fe4 -->
 <!-- /agent:exchange -->
 ###
 <!--

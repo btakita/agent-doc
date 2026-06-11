@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-EFS repo main: EFS `6eca4b1` makes admin dashboard Needs attention links route to Deal Pipeline, Lender Pipeline, or Documents and auto-open the relevant first actionable dialog where one exists; it is pushed to origin/main and deployed as Worker version `730027a8-cad2-4bf9-b171-58f245bf4dd9` on 2026-06-11. The prior lender document stack remains deployed (#doc-stack-esc, EFS `5c655ba`), and the Lender Pipeline nav count fix remains in place (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badges using `Aging Nd` (amber background/border matching Lender Pipeline) for open Leads and active loan stages; pushed to origin/main, parent submodule pointer committed as `4e3f10829`, and deployed as Worker version `cb9184c9-a67c-41f4-97e8-b33a04b20fd6` on 2026-06-11. Remote D1 reports no pending migrations; smoke checks returned `/` 200 and `/portal-admin/pipeline` 303 auth redirect. GitHub Actions `Agent Doc` run `27324496154` did not start because of account billing/spending-limit restrictions, not a test failure.
 <!-- /agent:status -->
 
 ## Exchange
@@ -32,53 +32,19 @@ EFS repo main: EFS `6eca4b1` makes admin dashboard Needs attention links route t
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-043604.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-052806.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Admin dashboard attention links
+- Archived 1 response topic(s): Deal Pipeline queue-head closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Deal Pipeline aging badges — gpt-5
-
-> **Queue prompt:**
->
-> The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation and bg color to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
-
-
-Implemented, pushed, and deployed. I used `Aging Nd` instead of `Stalled Nd`; for CRE loan originator/admin language, “pipeline aging” is the better fit because it names time-in-workflow without implying the deal is dead.
-
-What changed:
-- Deal Pipeline open Leads plus active loan stages (`Applications`, `Processing`, `Documents`, `Underwriting`) now get amber card background/border matching the Lender Pipeline attention treatment.
-- Those cards show an `Aging Nd` badge computed from server-side `now_s` and each card’s `created_at`.
-- Terminal/parked stages are not marked needs-attention.
-- PRD/spec and tests were updated under `#pipeline-action-aging`.
-
-Commits/deploy:
-- EFS commit pushed: `56cd057` (`feat(admin): annotate deal pipeline aging (#pipeline-action-aging)`).
-- Parent submodule pointer pushed: `4e3f10829`.
-- Deployed Worker version: `cb9184c9-a67c-41f4-97e8-b33a04b20fd6`.
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts` passed: 37 tests.
-- EFS `make check` passed: 552 tests + app build + Worker build.
-- Root `make check` passed.
-- Remote D1 migrations: none pending before and after deploy.
-- Smoke checks: `/` returned `200`; `/portal-admin/pipeline` returned expected `303` auth redirect.
-- GitHub Actions: no `CI` workflow exists here; latest parent `Agent Doc` run failed to start because GitHub billing/spending-limit blocked runner startup, so there were no failing logs to fix.
-
-### Re: Deal Pipeline queue-head closeout — gpt-5
-
-> The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation and bg color to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
-
-Closed by EFS `56cd057` and deployed as Worker version `cb9184c9-a67c-41f4-97e8-b33a04b20fd6`. The implemented badge copy is `Aging Nd`, which is a better CRE loan-originator term than `Stalled Nd`; it describes pipeline age without implying the deal is dead. The cards use the matching amber attention background/border for open Leads and active Deal Pipeline loan stages.
-<!-- agent:boundary:fd70bf2a -->
+<!-- agent:boundary:b930fc16 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

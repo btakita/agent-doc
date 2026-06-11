@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -78,14 +78,15 @@ Verification:
 - GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
 
 No actionable follow-up items were added for this queue head.
-<!-- agent:boundary:d4eb9edb -->
+<!-- agent:boundary:86e0c927 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- When a submission is made with validation errors, include an error box around the field. As the user completes the field, remove the error box. deploy
 <!-- /agent:queue -->
 
 ## Backlog

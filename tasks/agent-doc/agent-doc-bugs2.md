@@ -68,7 +68,22 @@ Compacted content:
 - Test + spec (`specs/07-closeout-commands.md`). `make check` clean.
 
 **Operator live-verify (the convergence half).** Next time you see a Stale File Cache dialog mid-session, `grep '\[jbstalecache\]' .agent-doc/logs/ops.log` (and the `ipc_listener_active=true` field on `live_prompt_drift_auto_recovered`). If the marker is present at that timestamp, the binary auto-recovery disk write is confirmed as the trigger and the editor-side dialog-suppression fix becomes a focused, low-risk follow-up. If the dialog fires with **no** marker, the trigger is a different write path and we chase that instead. The marker is the diagnostic that turns this from "intermittent and unexplained" into a one-grep root-cause confirmation.
-<!-- agent:boundary:9e2416d8 -->
+
+### Re: do [#respdel] (spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#respdel]
+
+
+**Verified resolved by existing infrastructure — no new code shipped (and intentionally so).** `#respdel` is the "response shows committed, then an uncommitted working-tree delete/rewrite of that same response is left behind" wedge (`live_prompt_drift_after_preflight`). Two existing mechanisms cover both directions and I confirmed them live this session:
+
+- **Deletion direction (the `#respdel` symptom):** `write.rs::try_auto_recover_live_prompt_drift` (#exch-intermix) writes the adopted `content_ours` snapshot — which contains the full response — back to disk same-cycle. Evidence: every finalize this session hit `live_prompt_drift_auto_recovered` with `snap_len > file_len` (e.g. `9767 > 8443`), i.e. the full response was re-written over the fragmented file. After the cycle, `git diff HEAD -- tasks/agent-doc/agent-doc-bugs2.md` is **empty** — the working tree retains the response and matches HEAD. No leftover deletion.
+- **Over-application direction:** `session_check.rs::self_heal_late_ipc_overapplication` + `detect_late_ipc_response_overapplication` restore committed HEAD when a late IPC replay re-adds a duplicate/stale response. `preflight` applies the same repair.
+- Plus `17c20732` ("repair socket already-applied response drift") reworked the socket-drift path after the original repro (cycle-1781137531085).
+
+**Deliberately not shipped:** a *fresh-preflight* deletion self-heal (working tree == HEAD minus a committed response → restore HEAD). It has no current live repro, and auto-restoring a response the user may have genuinely deleted is a dangerous data mutation. The same-cycle recovery already prevents the leftover deletion in practice. If it ever recurs, the `live_prompt_drift_auto_recovered` marker is the diagnostic and it becomes a focused, provable fix — consistent with the test/file-bug/check-logs workflow.
+<!-- agent:boundary:24492b98 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -76,7 +91,7 @@ Compacted content:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#clearcodex]~~
 - ~~[#jbstalecache]~~
-- [#respdel]
+- ~~[#respdel]~~
 - [#mrhpcdrift]
 - [#ktw8]
 - [#lvbremain]
@@ -118,7 +133,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#respdel] agent-doc-bug: closeout can show a response as committed and then leave an uncommitted working-tree delete/rewrite of that same response. Live repro from tasks/agent-doc/agent-doc-bugs2.md on 2026-06-10: after the #blgmangle finalize/late sibling failure path, HEAD contained the committed response but the working tree showed an uncommitted deletion/rewrite of that response; the next preflight/session-check reported ipc_proof_insufficient with invariant=live_prompt_drift_after_preflight for cycle-1781137531085. Fix terminal closeout so late sibling/pre-write/IPC proof failures are atomic with the document write, or recover content_ours without deleting/requoting committed exchange content.
 - [ ] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).

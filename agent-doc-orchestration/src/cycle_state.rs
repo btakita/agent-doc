@@ -629,7 +629,11 @@ pub fn record_pending_added_ids(file: &Path, ids: &[String]) -> Result<Option<Cy
         .map(|id| normalize_pending_id(id))
         .filter(|id| !id.is_empty())
     {
-        if !state.pending_added_ids.iter().any(|existing| existing == &id) {
+        if !state
+            .pending_added_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
             state.pending_added_ids.push(id);
             changed = true;
         }

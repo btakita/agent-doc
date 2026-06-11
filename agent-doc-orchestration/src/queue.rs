@@ -742,8 +742,10 @@ pub fn annotate_manual_queue_additions(
             _ => None,
         })
         .collect();
-    let synced_lc: std::collections::HashSet<String> =
-        synced_ids.iter().map(|id| id.to_ascii_lowercase()).collect();
+    let synced_lc: std::collections::HashSet<String> = synced_ids
+        .iter()
+        .map(|id| id.to_ascii_lowercase())
+        .collect();
     let mut changed = false;
     let mut out = current.to_vec();
     for entry in &mut out {
@@ -1500,8 +1502,7 @@ mod tests {
         // NOT auto-pinned; an already-pinned new line is left as-is; an existing
         // (snapshot) line is untouched.
         let snapshot = parse("- do [#a]\n").unwrap();
-        let current =
-            parse("- do [#synced]\n- :round_pushpin: do [#pinned]\n- do [#a]\n").unwrap();
+        let current = parse("- do [#synced]\n- :round_pushpin: do [#pinned]\n- do [#a]\n").unwrap();
         let synced: std::collections::HashSet<String> =
             ["synced".to_string()].into_iter().collect();
 

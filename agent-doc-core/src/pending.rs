@@ -3894,9 +3894,13 @@ mod tests {
     #[test]
     fn op_set_gate_verify_round_trips_predicate() {
         let body = "- [/] [#saev] early-ack live verify\n";
-        let new_body =
-            op_set_gate_verify(body, "saev", "verify=ops_log:early_ack_pending;disproof=false ack-timeout", 1749526200)
-                .unwrap();
+        let new_body = op_set_gate_verify(
+            body,
+            "saev",
+            "verify=ops_log:early_ack_pending;disproof=false ack-timeout",
+            1749526200,
+        )
+        .unwrap();
         let (_, items, _) = parse_items(&new_body);
         // Still gated, untyped checkbox preserved.
         assert_eq!(items[0].state, PendingState::Gated);

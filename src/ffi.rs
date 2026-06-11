@@ -2197,7 +2197,10 @@ mod ack_content_tests {
         let tmp = TempDir::new().unwrap();
         let file = CString::new(tmp.path().join("plan.md").to_str().unwrap()).unwrap();
         let readonly = unsafe { agent_doc_plugin_watch_readonly(file.as_ptr()) };
-        assert_eq!(readonly, 1, "post-cutover the plugin must never apply file-IPC patches");
+        assert_eq!(
+            readonly, 1,
+            "post-cutover the plugin must never apply file-IPC patches"
+        );
     }
 
     #[test]

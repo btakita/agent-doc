@@ -2024,8 +2024,7 @@ fn live_transcript_context_pct(
     // Active transcript: newest `*.jsonl` under `~/.claude/projects/<hash(cwd)>/`.
     let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
     let project_dir = std::env::current_dir().ok()?;
-    let subdir =
-        crate::context_pct::claude_projects_subdir(Path::new(&home), &project_dir);
+    let subdir = crate::context_pct::claude_projects_subdir(Path::new(&home), &project_dir);
     let transcript = crate::context_pct::latest_claude_transcript(&subdir)?;
     crate::context_pct::transcript_context_pct(harness_kind, &transcript, &model)
 }
@@ -3775,7 +3774,10 @@ pub fn run_with_reap_policy(
     // `AGENT_DOC_SUPERVISOR` rollback flag were removed at the removal rung.
     crate::ops_log::log_op(
         file,
-        &format!("supervisor_host_gate file={} hosting=in-process", file.display()),
+        &format!(
+            "supervisor_host_gate file={} hosting=in-process",
+            file.display()
+        ),
     );
     log_event(&mut session_log, "supervisor_host_gate hosting=in-process");
 

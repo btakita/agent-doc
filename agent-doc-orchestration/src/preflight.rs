@@ -3906,8 +3906,7 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
         // preset_item_id_collision). Only exact duplicates are removed; distinct
         // items that merely share an id are preserved so the ambiguity warning
         // still surfaces.
-        let (after_dedupe, deduped_ids) =
-            crate::pending::op_dedupe_identical_items(&current_body);
+        let (after_dedupe, deduped_ids) = crate::pending::op_dedupe_identical_items(&current_body);
         if !deduped_ids.is_empty() {
             eprintln!(
                 "[preflight] {}: deduped {} duplicate same-id entr{}: {}",
@@ -3944,9 +3943,10 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             // work and must be closed explicitly, not reaped on the cycle they
             // appear. Only apply the guard when we have a snapshot baseline to
             // compare against (untracked scaffold docs have none).
-            let snapshot_baseline = snapshot_at_start.as_deref().filter(|s| !s.trim().is_empty());
-            let snapshot_ids =
-                snapshot_baseline.map(|snap| surface_pending_ids(snap, surface));
+            let snapshot_baseline = snapshot_at_start
+                .as_deref()
+                .filter(|s| !s.trim().is_empty());
+            let snapshot_ids = snapshot_baseline.map(|snap| surface_pending_ids(snap, surface));
             // `#opsproof-samecycle-add`: the snapshot baseline alone is not enough.
             // In the `write`/`finalize` path the same invocation that adds an item
             // via `--review-add` / `--pending-add*` also re-syncs the on-disk
@@ -5079,45 +5079,45 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         {
             let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
             if let Ok(snap_entries) = crate::queue::parse(snap_body) {
-            if let Some(pinned) =
+                if let Some(pinned) =
                     crate::queue::annotate_operator_priority_reorders(&snap_entries, &entries)
-            {
-                let new_body = crate::queue::render(&pinned);
-                current_content = {
-                    let comps = crate::component::parse(&current_content)?;
-                    let q = comps.iter().find(|c| c.name == "queue").unwrap();
-                    q.replace_content(&current_content, &new_body)
-                };
-                eprintln!(
-                    "[preflight] queue: pinned manually reordered prompt(s) with operator priority"
-                );
-                entries = pinned;
-                mutated = true;
-            }
-            // #7r2s: a brand-new queue line the operator just typed (absent from
-            // the snapshot, not one the binary appended from the backlog this
-            // cycle) carries no pin, so the priority sort below would sink it
-            // under `queue`-attr backlog items. Auto-pin it with operator
-            // priority so it stays at its authored slot.
-            let synced_set: std::collections::HashSet<String> =
-                synced_queue_ids.iter().cloned().collect();
-            if let Some(pinned_new) = crate::queue::annotate_manual_queue_additions(
-                &snap_entries,
-                &entries,
-                &synced_set,
-            ) {
-                let new_body = crate::queue::render(&pinned_new);
-                current_content = {
-                    let comps = crate::component::parse(&current_content)?;
-                    let q = comps.iter().find(|c| c.name == "queue").unwrap();
-                    q.replace_content(&current_content, &new_body)
-                };
-                eprintln!(
-                    "[preflight] queue: auto-pinned manually-added prompt(s) with operator priority (#7r2s)"
-                );
-                entries = pinned_new;
-                mutated = true;
-            }
+                {
+                    let new_body = crate::queue::render(&pinned);
+                    current_content = {
+                        let comps = crate::component::parse(&current_content)?;
+                        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                        q.replace_content(&current_content, &new_body)
+                    };
+                    eprintln!(
+                        "[preflight] queue: pinned manually reordered prompt(s) with operator priority"
+                    );
+                    entries = pinned;
+                    mutated = true;
+                }
+                // #7r2s: a brand-new queue line the operator just typed (absent from
+                // the snapshot, not one the binary appended from the backlog this
+                // cycle) carries no pin, so the priority sort below would sink it
+                // under `queue`-attr backlog items. Auto-pin it with operator
+                // priority so it stays at its authored slot.
+                let synced_set: std::collections::HashSet<String> =
+                    synced_queue_ids.iter().cloned().collect();
+                if let Some(pinned_new) = crate::queue::annotate_manual_queue_additions(
+                    &snap_entries,
+                    &entries,
+                    &synced_set,
+                ) {
+                    let new_body = crate::queue::render(&pinned_new);
+                    current_content = {
+                        let comps = crate::component::parse(&current_content)?;
+                        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                        q.replace_content(&current_content, &new_body)
+                    };
+                    eprintln!(
+                        "[preflight] queue: auto-pinned manually-added prompt(s) with operator priority (#7r2s)"
+                    );
+                    entries = pinned_new;
+                    mutated = true;
+                }
             }
         }
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
@@ -10097,8 +10097,8 @@ mod tests {
             file_after.contains("[#freshgate]"),
             "same-cycle-added gated item must not be ops-proof reaped: {file_after}"
         );
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !log.contains("auto_complete_ops_proof"),
             "no ops-proof auto-completion should fire for a same-cycle add"
@@ -10172,8 +10172,8 @@ mod tests {
             file_after.contains("[#ktw8]"),
             "live-verify gate must not be ops-proof reaped on a cited commit hash: {file_after}"
         );
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !log.contains("auto_complete_ops_proof"),
             "no ops-proof auto-completion should fire for a live-verify gate"
@@ -10745,7 +10745,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "saev");
         assert_eq!(results[0].status, "provable");
-        assert!(!results[0].auto_resolved, "opt-in off must not flip the gate");
+        assert!(
+            !results[0].auto_resolved,
+            "opt-in off must not flip the gate"
+        );
 
         // The document still shows the gated item — never silently flipped.
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -10769,10 +10772,16 @@ mod tests {
         assert!(results[0].auto_resolved);
 
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert!(after.contains("[x] [#saev]"), "gate must be flipped: {after}");
+        assert!(
+            after.contains("[x] [#saev]"),
+            "gate must be flipped: {after}"
+        );
         // Snapshot kept in lockstep for the upcoming commit.
         let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(snap.contains("[x] [#saev]"), "snapshot must flip too: {snap}");
+        assert!(
+            snap.contains("[x] [#saev]"),
+            "snapshot must flip too: {snap}"
+        );
     }
 
     #[test]
@@ -10793,7 +10802,10 @@ mod tests {
         assert_eq!(results[0].status, "failed", "disproof wins");
         assert!(!results[0].auto_resolved);
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert!(after.contains("- [/] [#saev]"), "failed gate must remain: {after}");
+        assert!(
+            after.contains("- [/] [#saev]"),
+            "failed gate must remain: {after}"
+        );
     }
 
     #[test]
@@ -10872,7 +10884,10 @@ mod tests {
         assert_eq!(results[0].status, "provable");
         assert!(results[0].auto_resolved);
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert!(after.contains("[x] [#saev]"), "gate must be flipped: {after}");
+        assert!(
+            after.contains("[x] [#saev]"),
+            "gate must be flipped: {after}"
+        );
     }
 
     #[test]

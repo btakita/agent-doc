@@ -125,7 +125,12 @@ pub fn parse_claude_jsonl_used_tokens(content: &str) -> Option<UsedTokens> {
             .and_then(|m| m.get("usage"))
             .or_else(|| value.get("usage"));
         let Some(usage) = usage else { continue };
-        let field = |k: &str| usage.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let field = |k: &str| {
+            usage
+                .get(k)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+        };
         let used = UsedTokens {
             input: field("input_tokens"),
             output: field("output_tokens"),
@@ -172,7 +177,9 @@ pub fn context_window_for_model(model: &str) -> Option<u64> {
     {
         return Some(CLAUDE_CONTEXT_WINDOW);
     }
-    eprintln!("[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)");
+    eprintln!(
+        "[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)"
+    );
     None
 }
 
@@ -343,7 +350,11 @@ mod tests {
             "opus",
             "Sonnet",
         ] {
-            assert_eq!(context_window_for_model(m), Some(CLAUDE_CONTEXT_WINDOW), "{m}");
+            assert_eq!(
+                context_window_for_model(m),
+                Some(CLAUDE_CONTEXT_WINDOW),
+                "{m}"
+            );
         }
     }
 
@@ -373,7 +384,9 @@ mod tests {
         assert!(read_used_tokens(Harness::Codex, tmp.path()).is_none());
         assert!(read_used_tokens(Harness::OpenCode, tmp.path()).is_none());
         // Missing file is also None (fail safe).
-        assert!(read_used_tokens(Harness::Claude, Path::new("/no/such/transcript.jsonl")).is_none());
+        assert!(
+            read_used_tokens(Harness::Claude, Path::new("/no/such/transcript.jsonl")).is_none()
+        );
     }
 
     #[test]
@@ -386,7 +399,9 @@ mod tests {
         // Below window: build a small fixture.
         let mut small = NamedTempFile::new().unwrap();
         small
-            .write_all(b"{\"message\":{\"usage\":{\"input_tokens\":50000,\"output_tokens\":10000}}}\n")
+            .write_all(
+                b"{\"message\":{\"usage\":{\"input_tokens\":50000,\"output_tokens\":10000}}}\n",
+            )
             .unwrap();
         let pct = transcript_context_pct(Harness::Claude, small.path(), "sonnet").unwrap();
         assert_eq!(pct, 30.0); // 60000 / 200000 * 100

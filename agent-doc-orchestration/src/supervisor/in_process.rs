@@ -706,8 +706,7 @@ mod tests {
         let mut session = sh_session("exit 0");
         let pid = session.process_id();
         let child = session.take_child().expect("take child");
-        let mut sup =
-            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+        let mut sup = InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
         assert_eq!(sup.pid(), pid);
 
         // Drive the adapter tick loop the way start.rs's in-process host loop
@@ -735,8 +734,7 @@ mod tests {
         let mut session = sh_session("exit 3");
         let pid = session.process_id();
         let child = session.take_child().expect("take child");
-        let mut sup =
-            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+        let mut sup = InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
 
         let mut outcome = None;
         for _ in 0..200 {
@@ -760,8 +758,7 @@ mod tests {
         let mut session = sh_session("sleep 30");
         let pid = session.process_id();
         let child = session.take_child().expect("take child");
-        let mut sup =
-            InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
+        let mut sup = InProcessSupervisor::adopt(Box::new(PtySupervisedChild::monitor(child, pid)));
 
         assert_eq!(sup.tick(), TickOutcome::Running);
         // External stop/restart request: kill the child, keep the supervisor live.

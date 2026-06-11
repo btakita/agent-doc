@@ -932,10 +932,12 @@ mod tests {
         );
         // #x9ds: the reject marker is recorded to ops.log (not just stderr) so the
         // #4wxr behavior is provable from the ops.log gate-verify scan.
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains("[claim] cross-session-reject pane_id=%12 pane_session=claude configured=0"),
+            log.contains(
+                "[claim] cross-session-reject pane_id=%12 pane_session=claude configured=0"
+            ),
             "reject marker should reach ops.log: {log}"
         );
     }

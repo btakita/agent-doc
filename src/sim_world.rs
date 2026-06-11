@@ -1318,10 +1318,12 @@ impl SimWorld {
         content_ours: &str,
         expected_response: &str,
     ) {
-        if let Some(repaired) = agent_doc_orchestration::write::materialize_response_in_current_exchange(
-            &self.doc,
-            expected_response,
-        ) {
+        if let Some(repaired) =
+            agent_doc_orchestration::write::materialize_response_in_current_exchange(
+                &self.doc,
+                expected_response,
+            )
+        {
             if repaired != self.doc {
                 self.coverage.already_applied_response_recoveries += 1;
             }

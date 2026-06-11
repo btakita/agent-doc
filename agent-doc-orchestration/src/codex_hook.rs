@@ -676,8 +676,7 @@ fn tracked_repeated_queue_recovery_response(
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
-    let context_reset_reason =
-        codex_continuation_clear_reason(file, state.last_context_clear_at);
+    let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -777,8 +776,7 @@ fn auto_queue_continuation_response(
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
-    let context_reset_reason =
-        codex_continuation_clear_reason(file, state.last_context_clear_at);
+    let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
@@ -2909,8 +2907,8 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !ops_log.contains("[s760] clear-decision"),
             "no s760 clear-decision should be logged when not opted in:\n{ops_log}"

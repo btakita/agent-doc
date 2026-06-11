@@ -364,6 +364,58 @@ fn is_context_clear_prompt(prompt: &str) -> bool {
     crate::queue_command::is_context_clear_command(prompt)
 }
 
+/// `#clearcodex`: resolve the Codex Stop-hook continuation context-reset reason
+/// AND emit the structured proof lines an operator greps for in ops.log.
+///
+/// The supervisor idle-queue watch (`start.rs`, `#s760c`) already emits the
+/// canonical `[s760] clear-decision …` line before a pre-emptive `/clear`, but
+/// the Codex Stop-hook continuation decided its `/clear` instruction with no
+/// observable marker — so an operator driving a queue drain could never confirm
+/// or deny that a queue-turn boundary actually requested a reset. This helper
+/// restores parity: when the project is opted into `agent_doc_queue_context_reset`,
+/// it logs the canonical `[s760] clear-decision` line (Codex transcript token
+/// reading is unsupported — `read_used_tokens` → None for Codex — so the ctx%
+/// gate is always `pct=none clear=false` and never drives the clear by itself)
+/// plus a `[clearcodex] codex-continuation` companion line carrying the
+/// accretion/compaction reason that actually instructs the `/clear`. Returns the
+/// effective reason unchanged so the caller still wires it into the continuation
+/// instruction.
+fn codex_continuation_clear_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Option<String> {
+    let reason = match crate::session_accretion::queue_context_reset_reason_if_opted_in(
+        file,
+        last_context_clear_at,
+    ) {
+        Ok(reason) => reason,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] codex stop hook: failed to resolve queue context-reset reason for {}: {err:#}",
+                file.display()
+            );
+            None
+        }
+    };
+    if crate::session_accretion::queue_context_reset_opted_in(file) {
+        let threshold = crate::session_accretion::clear_threshold_for_doc(file);
+        // Codex transcript token reading is unsupported, so ctx% is unknown and
+        // the s760 gate never clears on its own; the accretion/compaction
+        // `reason` is the live signal that instructs the `/clear`.
+        let decision = crate::context_pct::clear_decision(true, None, threshold);
+        crate::ops_log::log_op(file, &decision.diagnostic);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed={}",
+                reason.as_deref().unwrap_or(""),
+                reason.is_some()
+            ),
+        );
+    }
+    reason
+}
+
 fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&str>) -> String {
     if let Some(reason) = context_reset_reason {
         return format!(
@@ -610,12 +662,8 @@ fn tracked_repeated_queue_recovery_response(
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
-    let context_reset_reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
-        file,
-        state.last_context_clear_at,
-    )
-    .ok()
-    .flatten();
+    let context_reset_reason =
+        codex_continuation_clear_reason(file, state.last_context_clear_at);
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -653,10 +701,7 @@ fn marker_repeated_queue_recovery_response(
         });
     }
     crate::queue_continuation::record_requested_head(file, &next_prompt)?;
-    let context_reset_reason =
-        crate::session_accretion::queue_context_reset_reason_if_opted_in(file, None)
-            .ok()
-            .flatten();
+    let context_reset_reason = codex_continuation_clear_reason(file, None);
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -718,12 +763,8 @@ fn auto_queue_continuation_response(
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
-    let context_reset_reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
-        file,
-        state.last_context_clear_at,
-    )
-    .ok()
-    .flatten();
+    let context_reset_reason =
+        codex_continuation_clear_reason(file, state.last_context_clear_at);
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -804,10 +845,7 @@ fn marker_fallback_continuation_response(
     }
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
-    let context_reset_reason =
-        crate::session_accretion::queue_context_reset_reason_if_opted_in(&file, None)
-            .ok()
-            .flatten();
+    let context_reset_reason = codex_continuation_clear_reason(&file, None);
     // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
     // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
@@ -2767,6 +2805,86 @@ agent-doc {}\n",
             }
             other => panic!("expected fresh-context continuation block, got {other:?}"),
         }
+    }
+
+    /// `#clearcodex`: the Codex Stop-hook continuation now emits structured
+    /// proof lines to ops.log when opted in, so an operator can verify the
+    /// queue-turn clear decision instead of guessing. The canonical
+    /// `[s760] clear-decision` line plus a `[clearcodex] codex-continuation`
+    /// companion (with the accretion/compaction reason and the
+    /// `clear_instructed` outcome) must both be present.
+    #[test]
+    fn stop_codex_continuation_logs_structured_clear_proof_when_opted_in() {
+        let dir = setup_project();
+        fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\n",
+        )
+        .unwrap();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log should exist after an opted-in continuation");
+        assert!(
+            ops_log.contains("[s760] clear-decision optIn=true"),
+            "missing canonical s760 marker:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("pct=none clear=false"),
+            "codex ctx% is unsupported, so the s760 gate must report pct=none clear=false:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("[clearcodex] codex-continuation optIn=true"),
+            "missing codex-continuation companion marker:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("clear_instructed=true"),
+            "compaction-after-clear should instruct a /clear:\n{ops_log}"
+        );
+    }
+
+    /// `#clearcodex`: without the `agent_doc_queue_context_reset` opt-in the
+    /// Codex continuation must stay silent — no pre-emptive `/clear` and no
+    /// structured clear-decision noise in ops.log.
+    #[test]
+    fn stop_codex_continuation_emits_no_clear_proof_when_not_opted_in() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !ops_log.contains("[s760] clear-decision"),
+            "no s760 clear-decision should be logged when not opted in:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("[clearcodex] codex-continuation"),
+            "no codex-continuation marker should be logged when not opted in:\n{ops_log}"
+        );
     }
 
     #[test]

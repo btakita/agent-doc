@@ -154,12 +154,31 @@ cases: 5  failed: 0  status: pass
 Proof — changed paths: `log_digest.rs`, `tsift-cli/src/{lib,cli,commands/digests}.rs`, `tests/exit_code.rs`, `fixtures/log-digest-token-savings.json`, `specs/digests-sessions.md`, `VERSIONS.md`. Commands: `make check` (exit 0), `cargo install --path .` (ok), live gate (5/5 pass), `git push` (`d056da5..64f30cf`). Verification: 8/8 `tsift-digest` log_digest tests (incl. new classifier + fixture-eval tests) + new integration gate pass; full suite green. **CI:** the `#logchunk` run (27324362283) is now **green**, confirming the earlier `#logfam` FAIL was a transient cache-step infra kill (not a code regression); the `#loggate` run is pending. Confidence: high. Escalation: none.
 
 **Log-compression backlog (P1 `#logfam` + P2 `#logchunk` + P3 `#loggate`) is fully drained.** All three shipped with spec + tests + build + install + push.
-<!-- agent:boundary:d016b903 -->
+
+### Re: queue drained, auto-loop disarmed — opus-4-8
+
+You removed `go` from the now-empty queue marker — the auto-loop trigger is off and there's nothing queued to drain. No actionable prompt, backlog, or repo work remains this cycle.
+
+The log-compression backlog is fully shipped on `origin/main`:
+- **P1 `#logfam`** (`88a7f46`) — semantic line-family folding
+- **P2 `#logchunk`** (`d056da5`) — raw-chunk artifact handles
+- **P3 `#loggate`** (`64f30cf`) — fixture-backed token-savings + false-negative gate
+
+CI on `#logchunk` is green; the `#loggate` run verifies the committed tree (it was pending at last check).
+
+**Recommendation — compact this session.** The exchange is large (125 lines, 5 response sections, 16 no-op closeouts in the last 30 min) and the backlog/queue are empty, so accretion is at the block threshold. With no `agent_doc_auto_compact` opt-in, I won't auto-compact. When you're ready:
+
+```
+agent-doc compact tasks/software/tsift.md --commit
+```
+
+That archives the resolved exchange and keeps the document lean for the next task. Nothing else pending.
+<!-- agent:boundary:78cec595 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

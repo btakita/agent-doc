@@ -184,7 +184,22 @@ They're lazy-launched and respawn clean. That clears the active drift now while 
 **What shipped earlier this session (recap):** `#2v7b` Codex Enter re-submit, `#02bw` fmt cleanup, `#w42v` compact editor-IPC convergence (you struck `do [#w42v]` — thanks), `#kp5z` dispatch-source observability — all on `origin/main`.
 
 **State:** queue still paused; backlog `#kp5z` (awaiting your repro) + `#sjwm`/`#kqr6` (scoped, need dedicated stable turn) + `#nzmc` (offline-blocked); review `#2v7b`/`#qt32`/`#w42v` (operator-drive live proofs). Not auto-looping — these need your live env, a stable turn, and network.
-<!-- agent:boundary:cd241121 -->
+### Re: do #kp5z — the real blocker: live controllers run the OLD binary — opus-4-8
+
+I found why this whole session feels stuck. I checked `ops.log`: there are **zero** real `queue_dispatch_invoked` lines (the only "match" was my backlog item text quoting the marker name). The observability I shipped for `#kp5z` — and in fact **every fix this session** (`#2v7b`, `#w42v`, `#kp5z`) — is in the installed binary but **not running**, because the live `agent-doc controller serve` processes don't auto-restart; they keep executing the pre-`e6f7538e` binary. That stale controller is also exactly the `#stuckhandoff` / `#ipcdrift` cause (wedged old-binary controllers rewriting the buffer → the drift I've recovered every cycle).
+
+So I can't pin the `#kp5z` flood source: the data doesn't exist until the controllers run the new binary. This is a single, concrete unblock — not a code gap.
+
+**I'm recycling the controllers now** (after this commit) so the fresh binary activates. Once it's up:
+- **`#kp5z`:** run one flood repro → `ops.log` gets real `queue_dispatch_invoked … command_kind=…` lines → I pin the source → write the busy-gate/dedupe.
+- **`#w42v` / `#2v7b`:** re-test live (Compact Exchange conflict gone → `compact_writeback transport=editor_ipc`; Codex self-submit → `route_submit_resubmit … result=accepted`).
+- **`#qt32`:** the 08b zero-drift proof becomes meaningful only on the fresh binary.
+- The recurring per-cycle drift should stop once the wedged old-binary controllers are gone.
+
+If my recycle can't reach them (this sandbox filters the process list — the earlier diagnosis needed `lsof` on `.agent-doc/ipc.sock`, not `ps`), the operator-run version is: `cd src/agent-doc && make install` (done) then `pkill -f 'agent-doc controller serve'`. They respawn clean on the next invoke.
+
+`#nzmc` still needs network (crates.io offline here). Not auto-looping.
+<!-- agent:boundary:25beb19c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -263,6 +278,7 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
 - :round_pushpin: do [#kqr6]
 - :round_pushpin: do [#nzmc]
+- :round_pushpin: do [#kp5z]
 - The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - Upgrade lazily-rs + tsift-* dependencies.
 - JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.

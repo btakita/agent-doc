@@ -143,7 +143,42 @@ Commits / push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:4f47394f -->
+
+### Re: #dtmx — gpt-5
+
+Closed `#dtmx` by verifying the memo equality-guard implementation that is already present in `Context`.
+
+`Context::memo()` installs a `PartialEq` comparator through `slot_with_equals`, and `refresh_slot()` / `recompute_slot_now()` preserve downstream cached values when a dirty memo recomputes equal. The existing spec tests lock the two important contracts:
+
+- equal intermediate memo values do not recompute downstream slots;
+- effects do not rerun when their slot dependency validates to the same value.
+
+Changed paths:
+
+- `tasks/software/lazily-rs.md` queue/backlog repair and closeout
+- `tasks/software/lazily-rs.done.md` done archive update
+
+Commands run:
+
+- `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance`
+- `cargo test effect_skips_rerun_when_slot_dependency_recomputes_equal --test spec_compliance`
+- `make check`
+- `gh run list --workflow CI --limit 1` in `src/lazily-rs`
+
+Verification:
+
+- Both targeted memo guard tests passed.
+- Full `make check` passed, including the long `thread_safe_loom` coverage.
+- Latest lazily-rs CI run `27315337023` is still `in_progress` for commit `e32de87` (`test: lock context node storage allocation`).
+
+Commits / push:
+
+- No lazily-rs code commit was needed for `#dtmx`; the implementation and regression coverage were already in the pushed submodule state.
+- No push was performed this cycle because there were no new lazily-rs code changes.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:90ae6b18 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,20 +188,10 @@ Confidence: high.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 <!-- /agent:queue -->
-<!--
-- [#1xk0]
-- [#qhn6]
-- [#39xb]
-- [#p2pc]
-- [#6965]
-- [#9evs]
-- [#74c7]
--->
 
 ## Backlog
 
-<!-- agent:backlog -->
-- [ ] [#dtmx] #lzmemo=Implement Memo (ctx.memo) with PartialEq guard — dirty recomputation producing equal value suppresses downstream invalidation.
+<!-- agent:backlog queue -->
 - [ ] [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.
 - [ ] [#qhn6] #lzbatch=Implement Batch system — nested batches, outermost-boundary flush, coalesced updates, deferred effect scheduling.
 - [ ] [#39xb] #lzcellguard=Add PartialEq change detection to Cell.set() — no-op on equal value per spec.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -17,13 +17,14 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: As of Worker version `ff80afcd-c969-4377-bedd-ac33af4e8a44` (deployed 2026-06-09): the admin loan board is renamed **Deal Pipeline** (nav item, board page, lead-detail card; section id/route/endpoint unchanged) and its sidebar nav badge now counts **action-needed** items — open Leads (`new`/`contacted`) + loans in Applications/Processing/Documents/Underwriting — instead of `COUNT(*) FROM loans`, excluding terminal/parked stages (#pipeline-action-count, EFS `909b866`). The admin **Payments** section (`/portal-admin/payments`) adds a **Pipeline** board as the default view (with a Table toggle via `?view=table`) tracking borrower payments one-card-per-loan grouped Overdue/Due Soon/Current/Paid Off, each card showing next payment due date, amount, principal, and overdue count + total; read-only snapshot served by `GET /api/admin/payments/pipeline` (registered before `/:payment_id`), mutations stay on the Table view (#payments-pipeline, EFS `d8eb783`). Neither feature required a D1 migration. `/apply` public prequalification + D1-backed `application_leads` admin review and the public `/contact` form (D1-backed `contact_messages` + `/portal-admin/contact-messages` admin review) remain live (contact-form persistence from EFS commit `79ac942`, migration `0054_contact_messages` applied remote). Loan-application Approval is gated on a complete full application — `POST /api/admin/full-applications/:id/status` no longer accepts `accepted` (in_review/declined only) and `/approve` fails closed unless the submitted application is complete (#approve-requires-full-app, EFS `b136519`); the admin "Accept and send to TMO" button is disabled with a missing-parts list on incomplete apps (EFS `b731aa4`). Portal form-submission errors render a red banner at the top of the form plus an error toast via `portal/shared/form_error.tsx` (#form-error-standard). The admin Deal Pipeline (`/portal-admin/pipeline`) has a read-only "Leads" funnel column from open prequalification leads and the entry column is "Applications" (#pipeline-leads, EFS `877c3eb`); there is no separate "Approved" column (TMO has no such loan status). Admin Management sidebar links show item-count badges loaded from `GET /api/admin/nav-counts` (#admin-nav-counts, EFS `0d9708a`). Individual application leads have a detail page at `/portal-admin/application-leads/:lead_id` (`GET /api/admin/application-leads/:id`), linked from the leads list and the pipeline Leads column (#lead-detail, EFS `ef3b76e`). Contact-form staff notifications deliver to `CONTACT_NOTIFICATION_TO=btak.dev@gmail.com` (EFS `af4935d`) from `EFS_EMAIL_FROM=Equity Funding Source <info@briantakita.me>` via the Cloudflare Email Sending API (CLOUDFLARE_API_TOKEN secret); a live POST smoke test recorded staff_notification_status=sent. NOTE: staff_notification_status=sent means the Cloudflare Email API returned 2xx, not a guaranteed inbox delivery — if mail does not arrive, investigate briantakita.me SPF/DKIM/DMARC and Cloudflare Email Sending external-delivery limits. Public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications use `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`; an EFS-owned sending domain in Resend is still pending (#f4rq). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+
+EFS repo main: EFS `e6310d1` adds priority-sorted admin dashboard `attention_items` for nonzero operational work: pending funding commits, open applications, new leads, open document requests, pending lender requests, then recent uploads. This queue item used `#spec-test-commit-push`, so it was committed and pushed but not deployed. EFS workers.dev production remains Worker version `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac` (deployed 2026-06-10): lender document **View** opens a stacked preview modal above the Lender Pipeline lender/card dialog; Esc closes only the document layer and leaves the lender dialog open (#doc-stack-esc, EFS `5c655ba`). The **Lender Pipeline** sidebar nav badge counts active board investor cards — one per `users.role = 'investor'` row shown in `/portal-admin/lender-pipeline` — instead of only pending lender requests + pending funds (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -84,6 +85,11 @@ I did not make source changes in this cycle. `gh run list --workflow CI --limit 
 
 > **Queue prompt:**
 >
+> In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
+
+
+> **Queue prompt:**
+>
 > The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy
 
 
@@ -103,53 +109,27 @@ Verification:
 - Remote moved with unrelated EFS commit `2dcb1ae` (`fix(tmo): keep loan cache diffs on detail payloads`), so I rebased and reran `bun run check` — 545 pass / 0 fail, app build clean, worker build clean.
 - `bun run deploy:worker` — no D1 migrations to apply; Worker deployed successfully.
 - Live smoke: `/` returns HTTP 200; `/portal-admin/lender-pipeline` redirects to admin login with HTTP 303; `/api/admin/nav-counts` rejects unauthenticated access with HTTP 401.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
+- `bun run deploy:worker` — deployed; no D1 migrations to apply.
+- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
+- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
+- `bun run deploy:worker` — deployed; no D1 migrations to apply.
+- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
 
 CI note: `gh run list --workflow CI --limit 1` still cannot find a workflow named `CI`, and `gh workflow list` returns no configured workflows for this repo. The EFS repo is clean and synced with `origin/main`; unrelated dirty superproject files/submodule pointers were left untouched.
-Implemented and deployed.
-
-> **Queue prompt:**
->
-> In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
-
-
-The lender document `View` action now opens an in-app stacked document preview modal instead of a new tab. The preview modal uses `PortalModal` with `z="z-[1200]"`, so it layers above the existing lender/card dialog; the existing topmost-only Escape stack then closes only the document modal and leaves the lender dialog open. The modal previews the document inline and still offers a direct `Download` link.
-
-Backend support now lets the admin investor-document download route honor `?disposition=inline|attachment`, so preview and download behavior are explicit.
-
-EFS commit: `5c655ba` (`admin docs: stack lender document preview`), pushed to `origin/main`.
-Worker deploy: `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac`.
-
-Verification:
-- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
-- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
-- `bun run deploy:worker` — deployed; no D1 migrations to apply.
-- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
-- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
-Implemented and deployed.
-
-The lender document `View` action now opens an in-app stacked document preview modal instead of a new tab. The preview modal uses `PortalModal` with `z="z-[1200]"`, so it layers above the existing lender/card dialog; the existing topmost-only Escape stack then closes only the document modal and leaves the lender dialog open. The modal previews the document inline and still offers a direct `Download` link.
-
-Backend support now lets the admin investor-document download route honor `?disposition=inline|attachment`, so preview and download behavior are explicit.
-
-EFS commit: `5c655ba` (`admin docs: stack lender document preview`), pushed to `origin/main`.
-Worker deploy: `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac`.
-
-Verification:
-- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
-- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
-- `bun run deploy:worker` — deployed; no D1 migrations to apply.
-- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
-- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
-
-No new actionable follow-up items were found for the backlog.
-<!-- agent:boundary:fe4d6eda -->
+<!-- agent:boundary:b36745a6 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- Add items that need attentention to the admin dashboard. Sort by priority/urgency.
 <!-- /agent:queue -->
 
 ## Backlog

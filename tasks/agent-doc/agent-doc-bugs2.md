@@ -174,13 +174,37 @@ Heads-up on what the binary did and how I corrected it:
 - The `priority go` queue auto-pulled **#mrhpcdrift2** (a fresh-focused-session task) as the next head. I kept it open with a do-not-auto-drain note and **I'm not auto-looping**. Halt the queue (drop `go`) or run #mrhpcdrift2 in a fresh session when you're ready.
 
 Note: this doc's supervisor is rewriting the working tree on every commit (`postcommit_worktree_check match=false`); I recover via `git checkout HEAD` each cycle, but a fresh session for this doc is advisable.
-<!-- agent:boundary:b17a149b -->
+
+### Re: do [#opsproofgate] (spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#opsproofgate]
+
+
+**Fixed and shipped.** Live-verify / operator-drive gates are now excluded from `evidence=commit` ops-proof auto-completion, so a shipped commit hash cited in a gate's own text can no longer falsely archive an UNDRIVEN gate to done.
+
+**Root cause.** `preflight.rs::classify_ops_proof_completion` flips a gated `[/]` item to done when its text carries a completion marker (`SHIPPED`/`DONE`/…) **plus** a commit hash or green-CI phrase. That heuristic is right for ordinary code-complete gates, but a *live-verify* gate (`#ktw8`) deliberately keeps a "Code SHIPPED 1edb20d2" note in its body — and the scanner read that submodule hash as proof, emitting `auto_complete_ops_proof id=ktw8 evidence=commit` and reaping the gate that had **zero** genuine structured `[s760] clear-decision` emissions. For these gates a commit is not proof; only an anchored `^[epoch] <marker>` line in `ops.log`, driven live by the operator, is.
+
+**Fix** (submodule `cd37010f`, pushed to origin/main; superproject pointer bumped):
+- `classify_ops_proof_completion` now returns `None` for any item whose text marks it a live-verify / operator-drive gate (`[live-verify gate]`, `live-verify ONLY`, `operator-drive`, `operator drives`, `operator live-verify`). Closure is left to the `#optverify` log-arbiter path (`run_gate_verify`, which already requires a genuine anchored ops.log marker, prose stripped) and manual operator resolution.
+- New `is_live_verify_gate()` helper alongside the existing `has_ops_completion_blocker` / `marker_is_leading_status` guards.
+- Regression test `ops_proof_does_not_reap_live_verify_gate_on_commit_hash`: a multi-cycle-old `[#ktw8] [live-verify gate] … Code SHIPPED 1edb20d2` review item survives pending maintenance with **no** `auto_complete_ops_proof` log line. The existing `#opsproof-falsepos` / `#opsproof-samecycle-add` tests still pass.
+
+The mechanism is a code-internal heuristic (tagged in-code like its siblings `#opsproof-falsepos`/`#opsproof-samecycle-add`), so the fix carries `#opsproofgate` code comments rather than a new spec section — the `[/]` "never auto-reaped" contract in `specs/pending-system.md` is now actually honored for these gates.
+
+**Verification:** `make check` clean (EXIT=0); `cargo install` + `cargo build --release` both done (new binaries live). CI run `27321666329` in progress for commit `cd37010f`; continuing from green local evidence.
+
+**Closeout:** `#opsproofgate` is `--done`. With it fixed, `#ktw8` / `#lvbremain` will no longer be spuriously archived from `agent:review` on a cited commit — they stay parked as the operator-drive gates they are.
+
+**Not auto-looping.** The next queue head is `#mrhpcdrift2`, which is explicitly marked *FRESH focused session ONLY — do NOT auto-drain here* (the socket-ACK / live-buffer divergence root-cause belongs in a clean session, not this degraded one). Halting the drain; open a fresh `/agent-doc` session on `plan-ipc-crdt-response-drift.md` when you're ready, or drop `go` to halt the queue.
+<!-- agent:boundary:e7543745 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#opsproofgate]
+- ~~[#opsproofgate]~~
 - [#mrhpcdrift2]
 <!-- /agent:queue -->
 ###
@@ -220,7 +244,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#opsproofgate] agent-doc-bug: preflight review ops-proof auto-completion falsely completed a live-verify GATE (#ktw8) on evidence=commit — it treated a submodule/commit hash referenced in the gate text as proof and archived the UNDRIVEN item to done (auto_complete_ops_proof id=ktw8 surface=review evidence=commit, while ktw8 had 0 genuine structured [s760] clear-decision emissions). Fix: items tagged live-verify/operator-drive must be excluded from evidence=commit auto-completion; require the actual structured ops.log marker (anchored ^[epoch] line, NOT prose). Distinct from #zwn5 (queue-head strike disposition) and #x9ds (prose false-positive scan). Repro 2026-06-10 agent-doc-bugs2.md.
 - [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Plan tasks/agent-doc/plan-ipc-crdt-response-drift.md. (stays open: FRESH focused session ONLY — do NOT auto-drain here; the priority go queue auto-pulled this head into a degraded session where it should not run.)
 <!-- /agent:backlog -->
 

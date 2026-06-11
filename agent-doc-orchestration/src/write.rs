@@ -8417,9 +8417,16 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     }
     content_ours.push_str("\n## User\n\n");
 
-    // Re-read file to check for user edits since lock acquisition
-    let content_current = std::fs::read_to_string(file)
+    // Re-read file to check for user edits since lock acquisition. #rtwwire rung
+    // 3b: source the merge "theirs" from the realtime model (newest of disk vs the
+    // editor's unsaved buffer) so the 3-way merge incorporates a queue/exchange
+    // edit that lives only in the unsaved buffer instead of clobbering it
+    // (#queue-user-edit-overwrite). Staleness-gated (`#rtwfeed`) — the buffer wins
+    // only when it provably holds unsaved edits ahead of disk; no editor attached
+    // returns disk unchanged.
+    let disk_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let content_current = crate::realtime_model::resolve_current_doc(file, &disk_current).content;
 
     let final_content = if content_current == base {
         // No edits — use our version directly
@@ -9691,8 +9698,18 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let mut current_content = std::fs::read_to_string(file)
+    // #rtwwire rung 3b: the IPC write path normalizes/parses its patches against
+    // the "current document". Source it from the realtime model — newest of disk
+    // vs the editor's unsaved buffer — so a component patch (e.g. the queue) is
+    // computed against the buffer the user actually sees, not stale disk, and the
+    // resulting patchback cannot drop a queue/exchange item that exists only in
+    // the unsaved buffer (#queue-user-edit-overwrite). Staleness-gated (`#rtwfeed`):
+    // the buffer wins only when it provably holds unsaved edits ahead of disk, so
+    // agent-doc's own just-written disk content can never be overridden. No editor
+    // attached returns disk unchanged.
+    let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let mut current_content = crate::realtime_model::resolve_current_doc(file, &disk).content;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
         file,

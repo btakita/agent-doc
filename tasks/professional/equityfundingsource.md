@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -82,7 +82,7 @@ feat(admin): add dashboard pipeline attention accordion
 
 Show concrete Deal Pipeline items in the admin dashboard Needs attention section, deep-link each row back to the pipeline with loan/lead ids, and open the matching dialog after the pipeline loads. Covers the dashboard API payload, dashboard accordion UI, pipeline query handling, and admin dashboard tests.
 ```
-<!-- agent:boundary:e5dfd3e4 -->
+<!-- agent:boundary:3fd2bac5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,6 +90,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The admin dashboard "Needs Attention" accordion should be collapsible and collapsed by default. deploy
 <!-- /agent:queue -->
 
 ## Backlog

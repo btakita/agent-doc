@@ -88,7 +88,30 @@ Captured your live clarifications — they sharpen the spec and I've folded them
 This very turn was itself the live repro again: my first finalize hit `live_prompt_drift_after_preflight` because you were typing into the buffer mid-write — the recovery path committed rung 1 correctly from `content_ours`, which is the fail-safe working as designed, but it's precisely the staleness #rtwwire removes.
 
 **Not auto-looping.** The next queue item `do [#sjwm]` (the IPC-drift / stuck-`Preparing`-controller fix) is operator-drive: it needs a dedicated stable turn with live multi-process verification and can't be agent-completed from inside this racing session — same constraint as rungs 2–4. Rung 1 (`realtime_model.rs`) is committed + pushed (submodule `41eee413`).
-<!-- agent:boundary:e126b369 -->
+
+### Re: re-queued the rungs (#rtwfeed/#rtwwire/#rtwbcast/#sjwtm) — this session is still an affected one — opus-4-8
+
+You re-queued the rungs in `go` mode, and I checked the live state instead of guessing. It confirms this is exactly the session those items say they can't run in:
+
+- **A wedged controller is live right now:** PID `152664`, `agent-doc controller serve … --handoff-state preparing` (generation 1002, previous-controller-pid 4140434). That's the `#stuckhandoff` / `#sjwm` / `#kqr6` symptom itself — a controller stuck mid-handoff in `preparing`, which is precisely what races the IPC writes and reverts edits.
+- **The live editor is on pre-rung-1 code.** The `~/.cargo/bin` binary and the submodule are both at `41eee413` (rung 1), but preflight flags the **cdylib** (the `.so` IDEA hot-reloads) as older — so the JB buffer this session serves is still running the FFI from *before* the realtime primitive landed.
+
+Every queued item's own backlog text says the same thing — #rtwwire "MUST run in a dedicated stable turn … cannot be done in an affected session", #rtwfeed/#rtwbcast "NEEDS live verify", #sjwm/#kqr6 "cannot be verified from inside the affected session". And the preset you attached is `#spec-test-build-install-commit-push` — the **build + install** step rebuilds the very `~/.cargo/bin/agent-doc` this session shells out to for preflight/finalize, mid-turn. Doing that from here is the self-race, not the fix.
+
+So I'm not implementing the rungs from this session — same stance as last turn, now with live proof rather than caution.
+
+**The clean turn is one operator setup, then it's all agent-doable.** After this turn closes:
+
+1. `cd src/agent-doc && make install` — rebuilds the binary **and** refreshes the cdylib so rung 1 actually goes live in IDEA (this is the missing piece; the `.so` never got `lib-install`ed).
+2. `pkill -f 'agent-doc controller serve.*--handoff-state preparing'` — recycles the wedged `152664`; it respawns clean on the next invoke (the immediate-relief step #kqr6 already specifies).
+3. Reopen / restart the session (or run the queue from a non-IDE harness with the doc closed in IDEA) so nothing holds a stale buffer.
+
+Then the `go` queue drains against a fresh binary with no wedged controller, and #rtwfeed → #rtwwire → #rtwbcast can be implemented, unit-tested, built/installed, and **verified live** without racing my own writes.
+
+**One queue fix:** `do [#sjwtm]` references an id that doesn't exist — the backlog item is `#sjwm` (typo: `sjwtm` vs `sjwm`). I left it as-is rather than silently rewrite your queue; correct it to `#sjwm` and it'll resolve.
+
+Backlog and queue are intact — nothing struck or rewritten. **Not auto-looping** (no new free-text prompt, only the requeue/reorg; and adding `/loop` as a second drain owner is the `#kp5z` flood I'd be reproducing).
+<!-- agent:boundary:d75b9158 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -168,7 +191,6 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 - :pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
 - :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
-- :round_pushpin: do [#kqr6]
 - :round_pushpin: do [#nzmc]
 - :round_pushpin: do [#kp5z]
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.

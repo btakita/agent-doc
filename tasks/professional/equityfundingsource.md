@@ -35,81 +35,12 @@ EFS deployed Worker 0336450c-126f-49da-9321-1d4c74a6d2c1 on 2026-06-11: full-app
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-154115.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-174449.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Boolean application radios
+- Archived 2 response topic(s): validation toasts and deploy; field-level validation boxes and deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-Implemented and deployed.
-
-The borrower/broker full application now routes explicit submission failures through the shared form error reporter, so Save & continue validation failures, final submit validation failures, and e-sign missing-field failures show the existing top-of-form red error plus an error toast. Silent autosave remains silent.
-
-Also preserved the active session's deployed full-application Yes/No radio work and rebased over the newer dashboard funded-deals work from origin/main. EFS submodule commit `7d4fb0d` was pushed to `origin/main`.
-
-Verification:
-❯ - `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
-❯ - `make check` after rebase: 557 tests, build, and worker build passed
-❯ - `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
-❯ - Remote D1 migrations: no pending migrations
-❯ - Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
-- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-
-
-Also preserved the active session deployed full-application Yes/No radio work and rebased over the newer dashboard funded-deals work from origin/main. EFS submodule commit `7d4fb0d` was pushed to `origin/main`.
-
-- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
-- `make check` after rebase: 557 tests, build, and worker build passed
-- `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
-- Remote D1 migrations: no pending migrations
-- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
-
-### Re: validation toasts and deploy — gpt-5
-
-Implemented and deployed.
-
-The borrower/broker full application now routes explicit submission failures through the shared form error reporter, so Save & continue validation failures, final submit validation failures, and e-sign missing-field failures show the existing top-of-form red error plus an error toast. Silent autosave remains silent.
-
-EFS submodule commit `7d4fb0d` was pushed to `origin/main`.
-
-Verification:
-- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
-- `make check` after rebase: 557 tests, build, and worker build passed
-- `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
-- Remote D1 migrations: no pending migrations
-- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
-- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-
-No actionable follow-up items were added for this queue head.
-
-### Re: field-level validation boxes and deploy — gpt-5
-
-> **Queue prompt:**
->
-> When a submission is made with validation errors, include an error box around the field. As the user completes the field, remove the error box. deploy
-
-
-Implemented and deployed.
-
-The borrower/broker full application now keeps structured validation field keys alongside the existing banner/toast message. When Save & continue, final submit, or e-sign validation fails, the missing or invalid controls get a red field-level error box. The visible box is derived from current field validity, so it disappears as soon as the user completes or fixes that field.
-
-Changed files in `src/equityfundingsource-dev`:
-- `lib/ui--browser--efs/portal/borrower/full_application.tsx`
-- `lib/ui--server--efs/portal.ts`
-- `tests/form-error-standard.test.ts`
-
-Verification:
-- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts tests/apply4-full-application-p2.test.ts` passed: 16 tests
-- `make check` passed: 559 tests, app build, and worker build
-- `make deploy` deployed Worker version `0336450c-126f-49da-9321-1d4c74a6d2c1`
-- Remote D1 migrations: no pending migrations before and after deploy
-- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
-- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-
-No git commit was created in the EFS submodule because its local instructions say not to commit without an explicit request; the intended source changes remain in that submodule worktree.
-
-No actionable follow-up items were added for this queue head.
-<!-- agent:boundary:5ae20eb1 -->
+<!-- agent:boundary:f5aa4907 -->
 <!-- /agent:exchange -->
 ###
 <!--

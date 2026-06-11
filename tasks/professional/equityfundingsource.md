@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -37,7 +37,7 @@ EFS repo main: EFS `6eca4b1` makes admin dashboard Needs attention links route t
 Compacted content:
 - Archived 1 response topic(s): Admin dashboard attention links
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:67085e20 -->
+<!-- agent:boundary:1afa89fd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
 <!-- /agent:queue -->
 
 ## Backlog

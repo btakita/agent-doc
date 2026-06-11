@@ -37,13 +37,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #next-steps to fix tsift bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:4138ab17 -->
+
+### Re: do #logsigfp — anchor npm/pnpm error classification — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#logsigfp]
+
+
+Done. Fixed the false-positive risk the `#loggate` classifier introduced.
+
+**Root cause:** `classify_generic_signal` matched `err!` and `err_pnpm` as bare substrings, so benign lines were misflagged as errors — `stderr!` contains `err!`, and any token/URL containing `err_pnpm` (e.g. a docs path) matched too.
+
+**Fix** (`packages/tsift-digest/src/log_digest.rs`): a new `has_npm_pnpm_error_token` helper anchors detection to whitespace tokens — an `ERR!` token (npm/yarn) or a token prefixed `ERR_PNPM_` (pnpm). I tightened the pnpm prefix to the full `ERR_PNPM_` (with trailing underscore) after the regression test caught that `err_pnpmish` slipped through an 8-char `err_pnpm` prefix.
+
+**Live proof** (installed binary):
+
+```
+input:  "flushed stderr! buffer"  +  "npm ERR! code ELIFECYCLE"
+signals: error x1 — "npm ERR! code ELIFECYCLE"   (stderr! correctly NOT flagged)
+```
+
+Proof — changed paths: `log_digest.rs`, `VERSIONS.md`. Commands: `make check` (exit 0), `cargo install` (ok), live smoke, `git push` (`64f30cf..32ae62c`). Verification: 9/9 `tsift-digest` log_digest tests (incl. new `npm_pnpm_error_classification_is_token_anchored`) + the `#loggate` fixture-gate integration test still pass (npm/pnpm cases still classify their real markers). CI run 27357574146 pending. Confidence: high.
+
+Marked `#logsigfp` done. Backlog now: `#logfixturecov` (top — add forbidden_signals cases to lock this in), then `#tsinflight`.
+<!-- agent:boundary:a4628735 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#logsigfp]
+- ~~do [#logsigfp]~~
 - do [#logfixturecov]
 - do [#tsinflight]
 <!-- /agent:queue -->
@@ -54,7 +78,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logsigfp] Tighten log-digest npm/pnpm error classification. The new classify_generic_signal in packages/tsift-digest/src/log_digest.rs uses unanchored substring checks (contains err! and contains err_pnpm) that can flag benign lines (prose, URLs, paths) as error signals. Anchor them to token boundaries: match an npm/yarn ERR! token and an ERR_PNPM_ prefix at a word boundary. Add a regression test.
 - [ ] [#logfixturecov] Harden the log-digest fixture gate against false positives. Add forbidden_signals cases to fixtures/log-digest-token-savings.json proving benign lines (prose mentioning err!, a non-cargo line with a version token) are NOT classified as error signals. Currently the gate only exercises false-negatives (required_signals); this locks in the logsigfp precision fix.
 - [ ] [#tsinflight] [recommended] Resolve the 16 in-flight uncommitted tsift working-tree changes (graph-db/surrealdb/token-gate/finding/health). session-check flags them as partial-staging risk and they block clean committed-tree verification; land or revert them in their own cycle.
 <!-- /agent:backlog -->

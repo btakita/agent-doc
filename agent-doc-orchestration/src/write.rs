@@ -1088,7 +1088,49 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
     )
 }
 
+/// Resolve the merge baseline (the common ancestor handed to the finalize merge).
+///
+/// `#mps` Rung 3 (flip): when the model-projected-baseline cutover is enabled
+/// (`AGENT_DOC_MPS=1`), source the base by projecting the model overlay pinned at
+/// preflight (`snapshot::load_baseline_model`), cross-checking against — and
+/// falling back to — the legacy `.md` baseline. The `.md` read stays the fail-safe
+/// (and, with the flag on, the derived cross-check cache; Rung 4). With the flag
+/// off this is byte-for-byte the legacy `.md` path.
 fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
+    let md_content = read_explicit_baseline_md(file, baseline_file)?;
+
+    if crate::snapshot::mps_enabled() {
+        match crate::snapshot::load_baseline_model(file, md_content.as_deref()) {
+            Ok(Some(projection)) => return Ok(Some(projection)),
+            Ok(None) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "mps_baseline_resolve source=md_fallback reason=no_model file={}",
+                        file.display()
+                    ),
+                );
+            }
+            Err(e) => {
+                // Fail-safe: a model-baseline error must never break finalize —
+                // fall back to the legacy `.md` baseline and log loudly.
+                eprintln!("[write] #mps baseline model resolve failed, using .md baseline: {e}");
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "mps_baseline_resolve source=md_fallback reason=model_error file={}",
+                        file.display()
+                    ),
+                );
+            }
+        }
+    }
+
+    Ok(md_content)
+}
+
+/// Legacy `.md` baseline read (the pre-`#mps` behavior). See [`read_explicit_baseline`].
+fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
     let Some(path) = baseline_file else {
         return Ok(None);
     };

@@ -830,7 +830,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // diagnostic disk-fallback reasons on the compact editor-IPC convergence
         // path (not flow guards), each proving why compact fell back to the
         // guarded disk write instead of converging through the editor.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 39,
+        // +2 (#mps Rung 3) for the audited `mps_baseline_resolve source=md_fallback
+        // reason=<no_model|model_error>` markers in `read_explicit_baseline`. These
+        // are diagnostic baseline-fallback reasons on the model-projected-baseline
+        // cutover path (not flow guards), logging why finalize fell back to the
+        // legacy `.md` baseline instead of the projected model overlay.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 41,
         _ => 0,
     }
 }

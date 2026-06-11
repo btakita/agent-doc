@@ -331,6 +331,162 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `#mps` Rungs 2-4 — model-projected baseline (opt-in cutover)
+// ---------------------------------------------------------------------------
+//
+// Rung 1 (above) proved `model → markdown` projection is byte-stable. Rungs 2-4
+// re-home the *merge baseline* (the explicit `--baseline-file` the finalize merge
+// uses as its common ancestor) from the on-disk `.md` baseline onto the structured
+// document model, projecting it on demand:
+//
+//   - Rung 2 (pin): preflight persists the baseline as an overlay sidecar
+//     (`baselines/<hash>.overlay.yrs`) representing the exact `resolve_current_doc`
+//     projection it already writes to the `.md` baseline.
+//   - Rung 3 (flip): the finalize merge sources its base by projecting that overlay
+//     instead of reading the `.md`, cross-checking against the `.md` and logging
+//     any divergence.
+//   - Rung 4 (derive): the `.md` baseline becomes a derived cross-check cache, no
+//     longer the read authority. (The file is retained as the cache until live
+//     divergence logs are clean; full removal is a later, separate step.)
+//
+// The whole cutover is gated behind `AGENT_DOC_MPS=1` so it can be exercised
+// end-to-end in a dog-food session and reverted instantly (flag off == current
+// behavior, byte for byte). Every decision emits a grep-able ops.log marker
+// (`mps_baseline_pin`, `mps_baseline_resolve`, `mps_baseline_divergence`).
+//
+// The baseline overlay is deliberately a *separate* sidecar from the crdt-runtime
+// overlay (`overlay_crdt_path_for`) so re-homing the baseline never perturbs the
+// stream/crdt write-merge base. The merge baseline is *not* secret-redacted, to
+// match the existing un-redacted `.md` baseline (`save_baseline_content`) so the
+// cross-check stays byte-exact; the redacted snapshot path is unaffected.
+
+const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
+
+/// Whether the `#mps` model-projected-baseline cutover (rungs 2-4) is enabled.
+/// Opt-in via `AGENT_DOC_MPS` (`1` / `true` / `yes` / `on`, case-insensitive).
+/// Off (default / any other value) == current `.md`-baseline behavior.
+pub fn mps_enabled() -> bool {
+    match std::env::var("AGENT_DOC_MPS") {
+        Ok(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => false,
+    }
+}
+
+/// Path of the structured-overlay baseline sidecar:
+/// `<project_root>/.agent-doc/baselines/<hash>.overlay.yrs`.
+pub fn baseline_overlay_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root
+        .join(BASELINE_DIR)
+        .join(format!("{}.{}", hash, BASELINE_OVERLAY_EXT)))
+}
+
+/// `#mps` Rung 2 (pin): persist `content` as the model baseline (overlay sidecar)
+/// for this cycle, overwriting any prior cycle's. Emits `mps_baseline_pin`. The
+/// caller keeps the `.md` baseline; a failure here is returned (and logged by the
+/// caller) but does not by itself break the cycle.
+pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
+    let path = baseline_overlay_path_for(doc)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let state =
+        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    std::io::Write::write_all(&mut tmp, &state)
+        .with_context(|| "failed to write baseline overlay temp file")?;
+    tmp.persist(&path)
+        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    crate::ops_log::log_op(
+        doc,
+        &format!(
+            "mps_baseline_pin file={} content_len={} overlay_bytes={}",
+            doc.display(),
+            content.len(),
+            state.len()
+        ),
+    );
+    Ok(())
+}
+
+/// `#mps` Rung 3 (flip): project the model baseline back to markdown — the base
+/// the finalize merge should use. Cross-checks against `md_baseline` (the legacy
+/// `.md` content, if present) and logs `mps_baseline_resolve` plus, on mismatch, a
+/// loud `mps_baseline_divergence` with the first differing byte for offline
+/// diffing. Returns `Some(projection)` when the overlay sidecar exists and
+/// projects; `None` when there is no model baseline (caller falls back to `.md`).
+pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Option<String>> {
+    let path = baseline_overlay_path_for(doc)?;
+    let bytes = match crate::fs_util::read_optional_bytes(&path)
+        .with_context(|| format!("failed to read baseline overlay {}", path.display()))?
+    {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+    let overlay = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(
+        &bytes,
+        md_baseline,
+    )
+    .with_context(|| format!("failed to decode baseline overlay {}", path.display()))?;
+    let projection = overlay
+        .to_markdown()
+        .with_context(|| format!("failed to project baseline overlay {}", path.display()))?;
+    let md_len = md_baseline.map(|m| m.len()).unwrap_or(0);
+    let diverged = md_baseline.map(|md| md != projection).unwrap_or(false);
+    crate::ops_log::log_op(
+        doc,
+        &format!(
+            "mps_baseline_resolve source=model file={} projected_len={} md_len={} diverged={}",
+            doc.display(),
+            projection.len(),
+            md_len,
+            diverged
+        ),
+    );
+    if diverged {
+        crate::ops_log::log_op(
+            doc,
+            &format!(
+                "mps_baseline_divergence file={} projected_len={} md_len={} first_diff_byte={:?}",
+                doc.display(),
+                projection.len(),
+                md_len,
+                md_baseline.and_then(|md| first_diff_byte(md, &projection))
+            ),
+        );
+    }
+    Ok(Some(projection))
+}
+
+/// Byte offset of the first difference between `a` and `b` (or the shorter
+/// length when one is a prefix of the other). `None` when equal.
+fn first_diff_byte(a: &str, b: &str) -> Option<usize> {
+    a.as_bytes()
+        .iter()
+        .zip(b.as_bytes())
+        .position(|(x, y)| x != y)
+        .or(if a.len() == b.len() {
+            None
+        } else {
+            Some(a.len().min(b.len()))
+        })
+}
+
+/// Delete the model baseline sidecar for a document, if present. Idempotent.
+pub fn delete_baseline_model(doc: &Path) -> Result<()> {
+    let path = baseline_overlay_path_for(doc)?;
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
 /// Delete the snapshot for a document.
 pub fn delete(doc: &Path) -> Result<()> {
     let snap = path_for(doc)?;
@@ -472,6 +628,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     const MIGRATE_DIRS: &[(&str, &str)] = &[
         ("snapshots", "md"),
         ("baselines", "md"),
+        ("baselines", "overlay.yrs"), // #mps model baseline sidecar
         ("locks", "lock"),
         ("pending", "md"),
         ("crdt", "yrs"),
@@ -1876,5 +2033,62 @@ Second answer line three.
             "unicode",
             "# T\u{e9}l\u{e9} \u{1f680}\n\n- caf\u{e9} \u{2014} r\u{e9}sum\u{e9}\n",
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // `#mps` Rungs 2-4 — model-projected baseline store
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mps_baseline_model_roundtrips_byte_identical() {
+        let (_dir, doc) = setup();
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n"
+        );
+        save_baseline_model(&doc, baseline).unwrap();
+        // Cross-checked against the matching `.md` content: projects identically,
+        // no divergence.
+        let projected = load_baseline_model(&doc, Some(baseline)).unwrap();
+        assert_eq!(projected.as_deref(), Some(baseline));
+    }
+
+    #[test]
+    fn mps_baseline_model_none_when_absent() {
+        let (_dir, doc) = setup();
+        // No sidecar pinned → caller falls back to the `.md` baseline.
+        assert!(load_baseline_model(&doc, Some("anything")).unwrap().is_none());
+    }
+
+    #[test]
+    fn mps_baseline_model_projects_even_when_md_diverges() {
+        let (_dir, doc) = setup();
+        let pinned = "## Queue\n<!-- agent:queue -->\n- do [#real]\n<!-- /agent:queue -->\n";
+        save_baseline_model(&doc, pinned).unwrap();
+        // A drifted `.md` baseline must not change the projection — the model is
+        // authoritative under the flip; the divergence is logged for debugging.
+        let stale_md = "## Queue\n<!-- agent:queue -->\n- do [#stale]\n<!-- /agent:queue -->\n";
+        let projected = load_baseline_model(&doc, Some(stale_md)).unwrap();
+        assert_eq!(projected.as_deref(), Some(pinned));
+    }
+
+    #[test]
+    fn mps_delete_baseline_model_idempotent() {
+        let (_dir, doc) = setup();
+        // Delete-before-create is a no-op, not an error.
+        delete_baseline_model(&doc).unwrap();
+        save_baseline_model(&doc, "x\n").unwrap();
+        assert!(baseline_overlay_path_for(&doc).unwrap().exists());
+        delete_baseline_model(&doc).unwrap();
+        assert!(!baseline_overlay_path_for(&doc).unwrap().exists());
+        delete_baseline_model(&doc).unwrap();
+    }
+
+    #[test]
+    fn mps_first_diff_byte_locates_mismatch() {
+        assert_eq!(first_diff_byte("abc", "abc"), None);
+        assert_eq!(first_diff_byte("abc", "abx"), Some(2));
+        assert_eq!(first_diff_byte("abc", "ab"), Some(2)); // prefix → shorter len
+        assert_eq!(first_diff_byte("ab", "abcd"), Some(2));
     }
 }

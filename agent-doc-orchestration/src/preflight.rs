@@ -6587,6 +6587,15 @@ fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
     match std::fs::write(&baseline_path, content) {
         Ok(()) => {
             eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+            // #mps Rung 2 (pin): when the cutover is enabled, also persist the
+            // baseline as the model overlay so finalize can project it. Best
+            // effort — the `.md` baseline above is the fail-safe.
+            if snapshot::mps_enabled() {
+                match snapshot::save_baseline_model(file, content) {
+                    Ok(()) => {}
+                    Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
+                }
+            }
             Some(baseline_path.to_string_lossy().to_string())
         }
         Err(e) => {

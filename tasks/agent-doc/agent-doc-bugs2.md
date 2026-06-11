@@ -58,14 +58,33 @@ Proof:
 - Verification: no code changes were needed for this queue item; the final gate will verify committed closeout and queue state after this response lands.
 - Confidence: high; the backlog is now concrete and ordered, and there are no remaining `agent:review` items to convert.
 - Escalation: none.
-<!-- agent:boundary:408c6a61 -->
+
+### Re: #queueeditloss — gpt-5
+
+> **Queue prompt:**
+>
+> [#queueeditloss]
+
+
+Implemented and pushed the queue edit-loss fix.
+
+The fix is deletion-only on the IPC `content_ours` adoption path: live queue additions are not absorbed into the response commit, while baseline queue prompts deleted in the live candidate are removed from the adopted `content_ours` snapshot so they are not resurrected. Live additions remain next-cycle visible work and continue through the existing `dropped_queue_prompt_recorded` evidence path if an editor overwrite loses them.
+
+Proof:
+- Changed paths: `src/agent-doc/agent-doc-orchestration/src/write.rs`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/tests/test_cli.rs`, and the parent `src/agent-doc` submodule pointer.
+- Commits pushed: `96b0b47e` to `btakita/agent-doc:main`; `8c5195996` to `btakita/agent-loop:main`.
+- Verification: `cargo test -p agent-doc-orchestration apply_live_queue_deletions_removes_deleted_items_without_absorbing_additions`; `cargo test -p agent-doc-orchestration ipc_live_prompt_drift_content_ours_preserves_live_queue_deletions`; `cargo test --test live_ipc_race_integration finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb`; `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`; `make check`; `cargo install --path .`.
+- CI: latest `btakita/agent-doc` CI for `96b0b47e` was `in_progress` when checked; the parent repo has no workflow named `CI`.
+- Confidence: high; local full-suite verification passed and the prior live-queue addition absorption invariant still passes.
+- Escalation: none.
+<!-- agent:boundary:d3093046 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#jblive160]~~
-- [#queueeditloss]
+- ~~[#queueeditloss]~~
 - [#eqrecovery]
 - [#opstdout]
 - [#fencestrip]
@@ -99,7 +118,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
-- [ ] [#queueeditloss] Reproduce and fix queue edits made during a running turn so user-deleted or user-added queue items are not resurrected or lost by closeout, preflight, or IPC convergence.
 - [ ] [#eqrecovery] Reproduce the equityfundingsource reentrant recovery churn and tighten the recovery/closeout state transition that caused repeated repair noise.
 - [ ] [#opstdout] Fix console stdout bleeding in front of the OpenCode TUI; capture a regression that proves agent-doc progress output cannot corrupt the foreground TUI surface.
 - [ ] [#fencestrip] Reproduce and fix the code-fence stripping path so agent-doc preserves fenced blocks across finalize, compaction, IPC, and repair.

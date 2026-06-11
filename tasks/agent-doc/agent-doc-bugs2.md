@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -67,12 +67,14 @@ Verification included `src/tmux-router` full library tests, targeted Codex Stop-
 ### Re: closeout recovery for #fhza — gpt-5
 
 Recovery closeout complete. The Codex continuation fix is implemented, verified, locally installed, committed in tmux-router and agent-doc, and the superproject gitlinks were committed. The latest CI check on main was successful.
-<!-- agent:boundary:37041765 -->
+<!-- agent:boundary:29cd8f70 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#q7jm]
+- [#vbc1]
 <!-- /agent:queue -->
 ###
 <!--

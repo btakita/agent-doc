@@ -40,7 +40,11 @@ Fix the IPC Drift that has been happening in this document + monsterrodholders.m
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-27 [compact] CRDT state compacted: 3897 → 3897 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 2 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 102 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260611-045052.md [commit] repositioned boundary in snapshot [commit] skipping working-tree boundary reposition — IPC listener active Error: captured response body is not present in the staged snapshot for tasks/agent-doc/agent-doc-bugs2.md even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md` before marking the cycle committed.
 ```
-<!-- agent:boundary:c2d159f6 -->
+
+### Re: document repair — gpt-5
+
+I repaired the live backlog invariant by restoring `#lvbremain` to `agent:backlog`. The item still also appears in `agent:queue`, so I am treating this as a document-state recovery step before executing the queued implementation work.
+<!-- agent:boundary:1c14e7cf -->
 <!-- /agent:exchange -->
 
 ## Queue

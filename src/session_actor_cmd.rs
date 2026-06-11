@@ -9,7 +9,7 @@ use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry, Tmux};
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 
-const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_delayed";
+const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_cr";
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

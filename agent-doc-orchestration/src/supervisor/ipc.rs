@@ -160,8 +160,8 @@ fn default_restart_mode() -> String {
 /// Normalize a single-line harness command before handing it to a submit path.
 ///
 /// Tmux-backed submissions should use this normalized text directly and let the
-/// pane submit helper add Enter. Raw PTY fallbacks should feed the normalized
-/// text into `submit_bytes`.
+/// pane submit helper add the submit suffix. Raw PTY fallbacks should feed the
+/// normalized text into `submit_bytes`.
 pub fn normalize_submit_text(text: &str) -> String {
     text.trim_end_matches(['\r', '\n']).to_string()
 }

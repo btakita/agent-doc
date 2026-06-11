@@ -457,6 +457,20 @@ fn continuation_closeout_instruction_for_head(
     }
 }
 
+fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "codex_stop_queue_continuation file={} source={} mcp_configured={} prompt_bytes={} prompt_sha256={}",
+            file.display(),
+            source,
+            agent_doc_mcp_configured_for(file),
+            prompt.len(),
+            crate::ops_log::content_hash(prompt),
+        ),
+    );
+}
+
 enum RepeatedQueueHeadRecovery {
     Recovered { note: String },
     NotRecoverable { note: String },
@@ -765,6 +779,7 @@ fn auto_queue_continuation_response(
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
     let context_reset_reason =
         codex_continuation_clear_reason(file, state.last_context_clear_at);
+    log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -846,6 +861,7 @@ fn marker_fallback_continuation_response(
 
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
     let context_reset_reason = codex_continuation_clear_reason(&file, None);
+    log_codex_stop_queue_continuation(&file, &continuation.head_prompt, "durable_marker");
     // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
     // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
@@ -2707,6 +2723,14 @@ agent-doc {}\n",
             }
             other => panic!("expected auto-queue continuation block, got {other:?}"),
         }
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_stop_queue_continuation")
+                && ops_log.contains("source=tracked_state")
+                && ops_log.contains("mcp_configured=true")
+                && ops_log.contains(&crate::ops_log::content_hash("do #fix2")),
+            "Stop hook should log tracked queue-continuation proof:\n{ops_log}"
+        );
     }
 
     #[test]
@@ -2745,6 +2769,16 @@ agent-doc {}\n",
             }
             other => panic!("expected durable-marker continuation block, got {other:?}"),
         }
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_stop_queue_continuation")
+                && ops_log.contains("source=durable_marker")
+                && ops_log.contains("mcp_configured=false")
+                && ops_log.contains(&crate::ops_log::content_hash(
+                    "do [#seopdp] deploy product page"
+                )),
+            "Stop hook should log durable-marker queue-continuation proof:\n{ops_log}"
+        );
     }
 
     #[test]

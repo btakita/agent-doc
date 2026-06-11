@@ -6514,7 +6514,7 @@ fn send_command_once_unchecked(
         if harness.binary == "opencode" {
             "routed_trigger_kitty_return"
         } else {
-            "routed_trigger_enter"
+            "routed_trigger_cr"
         },
         if harness.binary == "opencode" {
             "KittyReturn"

@@ -204,7 +204,7 @@ impl DispatchOnlyReopenDelivery {
     pub const fn submit_mode(self) -> &'static str {
         match self {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
-            DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_enter_delayed",
+            DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_cr",
         }
     }
 

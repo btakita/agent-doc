@@ -6,6 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex auto-queue owner continuations now submit as one tmux byte stream.** The idle queue watch now logs `idle_queue_watch_drain` with the actual submit mode and file-scoped prompt hashes, while Codex Stop-hook queue blocks log `codex_stop_queue_continuation` proof for tracked-state and durable-marker sources. The shared `tmux-router::Tmux::send_keys()` path now sends UTF-8 text plus carriage return in one `send-keys -H` byte payload, and OpenCode uses the same one-payload shape with Kitty Return. This closes the drafted-but-not-submitted owner-continuation path from `tasks/agent-doc/agent-doc-bugs2.md`.
 - **Queue convergence IPC now carries the queue body (`#mrhpcdrift`).** The
   preflight halt/drain convergence patch now sends the corrected `agent:queue`
   component body alongside `queue_auto` and canonical `queue:` frontmatter.

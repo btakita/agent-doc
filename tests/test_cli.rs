@@ -971,7 +971,7 @@ fn test_cli_ops_summary_groups_ops_log_events() {
 [100] ipc_write_consumed file={} patches=1
 [101] commit_success file={}
 [102] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
-[103] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_enter_delayed proof=accepted proof_scope=accepted_only timeout_secs=10
+[103] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_cr proof=accepted proof_scope=accepted_only timeout_secs=10
 [104] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
 [105] flow_event file=tasks/b.md flow=document_mutation stage=pre_write_guard outcome=blocked reason=visible_write_typing_defer_active_typing:socket_ipc
 ",

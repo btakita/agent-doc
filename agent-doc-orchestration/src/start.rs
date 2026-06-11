@@ -601,6 +601,46 @@ fn idle_queue_drain_payload_kind(
     }
 }
 
+fn idle_queue_submit_mode(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> &'static str {
+    if shared.inject_pane.is_some() {
+        if harness.binary == "opencode" {
+            "tmux_literal_kitty_return"
+        } else {
+            "tmux_literal_cr"
+        }
+    } else {
+        "pty_cr"
+    }
+}
+
+fn log_idle_queue_drain_submit(
+    file: &Path,
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    payload_kind: &str,
+    active_head: &str,
+    drain_payload: &str,
+) {
+    let target = shared.inject_pane.as_deref().unwrap_or("child_pty");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "idle_queue_watch_drain file={} harness={} payload_kind={} submit_mode={} target={} head_bytes={} head_sha256={} payload_bytes={}",
+            file.display(),
+            harness.binary,
+            payload_kind,
+            idle_queue_submit_mode(shared, harness),
+            target,
+            active_head.len(),
+            crate::ops_log::content_hash(active_head),
+            drain_payload.len(),
+        ),
+    );
+}
+
 #[derive(Debug, Default)]
 struct FailedResumeTracker {
     events: VecDeque<Instant>,
@@ -1330,7 +1370,7 @@ fn auto_trigger_inject_command(
             if shared.harness_binary == "opencode" {
                 "auto_trigger_kitty_return"
             } else {
-                "auto_trigger_enter"
+                "auto_trigger_cr"
             },
             if shared.harness_binary == "opencode" {
                 "KittyReturn"
@@ -2307,6 +2347,14 @@ fn spawn_idle_queue_watch_thread(
                         let slash_command = idle_queue_head_slash_command(&head);
                         match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
+                                log_idle_queue_drain_submit(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    payload_kind,
+                                    &head,
+                                    &drain_payload,
+                                );
                                 if let Some(command) = slash_command.as_deref() {
                                     let completed = complete_idle_queue_slash_command_head(
                                         &path,
@@ -2331,8 +2379,10 @@ fn spawn_idle_queue_watch_thread(
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "idle_queue_watch_drain harness={} payload_kind={}",
-                                        harness.binary, payload_kind
+                                        "idle_queue_watch_drain harness={} payload_kind={} submit_mode={}",
+                                        harness.binary,
+                                        payload_kind,
+                                        idle_queue_submit_mode(&shared, &harness)
                                     ),
                                 );
                                 // Already recorded in session_log above; only
@@ -6043,6 +6093,40 @@ Done.
                 "JB Run Agent Doc on monsterrodholders.md stalled."
             ),
             "owner_continuation"
+        );
+    }
+
+    #[test]
+    fn idle_queue_submit_mode_uses_literal_cr_for_codex_owner_pane() {
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+
+        assert_eq!(
+            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            "tmux_literal_cr"
+        );
+    }
+
+    #[test]
+    fn idle_queue_submit_mode_uses_pty_cr_without_owner_pane() {
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            None,
+        );
+
+        assert_eq!(
+            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            "pty_cr"
         );
     }
 

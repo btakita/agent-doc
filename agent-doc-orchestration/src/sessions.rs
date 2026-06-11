@@ -205,7 +205,7 @@ impl Multiplexer for Tmux {
             &format!("pane:{pane_id}"),
             text,
             None,
-            "tmux_text_enter",
+            "tmux_text_cr",
             "Enter",
         );
         Tmux::send_keys(self, pane_id, text)
@@ -226,7 +226,7 @@ impl Multiplexer for Tmux {
         let transform = if harness == "opencode" {
             "tmux_text_kitty_return"
         } else {
-            "tmux_text_enter"
+            "tmux_text_cr"
         };
         crate::input_diag::log_text_submit(
             None,
@@ -360,13 +360,13 @@ pub fn join_pane_guarded(
 
 /// Send a single key (not literal text) to a tmux pane.
 ///
-/// Unlike `Tmux::send_keys` (which sends literal text + Enter), this sends
+/// Unlike `Tmux::send_keys` (which submits literal text), this sends
 /// a single key name like "Up", "Down", "Enter" — used for TUI navigation.
 pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
     Multiplexer::send_key(tmux, pane_id, key)
 }
 
-/// Submit a single-line command through a tmux pane's normal text+Enter path.
+/// Submit a single-line command through a tmux pane's normal literal-text path.
 ///
 /// This is the canonical live-pane submission helper for agent-doc-managed
 /// harness commands such as routed reopen triggers and file-scoped `/clear`.
@@ -378,7 +378,7 @@ pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()>
 ///
 /// OpenCode's TUI can treat a bare carriage return as newline input when its
 /// enhanced keyboard protocol is active, so managed OpenCode panes receive the
-/// Kitty Return sequence instead of tmux's named `Enter` key.
+/// Kitty Return sequence instead of the default carriage-return suffix.
 pub fn send_submitted_text_for_harness(
     tmux: &Tmux,
     pane_id: &str,

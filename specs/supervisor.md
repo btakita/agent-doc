@@ -453,7 +453,8 @@ distinct from the one-shot restart auto-trigger:
   recursive-direct-invocation guard instead of doing the queued work. A failed
   inject is not recorded as dispatched, so it retries on the next idle tick.
   Successful drains log `idle_queue_watch_drain` with
-  `payload_kind=trigger|owner_continuation`; failures log
+  `payload_kind=trigger|owner_continuation` and
+  `submit_mode=tmux_literal_cr|tmux_literal_kitty_return|pty_cr`; failures log
   `idle_queue_watch_drain_failed`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is

@@ -270,14 +270,14 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
 
     let tmux = sessions::Tmux::default();
 
-    // Send the command text + Enter to the pane
+    // Send the command text through the canonical tmux submit path.
     agent_doc_orchestration::input_diag::log_text_submit(
         Some(&ctx.file),
         "queue_dispatch.tmux_send_keys",
         &format!("pane:{pane_id}"),
         &item.raw,
         None,
-        "tmux_text_enter",
+        "tmux_text_cr",
         "Enter",
     );
     sessions::send_submitted_text(&tmux, &pane_id, &item.raw)?;

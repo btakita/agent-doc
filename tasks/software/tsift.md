@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -85,15 +85,31 @@ So a naive full-projection forbidden check would false-fail. Checking classifica
 Proof — changed paths: `log_digest.rs`, `tests/exit_code.rs`, `fixtures/log-digest-token-savings.json`, `specs/digests-sessions.md`, `VERSIONS.md`. Commands: `make check` (exit 0), `cargo install` (ok), `git push` (`32ae62c..35f9c35`). Verification: 10/10 `tsift-digest` log_digest tests + gate integration test (now 6 cases, all 5 ecosystems, zero forbidden hits) pass; full suite green. CI pending. Confidence: high.
 
 Marked `#logfixturecov` done. Last queue item: `do [#tsinflight]` (resolve the 16 in-flight uncommitted files) — note that one is unrelated WIP I didn't author, so I'll assess carefully rather than presume to land it.
-<!-- agent:boundary:7765ab45 -->
+
+### Re: do #tsinflight — landed the in-flight graph-db changes — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#tsinflight]
+
+
+Done, per your **commit it now** decision.
+
+I paused on this one rather than auto-resolving because the 16 files were ~600 lines of graph-db/surrealdb/conflict-matrix/finding work I did **not** author — both "land" and "revert" are irreversible on unauthored WIP, so it was genuinely your call. You chose to land it.
+
+**What I committed** (`9d1f57f`): the accumulated working-tree changes across libsql/surrealdb graph stores, conflict-matrix orchestration, finding harvest/promote, community detection, search budget, session prompt-cache cost, algorithms health/Tarjan, index config, and token-gate quality — with their corresponding test updates (graph_db_conformance, finding, token_gate, cycle_packet_cache). It continues the `756b44d`/`dff637d` graph-db commit line.
+
+**Honest caveat:** I wrote a factual surface-area commit message (what the diff touches) rather than an intent description, since I didn't author the work. If you want it re-described or split into logical commits, that's easy to redo.
+
+Proof — verification: full `make check` (clippy + full suite) green on the exact committed tree before commit; `git push` (`35f9c35..9d1f57f`). The tsift working tree is now **clean** — the partial-staging warning that prompted this item will no longer fire. CI run 27358465614 in progress. Confidence: high on the mechanics (clean tree, green suite); the work's *intent* is yours to confirm.
+
+Marked `#tsinflight` done. **The queue is now fully drained** — all three backlog fixes (`#logsigfp`, `#logfixturecov`, `#tsinflight`) are shipped on origin/main.
+<!-- agent:boundary:c2a46c3d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#logsigfp]~~
-- ~~do [#logfixturecov]~~
-- do [#tsinflight]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -102,7 +118,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#tsinflight] [recommended] Resolve the 16 in-flight uncommitted tsift working-tree changes (graph-db/surrealdb/token-gate/finding/health). session-check flags them as partial-staging risk and they block clean committed-tree verification; land or revert them in their own cycle.
 <!-- /agent:backlog -->
 
 ## Review

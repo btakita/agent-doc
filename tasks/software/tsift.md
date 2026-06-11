@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,12 +61,15 @@ The bigger win is semantic compression, not byte compression. Today the weak spo
 I added three recommended backlog items for the implementation path: `#logfam`, `#logchunk`, and `#loggate`.
 
 Proof: changed paths are limited to the agent-doc session write; no tsift source code changed. Commands run: root/submodule `tsift status`, targeted `tsift` source/search reads for `log_digest`, `context_pack` log preview, versions, and digest specs. Verification: no test suite run because this was a planning/answer cycle only. Confidence: high. Escalation: none.
-<!-- agent:boundary:6c736b64 -->
+<!-- agent:boundary:d986fc0a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#logfam]
+- [#logchunk]
+- [#loggate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

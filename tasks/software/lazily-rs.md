@@ -167,7 +167,13 @@ Commits / push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:ec213004 -->
+
+### Re: queue closeout repair — gpt-5
+
+The remaining lazily-rs queue items were already resolved and archived. I repaired the stale queue bookkeeping so the live queue is empty, the live backlog is empty, and the completed IDs live in `tasks/software/lazily-rs.done.md`.
+
+Verification remains unchanged from the closeout above: the targeted memo/effect tests passed, full `make check` passed in `src/lazily-rs`, and the latest CI run checked was still `in_progress`.
+<!-- agent:boundary:a0b807c0 -->
 <!-- /agent:exchange -->
 ###
 <!--

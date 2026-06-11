@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -140,45 +140,34 @@ Commits / push:
 
 - Pushed `lazily-rs` `main` to `origin/main` at `e32de87` (`test: lock context node storage allocation`).
 - Committed and pushed the superproject submodule pointer at `525ff8a79`; later concurrent agent-doc commits advanced root `origin/main` to `eeaac3834` and include that pointer commit.
-
-Escalation: none.
-Confidence: high.
-
-### Re: #dtmx — gpt-5
-
-Closed `#dtmx` by verifying the memo equality-guard implementation that is already present in `Context`.
-
-`Context::memo()` installs a `PartialEq` comparator through `slot_with_equals`, and `refresh_slot()` / `recompute_slot_now()` preserve downstream cached values when a dirty memo recomputes equal. The existing spec tests lock the two important contracts:
-
-- equal intermediate memo values do not recompute downstream slots;
-- effects do not rerun when their slot dependency validates to the same value.
-
-Changed paths:
-
-- `tasks/software/lazily-rs.md` queue/backlog repair and closeout
-- `tasks/software/lazily-rs.done.md` done archive update
-
-Commands run:
-
-- `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance`
-- `cargo test effect_skips_rerun_when_slot_dependency_recomputes_equal --test spec_compliance`
-- `make check`
-- `gh run list --workflow CI --limit 1` in `src/lazily-rs`
-
-Verification:
-
-- Both targeted memo guard tests passed.
-- Full `make check` passed, including the long `thread_safe_loom` coverage.
-- Latest lazily-rs CI run `27315337023` is still `in_progress` for commit `e32de87` (`test: lock context node storage allocation`).
-
-Commits / push:
-
-- No lazily-rs code commit was needed for `#dtmx`; the implementation and regression coverage were already in the pushed submodule state.
 - No push was performed this cycle because there were no new lazily-rs code changes.
+- Latest GitHub Actions CI run checked with `gh run list --workflow CI --limit 1`; run `27315337023` for commit `e32de87` was still `in_progress` at the time of verification.
+- `make check` passed, including fmt, clippy, build, default tests, tokio sync, async, loom, distributed, FFI, IPC, IPC conformance, signaling client, and benchmark-check.
+- `cargo test effect_skips_rerun_when_slot_dependency_recomputes_equal --test spec_compliance` passed.
+- `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance` passed.
+- `#74c7` / `#lzipc`: IPC support is implemented in `src/ipc.rs` and covered by IPC JSON, binary, conformance, FFI, and related feature tests.
+- `#9evs` / `#lzasync`: `AsyncContext` is implemented and covered by the async integration and feature-gated test paths.
+- `#6965` / `#lzthreadsafe`: `ThreadSafeContext` is implemented with sidecar storage, invalidation planning, in-flight deduplication, and loom coverage.
+- `#p2pc` / `#lzslotops`: slot `clear`, `is_set`, `cell.clear_dependents`, and the `computed` alias are implemented and covered by slot/cell operation tests.
+- `#39xb` / `#lzcellguard`: cell same-value writes are equality guarded by `Context::set_cell<T: PartialEq>` and covered by the same-value no-invalidation specs.
+- `#qhn6` / `#lzbatch`: `Context::batch` and batched invalidation flushing are implemented across the sync/thread-safe/async contexts and covered by the batch update tests.
+- `#1xk0` / `#lzeffect`: `Context::effect`, disposal, cleanup, dependency tracking, coalescing, and dynamic dependency changes are implemented in `src/context.rs` and covered by the `effect_system` spec tests.
+- No lazily-rs code commit was needed for `#dtmx`; the implementation and regression coverage were already in the pushed submodule state.
+- Latest lazily-rs CI run `27315337023` is still `in_progress` for commit `e32de87` (`test: lock context node storage allocation`).
+- Full `make check` passed, including the long `thread_safe_loom` coverage.
+- Both targeted memo guard tests passed.
+- `gh run list --workflow CI --limit 1` in `src/lazily-rs`
+- `make check`
+- `cargo test effect_skips_rerun_when_slot_dependency_recomputes_equal --test spec_compliance`
+- `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance`
+- `tasks/software/lazily-rs.done.md` done archive update
+- `tasks/software/lazily-rs.md` queue/backlog repair and closeout
+- effects do not rerun when their slot dependency validates to the same value.
+- equal intermediate memo values do not recompute downstream slots;
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:90ae6b18 -->
+<!-- agent:boundary:ec213004 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,18 +176,18 @@ Confidence: high.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
+- [#1xk0]
+- [#qhn6]
+- [#39xb]
+- [#p2pc]
+- [#6965]
+- [#9evs]
+- [#74c7]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.
-- [ ] [#qhn6] #lzbatch=Implement Batch system — nested batches, outermost-boundary flush, coalesced updates, deferred effect scheduling.
-- [ ] [#39xb] #lzcellguard=Add PartialEq change detection to Cell.set() — no-op on equal value per spec.
-- [ ] [#p2pc] #lzslotops=Add missing slot operations: clear(), is_set(), cell.clear_dependents(), computed alias.
-- [ ] [#6965] #lzthreadsafe=Implement ThreadSafeContext with per-slot read-mostly sidecars, in-flight dedup, optimistic reads, InvalidationPlan.
-- [ ] [#9evs] #lzasync=Implement AsyncContext — async computed/memo/effect, AsyncSlotNode state machine, cancellation.
-- [ ] [#74c7] #lzipc=Implement IPC layer — Snapshot, Delta, DeltaOp, IpcSink/Source, ShmBlobArena.
 <!-- /agent:backlog -->
 
 ## Review

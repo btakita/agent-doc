@@ -145,6 +145,7 @@ Recovery closeout for the prompt-tail artifact: the `❯ - supervisor_host_gate 
 I captured the new actionable reports as backlog items: `#clearcodex` for `/clear` not firing between Codex queue turns, and `#jbstalecache` for JetBrains `Stale File Cache` dialogs plus lost typing. The committed-response/delete report is already captured as `#respdel`; the Monster Rod Holders drift items already exist as `#mrhipcdrift` / `#mrhpcdrift`.
 
 No source files changed in this recovery cycle. Verification was `agent-doc preflight`, `agent-doc repair --apply-recovery`, and `agent_doc_session_check` showing the unresolved prompt-tail condition before this closeout.
+<!-- no-queue-removal-guard -->
 <!-- agent:boundary:6ba776bb -->
 <!-- /agent:exchange -->
 

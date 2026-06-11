@@ -35,13 +35,36 @@ completed
 Compacted content:
 - Archived 4 response topic(s): do [#fhza] Investigate and fix Codex auto-queue continuation prompt insertion without submission; closeout recovery for #fhza; #q7jm JB Stale File Cache root causes; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5e405d6d -->
+
+### Re: #vbc1 next agent-doc bug backlog — gpt-5
+
+> **Queue prompt:**
+>
+> [#jblive160]
+
+
+I replaced the broad `#vbc1` next-steps prompt with concrete backlog items and kept review empty. Top backlog id: `#jblive160`.
+
+Added replacement backlog items, in priority order:
+- `#jblive160` Install JetBrains plugin `0.2.160` and run a live stale-cache validation cycle; verify `ops.log` proves `editor_convergence_succeeded` / `transport=editor_ipc` and does not emit `auto_recovery_disk_write_during_ipc_listener` on the successful path.
+- `#queueeditloss` Reproduce and fix queue edits made during a running turn so user-deleted or user-added queue items are not resurrected or lost by closeout, preflight, or IPC convergence.
+- `#eqrecovery` Reproduce the `equityfundingsource.md` reentrant recovery churn and tighten the recovery/closeout state transition causing repeated repair noise.
+- `#opstdout` Fix console stdout bleeding in front of the OpenCode TUI, with a regression proving agent-doc progress output cannot corrupt the foreground TUI surface.
+- `#fencestrip` Reproduce and fix the code-fence stripping path so fenced blocks survive finalize, compaction, IPC, and repair.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` backlog/queue/exchange only.
+- Commands: `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`, and this strict `agent-doc finalize ... --stream` closeout.
+- Verification: no code changes were needed for this queue item; the final gate will verify committed closeout and queue state after this response lands.
+- Confidence: high; the backlog is now concrete and ordered, and there are no remaining `agent:review` items to convert.
+- Escalation: none.
+<!-- agent:boundary:408c6a61 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#jblive160]
+- ~~[#jblive160]~~
 - [#queueeditloss]
 - [#eqrecovery]
 - [#opstdout]

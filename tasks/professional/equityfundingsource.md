@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -82,7 +82,37 @@ feat(admin): add dashboard pipeline attention accordion
 
 Show concrete Deal Pipeline items in the admin dashboard Needs attention section, deep-link each row back to the pipeline with loan/lead ids, and open the matching dialog after the pipeline loads. Covers the dashboard API payload, dashboard accordion UI, pipeline query handling, and admin dashboard tests.
 ```
-<!-- agent:boundary:3fd2bac5 -->
+Implemented and deployed the admin dashboard Needs attention accordion change.
+
+> **Queue prompt:**
+>
+> The admin dashboard "Needs Attention" accordion should be collapsible and collapsed by default. deploy
+
+
+What changed:
+- `lib/ui--browser--efs/portal/admin/dashboard.tsx`: the admin Needs attention panel now starts collapsed, keeps the header/count visible, and expands/collapses with `admin-needs-attention-toggle` using `aria-expanded`/`aria-controls`.
+- Nested attention detail rows no longer force `<details open>`, so they are collapsed by default when the panel is opened.
+- `tests/admin-dashboard.test.ts`: updated assertions to cover the collapsed-by-default accordion behavior.
+
+Verification:
+- `bun test tests/admin-dashboard.test.ts` passed.
+- `make check` passed.
+- Pre-deploy D1 migration check: no migrations to apply.
+- `make deploy` succeeded.
+- Deployed Worker version: `fbf57803-ae85-4d49-8f7a-ca16ffa37b92`.
+- Post-deploy D1 migration check: no migrations to apply.
+- Live smoke checks: `/` returned `200`; `/portal-admin/dashboard` returned `303` through Cloudflare Access.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Note: the exchange is large, but the active queue was drained without compacting per queue instructions.
+
+Suggested commit message:
+```txt
+fix(admin): collapse dashboard attention accordion by default
+
+Make the admin dashboard Needs attention panel start collapsed while preserving the count summary, leave nested attention detail rows collapsed by default, and update dashboard tests for the accordion behavior. Verified with the focused admin dashboard test, full make check, and production Worker deploy fbf57803-ae85-4d49-8f7a-ca16ffa37b92.
+```
+<!-- agent:boundary:169f38d0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,7 +120,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The admin dashboard "Needs Attention" accordion should be collapsible and collapsed by default. deploy
 <!-- /agent:queue -->
 
 ## Backlog

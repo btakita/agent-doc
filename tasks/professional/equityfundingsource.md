@@ -30,54 +30,20 @@ EFS deployed Worker 823c5cd2-5761-4755-86a9-c67ff1d1111b on 2026-06-11: borrower
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-152632.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-154115.md`*
 
 Compacted content:
+- Archived 1 response topic(s): Boolean application radios
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Boolean application radios — gpt-5
-
-Implemented and deployed.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/full_application.tsx`
-- `src/equityfundingsource-dev/lib/ui--server--efs/portal.ts`
-- `src/equityfundingsource-dev/tests/full-application-boolean-radios.test.ts`
-
-What changed:
-- `/portal-borrower/new-application` now renders Yes/No radio groups for boolean form answers: Self-employed, Pay off at closing, and each declaration.
-- The same `FullApplication` component powers the broker portal's New Loan Application flow, so `/portal-broker/submit-a-deal` gets the same radio-button behavior.
-- Fresh forms start with no Yes/No radio selected; saved boolean values reload as explicit Yes or No.
-- ESIGN consent remains a checkbox because it is an acknowledgement/consent control, not a Yes/No answer selection.
-
-Verification:
-- `bun test tests/full-application-boolean-radios.test.ts` passed.
-- `make check` passed: 555 tests, app build, and Worker bundle.
-- Remote D1 migration list before deploy: no migrations to apply.
-- `make deploy` completed and deployed Worker version `823c5cd2-5761-4755-86a9-c67ff1d1111b`.
-- Post-deploy D1 migration list: no migrations to apply.
-- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 for unauthenticated access.
-- GitHub Actions check: `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` and `gh run list --limit 1` returned no entries.
-
-Escalation: none.
-
-Confidence: high. The EFS submodule had pre-existing modified files outside this task, and the deploy necessarily shipped the current Worker bundle from that working tree. I only edited the three paths listed above.
-
-Suggested commit message:
-
-```txt
-fix(application): render boolean answers as Yes/No radios
-
-Replace the borrower and broker full-application boolean dropdowns with initially unselected Yes/No radio groups, preserve saved yes/no reload behavior, and cover the UI contract with a focused source-level regression test.
-```
-<!-- agent:boundary:62dd8b11 -->
+<!-- agent:boundary:25955a0e -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- Save and Continue and all other form submissions that have validation errors (missing responses), should have a toast message of the form submission fails...in addition to the error message above the form. Deploy
 <!-- /agent:queue -->
 
 ## Backlog

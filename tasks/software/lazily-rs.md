@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -38,7 +38,26 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): Next steps for lazily-zig spec compliance; #ce90; queue closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:464fd5c2 -->
+
+### Re: next-steps — gpt-5
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily-rs bugs?
+
+
+I do not see an active lazily-rs bug backlog item to reopen. The compacted session says the previous bug queue closed after `#dtmx`, and the current GitHub Actions check for the two latest bug-fix commits is green: `e32de87` (`test: lock context node storage allocation`) and `ed08785` (`test: lock dirty slot cache validation`) both completed successfully.
+
+I added the next bug-hardening backlog in priority order:
+
+1. `#lrsprop` — property/regression harness for randomized reactive graph operations across cell set/clear, slot clear, memo guard, batch boundaries, and effect disposal.
+2. `#lrsasyncstress` — async race stress coverage around `get_async` cancellation, stale future completion, cleanup ordering, and dependency tracking across awaits.
+3. `#lrsthreadstress` — ThreadSafeContext stress/model coverage for batch/effect/disposal interaction and read-strategy parity under contention.
+
+Top of backlog: `#lrsprop`.
+
+Proof: read the compacted session/context, checked `src/lazily-rs` history/status, and ran `gh run list --workflow CI --limit 5` in `src/lazily-rs`. No source changes or tests were needed for this planning-only queue head. The only current lazily-rs worktree diff I saw is the pre-existing `AGENTS.md` tsift marker update from `v0.1.66` to `v0.1.67`; I did not modify it.
+<!-- agent:boundary:03c44986 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,6 +71,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#lrsprop] Add property/regression harness for randomized reactive graph operations across cell set/clear, slot clear, memo guard, batch boundaries, and effect disposal.
+- [ ] [#lrsasyncstress] Add async race stress coverage around get_async cancellation, stale future completion, cleanup ordering, and dependency tracking across awaits.
+- [ ] [#lrsthreadstress] Add ThreadSafeContext stress/model coverage for batch/effect/disposal interaction and read-strategy parity under contention.
 <!-- /agent:backlog -->
 
 ## Review

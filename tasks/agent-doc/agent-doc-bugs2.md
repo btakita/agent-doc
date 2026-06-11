@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -174,12 +174,14 @@ Heads-up on what the binary did and how I corrected it:
 - The `priority go` queue auto-pulled **#mrhpcdrift2** (a fresh-focused-session task) as the next head. I kept it open with a do-not-auto-drain note and **I'm not auto-looping**. Halt the queue (drop `go`) or run #mrhpcdrift2 in a fresh session when you're ready.
 
 Note: this doc's supervisor is rewriting the working tree on every commit (`postcommit_worktree_check match=false`); I recover via `git checkout HEAD` each cycle, but a fresh session for this doc is advisable.
-<!-- agent:boundary:05526ab9 -->
+<!-- agent:boundary:1f191170 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: [#opsproofgate]
+- do [#mrhpcdrift2]
 <!-- /agent:queue -->
 ###
 <!--
@@ -225,7 +227,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. Live-verify ONLY — a shipped commit is NOT proof, an operator drive is. Log arbiter ops.log: PASS = a genuine structured line anchored ^[epoch] s760 clear-decision optIn=true with the clear flag true and pct>=threshold; FAIL = after a drive, no such anchored line OR a clear-true below threshold. Prose inside queue_diff_active_prompt_differs does NOT count. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator drives (throwaway doc, agent_doc_queue_context_reset:true, transcript past 50 pct, idle); agent greps the anchored structured line and resolves PASS/FAIL. No commit/submodule hash kept in this text on purpose: it makes preflight ops-proof auto-complete this gate on evidence=commit (see #opsproofgate).
 - [/] [#lvbremain] [live-verify gate] visible_write_live_buffer_matches_disk — the one residual marker (#4wxr cross-session-reject, #9adk run_clear_coalesce, #saev early_ack_pending already proven). Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] visible_write_live_buffer_matches_disk after an operator live-editor edit-during-finalize cycle; FAIL = operator drove a live IntelliJ buffer==disk write but only queue_diff prose matches appear. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator makes a live IntelliJ edit and lets agent-doc finalize with the buffer live; agent greps ^\[[0-9]+\] visible_write_live_buffer_matches_disk and --review-resolve on PASS or --pending-ungate with detail on FAIL.
 <!-- /agent:review -->
 

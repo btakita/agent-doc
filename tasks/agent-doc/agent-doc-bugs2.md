@@ -135,6 +135,10 @@ No new prompt — the only diff is the `go`-mode queue re-deriving its order (`:
 
 - **Two controllers are wedged in `--handoff-state preparing` right now:** `459700` (agent-loop, gen **1004**), `459745` (boost-client, gen 537). Last turn cited gen 1002 — it's now 1004, so the wedge **keeps respawning back into `preparing`**. That is `#kqr6`/`#sjwm` (no stale-`Preparing` reaper) reproducing, not a stale leftover. Those procs race every IPC write here.
 - The four re-queued ids are not new work: `#rtwverify` says rungs 2/3a/3b are **CODE-COMPLETE + installed** (only live-verify remains, which is operator-drive); preflight's semantic-completion check flags `#rtwwire`/`#rtwfeed`/`#rtwbcast` as already resolved by the landed `#rtwatch`. So the queue is re-deriving completed/operator-gated items, not surfacing undone code.
+4. **tmux + integrated system** — `SimTmux` drives editor edit → queue trigger → route → drain → model update → broadcast, asserting the drain-owner gate (`SkipSelfDrivingLoopOwner`, #kp5z) and the stuck-handoff reaper under emulated multi-owner contention.
+3. **Multi-editor CRDT sync** — two `SimEditor`s on one doc; the *only* way to test **#rtwbcast** without two live IDEs.
+2. **JB + VSCode parity fixtures** — model the protocol differences that bite (JB WatchService read-only watch vs VSCode buffer events, save timing). Drives #w42v Compact-Exchange File-Cache-Conflict deterministically.
+1. **`SimEditor` buffer actor** — speaks the same IPC/FFI buffer protocol the plugins do (content, dirty flag, monotonic generation; unsaved-edit / save / close). Makes the `#rtwverify` rung-3b proof deterministic: type an unsaved buffer edit, run finalize, assert `realtime_doc_resolve authority=editor_buffer` + the edit survives.
 
 **This loop won't converge from inside the session** — every write re-seeds the churn, and the reaper bug keeps re-wedging the controller. The one-time operator setup is unchanged:
 
@@ -144,13 +148,49 @@ pkill -f 'agent-doc controller serve.*--handoff-state preparing'
 ```
 
 …then reopen/restart and re-drive the queue on a fresh binary with no wedged controller. After that the rungs are fully agent-doable + live-verifiable. **Not auto-looping** (no new free-text prompt; draining from here just reproduces the flood + churn).
-<!-- agent:boundary:6a2f38f1 -->
+
+### Re: snapshots vs the document model, and the wedge controller — opus-4-8
+
+Three real questions, answered from live ground truth (I ran the commands, not memory).
+
+**What the "wedge controller" is.** The control plane is one per-project `agent-doc controller serve` process (the CPC — it owns ordered writes, dispatch, and queue drain). When ownership hands between controller generations and the handoff is interrupted, the new controller stalls in `ControllerHandoffState::Preparing`. That stuck process keeps writing its *stale* in-memory buffer back over your live edits — that is the IPC-drift / "repair used an old snapshot" symptom, and the gen `1002 → 1004 → 1006` respawn loop you watched climb.
+
+**Do we still need it?** We need the controller — not wedged. As of commit `23a3ce5b` (and it is **live in your installed binary** — I just ran `agent-doc admin reap-stale-controllers --dry-run`: it works, reports "0 would be terminated, 1 kept", so the current controller is healthy, not stuck) a Preparing handoff older than `AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS` (default 45s) is now detected, the live wedged `controller serve` proc is terminated (it verifies `/proc` cmdline and never kills itself), and the bootstrap is superseded `Failed` so the next bind promotes a fresh controller — breaking the respawn loop. It is wired into the gc sweep, self-heals at `connect_or_launch` before each handoff, and is exposed manually as `agent-doc admin reap-stale-controllers`. So the wedge class is now self-healing, not operator-only.
+
+**Why snapshots and not the document model.** The snapshot is the committed-baseline copy the cycle diffs your edits against and recovers from — the *legacy* baseline. The realtime document model (`#rtwatch`) is its replacement: newest-of(disk, buffer) reconciled via CRDT. Rungs 1/2/3a/3b have landed — the model, the durable buffer feed, and the classification reads all exist. The reason `preflight`/`finalize` **still** read a snapshot is the one remaining rung, **#rtwwire (rung 3)**: swapping the `read_to_string(file)` "current document" reads at `preflight.rs` / `write.rs` / `session_check.rs` for `realtime_model::current_doc(disk, buffer)`. That cutover touches the closeout path, so it must land in a dedicated clean turn — it can't be flipped safely from inside this session. Until it does, the cycle can still read a stale disk/snapshot, which is exactly the "repair used an old snapshot" failure. So: yes, we're phasing snapshots out as the *authority*; the model already exists; #rtwwire is the cutover that makes it authoritative at the read sites. The snapshot stays afterward only as the recovery baseline.
+
+Honest note: this turn's `preflight` itself failed `unsafe_user_content_drift` on a stale snapshot (32269 bytes vs your 32950-byte working tree) — the same staleness #rtwwire removes. I preserved your queue edits and finalized through them rather than committing the stale snapshot.
+
+### Re: SimWorld editor + tmux integration harness (#swint) — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we add a Simworld that tests integration with the JB Plugin and a Simworld that test integration with the VSCode plugin? The Simworld harness can emulate JB editors and VSCode using their respective plugins. Ideally we can have the Simworld emulate integrated editor scenarios. Simworld testing multi-editor + document model sync scenarios would also be good. Can we also have a Simworld emulating tmux? And test the entirely integrated system?
+
+
+This is the right instinct, and it's the deterministic answer to the *entire* operator-drive-live-verify backlog. Every File-Cache-Conflict / IPC-drift / queue-flood / multi-editor item is "operator-drive" only because it reproduces solely in a live IDE. A SimWorld editor emulator turns each into a regression test. Captured as **#swint** with a plan (`tasks/agent-doc/plan-simworld-editor-integration.md`), four slices:
+
+1. **`SimEditor` buffer actor** — speaks the same IPC/FFI buffer protocol the plugins do (content, dirty flag, monotonic generation; unsaved-edit / save / close). Makes the `#rtwverify` rung-3b proof deterministic: type an unsaved buffer edit, run finalize, assert `realtime_doc_resolve authority=editor_buffer` + the edit survives.
+2. **JB + VSCode parity fixtures** — model the protocol differences that bite (JB WatchService read-only watch vs VSCode buffer events, save timing). Drives #w42v Compact-Exchange File-Cache-Conflict deterministically.
+3. **Multi-editor CRDT sync** — two `SimEditor`s on one doc; the *only* way to test **#rtwbcast** without two live IDEs.
+4. **tmux + integrated system** — `SimTmux` drives editor edit → queue trigger → route → drain → model update → broadcast, asserting the drain-owner gate (`SkipSelfDrivingLoopOwner`, #kp5z) and the stuck-handoff reaper under emulated multi-owner contention.
+
+On the re-queued refs: **#sjwm + #kqr6** (stuck-handoff/IPC-drift) are now **code-complete and live** per the reaper above — their only remaining piece is live multi-process verification, which #swint Slice 4 makes deterministic. **#kp5z** (queue flood) also landed in `23a3ce5b` — the drain-owner lease (`agent-doc drain-claim`, TTL `AGENT_DOC_DRAIN_OWNER_TTL_SECS=90s`) + `SkipSelfDrivingLoopOwner` gate so the supervisor defers to `/loop` instead of double-injecting `agent-doc <FILE>`. **#rtwbcast** stays open — it's exactly Slice 3. **#rtwverify** is Slice 1.
+
+**Not implementing the harness from here** — same constraint as the reaper plan: this doc's controller is part of the system under test and races every write. And **not auto-looping** (the genuine new prompt is answered; the `go` queue's remaining refs are operator-drive live-verify or the #swint build, both of which need a clean session).
+<!-- agent:boundary:32cd48e4 -->
+<!-- agent:boundary:9e918e36 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: The `test test` repair lagged the document, since I had deleted `test test` entirely. It also replaced my legitimate queue content just with `test test`. Utter failure. Our document model must be realtime with the watcher. Any update that occurs should update the model in realtime. Also, the editor has buffer state and does not save to disk right away. Perhaps we should bring back the editor plugin watcher to update the realtime model. Can we make both watchers reliable? Where the editor plugin watcher is often more recent than the file on disk? This system needs to act real-time, so edits should update the document model in real-time. These updates should not cause performance issues with the rest of the project control pane. We need to avoid the conflicts, race conditions, and locks that occurred with the dual writable watchers pre-CPC refactor. The editor buffer is the source of truth for the document state when the editor is running...falling back to the file on disk. The CPC document model should be in sync with the source of truth.~~
+- ~~Can we add a Simworld that tests integration with the JB Plugin and a Simworld that test integration with the VSCode plugin? The Simworld harness can emulate JB editors and VSCode using their respective plugins. Ideally we can have the Simworld emulate integrated editor scenarios. Simworld testing multi-editor + document model sync scenarios would also be good. Can we also have a Simworld emulating tmux? And test the entirely integrated system?~~
+- [#rtwverify]
+- The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
+- [#rtwbcast]
+- [#sjwm]
+- [#kqr6]
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
@@ -256,6 +296,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#swint] #swint SimWorld editor + tmux integration harness — extend SimWorld to emulate JB plugin + VS Code plugin buffers, tmux, and the whole integrated system (editor buffer <-> FFI/IPC <-> controller <-> document model <-> tmux dispatch), incl. multi-editor + document-model sync. Turns the live-verify-only classes (File Cache Conflict, IPC drift, queue flood, #rtwbcast) into deterministic regression tests. 4 slices: SimEditor buffer actor -> JB/VSCode protocol parity -> multi-editor CRDT sync (only way to test #rtwbcast) -> tmux + integrated system. Implement from a CLEAN session (cwd src/agent-doc), NOT via /agent-doc on this doc. Plan: tasks/agent-doc/plan-simworld-editor-integration.md. Operator request 2026-06-11.
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#sjwm] #ipcdrift IPC drift continues post single-Project-Pane-Process / 08b migration. CONFIRMED root cause overlaps #stuckhandoff: controllers wedge in ControllerHandoffState::Preparing and keep writing the stale buffer (multi-owner race on ipc.sock vs the IDEA listener). The handoff state machine stores handoff_started_at but has NO stale-Preparing timeout/reaper (verified in project_controller.rs). Fix = stale-Preparing detect + force-fail/supersede + terminate the wedged live controller + self-heal on invoke. NEEDS a dedicated stable turn + live multi-process verification (cannot be verified from inside the affected session). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md (IPC section TBD).

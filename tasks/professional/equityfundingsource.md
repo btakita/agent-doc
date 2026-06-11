@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -37,14 +37,15 @@ EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badge
 Compacted content:
 - Archived 2 response topic(s): Admin dashboard Needs Attention accordion; Dashboard attention collapsed closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:e09f14f1 -->
+<!-- agent:boundary:2c0e995a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- On the portals and admin dashboard, if no items "Needs Attention", hide the "Needs Attention" section. deploy
 <!-- /agent:queue -->
 
 ## Backlog

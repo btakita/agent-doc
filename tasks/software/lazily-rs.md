@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -71,7 +71,52 @@ Proof:
 - CI: latest lazily-rs CI for `9efc693` was queued at check time; the previous run was still in progress and no failing latest CI was reported.
 
 Note: the pre-existing unstaged `src/lazily-rs/AGENTS.md` change remains untouched. Confidence: high.
-<!-- agent:boundary:017f29c4 -->
+
+### Re: lrsthreadstress — gpt-5
+
+> **Queue prompt:**
+>
+> [#lrsthreadstress]
+
+
+Implemented and pushed the ThreadSafeContext stress/model coverage for batch/effect/disposal interaction and read-strategy parity under contention.
+
+Changed paths:
+- `src/lazily-rs/tests/thread_safe_stress.rs`
+- `src/lazily-rs/src/thread_safe.rs`
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- parent gitlink `src/lazily-rs`
+
+What changed:
+- Added a new `thread_safe_stress` integration target that runs the same contention script under both `LowConcurrency` and `HighConcurrency`.
+- Covered concurrent cached readers, writer batches, explicit slot clears, `clear_cell_dependents`, effect cleanup/rerun, and effect disposal racing with writes.
+- Hardened the sidecar invalidation path so empty dependent sidecar snapshots and in-flight recompute frontiers fall back to the graph-locked invalidation path instead of publishing stale dirty state through the fast path.
+- Kept recompute dirty/fresh state changes under the per-slot recompute mutex and documented the stale-publish invariant in `SPEC.md` with a spec compliance assertion.
+
+Verification:
+- `cargo fmt --all`
+- `cargo test --locked --test thread_safe_stress`
+- `cargo test --locked --test spec_compliance spec_documents_thread_safe_stress_harness`
+- `for i in $(seq 1 50); do cargo test --locked --test thread_safe_stress >/tmp/thread-safe-stress-loop.log 2>&1 || { cat /tmp/thread-safe-stress-loop.log; exit 1; }; done`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with artifact `tart-74ba1392b6`
+- `git diff --check`
+
+Commits pushed:
+- lazily-rs: `c80ba70` (`fix: harden thread-safe sidecar invalidation`)
+- agent-loop parent pointer: `a61af3682` (`chore: update lazily-rs submodule`)
+
+CI:
+- Latest lazily-rs CI for `c80ba70` was `in_progress` at check time, not failed.
+- Previous lazily-rs CI for `test: add randomized graph property coverage` had completed successfully.
+
+Notes:
+- The pre-existing unstaged `src/lazily-rs/AGENTS.md` modification was left untouched and unstaged.
+
+Confidence: high. The focused stress target passed directly and across a 50-run loop, the spec assertion passed, and the full `make check` gate passed locally.
+
+Escalation: none.
+<!-- agent:boundary:9777201b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,15 +125,11 @@ Note: the pre-existing unstaged `src/lazily-rs/AGENTS.md` change remains untouch
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- ~~[#lrsprop]~~
-- ~~[#lrsasyncstress]~~
-- [#lrsthreadstress]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#lrsthreadstress] Add ThreadSafeContext stress/model coverage for batch/effect/disposal interaction and read-strategy parity under contention.
 <!-- /agent:backlog -->
 
 ## Review

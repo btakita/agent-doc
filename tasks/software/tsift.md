@@ -215,8 +215,8 @@ Closeout recovery note for the already-visible queue responses. `#tsbugidx` and 
 - ~~[#tsbugcm]~~
 <!-- /agent:queue -->
 <!--
-- ~~[#tsbugidx]~~
-- ~~[#tsbugcache]~~
+- [#tsbugidx]
+- [#tsbugcache]
 https://github.com/chopratejas/headroom
 -->
 

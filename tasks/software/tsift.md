@@ -119,7 +119,47 @@ Build/install/commit/push: skipped for this cycle because there were no source c
 Confidence: high. The queue head is a duplicate of completed implementation plus spec/test coverage, and the focused tests passed.
 
 Escalation: none.
-<!-- agent:boundary:ab219286 -->
+
+### Re: graph-db lock recovery — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsbuglock]
+
+
+Implemented the missing `#tsbuglock` regression coverage for graph-db doctor lock recovery. The read-only recovery implementation was already present for graph-db status/evidence/snapshot-export and documented in the graph spec; the gap I found was direct doctor coverage proving the same diagnostic path.
+
+Changed paths:
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift/VERSIONS.md`
+- `src/tsift` submodule pointer in the superproject
+
+What changed:
+- Added `graph_db_doctor_reports_snapshot_fallback_when_rollback_journal_is_locked`.
+- Added `graph_db_doctor_reports_wal_snapshot_fallback_when_locked`.
+- Both tests refresh a real traversal graph DB, hold a deterministic SQLite lock, run `append_sqlite_graph_doctor_checks`, and assert doctor stays `ok` while emitting `sqlite_graph_db_read_recovery` with the rollback-journal or WAL-aware snapshot fallback diagnostic.
+- Added an Unreleased `#tsbuglock` note.
+
+Verification:
+- `cargo fmt -p tsift-cli`
+- `cargo test -p tsift-cli graph_db_doctor_reports`
+- `cargo test -p tsift-cli graph_db_status_uses_snapshot_fallback_when_rollback_journal_is_locked`
+- `cargo test -p tsift-cli graph_db_status_copies_wal_sidecars_when_locked`
+- `make check`
+- `cargo build`
+- `cargo install --path . --locked`
+- `tsift --version` -> `tsift 0.1.67`
+
+Commits/push:
+- Pushed `btakita/tsift@756b44d` (`test: cover graph db doctor lock recovery`) to `origin/main`.
+- Pushed `btakita/agent-loop@fae1d9254` (`chore: update tsift submodule`) to `origin/main`.
+
+CI: latest tsift CI is in progress for `756b44d` (`27315205961`, started 2026-06-11T00:22:38Z). The agent-loop repo still has no workflow named `CI`.
+
+Confidence: high. The existing WAL/rollback recovery behavior is covered through status/evidence/snapshot-export already, and doctor now has direct regression tests for both lock modes.
+
+Escalation: none. Note: unrelated dirty working-tree changes remain in `src/tsift` and the superproject; I staged and committed only the `#tsbuglock` files/gitlink.
+<!-- agent:boundary:065b5794 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -127,7 +167,7 @@ Escalation: none.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#tsbugev]~~
 - ~~[#tsbugtok]~~
-- [#tsbuglock]
+- ~~[#tsbuglock]~~
 - [#tsbugcm]
 - [#tsbugidx]
 - [#tsbugcache]
@@ -139,7 +179,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsbuglock] Harden graph-db SQLite lock recovery for concurrent agent runs: document or add a safe release/diagnostic command, prefer WAL-safe reader behavior where appropriate, and cover hot-journal/locked-db failures in graph-db status/doctor tests.
 - [ ] [#tsbugcm] Clarify conflict-matrix dispatch semantics: split per-target fail_closed diagnostics from cross-target parallel-safety, expose previously_completed/worker_result evidence, and add contract tests for low-overlap targets with missing source ownership.
 - [ ] [#tsbugidx] Tighten stale index and summary-cache readiness: make graph-db refresh/status/context-pack fail closed or emit one clear repair command when indexes or summaries are stale/empty, and cover stale workspace/submodule cases with fixtures.
 - [ ] [#tsbugcache] Stabilize full-projection cache reuse before further graph performance work: reproduce source-watermark cache misses on a quiescent checkout, identify unstable inputs, and gate backend-eval metrics on repeated cache-hit evidence.

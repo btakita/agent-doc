@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,12 +56,14 @@ You chose to work this now, so I took the **safe, deterministic slice** of `#mrh
 **Gated, not done, and now out of the auto-drain.** I moved `#mrhpcdrift2` to `agent:review` as a live-verify gate carrying the exact ops.log PASS/FAIL predicate. That also stops the churn you kept hitting: it's no longer a `queue`-attr backlog item, so go-mode won't re-pull it into this session. Open a fresh `/agent-doc` session for the deep root-cause when you're ready, and drive the live edit-during-finalize cycle for the gate.
 
 The queue is now drained. Not auto-looping.
-<!-- agent:boundary:e9cd4560 -->
+<!-- agent:boundary:9607649a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- complete [#mrhpcdrift2]
+- 
 <!-- /agent:queue -->
 ###
 <!--

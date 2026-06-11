@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,11 +35,17 @@ completed
 Compacted content:
 - Archived 4 response topic(s): do [#fhza] Investigate and fix Codex auto-queue continuation prompt insertion without submission; closeout recovery for #fhza; #q7jm JB Stale File Cache root causes; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+<!-- agent:boundary:5e405d6d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#jblive160]
+- [#queueeditloss]
+- [#eqrecovery]
+- [#opstdout]
+- [#fencestrip]
 <!-- /agent:queue -->
 ###
 <!--

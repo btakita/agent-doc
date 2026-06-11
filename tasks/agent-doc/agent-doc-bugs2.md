@@ -83,7 +83,25 @@ Compacted content:
 - Plus `17c20732` ("repair socket already-applied response drift") reworked the socket-drift path after the original repro (cycle-1781137531085).
 
 **Deliberately not shipped:** a *fresh-preflight* deletion self-heal (working tree == HEAD minus a committed response → restore HEAD). It has no current live repro, and auto-restoring a response the user may have genuinely deleted is a dangerous data mutation. The same-cycle recovery already prevents the leftover deletion in practice. If it ever recurs, the `live_prompt_drift_auto_recovered` marker is the diagnostic and it becomes a focused, provable fix — consistent with the test/file-bug/check-logs workflow.
-<!-- agent:boundary:24492b98 -->
+
+### Re: do [#mrhpcdrift] (log-check) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#mrhpcdrift]
+
+
+**Log-check confirms the drift still reproduces — `#q6js` did NOT achieve zero-drift.** `src/boost-client/.agent-doc/logs/ops.log` on `tasks/monsterrodholders.md`, post-cutover: most recent `ipc_socket_already_applied_live_buffer_diverged … prompt_drift=true` at epoch **1781139154** (~19 min before this cycle), plus all-time `live_prompt_drift_after_preflight`×400, `ipc_socket_already_applied_live_buffer_diverged`×94, `crdt_merge_base_overlay_stale`×21. The in-process supervisor host gate is active (`supervisor_host_gate hosting=in-process`), yet the socket-ACK/live-buffer/content_ours path still diverges.
+
+**Why this is gated, not done (and not a fabricated completion):**
+- This is the **core socket-ACK / live-buffer / content_ours concurrency race**, the central problem the entire 08b migration targeted. Root-causing it is a deep, fresh-focused-session task — not an auto-loop cycle — and it is the same drift class I auto-recovered on *this* doc every finalize today.
+- **Important reframing:** every observed divergence was *detected and recovered* (`recovery=content_ours_snapshot_next_cycle`), never silently lost. With a live operator typing into the IntelliJ buffer during finalize, **some** memory↔disk divergence is inherent — the achievable goal is *clean detection + recovery* (which works), not literal zero-drift. The plan's "zero-drift" framing should likely become "zero **unrecovered** drift."
+- The proof requires your **live monsterrodholders editor** (drive one edit-during-finalize cycle; I read ops.log for clean recovery + no lost response). I can't fire a live editor.
+
+**Unblocks when:** you open a fresh focused agent-doc session on the socket/IPC path (root-cause `ipc_socket_already_applied_live_buffer_diverged` + add SimWorld regression coverage), and drive one live monsterrodholders edit-during-finalize cycle for the recovery proof.
+
+I'm **halting the auto-drain here.** The remaining queue (`#ktw8`, `#lvbremain`) are operator-drive live-verify items I cannot agent-complete — drive them live and I'll check the logs, or halt the queue.
+<!-- agent:boundary:193c7244 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -92,7 +110,7 @@ Compacted content:
 - ~~[#clearcodex]~~
 - ~~[#jbstalecache]~~
 - ~~[#respdel]~~
-- [#mrhpcdrift]
+- ~~[#mrhpcdrift]~~
 - [#ktw8]
 - [#lvbremain]
 <!-- /agent:queue -->
@@ -133,7 +151,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->
@@ -141,6 +158,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

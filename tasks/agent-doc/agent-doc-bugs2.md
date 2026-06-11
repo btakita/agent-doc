@@ -106,7 +106,25 @@ Concrete evidence from `src/boost-client/.agent-doc/logs/ops.log`:
 So the right conclusion is: `#q6js` landed the authority cut-over, but the live zero-drift proof failed on `monsterrodholders.md`. I added new top backlog item `#mrhpcdrift` with the exact evidence and the next implementation target: root-cause the socket ACK / live-buffer / `content_ours` path after authority routing, add regression coverage, then build/install/commit/push from a fresh focused session.
 
 I did not modify source code in this cycle. Commands run: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read`, `agent_doc_session_check`, `tsift --envelope session-review`, and targeted `rg` scans over the root and Boost Client `.agent-doc` logs. Verification was log-based; no code suite was run because this cycle only triaged and captured the follow-up.
-<!-- agent:boundary:b9de6a5f -->
+Implemented and shipped the `#blgmangle` fix.
+
+What changed in `src/agent-doc` commit `843137c5` (`fix pending backfill legacy tilde ids`), pushed to `main`:
+
+- `agent-doc-core/src/pending.rs`: `parse_item_line` now treats legacy `[~]` task markers as open `[ ]` markers, so a following existing `[#id]` is parsed as the item id instead of being left in text for backfill to re-key.
+- Added parser and backfill regression tests for the exact broken shape: `- [~] [#q6js] ...` canonicalizes to `- [ ] [#q6js] ...` and contains only one hash token.
+- `specs/pending-system.md`: documented the lazy-backfill invariant that `[~] [#id]` must preserve the existing id and must not get a prepended fresh `[ ] [#new]`.
+
+Verification completed:
+
+- `cargo test -p agent-doc-core legacy_tilde_checkbox --quiet` passed.
+- `cargo test -p agent-doc-core --quiet` passed via tsift digest-runner.
+- `make check` passed via tsift digest-runner.
+- `make build` passed.
+- `make install` passed.
+- GitHub Actions CI run `27315037356` passed after push, including remote `make check` and `make tmux-ci`.
+
+I left unrelated existing/unowned dirt in the submodule untouched: `AGENTS.md` and an unstaged `agent-doc-orchestration/src/write.rs` change that appeared after the scoped commit. The root closeout should only carry the session document and the `src/agent-doc` submodule pointer update for `843137c5`.
+<!-- agent:boundary:898c35f0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -115,7 +133,7 @@ I did not modify source code in this cycle. Commands run: `agent_doc_preflight`,
 - ~~[#q6js]~~
 - ~~[#ktw8]~~
 - ~~:pushpin: monsterrodholders.md has IPC drift.~~
-- [#blgmangle]
+- ~~[#blgmangle]~~
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - :pushpin: do [#lvbremain]
 - test t
@@ -150,7 +168,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#mrhipcdrift] agent-doc-bug: monsterrodholders.md IPC/CRDT drift persists after the 08b in-process supervisor/read-only cut-over proof was expected green. Evidence from src/boost-client/.agent-doc/logs/ops.log on 2026-06-10: supervisor_host_gate hosting=in-process at 1781134502/1781134954/1781136077, but later live_prompt_drift_after_preflight at 1781135262 and 1781136313, ipc_socket_already_applied_live_buffer_diverged at 1781135644, crdt_merge_base_overlay_stale at 1781135645, queue_consume_divergence_reconciled at 1781135262/1781136313, and postcommit_worktree_check match=false at 1781135262/1781135645/1781136314. Treat #q6js as not actually green; root likely remains in live-buffer/CRDT queue-consume adoption or parent/submodule closeout ordering, not merely old out-of-process supervisor. Build a focused repro/fix with SimWorld coverage and live monsterrodholders proof.
-- [ ] [#blgmangle] preflight pending-backfill mangling bug (hit live this session): during a same-cycle reap (dsqa reaped), the missing-id/checkbox backfill PREPENDED a fresh `[ ] [#g0qb]` onto an existing `[~] [#q6js]` backlog item, demoting the real `[#q6js]` to inline text and re-keying the item to the bogus id. session-check then INTERRUPTED with `open backlog item(s) exist only outside live agent:backlog: #q6js`. Repaired manually via pending-clear + ordered pending-add-back. Fix: backfill must skip any item that already has a leading `[#id]` and/or `[checkbox]`; never prepend a second id/checkbox token to an item that already has one.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->

@@ -105,7 +105,27 @@ Verification:
 - Live smoke: `/` returns HTTP 200; `/portal-admin/lender-pipeline` redirects to admin login with HTTP 303; `/api/admin/nav-counts` rejects unauthenticated access with HTTP 401.
 
 CI note: `gh run list --workflow CI --limit 1` still cannot find a workflow named `CI`, and `gh workflow list` returns no configured workflows for this repo. The EFS repo is clean and synced with `origin/main`; unrelated dirty superproject files/submodule pointers were left untouched.
-<!-- agent:boundary:9645978e -->
+Implemented and deployed.
+
+> **Queue prompt:**
+>
+> In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
+
+
+The lender document `View` action now opens an in-app stacked document preview modal instead of a new tab. The preview modal uses `PortalModal` with `z="z-[1200]"`, so it layers above the existing lender/card dialog; the existing topmost-only Escape stack then closes only the document modal and leaves the lender dialog open. The modal previews the document inline and still offers a direct `Download` link.
+
+Backend support now lets the admin investor-document download route honor `?disposition=inline|attachment`, so preview and download behavior are explicit.
+
+EFS commit: `5c655ba` (`admin docs: stack lender document preview`), pushed to `origin/main`.
+Worker deploy: `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac`.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/portal-table-dialog.test.ts` — 55 pass / 0 fail.
+- `bun run check` — 547 pass / 0 fail, app build clean, worker build clean.
+- `bun run deploy:worker` — deployed; no D1 migrations to apply.
+- Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
+- GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+<!-- agent:boundary:ae87ebe5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,9 +133,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- ~~We have /portal-admin/lenders/:lenderId and we have /portal-admin/users/:userId. The Lenders tab in the the Lender Pipeline should open the lender dialog. The lender dialog should a "Lender" tab and a "User" tab. The "Lender Info" tab should have the contents of /portal-admin/lenders/:lenderId..include the buttons to accept and deny the request. The "User" tab should have the contents of /portal-admin/users/:userId. deploy~~
-- ~~The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy~~
-- In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

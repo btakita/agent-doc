@@ -16,9 +16,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
-agent_doc_pipeline:
-  run_id: cycle-1781203425577
-  step: committed
 ---
 
 ## Status
@@ -111,15 +108,28 @@ Then the `go` queue drains against a fresh binary with no wedged controller, and
 **One queue fix:** `do [#sjwtm]` references an id that doesn't exist — the backlog item is `#sjwm` (typo: `sjwtm` vs `sjwm`). I left it as-is rather than silently rewrite your queue; correct it to `#sjwm` and it'll resolve.
 
 Backlog and queue are intact — nothing struck or rewritten. **Not auto-looping** (no new free-text prompt, only the requeue/reorg; and adding `/loop` as a second drain owner is the `#kp5z` flood I'd be reproducing).
-<!-- agent:boundary:d75b9158 -->
+
+### Re: queue re-derivation churn — still the affected session, still needs the clean restart — opus-4-8
+
+No new prompt this cycle — the exchange is unchanged. The only diff is the `go`-mode queue **re-deriving its order from the backlog** (every rung is present: `#sjwm #nzmc #kp5z #rtwbcast #rtwwire #rtwfeed #kqr6` — just reshuffled). Nothing was lost; the backlog is the source of truth and it's intact.
+
+This reshuffle is a direct consequence of last turn's `git checkout HEAD` (HEAD carried the old queue order, so `go`-mode re-derived against it) racing your live buffer — i.e. more of the exact `#queue-user-edit-overwrite` / `#ipcdrift` churn. I'm deliberately **not** reconciling the working tree again this turn; every write from inside this session re-seeds the churn instead of settling it.
+
+The wedged controller `152664` (`--handoff-state preparing`) is still live and the cdylib is still stale, so the session is still affected. Nothing here changes the answer from the last two turns — the rungs are fully agent-doable, but only after the one-time clean setup:
+
+```
+cd src/agent-doc && make install
+pkill -f 'agent-doc controller serve.*--handoff-state preparing'
+```
+
+…then reopen/restart and re-drive the queue on the fresh binary. **Not auto-looping** (no new prompt; draining from here just reproduces the flood + churn).
+<!-- agent:boundary:2cf7fd9e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 - :pushpin: The `test test` repair lagged the document, since I had deleted `test test` entirely. It also replaced my legitimate queue content just with `test test`. Utter failure. Our document model must be realtime with the watcher. Any update that occurs should update the model in realtime. Also, the editor has buffer state and does not save to disk right away. Perhaps we should bring back the editor plugin watcher to update the realtime model. Can we make both watchers reliable? Where the editor plugin watcher is often more recent than the file on disk? This system needs to act real-time, so edits should update the document model in real-time. These updates should not cause performance issues with the rest of the project control pane. We need to avoid the conflicts, race conditions, and locks that occurred with the dual writable watchers pre-CPC refactor. The editor buffer is the source of truth for the document state when the editor is running...falling back to the file on disk. The CPC document model should be in sync with the source of truth.
-- :round_pushpin: do [#sjwm]
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
@@ -191,12 +201,15 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 - :pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
 - :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
-- :round_pushpin: do [#nzmc]
-- :round_pushpin: do [#kp5z]
+- :round_pushpin: do [#rtwbcast]
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
+- :round_pushpin: do [#rtwwire]
+- :round_pushpin: do [#rtwfeed]
+- :round_pushpin: do [#kqr6]
+- If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
 ###
 <!--

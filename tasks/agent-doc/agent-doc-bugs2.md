@@ -160,16 +160,38 @@ You confirmed both directions, so I implemented them. Committed `7b6f022e`, push
 **Honest flag:** `#ipcdrift` / `#stuckhandoff` mean the 08b migration did **not** fully close the drift — these deserve a dedicated, stable (non-paused, fresh-binary) turn, not a blind change while the IPC is actively misbehaving. Recommend recycling the wedged controllers first (`make install` then `pkill -f 'agent-doc controller serve --project-root …'`) so the next turn runs on clean controllers + the fresh binary.
 
 **State:** queue still paused (flood mitigated); `7b6f022e` on `origin/main`; review has `#2v7b`, `#qt32`, `#w42v` (all operator-drive live proofs). Not auto-looping — paused queue, new heavy requests, and live verification needed.
-<!-- agent:boundary:badc5886 -->
+### Re: do #sjwm + #kqr6 + #nzmc — honest status, real blockers — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I typed in an unrelated queue item into this queue and the queue stalled.
+
+
+I investigated all three and confirmed precise scope, but I'm not going to ship blind changes to look busy — two are deep IPC-lifecycle fixes I can't safely make or verify from inside this session, and the third is blocked on network. Here's the straight account.
+
+**`#kqr6` / `#sjwm` (stuck-handoff → IPC drift) — root cause confirmed, fix is deep + unverifiable here.** I traced it: controllers wedge in `ControllerHandoffState::Preparing` and keep writing the stale buffer back (multi-owner race on `ipc.sock` vs the IDEA listener). The handoff state machine stores `handoff_started_at` **but nothing ever checks it for staleness** — there's no timeout/reaper. `gc.rs` reaps stale *starting* actor projections (>1h) but not wedged *Preparing* controller **processes**, and closing a projection wouldn't stop a live wedged process from writing. So the real fix is: detect a stale `Preparing` by `handoff_started_at` age → terminate/transition the wedged controller → heal on next invoke. That's a concurrency-critical change to cross-process IPC ownership with **no existing scaffold to extend safely**, and it can only be validated by a live multi-process race — which I cannot reproduce or verify from inside the session that's currently drifting. Shipping it blind risks deepening the exact drift you're fighting. This needs a dedicated, stable turn (clean controllers + fresh binary).
+
+**Immediate relief (operator-run — I can't see the wedged PIDs from this sandbox):**
+```
+cd src/agent-doc && make install
+pkill -f 'agent-doc controller serve --handoff-state preparing'
+# or, broader: pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
+```
+They're lazy-launched and respawn clean. That clears the active drift now while the durable fix is built.
+
+**`#nzmc` (upgrade lazily-rs + tsift-*) — blocked: crates.io is offline in this environment.** I can't resolve the latest `tsift-memory` (currently pinned `0.1.64`) without network — the query times out. `lazily` is a **path dep** (`../../lazily-rs`), already building against `0.10.3` (the lock reflects it). So the lazily side is effectively current; the `tsift-*` bump needs a turn with network access. Kept actionable.
+
+**What shipped earlier this session (recap):** `#2v7b` Codex Enter re-submit, `#02bw` fmt cleanup, `#w42v` compact editor-IPC convergence (you struck `do [#w42v]` — thanks), `#kp5z` dispatch-source observability — all on `origin/main`.
+
+**State:** queue still paused; backlog `#kp5z` (awaiting your repro) + `#sjwm`/`#kqr6` (scoped, need dedicated stable turn) + `#nzmc` (offline-blocked); review `#2v7b`/`#qt32`/`#w42v` (operator-drive live proofs). Not auto-looping — these need your live env, a stable turn, and network.
+<!-- agent:boundary:cd241121 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#kp5z]~~
-- The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
-- :pushpin: I typed in an unrelated queue item into this queue and the queue stalled.
-- Upgrade lazily-rs + tsift-* dependencies.
+- ~~:pushpin: I typed in an unrelated queue item into this queue and the queue stalled.~~
+- :round_pushpin: do [#sjwm]
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
@@ -239,7 +261,10 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 ```
 ---
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
-- :round_pushpin: do [#w42v]
+- :round_pushpin: do [#kqr6]
+- :round_pushpin: do [#nzmc]
+- The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
+- Upgrade lazily-rs + tsift-* dependencies.
 - JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 <!-- /agent:queue -->
@@ -271,8 +296,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#sjwm] #ipcdrift IPC drift (live_prompt_drift_after_preflight + postcommit_worktree_check mismatch) CONTINUES after the single Project-Pane-Process / 08b migration that was supposed to root-fix it. Identify the race conditions and fix the root cause. Tightly related to #stuckhandoff. Operator request 2026-06-11.
-- [ ] [#kqr6] #stuckhandoff Root-cause + binary self-mitigation: agent-doc controller serve procs wedge in --handoff-state preparing, survive an IDE restart, and keep writing the stale buffer back over edits (multi-owner race on .agent-doc/ipc.sock vs the IDEA listener). Operator diagnosis in queue: kill wedged preparing controllers + they respawn clean. Mitigation idea: binary auto-reaps wedged preparing controllers and self-heals on next invoke. Operator request 2026-06-11.
+- [ ] [#sjwm] #ipcdrift IPC drift continues post single-Project-Pane-Process / 08b migration. CONFIRMED root cause overlaps #stuckhandoff: controllers wedge in ControllerHandoffState::Preparing and keep writing the stale buffer (multi-owner race on ipc.sock vs the IDEA listener). The handoff state machine stores handoff_started_at but has NO stale-Preparing timeout/reaper (verified in project_controller.rs). Fix = stale-Preparing detect + force-fail/supersede + terminate the wedged live controller + self-heal on invoke. NEEDS a dedicated stable turn + live multi-process verification (cannot be verified from inside the affected session). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md (IPC section TBD).
+- [ ] [#kqr6] #stuckhandoff CONFIRMED: no handoff-timeout scaffold exists (project_controller.rs ControllerHandoffState has Preparing + handoff_started_at but nothing checks staleness). gc.rs reaps stale starting actor PROJECTIONS (>1h) but not wedged Preparing controller PROCESSES, and a projection-close would not stop a live wedged proc from writing. Real fix = detect stale Preparing by handoff_started_at age + terminate/transition the wedged controller + heal on next invoke, with live verification. IMMEDIATE RELIEF (operator-run): pkill the wedged controller serve --handoff-state preparing PIDs; they respawn clean. Operator request 2026-06-11.
 - [ ] [#nzmc] #lazilyup Upgrade lazily-rs (tsift is upgrading; build already resolves lazily 0.10.3 in Cargo.lock). Verify build + commit the lock bump. Operator request 2026-06-11.
 - [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc trigger submissions while the queue drains / during finalize-while-typing. OBSERVABILITY SHIPPED (commit 7b6f022e): project_controller::authorize_dispatch now logs queue_dispatch_invoked file=.. pane=.. generation=.. command_kind=.. payload=.. on every dispatch (no behavior change). NEXT: operator runs one live repro, agent reads ops.log to pin which command_kind floods while pane is mid-turn, then writes the pane-busy/dedupe gate + SimWorld coverage. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md.
 <!-- /agent:backlog -->

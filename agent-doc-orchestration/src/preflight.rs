@@ -4272,6 +4272,17 @@ fn classify_ops_proof_completion(item: &crate::pending::PendingItem) -> Option<S
         return None;
     }
 
+    // #opsproofgate: a live-verify / operator-drive gate must NEVER be
+    // auto-completed on `evidence=commit`. A shipped commit is not proof for
+    // these items — only an anchored `^[epoch] <marker>` line in ops.log
+    // (driven live by the operator) is. The `#optverify` log-arbiter path
+    // (`run_gate_verify`) closes them on a genuine structured emission; this
+    // commit/CI prose scan must stay out of their way, or a submodule hash
+    // cited in the gate text falsely archives an UNDRIVEN gate to done.
+    if is_live_verify_gate(&upper) {
+        return None;
+    }
+
     // #opsproof-falsepos: an open (non-gated) actionable item must NOT be reaped
     // just because its prose cites already-landed dependency work ("the predicate
     // already shipped in abc1234"). The completion marker must be the item's own
@@ -4367,6 +4378,27 @@ fn has_ops_completion_blocker(upper: &str) -> bool {
         || BLOCKER_WORDS
             .iter()
             .any(|word| contains_ascii_word(upper, word))
+}
+
+/// True when an item is a live-verify / operator-drive gate whose only valid
+/// completion proof is an anchored structured ops.log marker driven live by the
+/// operator — never a cited commit/CI reference (`#opsproofgate`). `upper` must
+/// already be ASCII-uppercased.
+fn is_live_verify_gate(upper: &str) -> bool {
+    const LIVE_VERIFY_PHRASES: &[&str] = &[
+        "LIVE-VERIFY GATE",
+        "LIVE-VERIFY ONLY",
+        "LIVE VERIFY GATE",
+        "LIVE VERIFY ONLY",
+        "OPERATOR-DRIVE",
+        "OPERATOR DRIVE",
+        "OPERATOR DRIVES",
+        "OPERATOR LIVE-VERIFY",
+        "OPERATOR LIVE VERIFY",
+    ];
+    LIVE_VERIFY_PHRASES
+        .iter()
+        .any(|phrase| upper.contains(phrase))
 }
 
 fn contains_successful_ci_proof(upper: &str) -> bool {
@@ -10090,6 +10122,42 @@ mod tests {
         );
         assert!(!backlog_after.contains("[#leadstatus]"));
         assert!(file_after.contains("[#leadstatus] DONE 7b60fcdc"));
+    }
+
+    // #opsproofgate: a live-verify / operator-drive gate that cites a shipped
+    // commit hash (e.g. "Code SHIPPED 1edb20d2") in its text must NOT be
+    // auto-completed on evidence=commit — even when it has existed for several
+    // cycles (not a same-cycle add). Only an anchored structured ops.log marker
+    // driven live by the operator may close it.
+    #[test]
+    fn ops_proof_does_not_reap_live_verify_gate_on_commit_hash() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. ",
+            "Code SHIPPED 1edb20d2; a shipped commit is NOT proof, an operator drive is. ",
+            "PASS = a genuine anchored ops.log line; current verdict UNDRIVEN.\n",
+            "<!-- /agent:review -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            file_after.contains("[#ktw8]"),
+            "live-verify gate must not be ops-proof reaped on a cited commit hash: {file_after}"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !log.contains("auto_complete_ops_proof"),
+            "no ops-proof auto-completion should fire for a live-verify gate"
+        );
     }
 
     // #opsproof-falsepos: never auto-archive an item on the same cycle it is

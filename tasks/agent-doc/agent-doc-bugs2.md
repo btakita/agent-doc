@@ -81,7 +81,28 @@ Fixed under the `go` queue's `#spec-test-build-install-commit-push` preset. Comm
 **Gated `#2v7b` (code-complete, awaiting your live proof).** I can't reproduce the live Codex TUI submit behavior on the agent side, so the end-to-end confirmation is operator-drive — exactly your "I test, you check logs" loop. To verify: trigger JB `Run Agent Doc` against a Codex pane (the binary is already reinstalled), then I read `ops.log` for `route_submit_issue ... issue=prompt_not_submitted` (first attempt) followed by `route_submit_resubmit ... action=enter_key result=accepted`, and the queue actually starting without a manual Enter. If `result=still_visible` shows up instead, the Codex composer needs a different submit shape and I'll iterate.
 
 Note: this is a JB→tmux **binary** path, so no JB plugin reinstall is needed. Remaining for release: this live proof + `#qt32` (08b zero-drift) + `#02bw` (the rustfmt churn cleanup).
-<!-- agent:boundary:3ce59ccd -->
+
+### Re: queue cleanup — fmt fixup + tree clean for tagging — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qt32]
+
+
+You struck `do [#2v7b]` (the JB→Codex fix is gated, awaiting your live proof). I drained the rest of the queue this cycle and found a gap in my own prior commit.
+
+**Caught + fixed my own fmt violation (`449a87e9`, pushed).** `cargo fmt --check` flagged the two spots I introduced in `d14dd12f` (`direct_pane_needs_codex_resubmit` and the `poll_direct_pane_acceptance` call) — `make check` runs clippy + tests but does **not** gate `cargo fmt`, so it slipped through. Reformatted, rebuilt + reinstalled, no behavior change.
+
+**`#02bw` done (`e6f7538e`, pushed) — working tree is now clean for tagging.** I corrected the characterization: the churn was *not* purely rustfmt. It was 12 `.rs` files of `cargo fmt` reflow **plus** an `AGENTS.md` tsift code-navigation marker bump (v0.1.66→v0.1.67, auto-generated). I proved the 12 `.rs` files are fmt-only via a non-destructive round-trip (`rustfmt(HEAD:f) == worktree:f` for every file — zero semantic deltas), then committed the lot as one honest housekeeping commit. `git status` in the submodule is now empty.
+
+**`#qt32` gated (operator-drive, not a churn item).** The 08b zero-drift proof needs a live editor I can't drive, so I moved it from the actionable backlog into `agent:review` — same treatment as `#2v7b`. That also stops the `priority queue` backlog from re-pulling it into the queue every cycle (the churn you'd otherwise see). It's not "tracked-for-later avoidance" — it's genuinely blocked on your live test.
+
+**State for release:** agent-doc submodule clean + on `origin/main` (`e6f7538e`). Backlog empty. Two gated review items, both operator-drive live proofs:
+- `#2v7b` — JB `Run Agent Doc` on a Codex pane should now self-submit; I check `ops.log` for `route_submit_resubmit ... action=enter_key result=accepted`.
+- `#qt32` — restart a session, drive one edit-during-finalize cycle; I check `ops.log` for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` + zero drift lines.
+
+Run those two live and I'll read the logs; then it's tag time. I'm halting the auto-loop here — nothing left that I can complete without your live editor.
+<!-- agent:boundary:c611f59f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -89,9 +110,13 @@ Note: this is a JB→tmux **binary** path, so no JB plugin reinstall is needed. 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~What are #next-steps to fix bugs? I want to release soon.~~
 - ~~:pushpin: JB `Run Agent Doc` on Codex still did not submit the prompt to Codex. The prompt was entered into the input, but I had to manually submit it to start the queue.~~
-- :pushpin: do [#2v7b]
-- :pushpin: do [#qt32]
-- :pushpin: do [#02bw]
+- ~~:pushpin: do [#2v7b]~~
+- ~~:pushpin: do [#qt32]~~
+- ~~:pushpin: do [#02bw]~~
+- JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
+- As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
+- The lazily-rs.md session running Codex reproduced the error.
+- test test test test test
 <!-- /agent:queue -->
 ###
 <!--
@@ -121,13 +146,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
-- [ ] [#02bw] #fmtchurn Uncommitted rustfmt-only whitespace churn in src/agent-doc working tree (13 files, no semantic changes). Decide: commit as a standalone `style: cargo fmt` commit or discard, before tagging a release. Cosmetic, not a functional blocker.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).
 <!-- /agent:review -->
 

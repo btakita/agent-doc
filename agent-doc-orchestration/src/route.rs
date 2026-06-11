@@ -6680,9 +6680,7 @@ fn direct_pane_needs_codex_resubmit(
     status: CommandDispatchStatus,
     trigger_visible: bool,
 ) -> bool {
-    harness_binary == "codex"
-        && status == CommandDispatchStatus::TimedOut
-        && trigger_visible
+    harness_binary == "codex" && status == CommandDispatchStatus::TimedOut && trigger_visible
 }
 
 fn send_command_unchecked(
@@ -6693,8 +6691,14 @@ fn send_command_unchecked(
 ) -> Result<CommandDispatchResult> {
     let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let file = Path::new(file_path);
-    let first =
-        poll_direct_pane_acceptance(tmux, pane, file, harness, &trigger, "direct_pane_acceptance");
+    let first = poll_direct_pane_acceptance(
+        tmux,
+        pane,
+        file,
+        harness,
+        &trigger,
+        "direct_pane_acceptance",
+    );
     if first.status == CommandDispatchStatus::Accepted {
         return Ok(CommandDispatchResult {
             status: first.status,

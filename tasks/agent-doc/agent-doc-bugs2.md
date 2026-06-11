@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -92,14 +92,35 @@ Proof:
 - GitHub Actions: latest agent-doc `CI` for `38bf22cb` completed successfully (`27328076329`). Parent repo has no workflow named `CI`.
 
 Install note: because the JetBrains plugin class/method shape changed, use the structural-update path for the built zip: uninstall plugin, restart IDE, install `agent-doc-jetbrains-0.2.160-signed.zip`, restart IDE.
-<!-- agent:boundary:30589f22 -->
+
+### Re: #vbc1 next agent-doc bug backlog — gpt-5
+
+> **Queue prompt:**
+>
+> [#vbc1]
+
+
+I replaced the broad `#vbc1` next-steps prompt with concrete backlog items and kept review empty. Top backlog id: `#jblive160`.
+
+Added replacement backlog items, in priority order:
+- `#jblive160` Install JetBrains plugin `0.2.160` and run a live stale-cache validation cycle; verify `ops.log` proves `editor_convergence_succeeded` / `transport=editor_ipc` and does not emit `auto_recovery_disk_write_during_ipc_listener` on the successful path.
+- `#queueeditloss` Reproduce and fix queue edits made during a running turn so user-deleted or user-added queue items are not resurrected or lost by closeout, preflight, or IPC convergence.
+- `#eqrecovery` Reproduce the `equityfundingsource.md` reentrant recovery churn and tighten the recovery/closeout state transition causing repeated repair noise.
+- `#opstdout` Fix console stdout bleeding in front of the OpenCode TUI, with a regression proving agent-doc progress output cannot corrupt the foreground TUI surface.
+- `#fencestrip` Reproduce and fix the code-fence stripping path so fenced blocks survive finalize, compaction, IPC, and repair.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` backlog/queue/exchange only.
+- Commands: `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`, and this strict `agent-doc finalize ... --stream` closeout.
+- Verification: no code changes were needed for this queue item; the final gate will verify committed closeout and queue state after this response lands.
+- Confidence: high; the backlog is now concrete and ordered, and there are no remaining `agent:review` items to convert.
+- Escalation: none.
+<!-- agent:boundary:59419f5c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#q7jm]~~
-- [#vbc1]
 <!-- /agent:queue -->
 ###
 <!--
@@ -129,7 +150,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#vbc1] What are #next-steps to fix agent-doc bugs?
+- [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
+- [ ] [#queueeditloss] Reproduce and fix queue edits made during a running turn so user-deleted or user-added queue items are not resurrected or lost by closeout, preflight, or IPC convergence.
+- [ ] [#eqrecovery] Reproduce the equityfundingsource reentrant recovery churn and tighten the recovery/closeout state transition that caused repeated repair noise.
+- [ ] [#opstdout] Fix console stdout bleeding in front of the OpenCode TUI; capture a regression that proves agent-doc progress output cannot corrupt the foreground TUI surface.
+- [ ] [#fencestrip] Reproduce and fix the code-fence stripping path so agent-doc preserves fenced blocks across finalize, compaction, IPC, and repair.
 <!-- /agent:backlog -->
 
 ## Review

@@ -53,14 +53,29 @@ Compacted content:
 **Verification:** `make check` clean (EXIT=0); `cargo install` + `cargo build --release` both done (new binary live). CI run `27316385221` in progress for this commit; prior run green.
 
 **Operator live-verify** (drives the remaining proof): in a Codex session with `agent_doc_queue_context_reset = true`, drain a queue past a compaction boundary, then `grep '\[clearcodex\]\|\[s760\] clear-decision' .agent-doc/logs/ops.log` — expect `[s760] clear-decision optIn=true … pct=none clear=false` and `[clearcodex] codex-continuation optIn=true … clear_instructed=true`.
-<!-- agent:boundary:2e518f64 -->
+
+### Re: do [#jbstalecache] (spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#jbstalecache]
+
+
+**Root cause.** The "Stale File Cache" / File Cache Conflict dialog (and the lost typing) is triggered by the binary's benign `live_prompt_drift_after_preflight` **auto-recovery** path (`write.rs::try_auto_recover_live_prompt_drift`): when the IPC patch proof fails this cycle, it writes the adopted snapshot **straight to the working-tree file** via `atomic_write`. If a JetBrains IPC listener is active and the editor buffer is dirty (operator mid-type), IntelliJ sees an external disk change and raises the conflict dialog. The disk write is unavoidable there — the IPC path already failed, which is *why* we're recovering — and the plugin already has reflection-based memory/disk conflict mitigation (`hasPendingMemoryDiskConflict` / `memoryDiskConflictCancelLikelyUtil`), but the binary trigger was completely invisible to the operator.
+
+**Shipped this cycle** (submodule `295632e4`, pushed; binary + cdylib reinstalled):
+- The `live_prompt_drift_auto_recovered` ops.log marker now records `ipc_listener_active=<bool>`, and when a listener is active it emits a dedicated `[jbstalecache] auto_recovery_disk_write_during_ipc_listener …` line. This gives your "you test, I check logs" workflow a **positive correlation** between a stale-cache dialog and this exact binary disk write, instead of guessing.
+- Test + spec (`specs/07-closeout-commands.md`). `make check` clean.
+
+**Operator live-verify (the convergence half).** Next time you see a Stale File Cache dialog mid-session, `grep '\[jbstalecache\]' .agent-doc/logs/ops.log` (and the `ipc_listener_active=true` field on `live_prompt_drift_auto_recovered`). If the marker is present at that timestamp, the binary auto-recovery disk write is confirmed as the trigger and the editor-side dialog-suppression fix becomes a focused, low-risk follow-up. If the dialog fires with **no** marker, the trigger is a different write path and we chase that instead. The marker is the diagnostic that turns this from "intermittent and unexplained" into a one-grep root-cause confirmation.
+<!-- agent:boundary:9e2416d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#clearcodex]~~
-- [#jbstalecache]
+- ~~[#jbstalecache]~~
 - [#respdel]
 - [#mrhpcdrift]
 - [#ktw8]
@@ -103,7 +118,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#jbstalecache] agent-doc-bug: JetBrains still shows `Stale File Cache` dialogs and operator typing can be lost during agent-doc closeout/live-buffer sync. Repro reported during tasks/agent-doc/agent-doc-bugs2.md recovery on 2026-06-10 while IPC/live-buffer drift was present. Root-cause JB plugin cache invalidation and socket ACK/live document adoption so editor-visible content, disk, snapshot, and user typing converge without stale-cache prompts or lost input.
 - [ ] [#respdel] agent-doc-bug: closeout can show a response as committed and then leave an uncommitted working-tree delete/rewrite of that same response. Live repro from tasks/agent-doc/agent-doc-bugs2.md on 2026-06-10: after the #blgmangle finalize/late sibling failure path, HEAD contained the committed response but the working tree showed an uncommitted deletion/rewrite of that response; the next preflight/session-check reported ipc_proof_insufficient with invariant=live_prompt_drift_after_preflight for cycle-1781137531085. Fix terminal closeout so late sibling/pre-write/IPC proof failures are atomic with the document write, or recover content_ours without deleting/requoting committed exchange content.
 - [ ] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).

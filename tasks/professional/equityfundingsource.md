@@ -37,14 +37,33 @@ EFS repo main: EFS `7d0ce71` adds visible `Needs attention` dashboard panels acr
 Compacted content:
 - Archived 7 response topic(s): Tabbed lender dialog; Codex session handoff; Lender Pipeline tabbed lender dialog; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:fb731d6f -->
+
+### Re: Admin dashboard attention links — gpt-5
+
+> **Queue prompt:**
+>
+> The admin dashboard Needs Attention links should go to the respective pipeline and open the appropriate dialog. deploy 
+
+
+Implemented, pushed, and deployed.
+
+Changed paths: `app/equityfundingsource/lib/admin/dashboard/index.ts`, admin portal UI files for Deal Pipeline/Lender Pipeline/Documents, `prds/equity-funding-source-lending-portal-prd.md`, and focused admin tests.
+
+What changed: dashboard `Needs attention` action hrefs now route open applications and new leads into Deal Pipeline and pending funds/lender requests into Lender Pipeline. Those target views read the `attention` query and auto-open the first matching actionable card/dialog. Open investor document requests also auto-open the existing Documents provide-dialog; recent uploads remain a filtered Documents view because that list has no row dialog today.
+
+Verification: `bun test tests/admin-dashboard.test.ts`, `bun test tests/admin-investor-pipeline.test.ts`, `bun test tests/admin-investor-documents.test.ts`, `bun test tests/admin-pipeline.test.ts`, and full `make check` all passed. `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows. Production D1 reported no pending migrations before and after deploy; live smoke tests returned `200` for `/` and `303` for `/portal-admin/dashboard`.
+
+Commit/deploy: EFS `6eca4b1` pushed to `origin/main`; deployed Worker version `730027a8-cad2-4bf9-b171-58f245bf4dd9`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:2194b6b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -10810,6 +10810,52 @@ mod tests {
     }
 
     #[test]
+    fn gate_verify_s760_builtin_ignores_queue_diff_prose_only() {
+        // #ktw8: the destructive clear gate is proven only by an anchored
+        // structured [s760] line, never by prose embedded in queue_diff logs.
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(
+            &dir,
+            "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"PASS requires [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\"] queue_head=\"[#ktw8]\"\n",
+        );
+
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "pending", "quoted prose must not prove");
+        assert!(!results[0].auto_resolved);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+    }
+
+    #[test]
+    fn gate_verify_s760_builtin_auto_resolves_on_anchored_clear_true() {
+        let dir = setup_project();
+        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+            verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(100),
+        });
+        let doc = write_optverify_doc(&dir, &pred);
+        write_ops_log(
+            &dir,
+            "[150] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
+        );
+
+        let results = run_gate_verify(&doc, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "provable");
+        assert!(results[0].auto_resolved);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("[x] [#saev]"), "gate must be flipped: {after}");
+    }
+
+    #[test]
     fn pending_maintenance_fails_closed_when_snapshot_backlog_cannot_be_synced() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

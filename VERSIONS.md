@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Structured `#s760` clear-decision gate verifier (`#ktw8`).** Added the
+  built-in `s760_clear_decision_clear_true` ops-log verifier for destructive
+  queue-turn `/clear` proof. It accepts only anchored
+  `^[epoch] [s760] clear-decision ...` lines with `optIn=true`, numeric
+  `pct >= threshold`, and `clear=true`; prose-only mentions inside
+  `queue_diff_active_prompt_differs` remain pending, and structured false fires
+  (`clear=true` below threshold or no-clear at/above threshold) fail closed.
+  Regression coverage:
+  `scan_s760_clear_decision_requires_anchored_clear_true_at_threshold`,
+  `scan_s760_clear_decision_ignores_queue_diff_prose_only`,
+  `scan_s760_clear_decision_fails_clear_true_below_threshold`,
+  `scan_s760_clear_decision_fails_clear_false_at_threshold`,
+  `gate_verify_s760_builtin_ignores_queue_diff_prose_only`, and
+  `gate_verify_s760_builtin_auto_resolves_on_anchored_clear_true`.
 - **08b cutover COMPLETE — removed the out-of-process writers and flipped all three authority
   defaults (removal rung).** This retires the gate ladders now that in-process hosting + ordered
   write queue + plugin read-only are the only behavior; **there is no rollback flag.**

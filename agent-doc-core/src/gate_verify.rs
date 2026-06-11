@@ -39,13 +39,21 @@
 //! double-quoted spans from each message before matching. Structured marker
 //! emissions (`[claim] cross-session-reject pane_id=...`,
 //! `[ipc-socket] early_ack_pending ...`, `[s760] clear-decision ...`) are
-//! plain unquoted message text and must stay that way to remain provable.
+//! plain unquoted message text and must stay that way to remain provable. The
+//! built-in `s760_clear_decision_clear_true` verifier is stricter than a
+//! substring: it accepts only anchored `[<epoch>] [s760] clear-decision ...`
+//! lines and checks `optIn=true`, `pct >= threshold`, and `clear=true`.
 
 use serde::{Deserialize, Serialize};
 
 /// Marker used to delimit the inline predicate annotation.
 const ANNOTATION_OPEN: &str = "<!-- gate-verify";
 const ANNOTATION_CLOSE: &str = "-->";
+
+/// Built-in verifier for the `#s760` destructive clear proof. Use in a predicate
+/// as `verify=ops_log:s760_clear_decision_clear_true`.
+pub const S760_CLEAR_DECISION_CLEAR_TRUE_MARKER: &str = "s760_clear_decision_clear_true";
+const S760_CLEAR_DECISION_INVALID_MARKER: &str = "s760_clear_decision_invalid";
 
 /// Typed proof/disproof predicate carried inline on a gated `[/]` item.
 ///
@@ -165,6 +173,10 @@ pub fn scan_ops_log(predicate: &GatePredicate, ops_log: &str) -> VerifyOutcome {
     let verify = predicate.verify.as_deref().filter(|s| !s.is_empty());
     let disproof = predicate.disproof.as_deref().filter(|s| !s.is_empty());
 
+    if verify == Some(S760_CLEAR_DECISION_CLEAR_TRUE_MARKER) {
+        return scan_s760_clear_decision_ops_log(ops_log, set_at, disproof);
+    }
+
     let mut proof_hit: Option<u64> = None;
     let mut disproof_hit: Option<u64> = None;
 
@@ -201,6 +213,123 @@ pub fn scan_ops_log(predicate: &GatePredicate, ops_log: &str) -> VerifyOutcome {
         };
     }
     VerifyOutcome::Pending
+}
+
+/// Scan `ops.log` for a real `#s760` clear decision.
+///
+/// This is intentionally anchored to the structured ops.log message emitted by
+/// `context_pct::clear_decision` and `ops_log::log_op`: `[<epoch>] [s760]
+/// clear-decision ...`. Prose embedded in `queue_diff_active_prompt_differs` is
+/// quoted and ignored, and unanchored mentions are ignored. Invariant-breaking
+/// structured lines fail the gate:
+/// - `clear=true` while `optIn=false`, `pct=none`, or `pct < threshold`
+/// - `clear=false` while `optIn=true` and `pct >= threshold`
+fn scan_s760_clear_decision_ops_log(
+    ops_log: &str,
+    set_at: u64,
+    disproof: Option<&str>,
+) -> VerifyOutcome {
+    let mut proof_hit: Option<u64> = None;
+    let mut disproof_hit: Option<u64> = None;
+
+    for line in ops_log.lines() {
+        let Some((ts, msg)) = parse_ops_line(line) else {
+            continue;
+        };
+        if ts < set_at {
+            continue;
+        }
+
+        let msg = strip_quoted_spans(msg);
+        if let Some(d) = disproof
+            && msg.contains(d)
+        {
+            disproof_hit = Some(disproof_hit.map_or(ts, |t| t.min(ts)));
+        }
+
+        let Some(decision) = parse_s760_clear_decision(&msg) else {
+            continue;
+        };
+
+        let threshold_met =
+            decision.opt_in && decision.pct.is_some_and(|pct| pct >= decision.threshold);
+        match (decision.clear, threshold_met) {
+            (true, true) => proof_hit = Some(proof_hit.map_or(ts, |t| t.min(ts))),
+            (true, false) | (false, true) => {
+                disproof_hit = Some(disproof_hit.map_or(ts, |t| t.min(ts)));
+            }
+            (false, false) => {}
+        }
+    }
+
+    if let Some(at) = disproof_hit {
+        return VerifyOutcome::Failed {
+            marker: disproof
+                .unwrap_or(S760_CLEAR_DECISION_INVALID_MARKER)
+                .to_string(),
+            at,
+        };
+    }
+    if let Some(at) = proof_hit {
+        return VerifyOutcome::Provable {
+            marker: S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string(),
+            at,
+        };
+    }
+    VerifyOutcome::Pending
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct S760ClearDecision {
+    opt_in: bool,
+    threshold: f64,
+    pct: Option<f64>,
+    clear: bool,
+}
+
+fn parse_s760_clear_decision(msg: &str) -> Option<S760ClearDecision> {
+    let rest = msg
+        .strip_prefix("[s760] clear-decision ")
+        .or_else(|| msg.strip_prefix("s760 clear-decision "))?;
+
+    let mut opt_in = None;
+    let mut threshold = None;
+    let mut pct = None;
+    let mut clear = None;
+
+    for field in rest.split_whitespace() {
+        let Some((key, value)) = field.split_once('=') else {
+            continue;
+        };
+        match key {
+            "optIn" => opt_in = parse_bool(value),
+            "threshold" => threshold = value.parse::<f64>().ok(),
+            "pct" => {
+                pct = if value == "none" {
+                    Some(None)
+                } else {
+                    Some(Some(value.parse::<f64>().ok()?))
+                };
+            }
+            "clear" => clear = parse_bool(value),
+            _ => {}
+        }
+    }
+
+    Some(S760ClearDecision {
+        opt_in: opt_in?,
+        threshold: threshold?,
+        pct: pct?,
+        clear: clear?,
+    })
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }
 
 /// Parse the inline `<!-- gate-verify ... -->` annotation out of item text.
@@ -420,7 +549,10 @@ mod tests {
             disproof: Some("nope".to_string()),
             set_at: Some(0),
         };
-        assert_eq!(scan_ops_log(&pred, "[10] unrelated\n"), VerifyOutcome::Pending);
+        assert_eq!(
+            scan_ops_log(&pred, "[10] unrelated\n"),
+            VerifyOutcome::Pending
+        );
     }
 
     #[test]
@@ -486,6 +618,72 @@ mod tests {
             VerifyOutcome::Provable {
                 marker: "cross-session-reject".to_string(),
                 at: 20
+            }
+        );
+    }
+
+    #[test]
+    fn scan_s760_clear_decision_requires_anchored_clear_true_at_threshold() {
+        let pred = GatePredicate {
+            verify: Some(S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(100),
+        };
+        let log = concat!(
+            "[150] unrelated [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
+            "[160] [s760] clear-decision optIn=true threshold=50 pct=49.9 clear=false\n",
+            "[170] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
+        );
+        assert_eq!(
+            scan_ops_log(&pred, log),
+            VerifyOutcome::Provable {
+                marker: S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string(),
+                at: 170
+            }
+        );
+    }
+
+    #[test]
+    fn scan_s760_clear_decision_ignores_queue_diff_prose_only() {
+        let pred = GatePredicate {
+            verify: Some(S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(0),
+        };
+        let log = "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\"] queue_head=\"[#ktw8]\"\n";
+        assert_eq!(scan_ops_log(&pred, log), VerifyOutcome::Pending);
+    }
+
+    #[test]
+    fn scan_s760_clear_decision_fails_clear_true_below_threshold() {
+        let pred = GatePredicate {
+            verify: Some(S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(0),
+        };
+        let log = "[150] [s760] clear-decision optIn=true threshold=50 pct=49.9 clear=true\n";
+        assert_eq!(
+            scan_ops_log(&pred, log),
+            VerifyOutcome::Failed {
+                marker: S760_CLEAR_DECISION_INVALID_MARKER.to_string(),
+                at: 150
+            }
+        );
+    }
+
+    #[test]
+    fn scan_s760_clear_decision_fails_clear_false_at_threshold() {
+        let pred = GatePredicate {
+            verify: Some(S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+            disproof: None,
+            set_at: Some(0),
+        };
+        let log = "[150] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=false\n";
+        assert_eq!(
+            scan_ops_log(&pred, log),
+            VerifyOutcome::Failed {
+                marker: S760_CLEAR_DECISION_INVALID_MARKER.to_string(),
+                at: 150
             }
         );
     }
@@ -564,7 +762,9 @@ mod tests {
 
     #[test]
     fn parse_predicate_spec_strips_ops_log_prefix() {
-        let pred = parse_predicate_spec("verify=ops_log:early_ack_pending;disproof=ops_log:false ack-timeout");
+        let pred = parse_predicate_spec(
+            "verify=ops_log:early_ack_pending;disproof=ops_log:false ack-timeout",
+        );
         assert_eq!(pred.verify.as_deref(), Some("early_ack_pending"));
         assert_eq!(pred.disproof.as_deref(), Some("false ack-timeout"));
         assert_eq!(pred.set_at, None);
@@ -580,10 +780,12 @@ mod tests {
     #[test]
     fn is_actionable_requires_a_matcher() {
         assert!(!GatePredicate::default().is_actionable());
-        assert!(GatePredicate {
-            verify: Some("x".to_string()),
-            ..Default::default()
-        }
-        .is_actionable());
+        assert!(
+            GatePredicate {
+                verify: Some("x".to_string()),
+                ..Default::default()
+            }
+            .is_actionable()
+        );
     }
 }

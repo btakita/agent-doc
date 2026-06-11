@@ -62,14 +62,36 @@ Diagnosed and filed as `#2v7b` with a plan at `tasks/agent-doc/plan-jb-codex-sub
 **Fix (planned, not yet implemented):** Codex-scoped one-shot fallback — when direct-pane acceptance detects `TriggerStillVisible` on a Codex pane, send a *separate* bare `Enter` key event and re-poll once, gated to `harness == codex` so claude/opencode are untouched, bounded to a single retry. Plus a `route_submit_resubmit ... action=enter_key result=accepted|still_visible` proof line so your live test is provable from `ops.log` without a live editor on my side.
 
 I did **not** implement the fix this turn — it's a dispatch-path change that needs your live Codex+JB verification (I can't reproduce the Codex TUI submit behavior here), and your two prompts were "what's next" + a bug report, which per your own `#agent-doc-bug` convention means plan-and-backlog. Say "do `#2v7b`" (or "go") and I'll implement it, add SimWorld coverage, `make check` + build + `lib-install`, then hand it to you to live-verify the `route_submit_resubmit` proof.
-<!-- agent:boundary:99011766 -->
+
+### Re: JB `Run Agent Doc` on Codex submit fix — implemented + shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on Codex still did not submit the prompt to Codex. The prompt was entered into the input, but I had to manually submit it to start the queue.
+
+
+Fixed under the `go` queue's `#spec-test-build-install-commit-push` preset. Committed `d14dd12f` and **pushed to `origin/main`** (agent-doc submodule).
+
+**What changed** (`route.rs::send_command_unchecked`):
+- Factored the direct-pane submit-acceptance poll into `poll_direct_pane_acceptance` (pure detection, no input) so it can run before *and* after a re-submit.
+- `#jbcodexsubmit`: when a **Codex** direct-pane submit times out with the trigger still visible, send a *separate* bare `Enter` key event and re-poll the acceptance window **exactly once**, logging `route_submit_resubmit ... action=enter_key result=accepted|still_visible`. Gated through the pure `direct_pane_needs_codex_resubmit` (codex-only, timeout-only, trigger-still-visible-only) so claude/opencode are untouched and it never loops on a stuck pane.
+
+**Verification done this turn:** `make check` green (exit 0), new test `direct_pane_codex_resubmit_only_on_timeout_with_trigger_visible` passes, `cargo build --release` + `cargo install --path .` both refreshed (release symlink + `~/.cargo/bin`), spec `08a-session-actor-contract.md` + `VERSIONS.md` updated.
+
+**Gated `#2v7b` (code-complete, awaiting your live proof).** I can't reproduce the live Codex TUI submit behavior on the agent side, so the end-to-end confirmation is operator-drive — exactly your "I test, you check logs" loop. To verify: trigger JB `Run Agent Doc` against a Codex pane (the binary is already reinstalled), then I read `ops.log` for `route_submit_issue ... issue=prompt_not_submitted` (first attempt) followed by `route_submit_resubmit ... action=enter_key result=accepted`, and the queue actually starting without a manual Enter. If `result=still_visible` shows up instead, the Codex composer needs a different submit shape and I'll iterate.
+
+Note: this is a JB→tmux **binary** path, so no JB plugin reinstall is needed. Remaining for release: this live proof + `#qt32` (08b zero-drift) + `#02bw` (the rustfmt churn cleanup).
+<!-- agent:boundary:3ce59ccd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~What are #next-steps to fix bugs? I want to release soon.~~
-- :pushpin: JB `Run Agent Doc` on Codex still did not submit the prompt to Codex. The prompt was entered into the input, but I had to manually submit it to start the queue.
+- ~~:pushpin: JB `Run Agent Doc` on Codex still did not submit the prompt to Codex. The prompt was entered into the input, but I had to manually submit it to start the queue.~~
+- :pushpin: do [#2v7b]
+- :pushpin: do [#qt32]
+- :pushpin: do [#02bw]
 <!-- /agent:queue -->
 ###
 <!--
@@ -99,7 +121,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).
 - [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#02bw] #fmtchurn Uncommitted rustfmt-only whitespace churn in src/agent-doc working tree (13 files, no semantic changes). Decide: commit as a standalone `style: cargo fmt` commit or discard, before tagging a release. Cosmetic, not a functional blocker.
 <!-- /agent:backlog -->
@@ -107,6 +128,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

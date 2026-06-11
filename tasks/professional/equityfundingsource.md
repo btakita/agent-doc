@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-EFS repo main: EFS `e6310d1` adds priority-sorted admin dashboard `attention_items` for nonzero operational work: pending funding commits, open applications, new leads, open document requests, pending lender requests, then recent uploads. This queue item used `#spec-test-commit-push`, so it was committed and pushed but not deployed. EFS workers.dev production remains Worker version `c2d7b525-8682-4e51-aa5e-05a7d13eb4ac` (deployed 2026-06-10): lender document **View** opens a stacked preview modal above the Lender Pipeline lender/card dialog; Esc closes only the document layer and leaves the lender dialog open (#doc-stack-esc, EFS `5c655ba`). The **Lender Pipeline** sidebar nav badge counts active board investor cards — one per `users.role = 'investor'` row shown in `/portal-admin/lender-pipeline` — instead of only pending lender requests + pending funds (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS repo main: EFS `7d0ce71` adds visible `Needs attention` dashboard panels across admin, borrower, broker, and investor/funder portals; it is pushed to origin/main and deployed as Worker version `789cfa3d-4dc8-404e-9628-00327159f4d6` on 2026-06-11. The prior lender document stack remains deployed (#doc-stack-esc, EFS `5c655ba`), and the Lender Pipeline nav count fix remains in place (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -203,7 +203,7 @@ Verification:
 - `bun run deploy:worker` — deployed; no D1 migrations to apply.
 - Worker smoke checks: `/` 200; `/portal-admin/dashboard`, `/portal-broker/dashboard`, `/portal-borrower/dashboard`, and `/portal-investor/dashboard` each 303 to the correct role login when unauthenticated.
 - GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
-<!-- agent:boundary:61e99771 -->
+<!-- agent:boundary:b37c1c7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -211,7 +211,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- I don't see the "Needs attention" in the admin dashboard. Add "Needs attention" with the other funder/broker/borrower portal dashboards.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -118,15 +118,48 @@ Raw log artifact:
 **Scope discipline:** still committed only my files (`log_digest.rs`, `tsift-cli/src/lib.rs`, `context_pack.rs`, `specs/digests-sessions.md`, `VERSIONS.md`); the 17 unrelated in-flight files stayed untouched.
 
 Proof — changed paths: those 5 files. Commands: `make check` (exit 0, no FAILED/clippy), `cargo install --path .` (ok), live stdin smoke test, `git push` (`88a7f46..d056da5`). Verification: 6/6 `tsift-digest` log_digest tests + new `maybe_attach_log_digest_raw_artifact_persists_bulky_logs` + ctxpack preview test pass; full suite green. **CI note:** the `#logfam` run (27323995205) shows FAIL, but it died at the **"Cache cargo registry + build" infrastructure step before the test suite ever ran** (an abrupt runner kill, not a code regression) — local `make check` is the authoritative full-suite evidence and is green. The `#logchunk` run (27324362283) is in-progress; recording it, not blocking. Confidence: high. Escalation: none. Next queue item: `#loggate` (P3 — fixture-backed token-savings + false-negative gates).
-<!-- agent:boundary:2bd773ad -->
+
+### Re: #loggate log compression P3 (fixture-backed gates) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#loggate]
+
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):** update spec + tests. build + install for local testing. commit + push
+
+Done — final P3 item. `log-digest` now has a **fixture-backed token-savings + false-negative gate** across all five ecosystems: `tsift log-digest --fixture <file> [--fail-under]`.
+
+**Two guarantees per case:**
+- **Token-savings:** `1 − digest_tokens/raw_tokens` must meet `minimum_savings_percent` (deterministic ~4 chars/token estimate over a new `digest_signal_text` projection — the bounded text an agent actually reads). Proves the digest compresses, not just claims to.
+- **False-negative:** every `required_signal` must survive into the digest; every `forbidden_signal` must be absent. Proves real failures aren't folded away as noise.
+
+**Classifier fix driven by the gate:** the generic signal classifier was silently dropping common real errors — cargo `error[E0277]:`, pytest `E   assert …` detail lines, and npm/pnpm `ERR!`/`ERR_PNPM_…`. All three are now recognized, so the gate's required-signal assertions are meaningful instead of just documenting current behavior.
+
+**Live proof** (installed binary, `fixtures/log-digest-token-savings.json`):
+
+```
+cases: 5  failed: 0  status: pass
+[pass] cargo (52% min)     savings 57.8%  raw 249 → digest 105 tok
+[pass] pytest (50% min)    savings 61.0%  raw 264 → digest 103 tok
+[pass] npm (50% min)       savings 65.1%  raw 335 → digest 117 tok
+[pass] pnpm (50% min)      savings 64.3%  raw 263 → digest  94 tok
+[pass] agent-doc (55% min) savings 67.4%  raw 304 → digest  99 tok
+```
+
+`--fail-under` exits non-zero on any miss; an `exit_code` integration test runs the committed fixture so `make check`/CI enforce it.
+
+**Scope discipline:** committed only my 8 files; the 17 unrelated in-flight files stayed untouched throughout all three P-items.
+
+Proof — changed paths: `log_digest.rs`, `tsift-cli/src/{lib,cli,commands/digests}.rs`, `tests/exit_code.rs`, `fixtures/log-digest-token-savings.json`, `specs/digests-sessions.md`, `VERSIONS.md`. Commands: `make check` (exit 0), `cargo install --path .` (ok), live gate (5/5 pass), `git push` (`d056da5..64f30cf`). Verification: 8/8 `tsift-digest` log_digest tests (incl. new classifier + fixture-eval tests) + new integration gate pass; full suite green. **CI:** the `#logchunk` run (27324362283) is now **green**, confirming the earlier `#logfam` FAIL was a transient cache-step infra kill (not a code regression); the `#loggate` run is pending. Confidence: high. Escalation: none.
+
+**Log-compression backlog (P1 `#logfam` + P2 `#logchunk` + P3 `#loggate`) is fully drained.** All three shipped with spec + tests + build + install + push.
+<!-- agent:boundary:d016b903 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#logfam]~~
-- ~~[#logchunk]~~
-- [#loggate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -135,7 +168,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#loggate] [recommended] Log compression P3: add fixture-backed token-savings and false-negative gates for cargo, pytest, npm/pnpm, and agent-doc runtime logs.
 <!-- /agent:backlog -->
 
 ## Review

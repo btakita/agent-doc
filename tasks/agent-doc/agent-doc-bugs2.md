@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -50,8 +50,15 @@ Closed the actionable gap for #q6js (the `build + install` leg of `#spec-test-bu
 - Verified the `stale_install` warning is cleared — installed binary + cdylib now match source commit `79d46c0b`.
 
 **Live zero-drift proof (driven via this finalize):** this very `finalize` ran while you drove concurrent edits — the edit-during-finalize stress the proof needs. Post-finalize I check `ops.log` for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` and **zero** `ipc_socket_already_applied_live_buffer_diverged` / `live_prompt_drift_after_preflight` / `crdt_merge_base_overlay_stale` lines. Note: a supervisor started before the `make install` still runs the pre-`79d46c0b` binary — restart it for a valid proof.
-<!-- agent:boundary:7da02066 -->
 
+### Re: monsterrodholders.md IPC drift — gpt-5
+
+Captured the new pinned queue item: `monsterrodholders.md has IPC drift.` It is now part of the active queue after `#ktw8` and before `#blgmangle`.
+
+I treated this cycle as queue bookkeeping and response only. The frontmatter now reflects the active harness as `agent: codex`; no repo code changed, and I did not mark any backlog item done. Preflight also raised semantic-completion candidates for `test t`, `#lvbremain`, `#ktw8`, and `#blgmangle`; I left them open because those were candidate matches, not authoritative completions.
+
+Proof: changed path is this session document via finalize; commands run were `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, and `agent-doc plan`. No code-test suite was run because this cycle did not edit code, specs, tests, or instruction surfaces.
+<!-- agent:boundary:07035e6f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -59,6 +66,7 @@ Closed the actionable gap for #q6js (the `build + install` leg of `#spec-test-bu
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~[#q6js]~~
 - [#ktw8]
+- :pushpin: monsterrodholders.md has IPC drift.
 - [#blgmangle]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - :pushpin: do [#lvbremain]

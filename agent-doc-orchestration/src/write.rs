@@ -698,6 +698,93 @@ fn dropped_queue_prompt_lines_after_content_ours(
     dropped
 }
 
+/// Preserve live queue deletions while still adopting the agent-owned
+/// `content_ours` response snapshot.
+///
+/// Live queue additions are intentionally *not* folded into `content_ours`; they
+/// stay as visible next-cycle work and are covered by `dropped_queue_prompts` if
+/// an editor overwrite loses them. Deletions are different: if a prompt existed
+/// at baseline and the live IPC candidate removed it, raw `content_ours` would
+/// resurrect that deleted queue item in the response commit. Remove those
+/// baseline-owned deleted prompts from the `content_ours` queue only.
+fn apply_live_queue_deletions_to_content_ours(
+    baseline: &str,
+    live_candidate: &str,
+    content_ours: &str,
+) -> String {
+    let baseline_prompts = queue_prompt_texts(&queue_component_text(baseline));
+    if baseline_prompts.is_empty() {
+        return content_ours.to_string();
+    }
+    let candidate_prompts = queue_prompt_texts(&queue_component_text(live_candidate));
+    let baseline_counts = queue_prompt_counts(&baseline_prompts);
+    let candidate_counts = queue_prompt_counts(&candidate_prompts);
+    let deleted_counts: HashMap<String, usize> = baseline_counts
+        .iter()
+        .filter_map(|(prompt, baseline_count)| {
+            let candidate_count = queue_prompt_count(&candidate_counts, prompt);
+            let deleted = baseline_count.saturating_sub(candidate_count);
+            (deleted > 0).then(|| (prompt.clone(), deleted))
+        })
+        .collect();
+    if deleted_counts.is_empty() {
+        return content_ours.to_string();
+    }
+
+    let target_comps = match component::parse(content_ours) {
+        Ok(comps) => comps,
+        Err(_) => return content_ours.to_string(),
+    };
+    let Some(target_queue) = target_comps.iter().find(|c| c.name == "queue") else {
+        return content_ours.to_string();
+    };
+    let target_body = &content_ours[target_queue.open_end..target_queue.close_start];
+    let Ok(target_entries) = crate::queue::parse(target_body) else {
+        return content_ours.to_string();
+    };
+
+    let mut removed_counts: HashMap<String, usize> = HashMap::new();
+    let mut changed = false;
+    let mut kept = Vec::with_capacity(target_entries.len());
+    for entry in target_entries {
+        let remove = match &entry {
+            crate::queue::QueueEntry::Prompt(prompt) if !prompt.multiline => {
+                let text = prompt.text.trim().to_string();
+                let deleted_count = queue_prompt_count(&deleted_counts, &text);
+                if deleted_count == 0 {
+                    false
+                } else {
+                    let removed = removed_counts.entry(text).or_insert(0);
+                    if *removed < deleted_count {
+                        *removed += 1;
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            _ => false,
+        };
+        if remove {
+            changed = true;
+        } else {
+            kept.push(entry);
+        }
+    }
+
+    if !changed {
+        return content_ours.to_string();
+    }
+
+    let new_body = crate::queue::render(&kept);
+    let out = target_queue.replace_content(content_ours, &new_body);
+    if crate::queue::prompts(&kept).is_empty() {
+        frontmatter::merge_queue_state(&out, false).unwrap_or(out)
+    } else {
+        out
+    }
+}
+
 fn snapshot_content_to_persist<'a>(
     mode: SnapshotPersistMode,
     content_ours: &'a str,
@@ -1492,8 +1579,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 )
             })?;
         }
-        same_cycle_added_ids
-            .extend(crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?);
+        same_cycle_added_ids.extend(crate::pending_cmd::add_many(
+            file,
+            &options.pending_add_gated,
+            true,
+        )?);
         // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
         // the front-insert default so anchor ids added this same cycle resolve.
         for pair in options.pending_add_after.chunks(2) {
@@ -10566,8 +10656,24 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // edits. Record the dropped `do [#id]` queue lines now; session-check
     // filters them against committed HEAD (preserved or consumed → cleared,
     // silently deleted → fail closed).
-    let dropped_queue =
-        dropped_queue_prompt_lines_after_content_ours(base, &decision.snapshot_content, ours);
+    let queue_reconciled_ours =
+        apply_live_queue_deletions_to_content_ours(base, &decision.snapshot_content, ours);
+    if queue_reconciled_ours != ours {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_content_ours_reconciled file={} source={} patch_id={} reason=live_queue_deletion_authoritative",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-")
+            ),
+        );
+    }
+    let dropped_queue = dropped_queue_prompt_lines_after_content_ours(
+        base,
+        &decision.snapshot_content,
+        &queue_reconciled_ours,
+    );
     if !dropped_queue.is_empty() {
         if let Err(e) = crate::cycle_state::record_dropped_queue_prompts(file, &dropped_queue) {
             eprintln!(
@@ -10587,7 +10693,7 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ),
         );
     }
-    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
+    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&queue_reconciled_ours);
     true
 }
 
@@ -15634,6 +15740,129 @@ Old.
     }
 
     #[test]
+    fn apply_live_queue_deletions_removes_deleted_items_without_absorbing_additions() {
+        let content_ours = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: response — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let live_candidate = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ live prompt after preflight\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto priority -->\n",
+            "- do [#manual]\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let reconciled =
+            apply_live_queue_deletions_to_content_ours(content_ours, live_candidate, content_ours);
+
+        assert!(reconciled.contains("### Re: response — gpt-5"));
+        assert!(!reconciled.contains("❯ live prompt after preflight"));
+        assert!(reconciled.contains("<!-- agent:queue auto -->"));
+        assert!(
+            !reconciled.contains("do [#manual]"),
+            "live queue additions stay next-cycle visible, not in content_ours:\n{reconciled}"
+        );
+        assert!(reconciled.contains("do [#head]"));
+        assert!(
+            !reconciled.contains("do [#deleted]"),
+            "live queue deletion must not be resurrected:\n{reconciled}"
+        );
+    }
+
+    #[test]
+    fn ipc_live_prompt_drift_content_ours_preserves_live_queue_deletions() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content_ours = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "### Re: original prompt — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "❯ live prompt after preflight\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#manual]\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_repo_with_doc(dir.path(), "session.md", baseline);
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut decision = IpcRepairDecision::ack_content(candidate.to_string());
+
+        let blocked = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &doc,
+            "test",
+            Some("patch-q"),
+            Some(baseline),
+            Some(content_ours),
+            &mut decision,
+        );
+
+        assert!(blocked);
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert!(
+            decision
+                .snapshot_content
+                .contains("### Re: original prompt — gpt-5")
+        );
+        assert!(
+            !decision
+                .snapshot_content
+                .contains("❯ live prompt after preflight")
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#manual]"),
+            "live queue addition must not be absorbed into the response commit:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#deleted]"),
+            "live queue deletion must not be resurrected:\n{}",
+            decision.snapshot_content
+        );
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("queue_content_ours_reconciled")
+                && log.contains("reason=live_queue_deletion_authoritative")
+                && log.contains("dropped_queue_prompt_recorded"),
+            "queue reconciliation must leave ops.log proof:\n{log}"
+        );
+    }
+
+    #[test]
     fn extract_response_headings_returns_re_lines_in_order() {
         let patches = vec![
             patch_with_heading("### Re: first topic — opus-4-7"),
@@ -16036,7 +16265,10 @@ scratch
             )),
             "marker must carry live-buffer hash: {log}"
         );
-        assert!(log.contains("live_ts="), "marker must carry live timestamp: {log}");
+        assert!(
+            log.contains("live_ts="),
+            "marker must carry live timestamp: {log}"
+        );
         assert!(
             !log.contains("visible_write_deferred_live_buffer_changed"),
             "must not record a fail-closed live-buffer block: {log}"
@@ -17762,16 +17994,14 @@ scratch
         // Snapshot consumed the queued `do [#fix]` (struck) and carries the full
         // `### Re:` response; the fragmented disk file also struck it but lost the
         // response body → wedge shape.
-        let snapshot = drift_content_ours()
-            .replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let snapshot = drift_content_ours().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         let fragmented = drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
         snapshot::save(&doc, &snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
         // The drift heuristic recorded the consumed item as a dropped queue prompt.
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()])
-            .unwrap();
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()]).unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(

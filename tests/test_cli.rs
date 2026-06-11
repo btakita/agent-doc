@@ -786,7 +786,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // recovery writes only the visible response materialization, then keeps
         // the committed snapshot on content_ours instead of falling back through
         // stale file IPC.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 90,
+        // +1 (#queueeditloss) for the regression's direct call to the existing
+        // live-prompt-drift IPC adoption guard. No new guard boundary; the fix
+        // reconciles live `agent:queue` edits inside the existing guard.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 91,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
@@ -806,7 +809,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `empty_response`, `no_head_baseline`) so a true replay is distinguished
         // from the genuinely-new-response path that auto-reopens from HEAD instead
         // of bailing. Routed through the same explicit-baseline replay gate.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 31,
+        // +2 (#queueeditloss) for the audited
+        // `queue_content_ours_reconciled ... reason=live_queue_deletion_authoritative`
+        // ops-log marker and its regression assertion. It proves content_ours
+        // adoption removes live-deleted baseline queue prompts instead of
+        // resurrecting them; live additions remain covered by the existing
+        // dropped-queue evidence path.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 33,
         _ => 0,
     }
 }

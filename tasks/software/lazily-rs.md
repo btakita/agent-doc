@@ -43,16 +43,21 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#ce90]
+
+
+> **Queue prompt:**
+>
 > [#r5an]
 
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > What are #next-steps to fix bugs in lazily-rs?
 
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > What are #next-steps to make lazily-zig compliant with the spec?
 
 
@@ -75,14 +80,14 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 - Pushed `lazily-rs` `main` to `origin/main` at `ed08785` (`test: lock dirty slot cache validation`).
 - The superproject has no workflow named `CI`.
 - lazily-rs GitHub Actions CI started after push and is currently `in_progress` for run `27314803102`.
-- Full `make check` passed, including fmt, clippy, build, default/tokio/async/distributed/ffi/ipc/signaling tests, loom, doctests, and benchmark result check.
+❯ - Full `make check` passed, including fmt, clippy, build, default/tokio/async/distributed/ffi/ipc/signaling tests, loom, doctests, and benchmark result check.
 - Targeted invalidation tests passed.
 - `gh run list --workflow CI --limit 1` in `src/lazily-rs`
-- `make check`
+❯ - `make check`
 - `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance`
 - `cargo test invalidation_semantics --test spec_compliance`
-- `cargo fmt --check`
-- `src/lazily-rs` submodule pointer in the superproject
+❯ - `cargo fmt --check`
+❯ - `src/lazily-rs` submodule pointer in the superproject
 - `src/lazily-rs/tests/spec_compliance.rs`
 9. **`#9evs` / `#lzasync`** — Add async context support after core invalidation/effect semantics are proven.
 8. **`#6965` / `#lzthreadsafe`** — Add ThreadSafeContext after the single-threaded semantics are correct.
@@ -97,7 +102,7 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
 
 **Top of backlog: `#lzinvmod`**
-<!-- agent:boundary:513b870a -->
+<!-- agent:boundary:986656df -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,8 +113,10 @@ Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation mo
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~What are #next-steps to fix bugs in lazily-rs?~~
 - ~~[#r5an]~~
-- [#ce90]
+- ~~[#ce90]~~
 - [#dtmx]
+<!-- /agent:queue -->
+<!--
 - [#1xk0]
 - [#qhn6]
 - [#39xb]
@@ -117,12 +124,11 @@ Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation mo
 - [#6965]
 - [#9evs]
 - [#74c7]
-<!-- /agent:queue -->
+-->
 
 ## Backlog
 
-<!-- agent:backlog queue -->
-- [ ] [#ce90] #lznodevec=Refactor node storage from HashMap(usize, *Slot) to Vec(?Option(Node)) indexed by sequential SlotId with free-list reuse per spec.
+<!-- agent:backlog -->
 - [ ] [#dtmx] #lzmemo=Implement Memo (ctx.memo) with PartialEq guard — dirty recomputation producing equal value suppresses downstream invalidation.
 - [ ] [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.
 - [ ] [#qhn6] #lzbatch=Implement Batch system — nested batches, outermost-boundary flush, coalesced updates, deferred effect scheduling.

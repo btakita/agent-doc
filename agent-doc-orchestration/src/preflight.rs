@@ -2663,8 +2663,16 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)
+    let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    // #rtwwire (rung 3): classify against the realtime document model — newest of
+    // disk vs the editor's unsaved buffer — so preflight never treats a buffer
+    // the user is actively editing as a "differs from disk" drift to block. The
+    // feed is staleness-gated (`#rtwfeed`): the buffer only supersedes disk when
+    // it provably holds unsaved edits ahead of disk, so a stale buffer or
+    // agent-doc's own just-written disk content can never override disk here.
+    // With no editor attached (the common/CI case) this returns disk unchanged.
+    let content = crate::realtime_model::resolve_current_doc(file, &disk).content;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (initial_frontmatter, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
     let active_harness = rc.harness();

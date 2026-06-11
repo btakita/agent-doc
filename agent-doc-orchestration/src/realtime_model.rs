@@ -161,6 +161,93 @@ pub fn buffer_supersedes(prev: u64, next: u64) -> bool {
     next > prev
 }
 
+// ── Rung 2 (`#rtwfeed`): durable, staleness-gated editor-buffer feed ──
+//
+// Rung 1 above is the *pure authority decision* over a `BufferState` the caller
+// is assumed to trust. Rung 2 is the durable *source* of that `BufferState`: it
+// reads the editor-buffer snapshot the plugin persists on every change
+// (`.agent-doc/live-buffer/<hash>`, [`crate::debounce::LiveBufferSnapshot`],
+// written via the `#pcp6` full-content digest path), and only promotes it to an
+// authoritative `BufferState` when the existing staleness classifier
+// ([`crate::debounce::live_buffer_diverges_from_content`]) proves the editor
+// holds genuine *unsaved edits ahead of disk*.
+//
+// Gating on that classifier — not the raw `dirty`/`version` digest — is what
+// keeps this safe. The classifier already suppresses the two clobber-in-reverse
+// hazards this whole plan exists to avoid: (1) the editor digest merely *lags*
+// agent-doc's own just-written disk content (`#pcp2` write-provenance), and
+// (2) the editor buffer provably *equals* disk (`#pcp6` content match). So a
+// stale buffer can never override a fresh disk write, and the feed only wins
+// when the user has typed something disk does not yet have.
+
+/// Map the staleness classifier's output to an authoritative [`BufferState`].
+///
+/// Pure (no I/O): `divergence` is `Some` only when
+/// [`crate::debounce::live_buffer_diverges_from_content`] proved the editor
+/// holds unsaved edits ahead of disk. We additionally require the snapshot to
+/// carry the **full buffer content** (`#pcp6`); a len/hash-only digest proves
+/// *that* the buffer diverged but not *what* it contains, so we cannot
+/// substitute it and fall back to disk (`None`). The snapshot timestamp is the
+/// monotonic generation stamp.
+fn buffer_state_from_divergence(
+    divergence: Option<&crate::debounce::LiveBufferSnapshot>,
+) -> Option<BufferState> {
+    let snapshot = divergence?;
+    let content = snapshot.content.clone()?;
+    Some(BufferState::new(content, true, snapshot.timestamp_ms as u64))
+}
+
+/// Canonical path string used to key the editor-buffer sidecar lookup. Mirrors
+/// the convention the visible-write reconcile guard uses
+/// (`guard_visible_write_reconcile`) so the path hashed here matches the
+/// absolute path the editor plugin reported the buffer under; a relative vs
+/// absolute mismatch would silently miss the sidecar.
+fn indicator_path(file: &std::path::Path) -> String {
+    file.canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Source the durable editor-buffer feed for `file`, gated by the existing
+/// staleness-suppression classifier against the current `disk` content.
+///
+/// Returns `Some(BufferState)` **only** when the editor provably holds unsaved
+/// edits ahead of disk and the full buffer text is available; otherwise `None`
+/// (disk is authoritative). Durable across controller restart because the feed
+/// reads the persisted `.agent-doc/live-buffer/<hash>` sidecar, not in-memory
+/// state. Does filesystem reads (sidecar + provenance + mtime) but no blocking
+/// waits, so it is safe off the project-control-pane hot path.
+pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<BufferState> {
+    let indicator = indicator_path(file);
+    let divergence = crate::debounce::live_buffer_diverges_from_content(&indicator, disk);
+    buffer_state_from_divergence(divergence.as_ref())
+}
+
+/// Resolve the authoritative "current document" for a cycle read: reconcile the
+/// on-disk `disk` content against the durable editor-buffer feed for `file`.
+///
+/// This is the single entry point rung 3 (`#rtwwire`) wires into the cycle read
+/// sites (`preflight` / `write` / `session-check`) so the agent reads
+/// newest-of(disk, editor buffer) instead of bare disk. Emits a grep-able
+/// `realtime_doc_resolve` ops.log marker so a live edit-during-finalize run can
+/// prove which source won.
+pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
+    let buffer = durable_buffer_state(file, disk);
+    let reconciliation = reconcile_current_doc(disk, buffer.as_ref());
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "realtime_doc_resolve authority={} reason={} diverged={} file={}",
+            reconciliation.authority.as_str(),
+            reconciliation.reason,
+            reconciliation.diverged,
+            file.display(),
+        ),
+    );
+    reconciliation
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +311,97 @@ mod tests {
         assert!(buffer_supersedes(1, 2));
         assert!(!buffer_supersedes(2, 2));
         assert!(!buffer_supersedes(3, 2));
+    }
+
+    // ── Rung 2 (`#rtwfeed`) durable-feed bridge ──
+
+    use crate::debounce::LiveBufferSnapshot;
+
+    fn snapshot(content: Option<&str>, generation: u128) -> LiveBufferSnapshot {
+        let body = content.unwrap_or("");
+        LiveBufferSnapshot {
+            path: "doc.md".to_string(),
+            len: body.len(),
+            hash: crate::debounce::content_hash(body),
+            timestamp_ms: generation,
+            content: content.map(|c| c.to_string()),
+        }
+    }
+
+    #[test]
+    fn buffer_state_from_divergence_none_when_no_divergence() {
+        // Classifier suppressed (in sync / stale / agent's own write) → disk wins.
+        assert!(buffer_state_from_divergence(None).is_none());
+    }
+
+    #[test]
+    fn buffer_state_from_divergence_promotes_full_content() {
+        let snap = snapshot(Some("## Queue\n- do [#a]\n- do [#rtwatch]\n"), 4242);
+        let state = buffer_state_from_divergence(Some(&snap)).expect("full content promotes");
+        assert!(state.dirty, "a proven divergence is unsaved-ahead-of-disk");
+        assert_eq!(state.generation, 4242);
+        assert!(state.content.contains("#rtwatch"));
+    }
+
+    #[test]
+    fn buffer_state_from_divergence_falls_back_when_content_absent() {
+        // A len/hash-only digest proves THAT the buffer diverged but not WHAT it
+        // holds — we must not fabricate content, so disk stays authoritative.
+        let snap = snapshot(None, 7);
+        assert!(buffer_state_from_divergence(Some(&snap)).is_none());
+    }
+
+    /// Build a temp project with `.agent-doc/` and the document on disk. Returns
+    /// the `TempDir` (keep alive), the file `PathBuf`, and the canonical path
+    /// string — the sidecar must be recorded under the same canonical key the
+    /// feed canonicalizes to, exactly as the live editor plugin reports it.
+    fn temp_doc(disk: &str) -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, disk).unwrap();
+        let canonical = std::fs::canonicalize(&file)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        (dir, file, canonical)
+    }
+
+    #[test]
+    fn durable_buffer_state_none_when_buffer_in_sync_with_disk() {
+        let disk = "## Queue\n- do [#a]\n";
+        let (_dir, file, canonical) = temp_doc(disk);
+        // Editor reports the same text as disk: no unsaved edit ahead → disk wins.
+        crate::debounce::record_live_buffer_digest_content(&canonical, disk).unwrap();
+        assert!(durable_buffer_state(&file, disk).is_none());
+        // resolve_current_doc agrees, returns disk content.
+        let r = resolve_current_doc(&file, disk);
+        assert_eq!(r.authority, DocAuthority::Disk);
+        assert_eq!(r.content, disk);
+    }
+
+    #[test]
+    fn durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk() {
+        // #queue-user-edit-overwrite: user typed a queue item in the editor that
+        // disk does not have yet. The durable feed must surface the buffer so the
+        // agent reads it instead of clobbering it.
+        let disk = "## Queue\n- do [#a]\n";
+        let buffer = "## Queue\n- do [#a]\n- do [#rtwatch]\n";
+        let (_dir, file, canonical) = temp_doc(disk);
+        crate::debounce::record_live_buffer_digest_content(&canonical, buffer).unwrap();
+        let state = durable_buffer_state(&file, disk).expect("unsaved buffer wins");
+        assert_eq!(state.content, buffer);
+        let r = resolve_current_doc(&file, disk);
+        assert_eq!(r.authority, DocAuthority::EditorBuffer);
+        assert!(r.content.contains("#rtwatch"));
+    }
+
+    #[test]
+    fn durable_buffer_state_none_when_no_editor_feed() {
+        // No sidecar recorded (no editor attached) → disk is the only source.
+        let disk = "plain disk body\n";
+        let (_dir, file, _canonical) = temp_doc(disk);
+        assert!(durable_buffer_state(&file, disk).is_none());
+        assert_eq!(resolve_current_doc(&file, disk).authority, DocAuthority::Disk);
     }
 }

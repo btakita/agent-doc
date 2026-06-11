@@ -249,7 +249,17 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         // independently re-reading + re-parsing the file (previously ~20 reads
         // and ~10 parses per `inspect` call).
         let rc = crate::graph::RunContext::new(file.to_path_buf());
-        rc.set_doc_content(std::fs::read_to_string(file)?);
+        // #rtwwire (rung 3): seed the guard-sweep cache from the realtime document
+        // model (newest of disk vs the editor's unsaved buffer) so every guard
+        // reasons about what the user actually sees, not a staler disk view. This
+        // is what removes the "buffer differs from disk" false INTERRUPTED whack-a-
+        // mole: a queue/exchange edit that lives only in the unsaved buffer is now
+        // visible to the dropped-prompt / contamination guards instead of looking
+        // dropped. Staleness-gated (`#rtwfeed`) — the buffer only wins when it
+        // provably holds unsaved edits ahead of disk; no editor attached returns
+        // disk unchanged.
+        let disk = std::fs::read_to_string(file)?;
+        rc.set_doc_content(crate::realtime_model::resolve_current_doc(file, &disk).content);
         match check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),

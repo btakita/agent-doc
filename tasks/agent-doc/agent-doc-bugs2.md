@@ -67,13 +67,38 @@ Verification included `src/tmux-router` full library tests, targeted Codex Stop-
 ### Re: closeout recovery for #fhza — gpt-5
 
 Recovery closeout complete. The Codex continuation fix is implemented, verified, locally installed, committed in tmux-router and agent-doc, and the superproject gitlinks were committed. The latest CI check on main was successful.
-<!-- agent:boundary:29cd8f70 -->
+
+### Re: #q7jm JB Stale File Cache root causes — gpt-5
+
+> **Queue prompt:**
+>
+> [#q7jm]
+
+
+Fixed and shipped the root causes I could prove from the existing stale-cache path.
+
+The main binary-side trigger was `try_auto_recover_live_prompt_drift`: when `commit` hit the benign larger-snapshot/live-prompt-drift wedge, it wrote the adopted snapshot straight to disk even if the JetBrains IPC listener was active. That direct disk write is exactly the File Cache Conflict / Stale File Cache trigger when IntelliJ still has a live buffer. That path now tries editor IPC convergence first: it builds component-level `op: "replace"` patches from the visible file to the adopted snapshot, sends them through the socket listener, waits for ack-content, and accepts the repair only when the ack content matches the adopted snapshot modulo transient markers. Successful repairs log `transport=editor_ipc` and do not emit the disk-risk marker; direct disk recovery remains only as `transport=disk_fallback` when convergence cannot be proven.
+
+The second root cause was editor protocol drift: both JetBrains and VS Code parsed `op` in the patch data model but ignored it during component application, so a convergence patch targeting `agent:exchange patch=append` would still append instead of replacing. Both plugins now honor explicit `op` overrides before marker `patch=` / `mode=` attributes, which lets the binary repair append-mode exchange bodies through the editor without duplicating the response.
+
+Proof:
+- Changed paths: `agent-doc-orchestration/src/write.rs`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`, `editors/vscode/src/extension.ts`, editor tests, plugin/spec docs, `VERSIONS.md`, and `editors/jetbrains/gradle.properties`.
+- Added regressions for editor-IPC live-prompt-drift recovery, convergence patch generation, JetBrains `op` override wiring, and VS Code `op` override wiring.
+- Ran focused checks: `cargo test live_prompt_drift --package agent-doc-orchestration`, `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`, and `npm test -- --test-name-pattern op`.
+- Ran full check after the final edit: `make check` passed with 4,262 tests, doctests, and the medium sim corpus.
+- Refreshed the installed local binary/cdylib with `make install` (`agent-doc 0.34.0`, `libagent_doc-0.34.0.so`).
+- Bumped and built the JetBrains plugin with `make bump-plugin`: `0.2.159 -> 0.2.160`, producing `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.160-signed.zip`.
+- Commits pushed: agent-doc `38bf22cb fix: converge stale cache recovery via editor IPC`; parent pointer `bf991da6d chore: update agent-doc submodule`.
+- GitHub Actions: latest agent-doc `CI` for `38bf22cb` completed successfully (`27328076329`). Parent repo has no workflow named `CI`.
+
+Install note: because the JetBrains plugin class/method shape changed, use the structural-update path for the built zip: uninstall plugin, restart IDE, install `agent-doc-jetbrains-0.2.160-signed.zip`, restart IDE.
+<!-- agent:boundary:30589f22 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#q7jm]
+- ~~[#q7jm]~~
 - [#vbc1]
 <!-- /agent:queue -->
 ###
@@ -104,7 +129,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#q7jm] Please fix the root causes for the JB `Stale File Cache` that periodically pops up.
 - [ ] [#vbc1] What are #next-steps to fix agent-doc bugs?
 <!-- /agent:backlog -->
 

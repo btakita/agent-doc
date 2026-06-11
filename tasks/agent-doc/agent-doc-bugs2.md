@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,6 +35,19 @@ completed
 Compacted content:
 - Archived 8 response topic(s): do [#clearcodex] (spec-test-build-install-commit-push); do [#jbstalecache] (spec-test-build-install-commit-push); do [#respdel] (spec-test-build-install-commit-push); 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+- The superproject has no workflow named `CI`.
+- `src/agent-doc` GitHub Actions `CI` for `5a2beca4` is currently in progress (`27325160429`). Local verification is green.
+- superproject: `6f6ac7bcb chore: update agent-doc pointer for queue IPC fix`, pushed to `origin/main`.
+- `src/agent-doc`: `5a2beca4 fix: converge queue body over IPC`, pushed to `origin/main`.
+- `make install` passed; `agent-doc --version` reports `agent-doc 0.34.0`, and `agent-doc lib-path` points at `/home/brian/.cargo/bin/libagent_doc.so`.
+- `make check` passed from the superproject.
+- `./gradlew test --tests com.github.btakita.agentdoc.ParsePatchJsonQueueAutoTest` passed.
+- `cargo test -p agent-doc-orchestration queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt` passed.
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/ParsePatchJsonQueueAutoTest.kt`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/agent-doc-orchestration/src/ipc_socket.rs`
 
 Fix the IPC Drift that has been happening in this document + monsterrodholders.md
 ```
@@ -50,13 +63,24 @@ I repaired the live backlog invariant by restoring `#lvbremain` to `agent:backlo
 I repaired the document-state blocker. `#lvbremain` was already present in `tasks/agent-doc-bugs2.done.md`, so the live queue copy was a stale open mirror. I marked the queue-side copy complete; preflight then recognized it as already resolved from the done archive and drained the queue.
 
 No new implementation work was started in this recovery cycle. The document is back on the normal agent-doc closeout path.
-<!-- agent:boundary:feb8ecc8 -->
+<!-- agent:boundary:cacb1595 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [x] [#lvbremain] Replace the visible_write_live_buffer_matches_disk live gate with actionable JB/live-buffer logging work: ensure the IntelliJ live-editor edit-during-finalize path emits a structured ^[epoch] visible_write_live_buffer_matches_disk marker with enough fields to distinguish buffer==disk from queue_diff prose, add/update regression coverage where possible, ship any JB plugin changes with version/install notes, and after the user tests, inspect ops.log and file/fix bugs from any missing or false marker.
+- :pushpin: Fix the root cause of the IPC drift.
+---
+The continuation prompt from the previous turn was entered into the codex input but not submitted. I had to manually submit the prompt.
+```
+  :pushpin: Fix the root cause of the IPC drift.
+
+  Continue in this owner pane: answer the queue head, then persist with `agent-doc finalize tasks/agent-doc/agent-doc-
+  bugs2.md` or `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`. Do NOT run `agent-doc tasks/agent-doc/
+  agent-doc-bugs2.md` from this pane; that re-invokes the owner pane and hits the recursive-direct-invocation guard. Do
+  not send a final answer until `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md --codex-final-gate` passes.
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

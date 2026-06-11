@@ -10548,7 +10548,14 @@ fn preserve_ipcfullprompt_forensic(
     let _ = std::fs::write(dir.join(format!("{stem}.candidate.md")), candidate);
 }
 
-fn materialize_response_in_current_exchange(
+/// Recover a divergent live buffer that dropped the assistant response: when the
+/// socket reports `already_applied` but the live buffer diverged with the
+/// response fragmented out of `exchange`, materialize `expected_response` back
+/// into the buffer's `exchange` so the response is never silently lost
+/// (`#mrhpcdrift2` zero-UNRECOVERED-drift guarantee). Returns `Some(current)`
+/// unchanged when the response is already materialized (no duplication), and
+/// `None` when the buffer has no parseable `exchange` to repair into.
+pub fn materialize_response_in_current_exchange(
     current: &str,
     expected_response: &str,
 ) -> Option<String> {

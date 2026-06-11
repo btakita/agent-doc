@@ -450,6 +450,7 @@ struct Coverage {
     sidecar_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
     ipc_snapshot_live_prompt_blocks: usize,
+    already_applied_response_recoveries: usize,
     ack_sidecar_only_repairs: usize,
     visible_duplicate_repairs: usize,
     post_commit_follow_up_handoffs: usize,
@@ -571,6 +572,7 @@ impl Coverage {
         self.normalization_repair_patches += other.normalization_repair_patches;
         self.sidecar_normalization_divergences += other.sidecar_normalization_divergences;
         self.stale_source_buffer_skips += other.stale_source_buffer_skips;
+        self.already_applied_response_recoveries += other.already_applied_response_recoveries;
         self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
         self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
@@ -1302,6 +1304,30 @@ impl SimWorld {
         } else {
             self.snapshot = snapshot_candidate.to_string();
         }
+    }
+
+    /// Model the `ipc_socket_already_applied_live_buffer_diverged` recovery
+    /// (`#mrhpcdrift2`): the socket reported `already_applied` but the live
+    /// buffer diverged with the assistant response fragmented out of `exchange`.
+    /// The recovery materializes the response from `content_ours` back into the
+    /// visible buffer so it is never silently lost (zero UNRECOVERED drift),
+    /// without duplicating an already-present response. `self.doc` is the
+    /// divergent live buffer; `self.snapshot` adopts `content_ours`.
+    fn recover_already_applied_diverged_response(
+        &mut self,
+        content_ours: &str,
+        expected_response: &str,
+    ) {
+        if let Some(repaired) = agent_doc_orchestration::write::materialize_response_in_current_exchange(
+            &self.doc,
+            expected_response,
+        ) {
+            if repaired != self.doc {
+                self.coverage.already_applied_response_recoveries += 1;
+            }
+            self.doc = repaired;
+        }
+        self.snapshot = content_ours.to_string();
     }
 
     fn apply_ack_sidecar_only_repair(&mut self, ack_content: &str) {
@@ -3254,6 +3280,66 @@ fn ipc_snapshot_adoption_sim_blocks_live_prompt_drift_after_preflight() {
         world.doc.matches("### Re: Please reply — gpt-5").count(),
         1,
         "the response heading must not be duplicated"
+    );
+}
+
+// #mrhpcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
+// drift must always be RECOVERED, never silently lost. When the socket reports
+// `already_applied` but the live buffer diverged with the assistant response
+// fragmented out of `exchange` (plus a fresh user keystroke), the recovery
+// materializes the response back from `content_ours` so the committed snapshot
+// carries the full response and the live user edit survives. The target is zero
+// UNRECOVERED drift — clean detect+recover is acceptable, silent loss is not.
+#[test]
+fn already_applied_diverged_sim_recovers_dropped_response_without_loss() {
+    let mut world = SimWorld::new(2_037);
+    world.append_to_exchange("❯ Please reply\n").unwrap();
+    let baseline = world.doc.clone();
+    let expected_response = "### Re: Please reply — gpt-5\n\nAnswered.";
+    let content_ours = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: Please reply — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+    );
+    // The already_applied socket ack came back, but the live buffer diverged:
+    // the response fragmented out of exchange (only the prompt survives) and the
+    // operator typed the next prompt mid-finalize. The recovery must not lose
+    // the response.
+    world.doc = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "❯ typing the next prompt mid-finalize\n<!-- /agent:exchange -->",
+    );
+
+    world.recover_already_applied_diverged_response(&content_ours, expected_response);
+
+    assert_eq!(
+        world.coverage.already_applied_response_recoveries, 1,
+        "the dropped response must trigger exactly one recovery"
+    );
+    assert_eq!(
+        world.doc.matches("### Re: Please reply — gpt-5").count(),
+        1,
+        "the dropped response must be materialized back exactly once (zero UNRECOVERED drift)"
+    );
+    assert!(
+        world.doc.contains("❯ typing the next prompt mid-finalize"),
+        "the live user keystroke must be preserved alongside the recovered response"
+    );
+    assert_eq!(
+        world.snapshot, content_ours,
+        "the committed snapshot adopts content_ours (baseline + full response)"
+    );
+
+    // Idempotent: re-running recovery once the response is materialized is a
+    // no-op — no duplicate heading, no extra recovery count.
+    world.recover_already_applied_diverged_response(&content_ours, expected_response);
+    assert_eq!(
+        world.coverage.already_applied_response_recoveries, 1,
+        "recovery must not re-fire once the response is already materialized"
+    );
+    assert_eq!(
+        world.doc.matches("### Re: Please reply — gpt-5").count(),
+        1,
+        "no duplicate response heading after idempotent recovery"
     );
 }
 

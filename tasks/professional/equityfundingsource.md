@@ -112,7 +112,11 @@ fix(admin): collapse dashboard attention accordion by default
 
 Make the admin dashboard Needs attention panel start collapsed while preserving the count summary, leave nested attention detail rows collapsed by default, and update dashboard tests for the accordion behavior. Verified with the focused admin dashboard test, full make check, and production Worker deploy fbf57803-ae85-4d49-8f7a-ca16ffa37b92.
 ```
-<!-- agent:boundary:169f38d0 -->
+
+### Re: Dashboard attention collapsed closeout — gpt-5
+
+Confirmed closeout for the current active turn: the admin dashboard Needs attention accordion is collapsed by default, deployed as Worker version `fbf57803-ae85-4d49-8f7a-ca16ffa37b92`, and verified with the focused dashboard test, `make check`, D1 migration checks, and live smoke checks.
+<!-- agent:boundary:3e616181 -->
 <!-- /agent:exchange -->
 ###
 <!--

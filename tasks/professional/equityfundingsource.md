@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,35 @@ EFS repo main: EFS `6eca4b1` makes admin dashboard Needs attention links route t
 Compacted content:
 - Archived 1 response topic(s): Admin dashboard attention links
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:1afa89fd -->
+
+### Re: Deal Pipeline aging badges — gpt-5
+
+> **Queue prompt:**
+>
+> The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation and bg color to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
+
+
+Implemented, pushed, and deployed. I used `Aging Nd` instead of `Stalled Nd`; for CRE loan originator/admin language, “pipeline aging” is the better fit because it names time-in-workflow without implying the deal is dead.
+
+What changed:
+- Deal Pipeline open Leads plus active loan stages (`Applications`, `Processing`, `Documents`, `Underwriting`) now get amber card background/border matching the Lender Pipeline attention treatment.
+- Those cards show an `Aging Nd` badge computed from server-side `now_s` and each card’s `created_at`.
+- Terminal/parked stages are not marked needs-attention.
+- PRD/spec and tests were updated under `#pipeline-action-aging`.
+
+Commits/deploy:
+- EFS commit pushed: `56cd057` (`feat(admin): annotate deal pipeline aging (#pipeline-action-aging)`).
+- Parent submodule pointer pushed: `4e3f10829`.
+- Deployed Worker version: `cb9184c9-a67c-41f4-97e8-b33a04b20fd6`.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` passed: 37 tests.
+- EFS `make check` passed: 552 tests + app build + Worker build.
+- Root `make check` passed.
+- Remote D1 migrations: none pending before and after deploy.
+- Smoke checks: `/` returned `200`; `/portal-admin/pipeline` returned expected `303` auth redirect.
+- GitHub Actions: no `CI` workflow exists here; latest parent `Agent Doc` run failed to start because GitHub billing/spending-limit blocked runner startup, so there were no failing logs to fix.
+<!-- agent:boundary:3f2f3826 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +73,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,14 +17,17 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
+agent_doc_pipeline:
+  run_id: cycle-1781199410858
+  step: write_applied
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-EFS deployed Worker 0e6f83d8-80bf-41cd-8978-fdab09816e1e on 2026-06-11: full-application Save & continue, final submit, and e-sign validation failures now show both the top form error and an error toast; silent autosave stays silent. EFS submodule commit 7d4fb0d pushed to origin/main. make check passed (557 tests + build + worker build); remote D1 has no pending migrations; smoke checks returned / 200 and /portal-borrower/new-application 303 unauthenticated redirect. CI workflow check is unavailable because this repo has no workflow named CI.
+EFS deployed Worker 0336450c-126f-49da-9321-1d4c74a6d2c1 on 2026-06-11: full-application validation failures now add red field-level error boxes for missing/invalid fields and those boxes disappear as completed values pass live validation. make check passed (559 tests + build + worker build); remote D1 has no pending migrations; smoke checks returned / 200 and /portal-borrower/new-application 303 unauthenticated redirect. CI workflow check is unavailable because this repo has no workflow named CI. EFS submodule has the intended uncommitted source changes per local no-commit instruction.
 <!-- /agent:status -->
 
 ## Exchange
@@ -78,7 +81,35 @@ Verification:
 - GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
 
 No actionable follow-up items were added for this queue head.
-<!-- agent:boundary:86e0c927 -->
+
+### Re: field-level validation boxes and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> When a submission is made with validation errors, include an error box around the field. As the user completes the field, remove the error box. deploy
+
+
+Implemented and deployed.
+
+The borrower/broker full application now keeps structured validation field keys alongside the existing banner/toast message. When Save & continue, final submit, or e-sign validation fails, the missing or invalid controls get a red field-level error box. The visible box is derived from current field validity, so it disappears as soon as the user completes or fixes that field.
+
+Changed files in `src/equityfundingsource-dev`:
+- `lib/ui--browser--efs/portal/borrower/full_application.tsx`
+- `lib/ui--server--efs/portal.ts`
+- `tests/form-error-standard.test.ts`
+
+Verification:
+- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts tests/apply4-full-application-p2.test.ts` passed: 16 tests
+- `make check` passed: 559 tests, app build, and worker build
+- `make deploy` deployed Worker version `0336450c-126f-49da-9321-1d4c74a6d2c1`
+- Remote D1 migrations: no pending migrations before and after deploy
+- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
+- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
+
+No git commit was created in the EFS submodule because its local instructions say not to commit without an explicit request; the intended source changes remain in that submodule worktree.
+
+No actionable follow-up items were added for this queue head.
+<!-- agent:boundary:5ae20eb1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,7 +117,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- When a submission is made with validation errors, include an error box around the field. As the user completes the field, remove the error box. deploy
 <!-- /agent:queue -->
 
 ## Backlog

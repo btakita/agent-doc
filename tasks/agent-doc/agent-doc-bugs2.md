@@ -101,7 +101,32 @@ Compacted content:
 **Unblocks when:** you open a fresh focused agent-doc session on the socket/IPC path (root-cause `ipc_socket_already_applied_live_buffer_diverged` + add SimWorld regression coverage), and drive one live monsterrodholders edit-during-finalize cycle for the recovery proof.
 
 I'm **halting the auto-drain here.** The remaining queue (`#ktw8`, `#lvbremain`) are operator-drive live-verify items I cannot agent-complete — drive them live and I'll check the logs, or halt the queue.
-<!-- agent:boundary:e775c493 -->
+
+### Re: queue [#ktw8] [#lvbremain] (spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompts:**
+>
+> [#ktw8]
+> [#lvbremain]
+
+Both queue items are **operator-drive live-verify** — I cannot agent-complete either (one needs a destructive `/clear`, the other needs a live editor buffer==disk write). No code changes this cycle; the work is the log-check, which I ran against `.agent-doc/logs/ops.log` (57.4M). Distinguishing **genuine structured emission lines** (`[epoch] <marker> …`) from **prose false-positives** (the same string echoed inside `queue_diff_active_prompt_differs prompt_changes=[…]`), since the bare-substring scan over-counts:
+
+**#ktw8 (destructive `/clear`) — still 0 genuine, unchanged.**
+- `grep '[s760] clear-decision'` → 4 hits, **all 4 are `queue_diff_active_prompt_differs` prose**; `grep -v queue_diff` → 0; `^[epoch] [s760] clear-decision` → 0.
+- So there are still **zero genuine structured `[s760] clear-decision` emissions**, and zero `clear=true`. The code is shipped and wired (submodule `1edb20d2`, `start.rs` idle-queue watch + `context_pct`); it just hasn't been driven.
+- **Unblocks when you drive it:** throwaway doc, frontmatter `agent_doc_queue_context_reset: true`, queue an item, grow the harness transcript past the clear threshold (default 50%), let it go idle. Expect exactly one `[s760] clear-decision optIn=true threshold=50 pct=<≥50> clear=true` line + `/clear` firing once at the boundary, no false fire below. I confirm the structured marker (ignoring sub-threshold `clear=false` lines).
+
+**#lvbremain — down to ONE residual marker.**
+- `#4wxr` cross-session-reject — previously driven+verified (no genuine lines remain in the current rotated log, but it was proven earlier). Done.
+- `#9adk` run_clear_coalesce — plugin-side `idea.log` (`InvocationCoalescer`), operator-verified. Not an ops.log marker. Done.
+- `#saev` early_ack_pending — **NOW FIRING LIVE.** `[ipc-socket] early_ack_pending emitted before apply` has **58 genuine structured lines**, most recent epoch `1781140966`. The socket-IPC `EARLY_ACK_ENABLED` path you needed driven is emitting. This sub-marker is satisfied.
+- `visible_write_live_buffer_matches_disk` — **0 genuine** (all 7 hits are `queue_diff` prose). This is the **only** residual: it needs a live IntelliJ buffer==disk write to fire.
+- **Unblocks when you drive it:** one live editor edit-during-finalize cycle where the visible buffer converges to disk; I check ops.log for the structured `visible_write_live_buffer_matches_disk` line.
+
+**Why both stay open (not `--done`):** `#ktw8` has zero genuine clear-decision emissions and I cannot fire a destructive `/clear`; `#lvbremain` has one residual marker (`visible_write_live_buffer_matches_disk`) that requires a live editor write I can't produce. Marking either done would be a fabricated completion. Both are correctly parked as operator-drive backlog items.
+
+**Halting the auto-drain.** The queue is exhausted of agent-completable work — both remaining items are yours to drive. Drive either and I'll read the logs; or halt the queue. I am **not** auto-looping and **not** editing the queue (the IPC supervisor is active on this doc — editing queue state mid-run races and corrupts it).
+<!-- agent:boundary:3a72d6bb -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -54,7 +54,30 @@ Compacted content:
 **Caveat:** the live binary/cdylib still predate `b9186f8a` (preflight `stale_install`). Refreshing it (`make install` / `agent-doc lib-install`) is operator-drive — it must not run from this affected session (it would swap the binary mid-cycle). #swint as a source+test deliverable is complete and on origin.
 
 **Next in queue:** `#rtwbcast` (rung-4 production multi-editor CRDT broadcast) now has deterministic SimWorld coverage via Slice 3, but the production feature still needs its own clean-session implementation + multi-editor live verify — not this affected session.
-<!-- agent:boundary:d88adf99 -->
+
+### Re: Root cause of "stuck-handoff" + how the binary mitigates it — opus-4-8
+
+**Root cause (verified in code — see `tasks/agent-doc/plan-stuck-handoff-reaper.md` Slice A).**
+
+A controller wedges in `ControllerHandoffState::Preparing` and never leaves it, while continuing to write the stale editor buffer back to disk. That is the "stuck-handoff": a multi-owner race on `.agent-doc/ipc.sock` between the IDEA listener (which acks its buffer as `content_ours`) and a half-promoted controller. Three concrete code gaps let a `Preparing` controller live forever:
+
+1. **No staleness detector.** `handoff_started_at` is stored on the controller record but is never read for a `now - handoff_started_at > threshold` comparison anywhere — the only reads copy it forward at bootstrap.
+2. **The existing reaper targets the wrong thing.** `close_stale_starting_actors_for_caller` reaps stale `Starting` *projection records*, not `Preparing` *live processes* — and closing a projection does not stop a wedged process from writing the socket.
+3. **Wrong threshold.** `gc.rs` calls it with `Duration::from_secs(3600)` — 1h, for a handoff that should complete in seconds.
+
+So a wedged `Preparing` controller has no detector, no reaper, and no process termination. Live signature: PID rotates generation `1002 → 1004 → 1006`, each respawn re-entering `preparing`, and every write in the affected session re-drifts the working tree (`live_prompt_drift`, `postcommit_worktree_check match=false`).
+
+**How the binary mitigates it (defense in depth, plan Slice A fix).**
+
+1. **Reaper that kills the process.** New `terminate_stale_preparing_controllers_for_caller`: enumerate controllers; for each `Preparing` past a short threshold (30–60s, named const + env override) SIGTERM the actual `pid`, skip if a fresh supervisor lease proves the handoff is legitimately in flight, then transition the record to `Failed`. The process must die — closing a projection is not enough.
+2. **Two wiring sites.** gc sweep (short threshold) + self-heal on invoke (kill the wedged predecessor *before* the new controller promotes). The self-heal path is what breaks the `1002→1004→1006` respawn loop.
+3. **Predecessor self-termination.** A controller transitions itself to `Failed` if its own handoff does not reach `Promoted`/`Stable` within the threshold — don't depend solely on an external reaper.
+4. **Fail-closed write.** A controller still `Preparing` past the threshold refuses to write the session document rather than racing the live owner — so even an un-reaped wedge cannot corrupt the doc.
+5. **Operator command.** `agent-doc admin controller reap-stale` to replace the manual `pkill -f '... --handoff-state preparing'`.
+6. **Observability.** `stale_preparing_controller_reaped pid=… generation=… age_secs=…` on each kill (+ a `…_skipped reason=lease_fresh|within_threshold` line) — the live-verify proof.
+
+**Status / scope.** This is a diagnostic turn; the fix is planned (`plan-stuck-handoff-reaper.md`, committed this cycle) but **must be implemented in a clean session** — this doc's controller is the exact process the reaper terminates, so it cannot land here. Slice B (queue-flood drain gate, `#kp5z`) is in the same plan. `#rtwbcast` stays queued for that clean session (SimWorld Slice 3 coverage already landed; production rung-4 + multi-editor live verify remain). Not auto-looping — the remaining queue is operator-drive / clean-session work.
+<!-- agent:boundary:026fbd48 -->
 <!-- /agent:exchange -->
 
 ## Queue

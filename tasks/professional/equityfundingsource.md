@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-EFS repo main: EFS `7d0ce71` adds visible `Needs attention` dashboard panels across admin, borrower, broker, and investor/funder portals; it is pushed to origin/main and deployed as Worker version `789cfa3d-4dc8-404e-9628-00327159f4d6` on 2026-06-11. The prior lender document stack remains deployed (#doc-stack-esc, EFS `5c655ba`), and the Lender Pipeline nav count fix remains in place (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS repo main: EFS `6eca4b1` makes admin dashboard Needs attention links route to Deal Pipeline, Lender Pipeline, or Documents and auto-open the relevant first actionable dialog where one exists; it is pushed to origin/main and deployed as Worker version `730027a8-cad2-4bf9-b171-58f245bf4dd9` on 2026-06-11. The prior lender document stack remains deployed (#doc-stack-esc, EFS `5c655ba`), and the Lender Pipeline nav count fix remains in place (#investor-pipeline, EFS `5af3c7d`). Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -32,31 +32,12 @@ EFS repo main: EFS `7d0ce71` adds visible `Needs attention` dashboard panels acr
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-041959.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-043604.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Tabbed lender dialog; Codex session handoff; Lender Pipeline tabbed lender dialog; 4 more
+- Archived 1 response topic(s): Admin dashboard attention links
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Admin dashboard attention links — gpt-5
-
-> **Queue prompt:**
->
-> The admin dashboard Needs Attention links should go to the respective pipeline and open the appropriate dialog. deploy 
-
-
-Implemented, pushed, and deployed.
-
-Changed paths: `app/equityfundingsource/lib/admin/dashboard/index.ts`, admin portal UI files for Deal Pipeline/Lender Pipeline/Documents, `prds/equity-funding-source-lending-portal-prd.md`, and focused admin tests.
-
-What changed: dashboard `Needs attention` action hrefs now route open applications and new leads into Deal Pipeline and pending funds/lender requests into Lender Pipeline. Those target views read the `attention` query and auto-open the first matching actionable card/dialog. Open investor document requests also auto-open the existing Documents provide-dialog; recent uploads remain a filtered Documents view because that list has no row dialog today.
-
-Verification: `bun test tests/admin-dashboard.test.ts`, `bun test tests/admin-investor-pipeline.test.ts`, `bun test tests/admin-investor-documents.test.ts`, `bun test tests/admin-pipeline.test.ts`, and full `make check` all passed. `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows. Production D1 reported no pending migrations before and after deploy; live smoke tests returned `200` for `/` and `303` for `/portal-admin/dashboard`.
-
-Commit/deploy: EFS `6eca4b1` pushed to `origin/main`; deployed Worker version `730027a8-cad2-4bf9-b171-58f245bf4dd9`.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:2194b6b2 -->
+<!-- agent:boundary:67085e20 -->
 <!-- /agent:exchange -->
 ###
 <!--

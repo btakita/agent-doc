@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -36,7 +36,48 @@ EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badge
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a34481a5 -->
+
+### Re: Boolean application radios — gpt-5
+
+> **Queue prompt:**
+>
+> Make all boolean selections in /portal-borrower/new-application a radio button (Yes|No label) with the initial state unseleted in /portal-borrower/new-application. Same with similar form selections in other portals. Deploy 
+
+
+Implemented and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/full_application.tsx`
+- `src/equityfundingsource-dev/lib/ui--server--efs/portal.ts`
+- `src/equityfundingsource-dev/tests/full-application-boolean-radios.test.ts`
+
+What changed:
+- `/portal-borrower/new-application` now renders Yes/No radio groups for boolean form answers: Self-employed, Pay off at closing, and each declaration.
+- The same `FullApplication` component powers the broker portal's New Loan Application flow, so `/portal-broker/submit-a-deal` gets the same radio-button behavior.
+- Fresh forms start with no Yes/No radio selected; saved boolean values reload as explicit Yes or No.
+- ESIGN consent remains a checkbox because it is an acknowledgement/consent control, not a Yes/No answer selection.
+
+Verification:
+- `bun test tests/full-application-boolean-radios.test.ts` passed.
+- `make check` passed: 555 tests, app build, and Worker bundle.
+- Remote D1 migration list before deploy: no migrations to apply.
+- `make deploy` completed and deployed Worker version `823c5cd2-5761-4755-86a9-c67ff1d1111b`.
+- Post-deploy D1 migration list: no migrations to apply.
+- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 for unauthenticated access.
+- GitHub Actions check: `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` and `gh run list --limit 1` returned no entries.
+
+Escalation: none.
+
+Confidence: high. The EFS submodule had pre-existing modified files outside this task, and the deploy necessarily shipped the current Worker bundle from that working tree. I only edited the three paths listed above.
+
+Suggested commit message:
+
+```txt
+fix(application): render boolean answers as Yes/No radios
+
+Replace the borrower and broker full-application boolean dropdowns with initially unselected Yes/No radio groups, preserve saved yes/no reload behavior, and cover the UI contract with a focused source-level regression test.
+```
+<!-- agent:boundary:21526eff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +85,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Make all boolean selections in /portal-borrower/new-application a radio button (Yes|No label) with the initial state unseleted in /portal-borrower/new-application. Same with similar form selections in other portals. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

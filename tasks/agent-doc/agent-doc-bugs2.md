@@ -51,91 +51,13 @@ The substantive part: I pulled real `ops.log` ground truth this turn and it **co
 **What I did this turn:** paused the queue (`receipt_id=7`, observed-generation 300) so the supervisor stops re-injecting triggers into your live pane while this is fixed. **Not auto-looping** — there's no new prompt (only the struck item), the queue floods on drain, and the actual fix needs a dedicated stable turn with live multi-process verification that **cannot** happen from inside this affected session (the supervisor races my writes here).
 
 `#nzmc` still network-blocked (crates.io offline). `#sjwm`/`#kqr6` still need that same clean turn. The review items remain operator-drive live proofs.
-<!-- agent:boundary:cd161967 -->
+<!-- agent:boundary:55b29ada -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#sjwm]
----
-:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
-```
-[route] target tmux session: 13
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
-```
----
-What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
-```
-❯ How do I recover from the IPC-drift? Restart Idea?
-● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
-  helped at all. Let me show you why with the live state.
-● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
-      echo "=== who holds the sockets right now ==="…)
-  ⎿  === who holds the sockets right now ===
-     --- .agent-doc/ipc.sock ---
-     COMMAND     PID  USER  FD   TYPE             DEVICE SIZE/OFF       NODE NAME
-     … +86 lines (ctrl+o to expand)
-● Now I have ground truth (my earlier ps | grep idea missed it — RTK/sandbox filtering). The picture is clearer and
-  more useful than "restart IDEA":
-  Two writers are fighting over your doc:
-  1. IDEA holds ipc.sock in LISTEN mode — PID 2144231, FD 325u. It acks its editor buffer as authoritative, which is
-  how content_ours keeps winning.
-  2. Two agent-doc controller serve procs are wedged in --handoff-state preparing — boost-client PID 3767411 and
-  superproject PID 3691684. That's a crashed/interrupted controller handoff; those stuck controllers are the active IPC
-  writers reverting your edits. (The /tmp/adrepro7 one is an unrelated test repo — ignore.)
-  So restarting IDEA is the blunt instrument, not the right first move — it releases ipc.sock, but the wedged
-  controllers are separate processes parented to init that survive an IDE restart, so a restart alone won't fix the
-  re-winning.
-  Let me clear the wedged controllers now (they're lazy-launched and respawn clean on the next agent-doc invoke):
-● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
-      kill 3767411 3691684 2>&1 && echo "killed wedged handoff controllers 3767411 (boost-client) + 3691684 (a…)
-  ⎿  killed wedged handoff controllers 3767411 (boost-client) + 3691684 (agent-loop)
-     === remaining controllers ===
-     brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
-     … +8 lines (ctrl+o to expand)
-     … +8 lines (ctrl+o to expand)
-● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
-  (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
-  open; it's no longer fighting a stuck handoff.
-  So here's the actual answer to your question:
-  No — don't restart IDEA (it's the blunt instrument)
-  The drift this session wasn't caused by IDEA per se — it was two agent-doc controller serve procs wedged mid-handoff
-  (--handoff-state preparing), which survive an IDE restart anyway. I just killed them; the problem is cleared.
-  What causes IPC drift
-  A multi-owner race on .agent-doc/ipc.sock:
-  - IDEA holds the socket (LISTEN) and acks its editor buffer (content_ours) as the source of truth.
-  - A crashed/interrupted controller handoff leaves controllers stuck in preparing; those keep writing the stale buffer
-  back over your edits → live_prompt_drift_after_preflight, postcommit_worktree_check match=false.
-  Recovery ladder — least → most invasive
-  1. Working tree only (the common case): finalize usually commits the correct thing to HEAD; only the on-disk copy
-  drifts. Verify with git show HEAD:<file> | grep -c '<Re: topic>' → if 1, just git checkout HEAD -- <file> then
-  agent-doc session-check. One command. (This is exactly what fixed today's cycle.)
-  2. Wedged controllers (what I did): kill the controller serve … --handoff-state preparing PIDs — they're lazy and
-  respawn clean on next invoke.
-  3. IDEA fighting the buffer: close or revert the doc tab in IDEA (File → Revert, or close the
-  tasks/monsterrodholders.md tab). This releases its claim on the buffer — don't kill the whole IDE.
-  4. Restart IDEA: only if 1–3 don't release ipc.sock. Overkill, and it won't clear wedged controllers.
-  The durable fix (recommended)
-  Preflight flagged a stale install: your ~/.cargo/bin agent-doc cdylib predates source commit e6f7538e. Wedged
-  preparing handoffs are exactly the bug class a stale binary produces — the controllers I just respawned are still on
-  the old binary. Rebuild and recycle them:
-  cd /home/brian/work/btakita/agent-loop/src/agent-doc && make install
-  # then recycle so they respawn on the fresh binary:
-  pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
-  Want me to run the make install rebuild now?
-```
----
-- JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
-- I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
-- :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
-- :round_pushpin: do [#kqr6]
-- :round_pushpin: do [#nzmc]
-- :round_pushpin: do [#kp5z]
-- The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
-- Upgrade lazily-rs + tsift-* dependencies.
-- JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
-- As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
+- test test
 <!-- /agent:queue -->
 ###
 <!--

@@ -37,6 +37,34 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 7 response topic(s): queue duplicate cleanup; codebase-memory-mcp evaluation; graph-db snapshot artifact prototype; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
+- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_noop_closeout_guidance`
+- Pushed `btakita/agent-loop@fae1d9254` (`chore: update tsift submodule`) to `origin/main`.
+- Pushed `btakita/tsift@756b44d` (`test: cover graph db doctor lock recovery`) to `origin/main`.
+- `tsift --version` -> `tsift 0.1.67`
+- `cargo install --path . --locked`
+- `cargo build`
+- `make check`
+- `cargo test -p tsift-cli graph_db_status_copies_wal_sidecars_when_locked`
+- `cargo test -p tsift-cli graph_db_status_uses_snapshot_fallback_when_rollback_journal_is_locked`
+- `cargo test -p tsift-cli graph_db_doctor_reports`
+- `cargo fmt -p tsift-cli`
+- Added an Unreleased `#tsbuglock` note.
+- Both tests refresh a real traversal graph DB, hold a deterministic SQLite lock, run `append_sqlite_graph_doctor_checks`, and assert doctor stays `ok` while emitting `sqlite_graph_db_read_recovery` with the rollback-journal or WAL-aware snapshot fallback diagnostic.
+- Added `graph_db_doctor_reports_wal_snapshot_fallback_when_locked`.
+- Added `graph_db_doctor_reports_snapshot_fallback_when_rollback_journal_is_locked`.
+- `src/tsift` submodule pointer in the superproject
+- `src/tsift/VERSIONS.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_actionable_guardrail_failures`
+- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists`
+- `tsift --envelope source-read ...` / `rg ...` for the token-action implementation, spec, archived done rows, and tests.
+- `tsift status` from `src/tsift`; fresh.
+- `tsift status` from the superproject; it refreshed submodule indexes but reported one unrelated missing workspace scope.
+- `packages/tsift-cli/tests/exit_code.rs` has fixture-backed CLI coverage for actionable guardrail collapse: prompt budget, cache resend, restart loop, and no-op closeout move into `next_token_actions` and disappear from unresolved guardrail failures.
+- `packages/tsift-cli/src/lib.rs` has unit coverage asserting that the full action report orders those six action kinds exactly once and carries raw-read and command-bundle rewrite commands.
+- `packages/tsift-cli/src/session_review_budget.rs` builds one deduped, priority-sorted action list for `prompt_budget`, `cache_resend`, `repeated_raw_read`, `repeated_command_bundle`, `restart_loop`, and `noop_closeout`, including digest commands and rewrite commands.
+- `src/tsift/specs/digests-sessions.md` specifies that `session-review --next-context` emits prioritized `next_token_actions`, maps prompt-budget/cache-resend/restart-loop/no-op closeout guardrails to compact/restart/digest/rewrite commands, and adds `repeated_raw_read` plus `repeated_command_bundle` actions with exact rewrite/source-read commands.
+- `tasks/software/tsift.done.md` already records `#token-budget-guardrail`, `#token-action-coverage`, and `#token-actions-rewrite` as completed work covering the same prompt-budget/cache-resend/restart-loop/no-op closeout and rewrite-action surface.
 
 ### Re: install/trust UX comparison — gpt-5
 
@@ -69,6 +97,16 @@ Changed paths: session document/backlog only. Verification: no tsift source/buil
 
 > **Queue prompt:**
 >
+> [#tsbuglock]
+
+
+> **Queue prompt:**
+>
+> [#tsbugtok]
+
+
+> **Queue prompt:**
+>
 > [#tsbugev]
 
 
@@ -86,80 +124,86 @@ Verification: `cargo fmt`; `cargo test -p tsift-sqlite sqlite_resolves_evidence_
 
 Confidence: high. Escalation: none. Note: unrelated dirty working-tree changes were already present in `src/tsift` and the superproject and remain unstaged.
 
-### Re: token-pressure next actions — gpt-5
+### Re: graph-db lock recovery bookkeeping — gpt-5
+
+Bookkeeping closeout for the repeated active-queue continuation prompt. `#tsbuglock` was already implemented, verified, committed, pushed, and marked done in the prior cycle; no additional source changes were made here.
+
+Changed paths: session document only.
+
+Verification: no code verification rerun for this bookkeeping cycle. The `#tsbuglock` implementation cycle already passed `make check`, `cargo build`, `cargo install --path . --locked`, and focused lock-recovery tests.
+
+No actionable follow-up items were introduced by this bookkeeping prompt.
+
+
+### Re: conflict-matrix dispatch semantics — gpt-5
 
 > **Queue prompt:**
 >
-> [#tsbugtok]
+> [#tsbugcm]
 
 
-`#tsbugtok` is already satisfied by the archived token-action work, so I did not change source for this queue item.
+`#tsbugcm` is already satisfied in the committed tsift code, so I made no source changes for this queue item.
 
 Evidence checked:
-- `tasks/software/tsift.done.md` already records `#token-budget-guardrail`, `#token-action-coverage`, and `#token-actions-rewrite` as completed work covering the same prompt-budget/cache-resend/restart-loop/no-op closeout and rewrite-action surface.
-- `src/tsift/specs/digests-sessions.md` specifies that `session-review --next-context` emits prioritized `next_token_actions`, maps prompt-budget/cache-resend/restart-loop/no-op closeout guardrails to compact/restart/digest/rewrite commands, and adds `repeated_raw_read` plus `repeated_command_bundle` actions with exact rewrite/source-read commands.
-- `packages/tsift-cli/src/session_review_budget.rs` builds one deduped, priority-sorted action list for `prompt_budget`, `cache_resend`, `repeated_raw_read`, `repeated_command_bundle`, `restart_loop`, and `noop_closeout`, including digest commands and rewrite commands.
-- `packages/tsift-cli/src/lib.rs` has unit coverage asserting that the full action report orders those six action kinds exactly once and carries raw-read and command-bundle rewrite commands.
-- `packages/tsift-cli/tests/exit_code.rs` has fixture-backed CLI coverage for actionable guardrail collapse: prompt budget, cache resend, restart loop, and no-op closeout move into `next_token_actions` and disappear from unresolved guardrail failures.
+- `ConflictMatrixCandidate` and `ConflictMatrixWorkerPromptPacket` expose `previously_completed`.
+- `ConflictMatrixReport` exposes both aggregate `fail_closed` / `can_parallel` and the split fields `cross_target_parallel_safe` plus `per_target_fail_closed`.
+- `conflict_matrix_candidate_from_evidence` treats missing source ownership as per-target fail-closed only when there is no completed `worker_result`; completed worker results downgrade missing source handles to an informational warning and set `previously_completed=true`.
+- `build_conflict_matrix_report_from_prepared_graph` computes per-target fail-closed separately from cross-target overlap safety, then derives `can_parallel` from both.
+- Conformance tests cover the two key contracts: low-overlap targets with missing source ownership fail closed per target while cross-target safety stays true, and completed worker results without source handles are exposed as previously completed instead of redispatch-blocking hard failures.
 
 Changed paths: none for this queue item.
 
-Commands run:
-- `tsift status` from the superproject; it refreshed submodule indexes but reported one unrelated missing workspace scope.
-- `tsift status` from `src/tsift`; fresh.
-- `tsift --envelope source-read ...` / `rg ...` for the token-action implementation, spec, archived done rows, and tests.
-- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists`
-- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_actionable_guardrail_failures`
-- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_noop_closeout_guidance`
+Verification:
+- `cargo test -p tsift-cli --test graph_db_conformance conflict_matrix_separates_per_target_fail_closed_from_cross_target_overlap`
+- `cargo test -p tsift-cli --test graph_db_conformance conflict_matrix_downgrades_completed_worker_result_without_source_handles`
+- `cargo test -p tsift-cli conflict_matrix_uses_cargo_package_mentions_as_ownership_evidence`
 
-Verification: all focused tests passed.
+All focused tests passed. The earlier `#tsbuglock` cycle also ran the full `make check` suite successfully before commit/push.
 
 Build/install/commit/push: skipped for this cycle because there were no source changes to build, install, commit, or push.
 
-Confidence: high. The queue head is a duplicate of completed implementation plus spec/test coverage, and the focused tests passed.
+No actionable follow-up items were introduced by this duplicate verification.
 
-Escalation: none.
+Confidence: high. Escalation: none. Note: unrelated dirty working-tree changes remain in `src/tsift` and the superproject; I did not stage or alter them.
+Confidence: high. Escalation: none.
 
-### Re: graph-db lock recovery — gpt-5
+### Re: stale index and summary readiness — gpt-5
 
-> **Queue prompt:**
->
-> [#tsbuglock]
+`#tsbugidx` is already satisfied by the current implementation, so I did not make source changes for this item.
 
+The graph DB readiness path already fails closed when semantic rows are unavailable and the summary cache is empty/unavailable. In that case it returns blocked readiness, sets `fail_closed`, and emits the repair sequence through `next_commands`, including `tsift summarize --extract .` and the graph DB refresh command. The status/context-pack side also already reports stale scoped indexes with one explicit repair command before summary extraction is trusted.
 
-Implemented the missing `#tsbuglock` regression coverage for graph-db doctor lock recovery. The read-only recovery implementation was already present for graph-db status/evidence/snapshot-export and documented in the graph spec; the gap I found was direct doctor coverage proving the same diagnostic path.
+Verification passed:
 
-Changed paths:
-- `src/tsift/packages/tsift-cli/src/lib.rs`
-- `src/tsift/VERSIONS.md`
-- `src/tsift` submodule pointer in the superproject
+- `cargo test -p tsift-cli context_pack_status_reminders_include_stale_index_state`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db`
+- `cargo test -p tsift-status status_workspace_scoped_indexes_report_stale`
 
-What changed:
-- Added `graph_db_doctor_reports_snapshot_fallback_when_rollback_journal_is_locked`.
-- Added `graph_db_doctor_reports_wal_snapshot_fallback_when_locked`.
-- Both tests refresh a real traversal graph DB, hold a deterministic SQLite lock, run `append_sqlite_graph_doctor_checks`, and assert doctor stays `ok` while emitting `sqlite_graph_db_read_recovery` with the rollback-journal or WAL-aware snapshot fallback diagnostic.
-- Added an Unreleased `#tsbuglock` note.
+No actionable follow-up items for this queue head.
 
-Verification:
-- `cargo fmt -p tsift-cli`
-- `cargo test -p tsift-cli graph_db_doctor_reports`
-- `cargo test -p tsift-cli graph_db_status_uses_snapshot_fallback_when_rollback_journal_is_locked`
-- `cargo test -p tsift-cli graph_db_status_copies_wal_sidecars_when_locked`
-- `make check`
-- `cargo build`
-- `cargo install --path . --locked`
-- `tsift --version` -> `tsift 0.1.67`
+### Re: full-projection cache reuse — gpt-5
 
-Commits/push:
-- Pushed `btakita/tsift@756b44d` (`test: cover graph db doctor lock recovery`) to `origin/main`.
-- Pushed `btakita/agent-loop@fae1d9254` (`chore: update tsift submodule`) to `origin/main`.
+`#tsbugcache` is already satisfied by the current implementation, so I did not make source changes for this item.
 
-CI: latest tsift CI is in progress for `756b44d` (`27315205961`, started 2026-06-11T00:22:38Z). The agent-loop repo still has no workflow named `CI`.
+Evidence checked:
 
-Confidence: high. The existing WAL/rollback recovery behavior is covered through status/evidence/snapshot-export already, and doctor now has direct regression tests for both lock modes.
+- `VERSIONS.md` records `#gcachemiss`, and `plans/gcachemiss-evidence.md` documents the root cause, fix, and gate update.
+- `graph_db_backend_eval_full_projection_source_watermark` hashes stable projection inputs: projection/cache versions, scope/path, indexed symbols/call edges/routes, and semantic summary rows. It excludes generated artifacts and session markdown, and it does not depend on `.tsift/summaries.db` file metadata.
+- The full-projection cache-hit path reports `hit: true`, emits cache read/decode phases, and reports `full_projection.source_graph_build` plus `full_projection.projection_rows` as zero-duration skipped work.
+- The backend-eval performance gate requires `full_projection.cache.hit` and states that binding full-projection performance evidence requires a cold populate leg followed by cache-leg samples with `full_projection.cache.hit=1`; cache-miss samples are diagnostics, not backend or hop-cap promotion proof.
 
-Escalation: none. Note: unrelated dirty working-tree changes remain in `src/tsift` and the superproject; I staged and committed only the `#tsbuglock` files/gitlink.
-<!-- agent:boundary:065b5794 -->
+Verification passed:
+
+- `cargo test -p tsift-cli traversal_source_watermark_uses_summary_rows_not_summaries_db_metadata`
+- `cargo test -p tsift-cli full_projection`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+
+No actionable follow-up items for this queue head.
+
+### Re: queue closeout recovery — gpt-5
+
+Closeout recovery note for the already-visible queue responses. `#tsbugidx` and `#tsbugcache` are answered above, the backlog is empty, and no new actionable items are being added.
+<!-- agent:boundary:d90e5c6b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -168,20 +212,17 @@ Escalation: none. Note: unrelated dirty working-tree changes remain in `src/tsif
 - ~~[#tsbugev]~~
 - ~~[#tsbugtok]~~
 - ~~[#tsbuglock]~~
-- [#tsbugcm]
-- [#tsbugidx]
-- [#tsbugcache]
+- ~~[#tsbugcm]~~
 <!-- /agent:queue -->
 <!--
+- [#tsbugidx]
+- [#tsbugcache]
 https://github.com/chopratejas/headroom
 -->
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
-- [ ] [#tsbugcm] Clarify conflict-matrix dispatch semantics: split per-target fail_closed diagnostics from cross-target parallel-safety, expose previously_completed/worker_result evidence, and add contract tests for low-overlap targets with missing source ownership.
-- [ ] [#tsbugidx] Tighten stale index and summary-cache readiness: make graph-db refresh/status/context-pack fail closed or emit one clear repair command when indexes or summaries are stale/empty, and cover stale workspace/submodule cases with fixtures.
-- [ ] [#tsbugcache] Stabilize full-projection cache reuse before further graph performance work: reproduce source-watermark cache misses on a quiescent checkout, identify unstable inputs, and gate backend-eval metrics on repeated cache-hit evidence.
+<!-- agent:backlog priority -->
 <!-- /agent:backlog -->
 
 ## Review

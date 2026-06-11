@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,13 +35,46 @@ completed
 Compacted content:
 - Archived 4 response topic(s): document repair; queue mirror recovery; IPC drift closeout; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:57165390 -->
+
+### Re: do [#fhza] Investigate and fix Codex auto-queue continuation prompt insertion without submission — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#fhza]
+
+
+Implemented and verified.
+
+Changed:
+- `src/tmux-router`: `Tmux::send_keys()` now submits UTF-8 bytes plus `0d` through one `tmux send-keys -H` command; OpenCode uses the same byte-stream shape with Kitty Return. The raw tmux regression now proves `/clear\r` reaches the pane exactly.
+- `src/agent-doc`: Codex idle queue continuations log submit mode plus queue-head hashes, Stop-hook queue blocks log `codex_stop_queue_continuation` for tracked-state and durable-marker sources, and route/session diagnostics now report the CR submit path.
+- Specs, README, changelogs, and ops-report fixtures were updated for the new submit contract.
+
+Commits:
+- `src/tmux-router`: `15982c0 fix: submit pane text as one byte stream`
+- `src/agent-doc`: `87a56294 fix: submit Codex queue continuations`
+- root gitlinks: `9625afaac chore: update queue continuation submodules`
+
+Verification:
+- `cargo test --lib` in `src/tmux-router`: 112 passed.
+- `cargo test send_keys --lib`: passed.
+- `cargo test stop_auto_queue_continuation_prefers_configured_mcp_tools --package agent-doc-orchestration`: passed.
+- `cargo test stop_blocks_from_durable_marker_when_session_state_missing --package agent-doc-orchestration`: passed.
+- `cargo test idle_queue_submit_mode --package agent-doc-orchestration`: passed.
+- `cargo test opencode_submit_uses_kitty_return_sequence --package agent-doc-orchestration -- --ignored`: passed.
+- `cargo test test_cli_ops_summary_groups_ops_log_events --test test_cli`: passed.
+- `cargo test ops_summary --package agent-doc`: passed.
+- `make check` in `src/agent-doc`: passed, including clippy, 4260 nextest tests, doctests, and medium simulator.
+- `cargo install --path .` in `src/agent-doc`: installed the local binary.
+- `gh run list --workflow CI --limit 1`: latest CI on `main` was successful (`27325160429`).
+
+Existing unrelated dirty files were left unstaged. No escalation was needed.
+<!-- agent:boundary:8abe032e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#fhza]
 <!-- /agent:queue -->
 ###
 <!--
@@ -71,7 +104,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#fhza] Investigate and fix Codex auto-queue continuation prompt insertion without submission: the continuation prompt was entered into the Codex input but required manual submit; capture route/Stop-hook logs, add regression coverage, and ensure active queue continuations are actually submitted from the owner pane.
+- [ ] [#q7jm] Please fix the root causes for the JB `Stale File Cache` that periodically pops up.
+- [ ] [#vbc1] What are #next-steps to fix agent-doc bugs?
 <!-- /agent:backlog -->
 
 ## Review

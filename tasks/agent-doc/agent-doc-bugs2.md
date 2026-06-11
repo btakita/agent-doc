@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-complete
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -48,6 +48,17 @@ Closed the actionable gap for #q6js (the `build + install` leg of `#spec-test-bu
 **Done this cycle:**
 - `make install` in `src/agent-doc` → replaced `~/.cargo/bin/agent-doc` (tmux binary), rebuilt the cdylib, and `agent-doc lib-install` refreshed `libagent_doc-0.34.0.so` (JB plugin mtime hot-reload).
 - Verified the `stale_install` warning is cleared — installed binary + cdylib now match source commit `79d46c0b`.
+- After that, the same document still logs `prompt_duplication_in_ack_content` at `1781135048`, `live_prompt_drift_after_preflight` at `1781135262` and `1781136313`, and `ipc_socket_already_applied_live_buffer_diverged` plus `crdt_merge_base_overlay_stale` at `1781135644` / `1781135645`.
+- GitHub Actions CI run `27315037356` passed after push, including remote `make check` and `make tmux-ci`.
+- `make install` passed.
+- `make build` passed.
+- `make check` passed via tsift digest-runner.
+- `cargo test -p agent-doc-core --quiet` passed via tsift digest-runner.
+- `cargo test -p agent-doc-core legacy_tilde_checkbox --quiet` passed.
+- `specs/pending-system.md`: documented the lazy-backfill invariant that `[~] [#id]` must preserve the existing id and must not get a prepended fresh `[ ] [#new]`.
+- Added parser and backfill regression tests for the exact broken shape: `- [~] [#q6js] ...` canonicalizes to `- [ ] [#q6js] ...` and contains only one hash token.
+- `agent-doc-core/src/pending.rs`: `parse_item_line` now treats legacy `[~]` task markers as open `[ ]` markers, so a following existing `[#id]` is parsed as the item id instead of being left in text for backfill to re-key.
+- `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` appears at `1781134502`, `1781134954`, and `1781136077`.
 
 **Live zero-drift proof (driven via this finalize):** this very `finalize` ran while you drove concurrent edits — the edit-during-finalize stress the proof needs. Post-finalize I check `ops.log` for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` and **zero** `ipc_socket_already_applied_live_buffer_diverged` / `live_prompt_drift_after_preflight` / `crdt_merge_base_overlay_stale` lines. Note: a supervisor started before the `make install` still runs the pre-`79d46c0b` binary — restart it for a valid proof.
 
@@ -95,7 +106,7 @@ I checked the actual `monsterrodholders.md` runtime evidence instead of treating
 
 No source files changed and I did not run `make check`. Commands run included `agent_doc_preflight`/`plan`/`read`, targeted `rg` scans of root and `src/boost-client` ops logs, `agent-doc session status src/boost-client/tasks/monsterrodholders.md`, `agent_doc_session_check` for the monsterrodholders document, and focused git status/diff/log checks for `tasks/monsterrodholders.md`.
 
-### Re: monsterrodholders.md IPC drift — gpt-5
+### Re: monsterrodholders.md IPC drift — gpt-5 (HEAD)
 
 This is related to the `#q6js` / IPC-CRDT cut-over family, but it is not resolved by the code that already landed. The Monster Rod Holders local ops log has post-cutover drift evidence after in-process hosting was active.
 
@@ -143,10 +154,16 @@ No source files changed in this recovery cycle. Verification was `agent-doc pref
 - ~~[#q6js]~~
 - ~~[#ktw8]~~
 - ~~:pushpin: monsterrodholders.md has IPC drift.~~
+- :round_pushpin: do [#mrhipcdrift]
+- :pushpin: `/clear` is not being called between queue turns in codex.
+- :pushpin: The response was showing up committed then there was an uncommitted delete of the response. This happened in the last turn
+- :pushpin: I'm still getting JB `Stale File Cache` dialogs and losing some of my typing.
+- :pushpin: `:round_pushpin: do [#mrhipcdrift]`.
+- :pushpin: do [#lvbremain]
+- :round_pushpin: do [#mrhpcdrift]
 - ~~[#blgmangle]~~
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
-- :pushpin: do [#lvbremain]
-- test t
+- do [#respdel]
 <!-- /agent:queue -->
 ###
 <!--
@@ -199,4 +216,3 @@ What are #next-steps to fix bugs?
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
-

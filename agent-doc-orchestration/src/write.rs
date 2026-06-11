@@ -6737,14 +6737,20 @@ fn guard_visible_write_reconcile(
         let editor_matches_disk =
             live.len == actual_current.len() && live.hash.eq_ignore_ascii_case(&disk_hash);
         if editor_matches_disk {
+            let expected_hash = crate::ops_log::content_hash(expected_current);
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "visible_write_live_buffer_matches_disk file={} source={} expected_hash={} disk_hash={}",
+                    "visible_write_live_buffer_matches_disk file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
                     file.display(),
                     source,
-                    crate::ops_log::content_hash(expected_current),
-                    disk_hash
+                    expected_current.len(),
+                    expected_hash,
+                    actual_current.len(),
+                    disk_hash,
+                    live.len,
+                    live.hash,
+                    live.timestamp_ms
                 ),
             );
         } else {
@@ -15762,6 +15768,44 @@ scratch
             log.contains("visible_write_live_buffer_matches_disk"),
             "expected provenance-suppression log: {log}"
         );
+        assert!(
+            log.contains("source=test_editor_matches_disk"),
+            "marker must identify the write source: {log}"
+        );
+        assert!(
+            log.contains(&format!("expected_len={}", expected.len())),
+            "marker must carry expected length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "expected_hash={}",
+                crate::ops_log::content_hash(expected)
+            )),
+            "marker must carry expected hash: {log}"
+        );
+        assert!(
+            log.contains(&format!("disk_len={}", drifted.len())),
+            "marker must carry disk length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "disk_hash={}",
+                crate::ops_log::content_hash(&drifted)
+            )),
+            "marker must carry disk hash: {log}"
+        );
+        assert!(
+            log.contains(&format!("live_len={}", drifted.len())),
+            "marker must carry live-buffer length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "live_hash={}",
+                crate::ops_log::content_hash(&drifted)
+            )),
+            "marker must carry live-buffer hash: {log}"
+        );
+        assert!(log.contains("live_ts="), "marker must carry live timestamp: {log}");
         assert!(
             !log.contains("visible_write_deferred_live_buffer_changed"),
             "must not record a fail-closed live-buffer block: {log}"

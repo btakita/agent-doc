@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Structured live-buffer-equals-disk marker carries proof fields
+  (`#lvbremain`).** `visible_write_live_buffer_matches_disk` now logs
+  `source`, `expected_len/hash`, `disk_len/hash`, `live_len/hash`, and
+  `live_ts` when the editor live-buffer digest diverges from the merge base but
+  exactly matches the current disk content. That makes the IntelliJ
+  edit-during-finalize proof an anchored, self-contained `ops.log` line instead
+  of a token that can be confused with `queue_diff_active_prompt_differs` prose.
+  Regression `visible_write_reconcile_treats_editor_matching_disk_as_reconcilable_drift`
+  now asserts the structured fields.
 - **Structured `#s760` clear-decision gate verifier (`#ktw8`).** Added the
   built-in `s760_clear_decision_clear_true` ops-log verifier for destructive
   queue-turn `/clear` proof. It accepts only anchored

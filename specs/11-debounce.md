@@ -187,7 +187,9 @@ or was not treated as a pending edit:
 Logging only; the return value is unchanged. The trivial "snapshot already equals
 expected content" early return is intentionally not logged to avoid per-check
 noise. Pairs with the write-path outcome logs in `write.rs`
-(`visible_write_live_buffer_matches_disk` / `visible_write_deferred_current_changed`).
+(`visible_write_live_buffer_matches_disk` / `visible_write_deferred_current_changed`);
+the live-buffer-matches-disk marker must carry expected/disk/live lengths and
+hashes plus `live_ts` so a live editor proof is self-contained.
 
 ## Recommended Improvements
 

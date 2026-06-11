@@ -364,12 +364,17 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
 const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 
 /// Whether the `#mps` model-projected-baseline cutover (rungs 2-4) is enabled.
-/// Opt-in via `AGENT_DOC_MPS` (`1` / `true` / `yes` / `on`, case-insensitive).
-/// Off (default / any other value) == current `.md`-baseline behavior.
+///
+/// **Default ON.** Opt out with `AGENT_DOC_MPS` set to `0` / `false` / `no` /
+/// `off` (case-insensitive) to revert to the pure `.md`-baseline path. Defaulting
+/// on is safe because the cutover is non-regressing by construction while the
+/// `.md` baseline remains the cross-check cache (Rung 4 not yet complete): the
+/// model projection is used only when it agrees with the `.md`, and the proven
+/// `.md` wins on any divergence (see [`load_baseline_model`]).
 pub fn mps_enabled() -> bool {
     match std::env::var("AGENT_DOC_MPS") {
-        Ok(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => false,
+        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Err(_) => true,
     }
 }
 
@@ -415,12 +420,21 @@ pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// `#mps` Rung 3 (flip): project the model baseline back to markdown — the base
-/// the finalize merge should use. Cross-checks against `md_baseline` (the legacy
-/// `.md` content, if present) and logs `mps_baseline_resolve` plus, on mismatch, a
-/// loud `mps_baseline_divergence` with the first differing byte for offline
-/// diffing. Returns `Some(projection)` when the overlay sidecar exists and
-/// projects; `None` when there is no model baseline (caller falls back to `.md`).
+/// `#mps` Rung 3 (flip): project the model baseline back to markdown and decide
+/// the authoritative merge base, cross-checking against `md_baseline` (the legacy
+/// `.md` content, if present). Returns the base the finalize merge should use:
+///
+/// - `None` — no overlay sidecar pinned; the caller uses the `.md` baseline.
+/// - `Some(projection)` — the overlay projected and **agrees** with the `.md` (or
+///   there is no `.md`); the model projection is authoritative.
+/// - `Some(md)` — the overlay projected but **diverges** from the `.md`. Until
+///   Rung 4 removes the `.md`, it is the proven cross-check cache, so it wins as
+///   the non-regressing backstop and the divergence is logged loudly
+///   (`mps_baseline_divergence` with the first differing byte) for offline diff.
+///
+/// Defaulting the cutover on (see [`mps_enabled`]) is safe precisely because this
+/// can never change a merge outcome while the `.md` exists: it returns the model
+/// projection only when it is byte-identical to the legacy base.
 pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Option<String>> {
     let path = baseline_overlay_path_for(doc)?;
     let bytes = match crate::fs_util::read_optional_bytes(&path)
@@ -438,30 +452,45 @@ pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Opti
         .to_markdown()
         .with_context(|| format!("failed to project baseline overlay {}", path.display()))?;
     let md_len = md_baseline.map(|m| m.len()).unwrap_or(0);
-    let diverged = md_baseline.map(|md| md != projection).unwrap_or(false);
-    crate::ops_log::log_op(
-        doc,
-        &format!(
-            "mps_baseline_resolve source=model file={} projected_len={} md_len={} diverged={}",
-            doc.display(),
-            projection.len(),
-            md_len,
-            diverged
-        ),
-    );
-    if diverged {
-        crate::ops_log::log_op(
-            doc,
-            &format!(
-                "mps_baseline_divergence file={} projected_len={} md_len={} first_diff_byte={:?}",
-                doc.display(),
-                projection.len(),
-                md_len,
-                md_baseline.and_then(|md| first_diff_byte(md, &projection))
-            ),
-        );
+
+    match md_baseline {
+        // `.md` present and diverges — prefer the proven `.md` backstop, log loudly.
+        Some(md) if md != projection => {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_baseline_resolve source=md_backstop file={} projected_len={} md_len={} diverged=true",
+                    doc.display(),
+                    projection.len(),
+                    md_len,
+                ),
+            );
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_baseline_divergence file={} projected_len={} md_len={} first_diff_byte={:?}",
+                    doc.display(),
+                    projection.len(),
+                    md_len,
+                    first_diff_byte(md, &projection)
+                ),
+            );
+            Ok(Some(md.to_string()))
+        }
+        // `.md` agrees, or there is no `.md` — the model projection is authoritative.
+        _ => {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_baseline_resolve source=model file={} projected_len={} md_len={} diverged=false",
+                    doc.display(),
+                    projection.len(),
+                    md_len,
+                ),
+            );
+            Ok(Some(projection))
+        }
     }
-    Ok(Some(projection))
 }
 
 /// Byte offset of the first difference between `a` and `b` (or the shorter
@@ -2061,15 +2090,27 @@ Second answer line three.
     }
 
     #[test]
-    fn mps_baseline_model_projects_even_when_md_diverges() {
+    fn mps_baseline_model_prefers_md_backstop_on_divergence() {
         let (_dir, doc) = setup();
         let pinned = "## Queue\n<!-- agent:queue -->\n- do [#real]\n<!-- /agent:queue -->\n";
         save_baseline_model(&doc, pinned).unwrap();
-        // A drifted `.md` baseline must not change the projection — the model is
-        // authoritative under the flip; the divergence is logged for debugging.
+        // When the `.md` cross-check cache disagrees with the model projection, the
+        // proven `.md` wins as the non-regressing backstop (until Rung 4 removes
+        // it); the divergence is logged. This is what makes default-on safe.
         let stale_md = "## Queue\n<!-- agent:queue -->\n- do [#stale]\n<!-- /agent:queue -->\n";
-        let projected = load_baseline_model(&doc, Some(stale_md)).unwrap();
-        assert_eq!(projected.as_deref(), Some(pinned));
+        let resolved = load_baseline_model(&doc, Some(stale_md)).unwrap();
+        assert_eq!(resolved.as_deref(), Some(stale_md));
+    }
+
+    #[test]
+    fn mps_baseline_model_uses_projection_when_no_md() {
+        let (_dir, doc) = setup();
+        // With no `.md` (the eventual Rung-4 state), the model projection is the
+        // only and authoritative base.
+        let pinned = "## Queue\n<!-- agent:queue -->\n- do [#only]\n<!-- /agent:queue -->\n";
+        save_baseline_model(&doc, pinned).unwrap();
+        let resolved = load_baseline_model(&doc, None).unwrap();
+        assert_eq!(resolved.as_deref(), Some(pinned));
     }
 
     #[test]

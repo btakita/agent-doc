@@ -43,6 +43,16 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#r5an]
+
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix bugs in lazily-rs?
+
+
+> **Queue prompt:**
+>
 > What are #next-steps to make lazily-zig compliant with the spec?
 
 
@@ -60,34 +70,34 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 8. **`#lzthreadsafe`** — ThreadSafeContext with sidecars, in-flight dedup, optimistic reads
 9. **`#lzasync`** — AsyncContext with async state machine and cancellation
 10. **`#lzipc`** — IPC layer (Snapshot, Delta, IpcSink/Source)
+10. **`#74c7` / `#lzipc`** — Add IPC last, since it depends on stable snapshots/deltas over the core model.
+- Committed and pushed the superproject submodule pointer at `9f64f1d9f`.
+- Pushed `lazily-rs` `main` to `origin/main` at `ed08785` (`test: lock dirty slot cache validation`).
+- The superproject has no workflow named `CI`.
+- lazily-rs GitHub Actions CI started after push and is currently `in_progress` for run `27314803102`.
+- Full `make check` passed, including fmt, clippy, build, default/tokio/async/distributed/ffi/ipc/signaling tests, loom, doctests, and benchmark result check.
+- Targeted invalidation tests passed.
+- `gh run list --workflow CI --limit 1` in `src/lazily-rs`
+- `make check`
+- `cargo test equal_intermediate_slot_prevents_downstream_recompute --test spec_compliance`
+- `cargo test invalidation_semantics --test spec_compliance`
+- `cargo fmt --check`
+- `src/lazily-rs` submodule pointer in the superproject
+- `src/lazily-rs/tests/spec_compliance.rs`
+9. **`#9evs` / `#lzasync`** — Add async context support after core invalidation/effect semantics are proven.
+8. **`#6965` / `#lzthreadsafe`** — Add ThreadSafeContext after the single-threaded semantics are correct.
+7. **`#p2pc` / `#lzslotops`** — Fill in missing slot API surface: clear(), is_set(), clear_dependents(), computed alias.
+6. **`#39xb` / `#lzcellguard`** — Add Cell.set() equality no-op behavior.
+5. **`#qhn6` / `#lzbatch`** — Add batching and deferred effect flushing on top of stable effect scheduling.
+4. **`#1xk0` / `#lzeffect`** — Implement effects after memo/dependency propagation is stable.
+3. **`#dtmx` / `#lzmemo`** — Add memo equality guards once dirty recomputation can preserve cached values.
+2. **`#ce90` / `#lznodevec`** — Bring storage in line with the spec: sequential SlotId-backed node storage with free-list reuse.
+1. **`#r5an` / `#lzinvmod`** — Fix invalidation first by preserving slots and marking them dirty instead of destroying cached state.
 
 Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
 
 **Top of backlog: `#lzinvmod`**
-
-### Re: next steps to fix bugs in lazily-rs — gpt-5
-
-> **Queue prompt:**
->
-> What are #next-steps to fix bugs in lazily-rs?
-
-
-No additional backlog items are needed right now; the existing backlog already captures the follow-up work in dependency order. Work from the architectural invariants outward:
-
-1. **`#r5an` / `#lzinvmod`** — Fix invalidation first by preserving slots and marking them dirty instead of destroying cached state.
-2. **`#ce90` / `#lznodevec`** — Bring storage in line with the spec: sequential SlotId-backed node storage with free-list reuse.
-3. **`#dtmx` / `#lzmemo`** — Add memo equality guards once dirty recomputation can preserve cached values.
-4. **`#1xk0` / `#lzeffect`** — Implement effects after memo/dependency propagation is stable.
-5. **`#qhn6` / `#lzbatch`** — Add batching and deferred effect flushing on top of stable effect scheduling.
-6. **`#39xb` / `#lzcellguard`** — Add Cell.set() equality no-op behavior.
-7. **`#p2pc` / `#lzslotops`** — Fill in missing slot API surface: clear(), is_set(), clear_dependents(), computed alias.
-8. **`#6965` / `#lzthreadsafe`** — Add ThreadSafeContext after the single-threaded semantics are correct.
-9. **`#9evs` / `#lzasync`** — Add async context support after core invalidation/effect semantics are proven.
-10. **`#74c7` / `#lzipc`** — Add IPC last, since it depends on stable snapshots/deltas over the core model.
-
-Top of backlog: **`#r5an`**.
-
-<!-- agent:boundary:c0c89662 -->
+<!-- agent:boundary:513b870a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +107,7 @@ Top of backlog: **`#r5an`**.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
 - ~~What are #next-steps to fix bugs in lazily-rs?~~
-- [#r5an]
+- ~~[#r5an]~~
 - [#ce90]
 - [#dtmx]
 - [#1xk0]
@@ -112,7 +122,6 @@ Top of backlog: **`#r5an`**.
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#r5an] #lzinvmod=Refactor Slot invalidation model from destroy-and-recreate to dirty-state (fresh/dirty/unset) with lazy recomputation. This is the critical architectural blocker — memo guards, effects, and batching all depend on it.
 - [ ] [#ce90] #lznodevec=Refactor node storage from HashMap(usize, *Slot) to Vec(?Option(Node)) indexed by sequential SlotId with free-list reuse per spec.
 - [ ] [#dtmx] #lzmemo=Implement Memo (ctx.memo) with PartialEq guard — dirty recomputation producing equal value suppresses downstream invalidation.
 - [ ] [#1xk0] #lzeffect=Implement Effect system — immediate activation, auto-tracking, scheduling, coalescing, cleanup closures, disposal, is_active.

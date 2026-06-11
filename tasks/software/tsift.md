@@ -64,13 +64,34 @@ Priority order added: `#tsbugev`, `#tsbugtok`, `#tsbuglock`, `#tsbugcm`, `#tsbug
 Notes: `#tsbugtok` comes from this session's current token/churn signals: prompt_budget, cache_resend, repeated_raw_read, restart_loop, and noop_closeout all appeared in `session-review --next-context`. `#tsbuglock`, `#tsbugcm`, `#tsbugidx`, and `#tsbugcache` come from archived dogfood findings that are still credible root-cause work: graph-db locking, conflict-matrix mixed verdicts, stale index/summary readiness, and unstable full-projection cache reuse. I did not add the stale `agent-doc` install warning to the tsift backlog because that belongs to `src/agent-doc`, but it is real: preflight warned that the installed binary/cdylib predates source commit `616ef21f`, so live sessions may need `make install` in `src/agent-doc` separately.
 
 Changed paths: session document/backlog only. Verification: no tsift source/build/test run was needed for this planning-only cycle. Commands/proof: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift --envelope context-pack`, `tsift --envelope session-review --next-context`, archive/backlog searches with `rg`, `git -C src/tsift status --short`, and `tsift graph-db --json --path . evidence next-steps --depth 3 --limit 8`. Confidence: high on the ordering; medium on deeper implementation effort until each item is isolated in source. Escalation: none.
-<!-- agent:boundary:9fbdba57 -->
+
+### Re: graph evidence target resolution — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsbugev]
+
+
+Completed `#tsbugev`.
+
+Changed paths: `src/tsift/packages/tsift-core/src/store.rs`, `src/tsift/packages/tsift-sqlite/src/lib.rs`, `src/tsift/packages/tsift-cli/src/lib.rs`, `src/tsift/packages/tsift-cli/src/commands/infra.rs`, `src/tsift/packages/tsift-cli/src/conflict_matrix.rs`, `src/tsift/packages/tsift-cli/tests/graph_db_conformance.rs`, `src/tsift/specs/graph.md`, plus the superproject `src/tsift` gitlink.
+
+Implementation: `GraphStore` now exposes candidate-level evidence target lookup, SQLite resolves those candidates through indexed `graph_node_properties` and can filter by `path`, and `graph-db evidence` derives a preferred session path when `--path` points at an agent-doc markdown file. Exact graph node ids still bypass path scoping. Non-id evidence targets now prefer the hinted session document; unscoped same-kind collisions across multiple session paths fail closed with disambiguation guidance instead of silently choosing an unrelated row. The graph spec records that contract.
+
+Regression coverage: added a graph-db conformance fixture with `#b000` in both `tasks/software/tsift.md` and `tasks/professional/equityfundingsource.md`. It proves unscoped `evidence b000` is ambiguous and `--path tasks/software/tsift.md evidence b000` resolves to the tsift session row.
+
+Commits/push: pushed `btakita/tsift@dff637d` (`fix: scope graph evidence target resolution`) to `origin/main`, then pushed `btakita/agent-loop@2947a18be` (`chore: update tsift submodule`) so the superproject points at that tsift commit.
+
+Verification: `cargo fmt`; `cargo test -p tsift-sqlite sqlite_resolves_evidence_targets_with_indexed_properties`; `cargo test -p tsift-cli --test graph_db_conformance graph_db_evidence_prefers_hinted_session_path_for_colliding_backlog_ids`; `cargo test -p tsift-cli --test graph_db_conformance`; `make check`; `cargo build`; `cargo install --path . --locked`; `tsift --version`. All passed locally, and the installed binary reports `tsift 0.1.67`. Latest tsift CI after the push is in progress (`27314796862`); the previous CI run on `main` was green, and local full-suite evidence is clean. The agent-loop repo has no workflow named `CI`.
+
+Confidence: high. Escalation: none. Note: unrelated dirty working-tree changes were already present in `src/tsift` and the superproject and remain unstaged.
+<!-- agent:boundary:a64e0309 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#tsbugev]
+- ~~[#tsbugev]~~
 - [#tsbugtok]
 - [#tsbuglock]
 - [#tsbugcm]
@@ -84,7 +105,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsbugev] Fix graph-db evidence target resolution for session queue heads and generic ids: scope targets like `next-steps` to the current session/path, require disambiguation on collisions, and add regression coverage proving `tasks/software/tsift.md` does not resolve to unrelated backlog rows in another document.
 - [ ] [#tsbugtok] Add fixture-backed session-review/context-pack token-pressure guardrails: dedupe prompt_budget, cache_resend, restart_loop, repeated_raw_read, and noop_closeout signals into one prioritized next_token_actions block with exact compact/restart/digest commands.
 - [ ] [#tsbuglock] Harden graph-db SQLite lock recovery for concurrent agent runs: document or add a safe release/diagnostic command, prefer WAL-safe reader behavior where appropriate, and cover hot-journal/locked-db failures in graph-db status/doctor tests.
 - [ ] [#tsbugcm] Clarify conflict-matrix dispatch semantics: split per-target fail_closed diagnostics from cross-target parallel-safety, expose previously_completed/worker_result evidence, and add contract tests for low-overlap targets with missing source ownership.

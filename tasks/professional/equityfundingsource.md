@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -35,7 +35,7 @@ EFS deployed Worker 823c5cd2-5761-4755-86a9-c67ff1d1111b on 2026-06-11: borrower
 Compacted content:
 - Archived 1 response topic(s): Boolean application radios
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:25955a0e -->
+<!-- agent:boundary:ed983c55 -->
 <!-- /agent:exchange -->
 ###
 <!--

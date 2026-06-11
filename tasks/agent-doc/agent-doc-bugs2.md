@@ -122,16 +122,42 @@ You interrupted into an active flooding bug. I stopped it and captured the repor
 **Why I'm not auto-looping or fixing now:** real user prompts arrived mid-loop (these reports), and the active bug is *the dispatch loop itself*. The responsible move is to halt, capture, and hand back. Nothing here is safely agent-fixable without your live repro and a deliberate design pass — I'd rather not change dispatch concurrency code while the dispatch is misfiring.
 
 **State:** queue paused; `#qflood` (top) + `#jbcompactconflict` in backlog with plans; `#2v7b` and `#qt32` still gated awaiting your live proofs; agent-doc submodule clean on `origin/main`. Tell me which to pick up first in a fresh, unpaused turn and I'll start from the plan — or run the gated live proofs and I'll read the logs.
-<!-- agent:boundary:0fdfe16e -->
+### Re: do #kp5z + do #w42v — investigated; both need a decision/live repro, not a blind fix — opus-4-8
+
+I dug into both before touching code, and the honest finding is that neither is safely fixable blind from inside this (currently IPC-unstable) session. I did **not** ship speculative changes to a deliberately-disabled path or to concurrency-critical dispatch — that risks deepening the exact instability you're hitting. Here's what I found, with the evidence:
+
+**`#w42v` (Compact Exchange File Cache Conflict) — the IPC path is disabled *on purpose*.** Compact writes the whole document to disk (`atomic_write_if_current_pub`, op `compact_exchange_direct_write`), so with the JB buffer open it diverges into the conflict. The full-content editor-IPC path *already exists and was built for this* — `try_ipc_full_content_operator_mutation`, whose source label is literally `compact_exchange` — **but `try_ipc_full_content_with_mode` unconditionally returns `Ok(false)` and logs `reason=disabled_by_default`** (there's even a test pinning that it's off). So "make it CRDT-driven" isn't a one-line swap; it means re-implementing + re-enabling that path (ideally a component-scoped `exchange` `op:replace` convergence like the shipped `#q7jm` fix, so your concurrent edits survive the merge) plus the JB-side apply, then live-verifying. **This is a decision for you:** it was disabled deliberately — do you want me to re-enable it the `#q7jm` way? I won't flip a by-design safety-off blind. Plan updated: `tasks/agent-doc/plan-jb-compact-crdt.md`.
+
+**`#kp5z` (queue flood) — confirmed it's the controller `dispatch`, re-fired by live editor events.** Your own error proved it: `dispatch blocked ... failed_stage=queue_paused` — so the pause gate works, and the bug is *what keeps invoking `dispatch`*. You also saw it "auto-start as I was typing," which means file-change/save events (not just `/loop`) drive the re-dispatch. The flood funnels several entry points (route auto-start on file change, idle continuation, `/loop`) into `dispatch` with no pane-busy gate or trigger dedupe. To pin the *exact* offending invocation safely I need one **live ops.log repro** — which path logs a redundant `dispatch` while the pane is mid-turn — because a blind busy-gate could suppress legitimate dispatch or worsen the stall you also reported. Plan updated with this evidence: `tasks/agent-doc/plan-queue-dispatch-flood.md`. This stays an open actionable item — not done.
+
+**Also captured:** your two new sub-symptoms (queue stalls when you type an unrelated item; auto-start while typing) folded into the `#kp5z` plan as repro evidence. And you confirmed **`#2v7b` reproduces on lazily-rs.md under Codex** — that's the bug the shipped Enter-re-submit fix targets; still gated on your live check of `route_submit_resubmit … result=accepted`.
+
+**State / what I need from you:**
+- Flood stays **mitigated** — queue paused (holds). Resume anytime with `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md`, but the flood returns until `#kp5z` lands.
+- **`#w42v`:** confirm you want the `#q7jm`-style component-scoped compact-over-IPC re-enable, and I'll implement it with a live-verify gate.
+- **`#kp5z`:** one live repro (queue running, capture `ops.log`) so I can pin the dispatch source, then I'll write the busy-gate/dedupe with SimWorld coverage.
+- Plans committed (`dbf98dbd7`); agent-doc submodule clean on `origin/main`.
+
+I'm not auto-looping (real prompts from you, queue paused). Tell me the compact direction and/or drop the repro log and I'll move.
+<!-- agent:boundary:9bcc5ef7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: JB `File Cache Conflict` occurred while I was entering in queue items during finalize. Also `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` accumulated into the Claude Code session queue as I was typing during finalize. I manually deleted the prompt from the Claude Code session queue.~~
+- :round_pushpin: do [#kp5z]
+- :pushpin: I typed in an unrelated queue item into this queue and the queue stalled.
+---
+:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+```
+[route] target tmux session: 13
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
+```
+---
+- :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
+- :round_pushpin: do [#w42v]
 - JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
-- The lazily-rs.md session running Codex reproduced the error.
 <!-- /agent:queue -->
 ###
 <!--
@@ -162,7 +188,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc/`/agent-doc` trigger submissions while the queue drains and during finalize-while-typing; operator must manually delete the stacked prompts. Cross-harness (Claude Code + Codex on lazily-rs.md). Suspected: continuation dispatcher does not gate on proven pane-idle / does not dedupe an already-pending trigger. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md. MITIGATED this turn via admin queue pause (receipt_id=5).
-- [ ] [#w42v] #jbcompactconflict JB Compact Exchange (and finalize concurrent with operator typing) raises a File Cache Conflict; compact should converge through editor IPC/CRDT like the #q7jm live_prompt_drift fix instead of a direct disk write that diverges from the JB buffer. Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
+- [ ] [#w42v] #jbcompactconflict JB Compact Exchange writes the full doc to disk (atomic_write_if_current_pub, compact_exchange_direct_write), diverging from the open JB buffer = File Cache Conflict. The full-content editor-IPC path for compact (try_ipc_full_content_operator_mutation, source label compact_exchange) EXISTS but is HARD-DISABLED by design (always returns Ok(false), reason=disabled_by_default). Making it CRDT-driven = re-implement+re-enable that path with a component-scoped exchange op:replace convergence (mirror #q7jm) + JB-side apply + live verify. NEEDS OPERATOR DIRECTION before implementation (it was disabled deliberately). Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
 <!-- /agent:backlog -->
 
 ## Review

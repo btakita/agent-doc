@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,7 +35,25 @@ EFS deployed Worker 823c5cd2-5761-4755-86a9-c67ff1d1111b on 2026-06-11: borrower
 Compacted content:
 - Archived 1 response topic(s): Boolean application radios
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:ed983c55 -->
+Implemented and deployed.
+
+> **Queue prompt:**
+>
+> Save and Continue and all other form submissions that have validation errors (missing responses), should have a toast message of the form submission fails...in addition to the error message above the form. Deploy
+
+
+The borrower/broker full application now routes explicit submission failures through the shared form error reporter, so Save & continue validation failures, final submit validation failures, and e-sign missing-field failures show the existing top-of-form red error plus an error toast. Silent autosave remains silent.
+
+Also preserved the active session's deployed full-application Yes/No radio work and rebased over the newer dashboard funded-deals work from origin/main. EFS submodule commit `7d4fb0d` was pushed to `origin/main`.
+
+Verification:
+- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
+- `make check` after rebase: 557 tests, build, and worker build passed
+- `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
+- Remote D1 migrations: no pending migrations
+- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
+- GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
+<!-- agent:boundary:54eb6a5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,7 +61,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Save and Continue and all other form submissions that have validation errors (missing responses), should have a toast message of the form submission fails...in addition to the error message above the form. Deploy
 <!-- /agent:queue -->
 
 ## Backlog

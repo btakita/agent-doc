@@ -64,13 +64,37 @@ I converted the three gated review entries back into open backlog work instead o
 The review list is cleared by moving `#mrhpcdrift2`, `#ktw8`, and `#lvbremain` into backlog with actionable text. Each item now includes a concrete implementation/logging/check step so the next cycles complete the plan and then use your tests plus `ops.log` to prove or disprove behavior.
 
 No JB plugin install is needed from this cycle; I only changed the session document. I will call out a JB plugin install after a future cycle actually changes and builds the JetBrains plugin.
-<!-- agent:boundary:45bc6379 -->
+`#mrhpcdrift2` is complete.
+
+The root-cause slice is already on `src/agent-doc` HEAD rather than needing another patch in this cycle:
+
+- `b9c3408c` makes overlay-as-merge-base deterministic/order-stable for append merges and covers it with `overlay_merge_base_is_order_stable_for_exchange_append`.
+- `37783c89` serializes concurrent-supervisor superproject write-back and covers it with `superproject_writeback_serializes_pointer_update_and_root_commit`.
+- `6b5bba64` reconciles clean visible-buffer disk drift and covers it with `visible_write_reconcile_reports_disk_drift_without_live_buffer_edit`.
+- `f403cdde` adds the SimWorld regression for already-applied socket/content_ours divergence, recovering a dropped response without losing the fresh prompt.
+
+Verification in `src/agent-doc`:
+
+- `cargo test -p agent-doc-orchestration overlay_merge_base_is_order_stable_for_exchange_append` passed.
+- `cargo test -p agent-doc-orchestration superproject_writeback_serializes_pointer_update_and_root_commit` passed.
+- `cargo test -p agent-doc-orchestration visible_write_reconcile_reports_disk_drift_without_live_buffer_edit` passed.
+- `make check` passed, including nextest and doctests.
+- Latest GitHub Actions CI for `src/agent-doc` is `completed success` for HEAD `f403cdde`.
+
+I also checked the user's monsterrodholders live edit-during-finalize repro evidence in `src/boost-client/.agent-doc/logs/ops.log` and the working tree:
+
+- PASS marker present: `ipc_socket_already_applied_missing_disk_response_repaired` at event `1781139155` for `tasks/monsterrodholders.md`, followed by `postcommit_worktree_check ... match=true` in the same event window.
+- The later `live_prompt_drift_after_preflight` block at event `1781150993` was a guard path, not unrecovered response loss: the candidate snapshot was longer than `content_ours`, the guard preserved the live content, and event `1781150994` ended with `postcommit_worktree_check ... match=true`.
+- `src/boost-client/tasks/monsterrodholders.md` is clean against HEAD, and HEAD contains the latest monsterrodholders response (`21ef043`, `### Re: orders health + PostHog drop-off + enable $0.01 test product -- opus-4-8`).
+
+There is no remaining FAIL marker for this acceptance check: I found no current lost-response line and no missing response in HEAD. No additional code edit or plugin install was required in this cycle because the required fixes and coverage were already present on HEAD; this was the final verification/reap pass for the backlog item.
+<!-- agent:boundary:f0f5de18 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#mrhpcdrift2]
+- ~~[#mrhpcdrift2]~~
 - [#ktw8]
 - [#lvbremain]
 <!-- /agent:queue -->
@@ -102,7 +126,6 @@ What are #next-steps to fix bugs?
 ##nn Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#mrhpcdrift2] Complete the fresh-session root-cause plan in tasks/agent-doc/plan-ipc-crdt-response-drift.md for socket-ACK/live-buffer/content_ours divergence: implement deterministic CRDT merge-base ordering and multi-writer write-back serialization, add SimWorld coverage for unrecovered response loss, update specs, build/install, and then check ops.log after the user's monsterrodholders live edit-during-finalize repro. Required logging: PASS markers must show live_prompt_drift_auto_recovered or ipc_socket_already_applied_missing_disk_response_repaired with the response intact in HEAD; FAIL markers are any lost-response line or missing response in HEAD.
 - [ ] [#ktw8] Replace the destructive auto-/clear live gate with automated, log-proven work: add or verify structured ops.log emission for s760 clear-decision anchored as ^[epoch] s760 clear-decision optIn=true clear=true pct>=threshold, add a regression that prevents prose-only queue_diff_active_prompt_differs from auto-completing the item, update spec/tests, build/install, and after the user drives the throwaway reset scenario classify PASS/FAIL from the anchored line only.
 - [ ] [#lvbremain] Replace the visible_write_live_buffer_matches_disk live gate with actionable JB/live-buffer logging work: ensure the IntelliJ live-editor edit-during-finalize path emits a structured ^[epoch] visible_write_live_buffer_matches_disk marker with enough fields to distinguish buffer==disk from queue_diff prose, add/update regression coverage where possible, ship any JB plugin changes with version/install notes, and after the user tests, inspect ops.log and file/fix bugs from any missing or false marker.
 <!-- /agent:backlog -->

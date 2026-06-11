@@ -2481,6 +2481,50 @@ mod tests {
     }
 
     #[test]
+    fn repair_replay_preserves_response_leading_code_fence_after_prompt_fence() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ show fenced prompt\n",
+            "```\n",
+            "prompt body\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(
+            &doc,
+            "<!-- patch:exchange -->\n```\nresponse body\n```\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        let exchange = crate::component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+        assert_eq!(
+            exchange.matches("```").count(),
+            4,
+            "repair replay must preserve prompt and response fences:\n{exchange}"
+        );
+        assert!(
+            exchange.contains("```\n```\nresponse body\n```"),
+            "repair replay stripped the response opening fence:\n{exchange}"
+        );
+    }
+
+    #[test]
     fn repair_leaves_do_id_queue_head_for_reap_path() {
         // do[#id] heads are struck by preflight's reap path once their backlog
         // item resolves; the repair strike must NOT touch them, or the head

@@ -3003,11 +3003,16 @@ fn apply_mode(mode: &str, existing: &str, new_content: &str) -> String {
 ///
 /// When an agent echoes the user's last prompt as the first line of its patch,
 /// append mode would duplicate that line. This strips the overlap before concatenation.
+/// Markdown fence delimiters are structural, so adjacent prompt/response code
+/// fences must survive even when the delimiter text is identical.
 fn strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str {
     let last_nonempty = existing.lines().rfind(|l| !l.trim().is_empty());
     let Some(last) = last_nonempty else {
         return new_content;
     };
+    if is_code_fence_delimiter(last.trim()) {
+        return new_content;
+    }
     let test = format!("{}\n", last);
     if new_content.starts_with(test.as_str()) {
         &new_content[test.len()..]
@@ -3514,7 +3519,6 @@ Interstitial text.
         assert!(!result.contains("old\n"));
     }
 
-    #[test]
     #[test]
     fn stream_override_beats_inline_attr() {
         // Stream mode overrides should still beat inline attrs
@@ -4283,7 +4287,6 @@ body b
     }
 
     #[test]
-    #[test]
     fn max_lines_inline_beats_toml() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
@@ -4438,6 +4441,38 @@ code block 2
         assert!(
             result.contains("```\n```"),
             "adjacent code fences must be preserved"
+        );
+    }
+
+    #[test]
+    fn apply_patches_append_preserves_response_leading_code_fence_after_prompt_fence() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+<!-- agent:exchange patch=append -->
+❯ show fenced prompt
+```
+prompt body
+```
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "```\nresponse body\n```\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+
+        assert_eq!(
+            result.matches("```").count(),
+            4,
+            "prompt and response fences must all survive append:\n{result}"
+        );
+        assert!(
+            result.contains("```\n```\nresponse body\n```"),
+            "response opening fence must remain after the prompt closing fence:\n{result}"
         );
     }
 
@@ -4655,6 +4690,24 @@ Existing answer.
         let count = result.matches("❯ How do I configure .mise.toml?").count();
         assert_eq!(count, 1, "overlap line should appear exactly once");
         assert!(result.contains("### Re: configure"));
+    }
+
+    #[test]
+    fn apply_mode_append_preserves_leading_code_fence_overlap() {
+        let existing = "❯ show fenced prompt\n```\nprompt body\n```\n";
+        let new_content = "```\nresponse body\n```\n";
+
+        let result = apply_mode("append", existing, new_content);
+
+        assert_eq!(
+            result.matches("```").count(),
+            4,
+            "code fence delimiters are structural, not duplicate prompt overlap:\n{result}"
+        );
+        assert!(
+            result.contains("```\n```\nresponse body\n```"),
+            "adjacent prompt/response fences must remain distinct:\n{result}"
+        );
     }
 
     #[test]

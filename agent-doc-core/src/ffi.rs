@@ -740,3 +740,48 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
         .and_then(normalize_editor_visible_result),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::{CStr, CString};
+
+    #[test]
+    fn apply_patch_append_preserves_leading_code_fence_after_prompt_fence() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ show fenced prompt\n",
+            "```\n",
+            "prompt body\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let c_doc = CString::new(doc).unwrap();
+        let c_name = CString::new("exchange").unwrap();
+        let c_content = CString::new("```\nresponse body\n```\n").unwrap();
+        let c_mode = CString::new("append").unwrap();
+
+        let result = unsafe {
+            agent_doc_apply_patch(
+                c_doc.as_ptr(),
+                c_name.as_ptr(),
+                c_content.as_ptr(),
+                c_mode.as_ptr(),
+            )
+        };
+
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert_eq!(
+            text.matches("```").count(),
+            4,
+            "native IPC append must keep prompt and response fences:\n{text}"
+        );
+        assert!(
+            text.contains("```\n```\nresponse body\n```"),
+            "native IPC append stripped the response opening fence:\n{text}"
+        );
+        unsafe { agent_doc_free_string(result.text) };
+    }
+}

@@ -7636,32 +7636,37 @@ fn exchange_prompt_reconciliation_infos(
     let boundary_prefix = "<!-- agent:boundary:";
     let mut in_response_block = false;
     let mut response_heading_was_prefixed = false;
+    let mut in_code_fence = false;
     let mut infos = Vec::new();
 
     for segment in exchange.split_inclusive('\n') {
         let (line, _) = split_line_segment(segment);
         let trimmed = line.trim();
-        let mut eligible = true;
-        if trimmed.starts_with(boundary_prefix) {
-            in_response_block = false;
-            response_heading_was_prefixed = false;
-            eligible = false;
-        } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
-            in_response_block = true;
-            response_heading_was_prefixed =
-                is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
-            eligible = false;
-        } else if in_response_block {
-            let is_target =
-                target_counts.is_some_and(|counts| normalization_target_matches_line(line, counts));
-            if starts_targeted_or_prefixed_prompt_repair_after_response(
-                trimmed,
-                is_target && !response_heading_was_prefixed,
-            ) {
+        let is_fence = is_exchange_code_fence_delimiter(trimmed);
+        let was_in_code_fence = in_code_fence;
+        let mut eligible = !(was_in_code_fence || is_fence);
+        if eligible {
+            if trimmed.starts_with(boundary_prefix) {
                 in_response_block = false;
                 response_heading_was_prefixed = false;
-            } else {
                 eligible = false;
+            } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
+                in_response_block = true;
+                response_heading_was_prefixed =
+                    is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
+                eligible = false;
+            } else if in_response_block {
+                let is_target = target_counts
+                    .is_some_and(|counts| normalization_target_matches_line(line, counts));
+                if starts_targeted_or_prefixed_prompt_repair_after_response(
+                    trimmed,
+                    is_target && !response_heading_was_prefixed,
+                ) {
+                    in_response_block = false;
+                    response_heading_was_prefixed = false;
+                } else {
+                    eligible = false;
+                }
             }
         }
 
@@ -7676,6 +7681,9 @@ fn exchange_prompt_reconciliation_infos(
             prefixed: trimmed.starts_with("❯ "),
             remove: false,
         });
+        if is_fence {
+            in_code_fence = !in_code_fence;
+        }
     }
 
     infos
@@ -18992,6 +19000,36 @@ scratch
             result[0]["content"].as_str().unwrap(),
             new_content,
             "synthesized patch content should match unmatched"
+        );
+    }
+
+    #[test]
+    fn build_ipc_patches_json_preserves_leading_code_fence_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ show fenced prompt\n",
+            "```\n",
+            "prompt body\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "```\nresponse body\n```\n",
+        )];
+        let result = build_ipc_patches_json(&doc, &patches, "", None, None).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["component"].as_str().unwrap(), "exchange");
+        assert_eq!(result[0]["op"].as_str().unwrap(), "append");
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            "```\nresponse body\n```\n",
+            "IPC payload must keep a leading code fence byte-for-byte"
         );
     }
 

@@ -1396,6 +1396,56 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_preserves_summary_leading_code_fence() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-fence\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ show fenced prompt\n",
+            "```\n",
+            "prompt body\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact(
+            &file,
+            doc,
+            "exchange",
+            Some("```\ncompacted summary\n```"),
+            false,
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let exchange_after = crate::component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert_eq!(
+            exchange_after.matches("```").count(),
+            2,
+            "compact summary fences must survive:\n{exchange_after}"
+        );
+        assert!(
+            exchange_after.starts_with("```\ncompacted summary\n```\n"),
+            "compact summary leading fence must remain first content:\n{exchange_after}"
+        );
+    }
+
+    #[test]
     fn component_compact_preserves_post_exchange_scratch_comment() {
         let prompt = "The compact exchange scratch comment should not be deleted. #spec-test-build-install-commit-push";
         let doc = format!(

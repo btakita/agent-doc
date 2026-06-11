@@ -77,7 +77,24 @@ I re-checked the live proof for `#ktw8`. It is still **not complete**.
 **Commands run:** `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read`, `tsift status --json`, `git status --short`, targeted `rg` scans for `[s760]` / `clear-decision`, `agent-doc queue --help`, and archive/done-file checks for prior `#ktw8` disposition.
 
 Confidence: high. Escalation: do not auto-loop this head; another loop can only repeat the same log check until the operator drive happens.
-<!-- agent:boundary:d489702c -->
+
+### Re: monsterrodholders.md IPC drift — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: monsterrodholders.md has IPC drift.
+
+
+I checked the actual `monsterrodholders.md` runtime evidence instead of treating this as queue bookkeeping. This is a real residual agent-doc bug, not a Monster Rod Holders content issue.
+
+**Finding:** it is the same editor-boundary IPC/CRDT drift family as the cut-over proof, and it is **not green** after the in-process supervisor marker. In `src/boost-client/.agent-doc/logs/ops.log`, `supervisor_host_gate ... hosting=in-process` appears at `1781134502`, `1781134954`, and `1781136077`, but drift continues after that: `live_prompt_drift_after_preflight` at `1781135262` and `1781136313`, `ipc_socket_already_applied_live_buffer_diverged` at `1781135644`, `crdt_merge_base_overlay_stale` at `1781135645`, and `postcommit_worktree_check ... match=false` at `1781135262`, `1781135645`, and `1781136314`.
+
+**Current recovery status:** `git -C src/boost-client status --short tasks/monsterrodholders.md` is clean, and the owner actor is alive/idle on pane `%115` with a healthy in-process supervisor. However, `agent_doc_session_check` for that document reports an interrupted `preflight_started` cycle and the next queue head `Add a strikethrough pricing for the father's day pricing.` I did not repair or finalize `monsterrodholders.md` from this pane; this cycle is for `agent-doc-bugs2.md`, and cross-document writes from the wrong pane are part of the failure class.
+
+**Disposition:** I added `#mrhipcdrift` to the backlog as the concrete residual bug. `#q6js` should not be considered a clean proof; the remaining failure is likely in live-buffer/CRDT queue-consume adoption or parent/submodule closeout ordering, not simply the old out-of-process supervisor.
+
+No source files changed and I did not run `make check`. Commands run included `agent_doc_preflight`/`plan`/`read`, targeted `rg` scans of root and `src/boost-client` ops logs, `agent-doc session status src/boost-client/tasks/monsterrodholders.md`, `agent_doc_session_check` for the monsterrodholders document, and focused git status/diff/log checks for `tasks/monsterrodholders.md`.
+<!-- agent:boundary:c0f56165 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -85,7 +102,7 @@ Confidence: high. Escalation: do not auto-loop this head; another loop can only 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~[#q6js]~~
 - ~~[#ktw8]~~
-- :pushpin: monsterrodholders.md has IPC drift.
+- ~~:pushpin: monsterrodholders.md has IPC drift.~~
 - [#blgmangle]
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - :pushpin: do [#lvbremain]
@@ -119,6 +136,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#mrhipcdrift] agent-doc-bug: monsterrodholders.md IPC/CRDT drift persists after the 08b in-process supervisor/read-only cut-over proof was expected green. Evidence from src/boost-client/.agent-doc/logs/ops.log on 2026-06-10: supervisor_host_gate hosting=in-process at 1781134502/1781134954/1781136077, but later live_prompt_drift_after_preflight at 1781135262 and 1781136313, ipc_socket_already_applied_live_buffer_diverged at 1781135644, crdt_merge_base_overlay_stale at 1781135645, queue_consume_divergence_reconciled at 1781135262/1781136313, and postcommit_worktree_check match=false at 1781135262/1781135645/1781136314. Treat #q6js as not actually green; root likely remains in live-buffer/CRDT queue-consume adoption or parent/submodule closeout ordering, not merely old out-of-process supervisor. Build a focused repro/fix with SimWorld coverage and live monsterrodholders proof.
 - [ ] [#blgmangle] preflight pending-backfill mangling bug (hit live this session): during a same-cycle reap (dsqa reaped), the missing-id/checkbox backfill PREPENDED a fresh `[ ] [#g0qb]` onto an existing `[~] [#q6js]` backlog item, demoting the real `[#q6js]` to inline text and re-keying the item to the bogus id. session-check then INTERRUPTED with `open backlog item(s) exist only outside live agent:backlog: #q6js`. Repaired manually via pending-clear + ordered pending-add-back. Fix: backfill must skip any item that already has a leading `[#id]` and/or `[checkbox]`; never prepend a second id/checkbox token to an item that already has one.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).

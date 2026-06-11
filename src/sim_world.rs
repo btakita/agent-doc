@@ -4259,3 +4259,584 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
     assert_eq!(world.snapshot, world.doc);
     world.strict_closeout_invariants().unwrap();
 }
+
+// ============================================================================
+// #swint — SimWorld editor + tmux integration harness
+//
+// `SimEditor` is a deterministic in-harness actor that speaks the same durable
+// live-buffer protocol the JetBrains / VS Code plugins speak over socket IPC /
+// FFI: it records the editor-visible buffer via
+// `debounce::record_live_buffer_digest_content` (the `#pcp6` full-content
+// digest the plugin writes on every change) and reads "current document" back
+// through the *production* `realtime_model::resolve_current_doc` seam (rung 3b,
+// `#rtwatch`). This lets a SimWorld scenario exercise the editor-buffer-vs-disk
+// read-authority reconcile, multi-editor CRDT broadcast (`#rtwbcast`), and the
+// tmux dispatch/drain integrated system (`#kp5z`) *without a live IDE* — turning
+// the File-Cache-Conflict / IPC-drift / queue-flood live-verify-only classes
+// into deterministic regressions.
+//
+// See tasks/agent-doc/plan-simworld-editor-integration.md.
+// ============================================================================
+
+use agent_doc_orchestration::realtime_model::{BufferState, DocAuthority, Reconciliation};
+
+/// Which editor's live-buffer protocol a [`SimEditor`] emulates. The read
+/// authority contract is identical across kinds (a dirty buffer is always
+/// authoritative over stale disk); the kind only changes how an *external* disk
+/// write that lands while the buffer is dirty is surfaced to the user — the
+/// File-Cache-Conflict semantics that actually bite (Slice 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorKind {
+    /// No editor-specific conflict modeling — the pure realtime-model seam.
+    Generic,
+    /// IntelliJ / JetBrains: a read-only VFS WatchService notices the external
+    /// disk change and raises a modal "File Cache Conflict" dialog. The buffer
+    /// stays authoritative until the user resolves the dialog.
+    JetBrains,
+    /// VS Code: buffer events keep the dirty buffer; an external disk change is
+    /// flagged non-modally and the in-memory buffer stays authoritative.
+    VsCode,
+}
+
+impl EditorKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::JetBrains => "jetbrains",
+            Self::VsCode => "vscode",
+        }
+    }
+}
+
+/// How a [`SimEditor`] of a given [`EditorKind`] reconciles an external disk
+/// write (e.g. agent-doc's own patchback) that lands while the buffer holds
+/// unsaved edits. Both editors keep the buffer authoritative (no clobber) until
+/// the user resolves; only the surfaced signal differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheConflict {
+    /// Buffer was clean (in sync with disk): the external write is adopted
+    /// silently — there is nothing to conflict with.
+    NoneAdopted,
+    /// JetBrains modal File-Cache-Conflict dialog raised; buffer stays dirty.
+    JetBrainsDialog,
+    /// VS Code non-modal "file changed on disk" badge; buffer stays dirty.
+    VsCodeKeepBuffer,
+}
+
+/// A deterministic editor-buffer actor that speaks the durable live-buffer
+/// protocol against a real on-disk document, so SimWorld scenarios can drive the
+/// production read-authority reconcile without a live IDE.
+#[derive(Debug)]
+struct SimEditor {
+    kind: EditorKind,
+    path: PathBuf,
+    /// Canonical path string used as the live-buffer sidecar key. Mirrors the key
+    /// `realtime_model::resolve_current_doc` canonicalizes the file to, so a
+    /// relative-vs-absolute mismatch cannot silently miss the sidecar.
+    key: String,
+    buffer: String,
+    dirty: bool,
+    generation: u64,
+}
+
+impl SimEditor {
+    /// Attach an editor of `kind` to an existing on-disk document. The buffer
+    /// starts equal to disk (clean, in sync).
+    fn attach(kind: EditorKind, path: &Path) -> Result<Self> {
+        let buffer = std::fs::read_to_string(path)
+            .map_err(|err| anyhow!("SimEditor attach read {}: {err}", path.display()))?;
+        Ok(Self {
+            kind,
+            path: path.to_path_buf(),
+            key: editor_buffer_key(path),
+            buffer,
+            dirty: false,
+            generation: 0,
+        })
+    }
+
+    fn generic(path: &Path) -> Result<Self> {
+        Self::attach(EditorKind::Generic, path)
+    }
+
+    fn jetbrains(path: &Path) -> Result<Self> {
+        Self::attach(EditorKind::JetBrains, path)
+    }
+
+    fn vscode(path: &Path) -> Result<Self> {
+        Self::attach(EditorKind::VsCode, path)
+    }
+
+    /// Type an unsaved edit: the buffer now holds `content` ahead of disk. Records
+    /// the durable live-buffer sidecar so the production realtime feed surfaces it
+    /// as a genuine unsaved edit (the `#queue-user-edit-overwrite` no-clobber
+    /// hazard this whole plan exists to defend).
+    fn type_unsaved(&mut self, content: &str) -> Result<()> {
+        self.buffer = content.to_string();
+        self.dirty = true;
+        self.generation += 1;
+        self.record_buffer()
+    }
+
+    /// Flush the buffer to disk (Ctrl-S): buffer == disk, clean. Re-records the
+    /// sidecar so the realtime feed classifies the editor as in sync with disk.
+    fn save(&mut self) -> Result<()> {
+        std::fs::write(&self.path, &self.buffer)
+            .map_err(|err| anyhow!("SimEditor save write {}: {err}", self.path.display()))?;
+        self.dirty = false;
+        self.generation += 1;
+        self.record_buffer()
+    }
+
+    /// Close the document in the editor: clear the live-buffer sidecar so the
+    /// cycle falls back to disk (`editor_absent`). Uses the production
+    /// `debounce::clear_live_buffer` editor-close primitive.
+    fn close(self) -> Result<()> {
+        agent_doc_orchestration::debounce::clear_live_buffer(&self.key)
+            .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))
+    }
+
+    /// Adopt a CRDT-merged document broadcast back from a peer editor (Slice 3,
+    /// `#rtwbcast`): the realtime model merged a peer's change and pushed the
+    /// conflict-free result back into this buffer. The buffer stays unsaved (the
+    /// merge lives in-buffer) but converged.
+    fn adopt_broadcast(&mut self, merged: &str) -> Result<()> {
+        self.buffer = merged.to_string();
+        self.dirty = true;
+        self.generation += 1;
+        self.record_buffer()
+    }
+
+    /// Reload from disk after the controller wrote+committed the document model
+    /// (Slice 4 broadcast-back): buffer == disk, clean.
+    fn reload_from_disk(&mut self) -> Result<()> {
+        let disk = std::fs::read_to_string(&self.path)
+            .map_err(|err| anyhow!("SimEditor reload read {}: {err}", self.path.display()))?;
+        self.buffer = disk;
+        self.dirty = false;
+        self.generation += 1;
+        self.record_buffer()
+    }
+
+    /// Model an external disk write (agent-doc patchback) landing while the editor
+    /// is open. Returns the kind-specific [`CacheConflict`] surfaced to the user.
+    /// A clean buffer silently adopts the new disk content; a dirty buffer ahead
+    /// of disk stays authoritative (no clobber) and the editor re-reports its
+    /// still-unsaved buffer so the realtime feed keeps preferring it.
+    fn external_disk_write(&mut self, content: &str) -> Result<CacheConflict> {
+        std::fs::write(&self.path, content).map_err(|err| {
+            anyhow!(
+                "SimEditor external_disk_write {}: {err}",
+                self.path.display()
+            )
+        })?;
+        if !self.dirty {
+            self.buffer = content.to_string();
+            self.generation += 1;
+            self.record_buffer()?;
+            return Ok(CacheConflict::NoneAdopted);
+        }
+        // The plugin re-reports the still-dirty buffer when its VFS watch fires on
+        // the external change, refreshing the sidecar timestamp so the buffer
+        // stays provably ahead of the disk write.
+        self.generation += 1;
+        self.record_buffer()?;
+        Ok(match self.kind {
+            EditorKind::JetBrains => CacheConflict::JetBrainsDialog,
+            // VS Code and the generic seam both keep the dirty buffer non-modally.
+            EditorKind::VsCode | EditorKind::Generic => CacheConflict::VsCodeKeepBuffer,
+        })
+    }
+
+    /// Resolve "current document" through the *production* realtime model
+    /// (`resolve_current_doc`), the exact seam `preflight` / `write` /
+    /// `session-check` source the current doc through.
+    fn resolve(&self) -> Result<Reconciliation> {
+        let disk = std::fs::read_to_string(&self.path)
+            .map_err(|err| anyhow!("SimEditor resolve read {}: {err}", self.path.display()))?;
+        Ok(agent_doc_orchestration::realtime_model::resolve_current_doc(
+            &self.path, &disk,
+        ))
+    }
+
+    fn record_buffer(&self) -> Result<()> {
+        agent_doc_orchestration::debounce::record_live_buffer_digest_content(&self.key, &self.buffer)
+            .map_err(|err| anyhow!("SimEditor record live buffer: {err}"))
+    }
+
+    /// The pure [`BufferState`] this editor currently holds — what the plugin
+    /// reports over IPC. Feeds the seam-isolated `reconcile_current_doc` primitive
+    /// directly (vs the durable-feed `resolve`, which suppresses an in-sync buffer
+    /// to `None` and so reports `editor_absent` rather than `in_sync`).
+    fn buffer_state(&self) -> BufferState {
+        BufferState::new(self.buffer.clone(), self.dirty, self.generation)
+    }
+}
+
+/// Canonical live-buffer sidecar key for a document path. Matches
+/// `realtime_model::indicator_path`: canonicalize, falling back to the raw path.
+fn editor_buffer_key(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
+
+/// A template document with one exchange prompt — the on-disk baseline a
+/// `SimEditor` attaches to.
+fn editor_baseline_doc() -> String {
+    template_doc("❯ do #sim-existing. spec-test-build-install-commit-push\n")
+}
+
+/// [`editor_baseline_doc`] with an extra well-formed backlog line spliced in —
+/// the shape of a queue/backlog item a user types in the editor without saving.
+fn editor_doc_with_backlog(extra_line: &str) -> String {
+    editor_baseline_doc().replace(
+        "- [ ] [#tigersim] Implement the simulator MVP\n",
+        &format!("- [ ] [#tigersim] Implement the simulator MVP\n{extra_line}"),
+    )
+}
+
+/// Build a temp project with `.agent-doc/{snapshots,logs}` and the document on
+/// disk. Returns the live `TempDir` (keep it in scope) and the document path.
+fn editor_project(disk: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+    let doc = dir.path().join("doc.md");
+    std::fs::write(&doc, disk).unwrap();
+    (dir, doc)
+}
+
+/// Drive a finalize cycle on `baseline` (the resolved current document): capture
+/// the agent response, apply it, and commit. Returns the committed `SimWorld` so
+/// callers can assert the committed snapshot.
+fn finalize_on_resolved(seed: u64, baseline: &str) -> SimWorld {
+    let mut world = SimWorld::new(seed);
+    world.doc = baseline.to_string();
+    world.snapshot = baseline.to_string();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.apply(SimCommand::Commit).unwrap();
+    world
+}
+
+// -------- Slice 1: SimEditor buffer actor (foundation) --------
+
+#[test]
+fn simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit() {
+    // #swint Slice 1 acceptance — the deterministic form of the live-only
+    // `#rtwverify` proof: an unsaved buffer edit is authoritative over stale disk
+    // and survives the agent's commit, with the grep-able ops.log marker.
+    let disk = editor_baseline_doc();
+    let buffer = editor_doc_with_backlog(
+        "- [ ] [#buffer-only-edit] user typed this in IDEA without saving\n",
+    );
+    let (dir, doc) = editor_project(&disk);
+
+    let mut editor = SimEditor::generic(&doc).unwrap();
+    // Clean buffer in sync with disk → disk authority.
+    assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+
+    editor.type_unsaved(&buffer).unwrap();
+    let reconciliation = editor.resolve().unwrap();
+    assert_eq!(
+        reconciliation.authority,
+        DocAuthority::EditorBuffer,
+        "the production realtime model must read the unsaved buffer, not stale disk"
+    );
+    assert!(
+        reconciliation.content.contains("#buffer-only-edit"),
+        "resolve must surface the unsaved buffer edit"
+    );
+    assert_eq!(reconciliation.content, buffer);
+
+    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("realtime_doc_resolve authority=editor_buffer"),
+        "ops.log must record the editor-buffer authority decision:\n{ops_log}"
+    );
+
+    // The agent's response commits on top of the buffer the cycle read, so the
+    // unsaved edit crosses the commit boundary instead of being clobbered.
+    let world = finalize_on_resolved(2026_06_11, &reconciliation.content);
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert!(
+        world.snapshot.contains("#buffer-only-edit"),
+        "the unsaved buffer edit must survive the agent's commit (no clobber)"
+    );
+    assert!(
+        world.snapshot.contains("### Re: sim closeout"),
+        "the agent response committed on top of the buffer content"
+    );
+    world.strict_closeout_invariants().unwrap();
+    drop(dir);
+}
+
+#[test]
+fn simeditor_save_then_close_falls_back_to_disk_authority() {
+    // The "falling back to the file on disk" half of the authority model: once the
+    // editor saves (buffer == disk) disk is canonical, and once it closes (sidecar
+    // cleared) the realtime model reports `editor_absent`.
+    let disk = editor_baseline_doc();
+    let buffer =
+        editor_doc_with_backlog("- [ ] [#unsaved-then-saved] typed then saved\n");
+    let (dir, doc) = editor_project(&disk);
+
+    let mut editor = SimEditor::generic(&doc).unwrap();
+    editor.type_unsaved(&buffer).unwrap();
+    assert_eq!(
+        editor.resolve().unwrap().authority,
+        DocAuthority::EditorBuffer
+    );
+
+    editor.save().unwrap();
+    let disk_now = std::fs::read_to_string(&doc).unwrap();
+    assert!(disk_now.contains("#unsaved-then-saved"), "save flushed to disk");
+    // Pure seam: a present, in-sync buffer is disk-canonical with reason `in_sync`.
+    let in_sync = agent_doc_orchestration::realtime_model::reconcile_current_doc(
+        &disk_now,
+        Some(&editor.buffer_state()),
+    );
+    assert_eq!(in_sync.authority, DocAuthority::Disk);
+    assert_eq!(in_sync.reason, "in_sync");
+    // Durable seam: the in-sync buffer is suppressed to no-feed, so disk wins.
+    assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+
+    editor.close().unwrap();
+    let closed = agent_doc_orchestration::realtime_model::resolve_current_doc(&doc, &disk_now);
+    assert_eq!(closed.authority, DocAuthority::Disk);
+    assert_eq!(
+        closed.reason, "editor_absent",
+        "closing the document must clear the live-buffer sidecar"
+    );
+    drop(dir);
+}
+
+// -------- Slice 2: JB + VS Code protocol parity fixtures --------
+
+#[test]
+fn simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict() {
+    // #swint Slice 2 / File-Cache-Conflict class (#w42v): JetBrains and VS Code
+    // must agree on read authority (a dirty buffer always wins) while differing
+    // only on the surfaced cache-conflict signal for an external disk write.
+    for kind in [EditorKind::JetBrains, EditorKind::VsCode] {
+        let disk = editor_baseline_doc();
+        let marker = format!("#{}-unsaved", kind.as_str());
+        let buffer = editor_doc_with_backlog(&format!(
+            "- [ ] [{marker}] typed in {} without saving\n",
+            kind.as_str()
+        ));
+        let (dir, doc) = editor_project(&disk);
+        let mut editor = SimEditor::attach(kind, &doc).unwrap();
+
+        // Parity 1: a clean buffer defers to disk regardless of kind.
+        assert_eq!(
+            editor.resolve().unwrap().authority,
+            DocAuthority::Disk,
+            "{kind:?}: clean buffer defers to disk"
+        );
+
+        // Parity 2: an unsaved edit is authoritative regardless of kind.
+        editor.type_unsaved(&buffer).unwrap();
+        let r = editor.resolve().unwrap();
+        assert_eq!(
+            r.authority,
+            DocAuthority::EditorBuffer,
+            "{kind:?}: dirty buffer must win over disk"
+        );
+        assert!(r.content.contains(&marker));
+
+        // Divergence: the cache-conflict signal for an external disk write while
+        // the buffer is dirty is kind-specific (modal dialog vs non-modal badge).
+        let conflict = editor.external_disk_write(&disk).unwrap();
+        let expected = match kind {
+            EditorKind::JetBrains => CacheConflict::JetBrainsDialog,
+            EditorKind::VsCode => CacheConflict::VsCodeKeepBuffer,
+            EditorKind::Generic => unreachable!("loop only covers JB + VS Code"),
+        };
+        assert_eq!(conflict, expected, "{kind:?}: cache-conflict signal");
+
+        // Parity 3: despite the external write, the unsaved buffer is still
+        // authoritative — the conflict never silently clobbers the user's edit.
+        let after = editor.resolve().unwrap();
+        assert_eq!(
+            after.authority,
+            DocAuthority::EditorBuffer,
+            "{kind:?}: external write must not clobber the unsaved buffer"
+        );
+        assert!(after.content.contains(&marker));
+
+        // A clean buffer, by contrast, silently adopts the external write.
+        editor.save().unwrap();
+        assert_eq!(
+            editor.external_disk_write(&disk).unwrap(),
+            CacheConflict::NoneAdopted,
+            "{kind:?}: a clean buffer adopts the external write with no conflict"
+        );
+        assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+        drop(dir);
+    }
+}
+
+// -------- Slice 3: multi-editor sync (#rtwbcast harness) --------
+
+#[test]
+fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
+    // #swint Slice 3 / #rtwbcast: two editors open the same document; an edit in A
+    // and an edit in B merge conflict-free via the production CRDT path and
+    // broadcast back so both buffers converge. Only testable with two emulated
+    // editors — there is no live two-IDE harness.
+    let disk = editor_baseline_doc();
+    let (dir, doc) = editor_project(&disk);
+    let mut editor_a = SimEditor::jetbrains(&doc).unwrap();
+    let mut editor_b = SimEditor::vscode(&doc).unwrap();
+
+    let buffer_a = editor_doc_with_backlog("- [ ] [#edit-A] queued in editor A\n");
+    let buffer_b = editor_doc_with_backlog("- [ ] [#edit-B] queued in editor B\n");
+    editor_a.type_unsaved(&buffer_a).unwrap();
+    editor_b.type_unsaved(&buffer_b).unwrap();
+
+    // The realtime model merges the two divergent buffers against the shared
+    // on-disk baseline (the CRDT merge base) — conflict-free by construction.
+    let base_state = crate::crdt::CrdtDoc::from_text(&disk).encode_state();
+    let (merged, _state) = agent_doc_orchestration::merge::merge_contents_crdt(
+        Some(&base_state),
+        &buffer_a,
+        &buffer_b,
+    )
+    .unwrap();
+
+    assert!(
+        merged.contains("#edit-A") && merged.contains("#edit-B"),
+        "CRDT merge must union both editors' edits:\n{merged}"
+    );
+    for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
+        assert!(
+            !merged.contains(marker),
+            "CRDT broadcast must be conflict-free; found `{marker}`:\n{merged}"
+        );
+    }
+
+    // Broadcast the merged document back to both editor buffers — they converge.
+    editor_a.adopt_broadcast(&merged).unwrap();
+    editor_b.adopt_broadcast(&merged).unwrap();
+    assert_eq!(editor_a.buffer, merged);
+    assert_eq!(editor_b.buffer, merged);
+
+    let ra = editor_a.resolve().unwrap();
+    let rb = editor_b.resolve().unwrap();
+    assert_eq!(ra.authority, DocAuthority::EditorBuffer);
+    assert_eq!(rb.authority, DocAuthority::EditorBuffer);
+    assert_eq!(
+        ra.content, rb.content,
+        "both editors converge on the same merged document after broadcast"
+    );
+    assert!(ra.content.contains("#edit-A") && ra.content.contains("#edit-B"));
+    drop(dir);
+}
+
+// -------- Slice 4: tmux + integrated system --------
+
+#[test]
+fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back() {
+    // #swint Slice 4: editor edit → queue trigger → route dispatch → drain-owner
+    // gate (#kp5z) → controller drain → document update → broadcast back to
+    // editors, with the stuck-handoff reaper gating ownership under multi-owner
+    // contention. Connects the SimEditor seam (Slices 1–3) to the existing
+    // route/controller actor model and the public `drain_owner` lease.
+    let disk = editor_baseline_doc();
+    let (dir, doc) = editor_project(&disk);
+    let doc_key = doc.to_string_lossy().to_string();
+
+    let mut owner_editor = SimEditor::jetbrains(&doc).unwrap();
+    let mut observer_editor = SimEditor::vscode(&doc).unwrap();
+
+    // 1. The user queues a follow-up by typing an unsaved queue item in the editor.
+    let queued = editor_doc_with_backlog("- [ ] [#queued-followup] do the next step\n");
+    owner_editor.type_unsaved(&queued).unwrap();
+    let reconciliation = owner_editor.resolve().unwrap();
+    assert_eq!(
+        reconciliation.authority,
+        DocAuthority::EditorBuffer,
+        "the queued edit is authoritative over stale disk"
+    );
+    assert!(reconciliation.content.contains("#queued-followup"));
+
+    // 2. The queue trigger routes to the owner pane and is accepted + proven.
+    let mut world = SimWorld::new(2026_06_11 + 1);
+    world.doc = reconciliation.content.clone();
+    world.snapshot = reconciliation.content.clone();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_proofs, 1,
+        "the queued trigger dispatched to the owner pane and proved acceptance"
+    );
+
+    // 3. Drain-owner gate (#kp5z): a self-driving loop owns the drain (fresh
+    //    lease), so the supervisor must NOT double-inject (SkipSelfDrivingLoopOwner).
+    agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(
+        &doc_key,
+        agent_doc_orchestration::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+    )
+    .unwrap();
+    let lease = agent_doc_orchestration::drain_owner::read_drain_owner_lease(&doc_key)
+        .expect("drain-owner lease present after refresh");
+    assert!(
+        agent_doc_orchestration::drain_owner::fresh_drain_owner_lease(&doc_key, lease.heartbeat_secs)
+            .is_some(),
+        "a fresh drain-owner lease must gate the supervisor drain to the loop owner"
+    );
+
+    // 4. The owning loop drains: apply the response and commit the document model.
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert!(
+        world.snapshot.contains("#queued-followup"),
+        "the editor-queued edit survived the route + drain"
+    );
+
+    // 5. Stuck-handoff reaper under multi-owner contention: a stale generation can
+    //    neither hand off nor reap while the current owner holds the drain.
+    world.apply(SimCommand::AdminHandoffStale).unwrap();
+    assert_eq!(
+        world.coverage.admin_handoffs, 0,
+        "a stale-generation handoff must be rejected under contention"
+    );
+    world.apply(SimCommand::AdminReapStale).unwrap();
+    assert_eq!(
+        world.coverage.admin_reaps, 0,
+        "a stale-generation reap must be rejected under contention"
+    );
+    assert!(world.coverage.stale_generation_blocks >= 2);
+
+    // 6. The controller saved the committed document; broadcast back to both
+    //    editors — they reload and converge on the committed state, clean.
+    std::fs::write(&doc, &world.snapshot).unwrap();
+    owner_editor.reload_from_disk().unwrap();
+    observer_editor.reload_from_disk().unwrap();
+    assert_eq!(owner_editor.buffer, world.snapshot);
+    assert_eq!(observer_editor.buffer, world.snapshot);
+    assert_eq!(
+        owner_editor.resolve().unwrap().authority,
+        DocAuthority::Disk,
+        "after broadcast-back the owner editor is in sync with committed disk"
+    );
+    assert_eq!(
+        observer_editor.resolve().unwrap().authority,
+        DocAuthority::Disk,
+        "the observer editor also converges on committed disk"
+    );
+
+    // The loop terminates: release the drain-owner lease back to the supervisor.
+    agent_doc_orchestration::drain_owner::clear_drain_owner_lease(&doc_key);
+    assert!(
+        agent_doc_orchestration::drain_owner::read_drain_owner_lease(&doc_key).is_none(),
+        "clearing the lease hands the drain back to the supervisor"
+    );
+    drop(dir);
+}

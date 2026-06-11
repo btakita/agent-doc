@@ -392,6 +392,25 @@ pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
     }
 }
 
+/// Clear the durable live-buffer sidecar for a document.
+///
+/// Models the editor-close lifecycle (Shared Foundation pattern): when an editor
+/// closes a document there are no unsaved edits ahead of disk anymore, so the
+/// cycle must fall back to the on-disk file. Removing the sidecar makes
+/// [`live_buffer_diverges_from_content`] (and through it
+/// `realtime_model::resolve_current_doc`) return `editor_absent` instead of
+/// surfacing a stale buffer. Best-effort but not error-swallowing: a missing
+/// sidecar is success; any other IO error is returned so callers log rather than
+/// silently ignore it (per the no-`let _ =` rule).
+pub fn clear_live_buffer(file: &str) -> std::io::Result<()> {
+    let path = live_buffer_snapshot_path(file);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
 /// Record write-provenance for agent-doc's own disk write to `file` (#pcp2).
 ///
 /// Called from `atomic_write` after a successful document write. Best-effort and
@@ -855,6 +874,28 @@ mod tests {
         assert_eq!(snapshot.hash, content_hash(visible));
         assert!(live_buffer_diverges_from_content(&doc_str, "disk").is_some());
         assert!(live_buffer_diverges_from_content(&doc_str, visible).is_none());
+    }
+
+    /// Editor-close lifecycle: `clear_live_buffer` removes the sidecar so the
+    /// cycle falls back to disk, and a clear with no sidecar present is success.
+    #[test]
+    fn clear_live_buffer_removes_sidecar_and_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("clear-live-buffer.md");
+        std::fs::write(&doc, "disk").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content(&doc_str, "disk plus unsaved prompt").unwrap();
+        assert!(live_buffer_snapshot(&doc_str).is_some(), "sidecar recorded");
+
+        clear_live_buffer(&doc_str).expect("clear removes the sidecar");
+        assert!(
+            live_buffer_snapshot(&doc_str).is_none(),
+            "after clear the editor is absent and disk is the only source"
+        );
+        // Idempotent: clearing an already-absent sidecar is success, not an error.
+        clear_live_buffer(&doc_str).expect("clear with no sidecar is a no-op success");
     }
 
     /// `#f5d2`/`#pcp6` prove/disprove: the divergence classifier records its

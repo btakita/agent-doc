@@ -134,6 +134,9 @@ On every preflight run:
      content-less and is preserved.
    - No hash prefix → generate and insert a hash.
    - No checkbox → insert `- [ ] ` before the hash.
+   - Legacy `[~]` task markers are normalized to open `[ ]` while preserving
+     any following `[#id]`. Backfill must never prepend a fresh `[ ] [#new]`
+     ahead of an existing `[~] [#id]` line.
 3. Reap `- [x]` bullets **only**:
    - If a completed item still lacks an id (legacy/manual form such as `- [x] shipped` or `- [x] [#] shipped`), backfill its hash first, then reap/archive that canonicalized item in the same pass. Reap must never silently drop a done line that cannot be referenced in the archive or logs.
    - Remove the line from the component.

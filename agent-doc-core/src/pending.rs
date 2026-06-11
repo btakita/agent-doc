@@ -551,6 +551,10 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         (PendingState::Done, None, r.trim_start())
     } else if let Some(r) = rest.strip_prefix("[X]") {
         (PendingState::Done, None, r.trim_start())
+    } else if let Some(r) = rest.strip_prefix("[~]") {
+        // Legacy/in-progress task marker. Treat as open so an existing hash
+        // immediately after it is preserved instead of re-keyed by backfill.
+        (PendingState::Open, None, r.trim_start())
     } else {
         (PendingState::Open, None, rest)
     };
@@ -2521,6 +2525,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_legacy_tilde_checkbox_preserves_hash_id() {
+        let body = "- [~] [#q6js] in-progress legacy item\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].state, PendingState::Open);
+        assert_eq!(items[0].id, "q6js");
+        assert_eq!(items[0].text, "in-progress legacy item");
+    }
+
+    #[test]
     fn parse_checkbox_only_no_id() {
         let body = "- [ ] just text\n- [x] done item\n";
         let (_, items, _) = parse_items(body);
@@ -2718,6 +2732,21 @@ mod tests {
         let (new_body, changed) = backfill(body, DOC_ID, &ids());
         assert!(!changed);
         assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn backfill_preserves_id_behind_legacy_tilde_checkbox() {
+        let body = "- [~] [#q6js] pcpc5e3 08b cut-over proof\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert_eq!(new_body, "- [ ] [#q6js] pcpc5e3 08b cut-over proof\n");
+        assert_eq!(new_body.matches("[#").count(), 1);
+
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].state, PendingState::Open);
+        assert_eq!(items[0].id, "q6js");
+        assert_eq!(items[0].text, "pcpc5e3 08b cut-over proof");
     }
 
     #[test]

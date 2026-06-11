@@ -748,7 +748,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `partial_staging_closeout_guard_ignores_cross_document_markdown_noise`
         // regression test-fn name (substring `guard_`). The fix itself drops `md`
         // from `is_partial_staging_relevant_path` and adds no `guard_` token.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 94,
+        // +2 (#eqrecovery): the
+        // `committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery`
+        // regression test-fn name plus direct guard/log assertions. It proves a
+        // drained queue/backlog recovery carrying queue-turn evidence remains
+        // terminal when the commit event is `commit_already_current`.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 96,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

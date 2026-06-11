@@ -6345,6 +6345,65 @@ Body\n\
     }
 
     #[test]
+    fn committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery() {
+        // #eqrecovery: the equityfundingsource reentrant recovery cycle had already
+        // converged the drained queue/backlog state. A later no-op closeout still
+        // carried queue-turn evidence, but `commit_already_current` means no new
+        // binary-owned content was committed without a response body.
+        let _lock = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let current = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::record_active_queue_heads(&doc, &["do [#eqrecovery]".to_string()])
+            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_already_current",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "drained no-op queue recovery must not re-interrupt a committed cycle"
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("committed_without_response_body_guard_skipped_noop_commit"),
+            "{ops_log}"
+        );
+    }
+
+    #[test]
     fn stale_open_preflight_with_no_diff_still_interrupts() {
         // #nochange-after-stall-breadth: even when document == snapshot, a
         // non-terminal preflight cycle is not a healthy no-change state. It

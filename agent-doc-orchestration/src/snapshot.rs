@@ -241,7 +241,94 @@ pub fn save(doc: &Path, content: &str) -> Result<()> {
         doc,
         &format!("snapshot_save file={} len={}", doc.display(), content.len()),
     );
+    probe_overlay_projection(doc, content);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `#mps` Rung 1 (shadow) — model-projected snapshot baseline precondition
+// ---------------------------------------------------------------------------
+//
+// The #mps migration (`tasks/agent-doc/plan-model-projected-snapshot.md`) re-homes
+// the merge baseline from the on-disk `.md` snapshot onto the structured document
+// model, projecting it on demand from a per-cycle pinned overlay version. Its
+// load-bearing precondition (obstacle #2) is that `model → markdown` projection is
+// **byte-stable** — otherwise capture-replay hash validation and the merge base
+// itself drift. Rung 1 ships only the *instrument* that proves this on real
+// traffic; it never changes a persisted artifact or a merge outcome.
+
+/// Round-trip `content` through the exact persist→reload→project pipeline the
+/// merge base uses (`OverlayCrdtDoc::from_markdown → encode_state → decode_state →
+/// to_markdown`, mirroring [`crdt_merge_base_state`]). Returns the projected
+/// markdown, or `None` if the overlay failed to decode/project (logged, never
+/// swallowed). Pure (no I/O).
+fn project_overlay_roundtrip(content: &str) -> Option<String> {
+    let state =
+        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
+    match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&state) {
+        Ok(overlay) => match overlay.to_markdown() {
+            Ok(markdown) => Some(markdown),
+            Err(e) => {
+                eprintln!("[mps] overlay projection (to_markdown) failed: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("[mps] overlay projection (decode_state) failed: {e}");
+            None
+        }
+    }
+}
+
+/// Whether the structured overlay model can faithfully project `content` back to
+/// byte-identical markdown — the #mps byte-stable-projection gate. Pure; safe to
+/// call from evals and (future) cutover preconditions.
+pub fn overlay_projection_is_byte_stable(content: &str) -> bool {
+    project_overlay_roundtrip(content).as_deref() == Some(content)
+}
+
+/// `#mps` Rung 1 shadow probe, wired into [`save`]. **Off by default**; set
+/// `AGENT_DOC_MPS_PROJECTION_PROBE=1` during dog-fooding to emit a grep-able
+/// `mps_projection_equiv ok|drift …` ops.log marker on every snapshot save,
+/// collecting real-traffic byte-stability evidence without imposing the overlay
+/// encode/decode cost on every user's hot path. Never fails the cycle.
+fn probe_overlay_projection(doc: &Path, content: &str) {
+    if std::env::var_os("AGENT_DOC_MPS_PROJECTION_PROBE").is_none() {
+        return;
+    }
+    match project_overlay_roundtrip(content) {
+        Some(projected) if projected == content => {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_projection_equiv ok len={} file={}",
+                    content.len(),
+                    doc.display()
+                ),
+            );
+        }
+        Some(projected) => {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_projection_equiv drift kind=mismatch len={} projected_len={} file={}",
+                    content.len(),
+                    projected.len(),
+                    doc.display()
+                ),
+            );
+        }
+        None => {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "mps_projection_equiv drift kind=decode_error len={} file={}",
+                    content.len(),
+                    doc.display()
+                ),
+            );
+        }
+    }
 }
 
 /// Delete the snapshot for a document.
@@ -1710,6 +1797,84 @@ Second answer line three.
         assert!(
             snap_dir.join(format!("{}.md", hash)).exists(),
             "snapshot should be bootstrapped"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // `#mps` Rung 1 — byte-stable projection evals
+    //
+    // Prove the structured overlay model projects each document shape agent-doc
+    // actually persists back to byte-identical markdown through the same
+    // encode→decode→to_markdown pipeline the merge base uses. These are the
+    // offline half of the #mps obstacle-2 gate; the env-gated `save` probe
+    // collects the live-traffic half.
+    // -----------------------------------------------------------------------
+
+    fn assert_projection_byte_stable(label: &str, content: &str) {
+        let projected = project_overlay_roundtrip(content);
+        assert_eq!(
+            projected.as_deref(),
+            Some(content),
+            "#mps overlay projection not byte-stable for {label}"
+        );
+        assert!(overlay_projection_is_byte_stable(content), "{label}");
+    }
+
+    #[test]
+    fn mps_projection_byte_stable_inline_shape() {
+        let inline = concat!(
+            "---\nagent_doc_format: inline\n---\n\n",
+            "## User\n\nDo the thing.\n\n",
+            "## Assistant\n\nDid the thing.\n"
+        );
+        assert_projection_byte_stable("inline", inline);
+    }
+
+    #[test]
+    fn mps_projection_byte_stable_template_queue_shape() {
+        let template = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#a]\n- do [#b]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        assert_projection_byte_stable("template_queue", template);
+    }
+
+    #[test]
+    fn mps_projection_byte_stable_exchange_append_shape() {
+        let exchange = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "\u{276f} first question\n\n",
+            "### Re: first question \u{2014} opus-4-8\n\n",
+            "First answer here.\n\n",
+            "\u{276f} second question\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        assert_projection_byte_stable("exchange_append", exchange);
+    }
+
+    #[test]
+    fn mps_projection_byte_stable_boundary_marker_shape() {
+        let with_boundary = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "\u{276f} q\n\n### Re: q \u{2014} opus-4-8\n\nA.\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        assert_projection_byte_stable("boundary_marker", with_boundary);
+    }
+
+    #[test]
+    fn mps_projection_byte_stable_empty_and_unicode() {
+        assert_projection_byte_stable("empty", "");
+        assert_projection_byte_stable("plain", "just a line of prose\n");
+        assert_projection_byte_stable(
+            "unicode",
+            "# T\u{e9}l\u{e9} \u{1f680}\n\n- caf\u{e9} \u{2014} r\u{e9}sum\u{e9}\n",
         );
     }
 }

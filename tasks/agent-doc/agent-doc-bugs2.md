@@ -158,7 +158,7 @@ Done — both are now gated `[/]` items in `agent:review`, each carrying the exa
 **On the queue note you pasted (monsterrodholders IPC drift):** it's the same drift class already tracked as `#mrhpcdrift2` in the backlog (socket-ACK / live-buffer / content_ours divergence) — additional confirmation, no new code this cycle (it needs the same live monsterrodholders edit-during-finalize proof). Its "close/revert in JetBrains, re-invoke /agent-doc" line is operational advice for *that* session, out of scope here. By replacing `#ktw8` / `#lvbremain` in the queue with this note you also killed the churn loop; I'm letting this free-text note strike the queue head on finalize, which empties and deactivates the queue.
 
 No JB plugin install needed this round — these are log-verification gates, not code changes.
-<!-- agent:boundary:59128f80 -->
+<!-- agent:boundary:494576b0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -222,7 +222,6 @@ What are #next-steps to fix bugs?
  
 <!-- agent:review -->
 - [/] [#lvbremain] [live-verify gate] visible_write_live_buffer_matches_disk — the one residual marker (#4wxr cross-session-reject, #9adk run_clear_coalesce, #saev early_ack_pending already proven). Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] visible_write_live_buffer_matches_disk after an operator live-editor edit-during-finalize cycle; FAIL = operator drove a live IntelliJ buffer==disk write but only queue_diff prose matches appear. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator makes a live IntelliJ edit and lets agent-doc finalize with the buffer live; agent greps ^\[[0-9]+\] visible_write_live_buffer_matches_disk and --review-resolve on PASS or --pending-ungate with detail on FAIL.
-- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. Code-complete (submodule 1edb20d2, start.rs idle-queue watch + context_pct); no agent execution step remains. Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] [s760] clear-decision optIn=true threshold=N pct=M clear=true with pct>=threshold; FAIL = after an operator drive either no such line OR clear=true with pct<threshold (false fire). Prose echoes inside queue_diff_active_prompt_differs do NOT count. Current verdict: 0 genuine emissions = UNDRIVEN. NEXT: operator drives on a throwaway doc (agent_doc_queue_context_reset:true, queue an item, grow transcript past 50 pct, idle); agent greps ^\[[0-9]+\] \[s760\] clear-decision and --review-resolve on PASS or --pending-ungate with detail on FAIL.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

@@ -88,14 +88,44 @@ Line families (near-duplicate folds):
 **Scope discipline:** the tsift working tree carried 17 unrelated in-flight files (graph-db / surrealdb / token-gate). I staged and committed only my four: `log_digest.rs`, `tsift-cli/src/lib.rs`, `specs/digests-sessions.md`, `VERSIONS.md`.
 
 Proof — changed paths: those 4 files only. Commands: `make check` (exit 0, no masked FAILED), `cargo install --path .` (ok), live `tsift log-digest` smoke test, `git push` (`756b44d..88a7f46`). Verification: 5/5 `tsift-digest` log_digest tests pass incl. the new `log_digest_folds_near_duplicate_line_families`; full suite green. CI run 27323995205 is **pending** (just triggered by the push) — recording it, proceeding on local evidence per policy. Confidence: high. Escalation: none. Next queue item: `#logchunk` (P2 — persist raw chunks as artifact handles).
-<!-- agent:boundary:a677873b -->
+
+### Re: #logchunk log compression P2 (raw-chunk artifact handles) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#logchunk]
+
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):** update spec + tests. build + install for local testing. commit + push
+
+Done. `log-digest` now keeps bulky raw transcripts behind an **artifact handle** instead of inlining them or losing stdin input — the same pattern `digest-runner --kind log` already uses, now brought to the standalone command and `context-pack`.
+
+**What landed** (`tsift-digest` + `tsift-cli`):
+- New `LogDigestArtifactRef { handle, path, bytes, lines, expand }` plus a `raw_log_artifact` field on `LogDigestReport` (omitted from JSON when absent), and a shared `raw_log_artifact_recommended()` predicate (threshold `LOG_DIGEST_RAW_ARTIFACT_MIN_BYTES = 4096`, or any signal/repeated-line/line-family/stack group overflowing its inline cap).
+- Standalone `log-digest` persists the raw bytes to `.tsift/artifacts/<handle>.log` and attaches the ref with a `tsift log-digest --input <artifact> --json` expansion command. Surfaced in JSON, compact, and human output. Small logs attach nothing (verified: no `.tsift/artifacts` dir created).
+- `context-pack` surfaces the same `raw_log_artifact` shape on its bounded log preview, referencing the existing on-disk `--log-input` file rather than re-persisting it (its section already truncates and emits the re-expand command + source).
+
+**Live proof** (installed binary, 200-line stdin log):
+
+```
+Raw log artifact:
+  handle: logdg-a801bc3065
+  path:   .tsift/artifacts/logdg-a801bc3065.log
+  lines:  200   bytes: 10676
+  expand: tsift log-digest --path ... --input .../logdg-a801bc3065.log --json
+```
+
+**Scope discipline:** still committed only my files (`log_digest.rs`, `tsift-cli/src/lib.rs`, `context_pack.rs`, `specs/digests-sessions.md`, `VERSIONS.md`); the 17 unrelated in-flight files stayed untouched.
+
+Proof — changed paths: those 5 files. Commands: `make check` (exit 0, no FAILED/clippy), `cargo install --path .` (ok), live stdin smoke test, `git push` (`88a7f46..d056da5`). Verification: 6/6 `tsift-digest` log_digest tests + new `maybe_attach_log_digest_raw_artifact_persists_bulky_logs` + ctxpack preview test pass; full suite green. **CI note:** the `#logfam` run (27323995205) shows FAIL, but it died at the **"Cache cargo registry + build" infrastructure step before the test suite ever ran** (an abrupt runner kill, not a code regression) — local `make check` is the authoritative full-suite evidence and is green. The `#logchunk` run (27324362283) is in-progress; recording it, not blocking. Confidence: high. Escalation: none. Next queue item: `#loggate` (P3 — fixture-backed token-savings + false-negative gates).
+<!-- agent:boundary:2bd773ad -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#logfam]~~
-- [#logchunk]
+- ~~[#logchunk]~~
 - [#loggate]
 <!-- /agent:queue -->
 <!--
@@ -105,7 +135,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logchunk] [recommended] Log compression P2: persist raw log chunks/groups as artifact handles and emit expansion commands from log-digest/context-pack instead of inlining bulky groups.
 - [ ] [#loggate] [recommended] Log compression P3: add fixture-backed token-savings and false-negative gates for cargo, pytest, npm/pnpm, and agent-doc runtime logs.
 <!-- /agent:backlog -->
 

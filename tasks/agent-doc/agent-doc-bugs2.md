@@ -123,7 +123,7 @@ pkill -f 'agent-doc controller serve.*--handoff-state preparing'
 ```
 
 …then reopen/restart and re-drive the queue on the fresh binary. **Not auto-looping** (no new prompt; draining from here just reproduces the flood + churn).
-<!-- agent:boundary:2cf7fd9e -->
+<!-- agent:boundary:6cdfdff8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -239,6 +239,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwwire] #rtwatch rung 3 — wire cycle read sites. Replace the direct std::fs::read_to_string(file) "current document" reads at the cycle entry points (preflight.rs/write.rs/session_check.rs) with realtime_model::current_doc(disk, buffer) so the agent reads newest-of(disk, buffer) and stops clobbering buffer-only edits (#queue-user-edit-overwrite / test-test clobber). TOUCHES the closeout path — MUST run in a dedicated stable turn with live edit-during-finalize verify; cannot be done in an affected session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwfeed] #rtwatch rung 2 — feed the durable editor-buffer snapshot. Source BufferState{content,dirty,generation} from the socket IPC layer (ipc_socket.rs/ffi.rs): the plugin already reports buffer state over IPC; expose a debounced query returning current buffer content + dirty flag + monotonic generation, off the project-control-pane hot path, durable across controller restart, then feed realtime_model::reconcile_current_doc live. NEEDS live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.

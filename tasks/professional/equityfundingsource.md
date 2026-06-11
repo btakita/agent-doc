@@ -79,7 +79,33 @@ Fresh verification on the current commit:
 - `curl -I https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline` returned HTTP 303 to `/login?role=admin&next=%2Fportal-admin%2Flender-pipeline`, which is expected for the protected admin route.
 
 I did not make source changes in this cycle. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`, and `gh workflow list` returned no configured workflows. The EFS repo stayed clean after verification; unrelated dirty files/submodule pointers in the superproject were left untouched.
-<!-- agent:boundary:baa832fa -->
+
+### Re: Lender Pipeline menu count — gpt-5
+
+> **Queue prompt:**
+>
+> The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy
+
+
+Done, committed, pushed, and deployed (EFS `5af3c7d`; Worker version `675e2475-7351-4632-b17d-d9ce405cd532`).
+
+The admin Management sidebar badge for **Lender Pipeline** now counts active board items: one investor card per `users.role = 'investor'` row, matching what `/portal-admin/lender-pipeline` displays. It no longer shows `0` just because there are no pending lender requests or pending wires.
+
+Changed paths in `src/equityfundingsource-dev`:
+- `app/equityfundingsource/lib/admin/nav_counts/index.ts`
+- `tests/admin-investor-pipeline.test.ts`
+- `prds/investor-pipeline-admin.md`
+- `docs/current_progress.md`
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-dashboard.test.ts` — 50 pass / 0 fail.
+- `bun run check` before rebase — 543 pass / 0 fail, app build clean, worker build clean.
+- Remote moved with unrelated EFS commit `2dcb1ae` (`fix(tmo): keep loan cache diffs on detail payloads`), so I rebased and reran `bun run check` — 545 pass / 0 fail, app build clean, worker build clean.
+- `bun run deploy:worker` — no D1 migrations to apply; Worker deployed successfully.
+- Live smoke: `/` returns HTTP 200; `/portal-admin/lender-pipeline` redirects to admin login with HTTP 303; `/api/admin/nav-counts` rejects unauthenticated access with HTTP 401.
+
+CI note: `gh run list --workflow CI --limit 1` still cannot find a workflow named `CI`, and `gh workflow list` returns no configured workflows for this repo. The EFS repo is clean and synced with `origin/main`; unrelated dirty superproject files/submodule pointers were left untouched.
+<!-- agent:boundary:9645978e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +114,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
 - ~~We have /portal-admin/lenders/:lenderId and we have /portal-admin/users/:userId. The Lenders tab in the the Lender Pipeline should open the lender dialog. The lender dialog should a "Lender" tab and a "User" tab. The "Lender Info" tab should have the contents of /portal-admin/lenders/:lenderId..include the buttons to accept and deny the request. The "User" tab should have the contents of /portal-admin/users/:userId. deploy~~
-- The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy
+- ~~The admin menu "Lender Pipeline" counts are 0. They should be the number of active items in the pipeline. deploy~~
+- In /portal-admin/lender-pipeline, when I open the lender dialog then open Document then press the Esc key, the lender dialog should still be open. The Document dialog should layer on top of the lender dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

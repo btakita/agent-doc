@@ -177,7 +177,8 @@ Verification:
 This queue item used `#spec-test-commit-push`, so I did not deploy a new Worker.
 
 No new actionable follow-up items were found for the backlog.
-<!-- agent:boundary:c1b5486a -->
+No new queue item was present. Preflight repaired and committed the recovered closeout, drained the leftover `deploy` queue token, and reported no remaining document changes.
+<!-- agent:boundary:8be2f0bc -->
 <!-- /agent:exchange -->
 ###
 <!--

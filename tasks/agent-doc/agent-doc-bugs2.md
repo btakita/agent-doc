@@ -35,13 +35,31 @@ completed
 Compacted content:
 - Archived 9 response topic(s): queue flood; realtime editor watcher; #rtwatch refinements (reliable, sync-before-apply, multi-editor broadcast) + #sjwm; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c2124169 -->
+
+### Re: do [#swint] — SimWorld editor+tmux integration harness — opus-4-8
+
+**Already done.** #swint's harness landed in `src/agent-doc` commit `b9186f8a` (PR #44, "test(swint): SimWorld editor + tmux integration harness") — `HEAD == origin/main == b9186f8a`. All four plan slices are implemented and green; nothing new to write this turn. (#swint was already dropped from the live backlog by this session's compaction — correct, since it is complete.)
+
+**How `do` was honored under the clean-session constraint:** the #swint plan (and the backlog item) forbid implementing it "via `/agent-doc` on this doc — this doc's controller is part of the system under test and races every write." This session is exactly that degraded state: preflight reported session drift across 3 tmux sessions, a stale install predating `b9186f8a`, and it recovered a wedged `preflight_started` cycle. So the implementation ran in a clean `src/agent-doc` context (a separate agent, cwd the submodule, not driving this controller, no binary install). It found the work already complete and verified rather than re-implemented — no spurious commit created.
+
+**Verification (debug-only; no `--release`, no `install`, no `lib-install`):**
+- `cargo test --bin agent-doc sim_world::` -> **60 passed; 0 failed; 1 ignored**.
+- `cargo test -p agent-doc-orchestration realtime_model` -> **12 passed; 0 failed** (the production seam SimEditor drives).
+- All 4 slices present in `src/sim_world.rs`:
+  - Slice 1 (foundation): `simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit` — the deterministic form of the live-only **#rtwverify** proof. Not a tautology: it calls production `realtime_model::resolve_current_doc`, asserts `authority == EditorBuffer`, asserts the real on-disk `ops.log` carries `realtime_doc_resolve authority=editor_buffer` (emitted by production, not the test), and asserts the unsaved edit survives the full finalize/commit cycle.
+  - Slice 2 (JB/VSCode parity): `EditorKind::{JetBrains,VsCode,Generic}` + `CacheConflict::{JetBrainsDialog,VsCodeKeepBuffer}` + `simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict`.
+  - Slice 3 (#rtwbcast harness): `multi_editor_crdt_broadcast_converges_without_file_cache_conflict` (two editors on one doc — the only way to test #rtwbcast without two live IDEs).
+  - Slice 4 (tmux integrated system): `integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back` (drain-owner gate + reaper under emulated multi-owner contention).
+
+**Caveat:** the live binary/cdylib still predate `b9186f8a` (preflight `stale_install`). Refreshing it (`make install` / `agent-doc lib-install`) is operator-drive — it must not run from this affected session (it would swap the binary mid-cycle). #swint as a source+test deliverable is complete and on origin.
+
+**Next in queue:** `#rtwbcast` (rung-4 production multi-editor CRDT broadcast) now has deterministic SimWorld coverage via Slice 3, but the production feature still needs its own clean-session implementation + multi-editor live verify — not this affected session.
+<!-- agent:boundary:d88adf99 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#swint]
 - :pushpin: :round_pushpin: [#rtwbcast]
 - [#rtwverify]. Use simworld tests
 - :round_pushpin: do [#kp5z]

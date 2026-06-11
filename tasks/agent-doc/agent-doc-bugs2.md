@@ -101,7 +101,7 @@ Compacted content:
 **Unblocks when:** you open a fresh focused agent-doc session on the socket/IPC path (root-cause `ipc_socket_already_applied_live_buffer_diverged` + add SimWorld regression coverage), and drive one live monsterrodholders edit-during-finalize cycle for the recovery proof.
 
 I'm **halting the auto-drain here.** The remaining queue (`#ktw8`, `#lvbremain`) are operator-drive live-verify items I cannot agent-complete — drive them live and I'll check the logs, or halt the queue.
-<!-- agent:boundary:193c7244 -->
+<!-- agent:boundary:8b7011f4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -151,6 +151,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
+- [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Fresh focused session; plan tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 - [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
 - [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->
@@ -158,7 +159,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#mrhpcdrift] agent-doc-bug: post-cutover Monster Rod Holders IPC drift still reproduces after the in-process supervisor/write-authority cut-over. Evidence from `src/boost-client/.agent-doc/logs/ops.log`: `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` at 1781134502/1781134954/1781136077, then `prompt_duplication_in_ack_content` at 1781135048, `live_prompt_drift_after_preflight` at 1781135262 and 1781136313, plus `ipc_socket_already_applied_live_buffer_diverged` and `crdt_merge_base_overlay_stale` at 1781135644/1781135645. This means #q6js did not prove zero-drift; root-cause the socket ACK/live-buffer/content_ours path after authority routing, add regression coverage, then build/install/commit/push in a fresh focused session. Plan context: tasks/agent-doc/plan-supervisor-in-process.md and tasks/agent-doc/plan-ipc-crdt-response-drift.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

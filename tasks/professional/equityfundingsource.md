@@ -54,7 +54,15 @@ The Lenders-table dialog is now **tabbed**, embedding the two existing pages ins
 **Scope note:** I verified the build + full suite structurally, but I did **not** do a live click-through of the dialog — that needs an authenticated admin session (Cloudflare Access) I can't drive headlessly. The embedded components are existing, working pages, so risk is integration-level (props/layout). Worth a 10-second eyeball on `/portal-admin/lender-pipeline?tab=lenders` → click a lender → toggle the two tabs.
 
 **Verification:** updated `admin-dashboard`, `lender-request-labels-docs`, and `table-row-opens-dialog` tests for the new structure. Full suite **543 pass / 0 fail**, worker build clean, no D1 migrations.
-<!-- agent:boundary:c7a66a04 -->
+
+### Re: Codex session handoff — gpt-5
+
+Acknowledged. The session document now identifies `agent: codex`, so this cycle is only a harness/attribution handoff rather than an EFS implementation request.
+
+No repo work was requested by the edit. I left the backlog and gated review items unchanged; preflight did surface two semantic-completion warnings for `#cm3e` and `#vd8s`, but those are advisory cleanup signals rather than directives for this turn.
+
+Verification: `agent-doc --version` is `0.34.0`; `agent-doc plan` required only finalization for this prompt response.
+<!-- agent:boundary:6d3b13f3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -56,14 +56,23 @@ You chose to work this now, so I took the **safe, deterministic slice** of `#mrh
 **Gated, not done, and now out of the auto-drain.** I moved `#mrhpcdrift2` to `agent:review` as a live-verify gate carrying the exact ops.log PASS/FAIL predicate. That also stops the churn you kept hitting: it's no longer a `queue`-attr backlog item, so go-mode won't re-pull it into this session. Open a fresh `/agent-doc` session for the deep root-cause when you're ready, and drive the live edit-during-finalize cycle for the gate.
 
 The queue is now drained. Not auto-looping.
-<!-- agent:boundary:9607649a -->
+
+### Re: review gates to actionable backlog — gpt-5
+
+I converted the three gated review entries back into open backlog work instead of resolving them as done. The preflight semantic-completion warnings were exactly the trap here: `#ktw8` and `#lvbremain` have related completed work in the archive, but the operator proof in the current review text has not been driven, so I did not archive those gates as completed.
+
+The review list is cleared by moving `#mrhpcdrift2`, `#ktw8`, and `#lvbremain` into backlog with actionable text. Each item now includes a concrete implementation/logging/check step so the next cycles complete the plan and then use your tests plus `ops.log` to prove or disprove behavior.
+
+No JB plugin install is needed from this cycle; I only changed the session document. I will call out a JB plugin install after a future cycle actually changes and builds the JetBrains plugin.
+<!-- agent:boundary:d5c4f488 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - complete [#mrhpcdrift2]
-- 
+- complete [#ktw8]
+- complete [#lvbremain]
 <!-- /agent:queue -->
 ###
 <!--
@@ -93,14 +102,14 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#mrhpcdrift2] Complete the fresh-session root-cause plan in tasks/agent-doc/plan-ipc-crdt-response-drift.md for socket-ACK/live-buffer/content_ours divergence: implement deterministic CRDT merge-base ordering and multi-writer write-back serialization, add SimWorld coverage for unrecovered response loss, update specs, build/install, and then check ops.log after the user's monsterrodholders live edit-during-finalize repro. Required logging: PASS markers must show live_prompt_drift_auto_recovered or ipc_socket_already_applied_missing_disk_response_repaired with the response intact in HEAD; FAIL markers are any lost-response line or missing response in HEAD.
+- [ ] [#ktw8] Replace the destructive auto-/clear live gate with automated, log-proven work: add or verify structured ops.log emission for s760 clear-decision anchored as ^[epoch] s760 clear-decision optIn=true clear=true pct>=threshold, add a regression that prevents prose-only queue_diff_active_prompt_differs from auto-completing the item, update spec/tests, build/install, and after the user drives the throwaway reset scenario classify PASS/FAIL from the anchored line only.
+- [ ] [#lvbremain] Replace the visible_write_live_buffer_matches_disk live gate with actionable JB/live-buffer logging work: ensure the IntelliJ live-editor edit-during-finalize path emits a structured ^[epoch] visible_write_live_buffer_matches_disk marker with enough fields to distinguish buffer==disk from queue_diff prose, add/update regression coverage where possible, ship any JB plugin changes with version/install notes, and after the user tests, inspect ops.log and file/fix bugs from any missing or false marker.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#mrhpcdrift2] [live-verify gate] socket-ACK / live-buffer / content_ours divergence (ipc_socket_already_applied_live_buffer_diverged). SHIPPED 2026-06-11: write::materialize_response_in_current_exchange exposed + SimWorld regression already_applied_diverged_sim_recovers_dropped_response_without_loss (agent-doc f403cdde) asserting zero UNRECOVERED drift — response recovered from content_ours, never silently lost, live user edit preserved, idempotent. REMAINING (FRESH focused session ONLY, plan tasks/agent-doc/plan-ipc-crdt-response-drift.md): deep CRDT merge-base ordering + multi-writer write-back serialization root-cause. Gate predicate (operator-drive): one live monsterrodholders edit-during-finalize cycle; PASS = ops.log shows clean detect+recover (live_prompt_drift_auto_recovered / ipc_socket_already_applied_missing_disk_response_repaired) with the response intact in HEAD and ZERO lost-response lines; FAIL = any response silently lost.
-- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. Live-verify ONLY — a shipped commit is NOT proof, an operator drive is. Log arbiter ops.log: PASS = a genuine structured line anchored ^[epoch] s760 clear-decision optIn=true with the clear flag true and pct>=threshold; FAIL = after a drive, no such anchored line OR a clear-true below threshold. Prose inside queue_diff_active_prompt_differs does NOT count. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator drives (throwaway doc, agent_doc_queue_context_reset:true, transcript past 50 pct, idle); agent greps the anchored structured line and resolves PASS/FAIL. No commit/submodule hash kept in this text on purpose: it makes preflight ops-proof auto-complete this gate on evidence=commit (see #opsproofgate).
-- [/] [#lvbremain] [live-verify gate] visible_write_live_buffer_matches_disk — the one residual marker (#4wxr cross-session-reject, #9adk run_clear_coalesce, #saev early_ack_pending already proven). Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] visible_write_live_buffer_matches_disk after an operator live-editor edit-during-finalize cycle; FAIL = operator drove a live IntelliJ buffer==disk write but only queue_diff prose matches appear. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator makes a live IntelliJ edit and lets agent-doc finalize with the buffer live; agent greps ^\[[0-9]+\] visible_write_live_buffer_matches_disk and --review-resolve on PASS or --pending-ungate with detail on FAIL.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

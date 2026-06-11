@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -222,16 +222,37 @@ Notes:
 - Remaining local dirty files are unrelated pre-existing workspace/submodule changes and were not staged for this fix.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:43759b60 -->
+
+### Re: #jblive160 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#jblive160]
+
+
+Installed and validated the JetBrains 0.2.160 path.
+
+What I did:
+- Reinstalled the local signed build `agent-doc-jetbrains-0.2.160-signed.zip` into the running IntelliJ IDEA 2026.1 data plugin root: `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- Reinstalled the same build into the IntelliJ IDEA 2026.1 config root as well, replacing the stale `0.2.142` copy the installer also enumerated: `/home/brian/.config/JetBrains/IntelliJIdea2026.1`.
+- Verified both roots now contain only `agent-doc-jetbrains-0.2.160.jar` for this plugin.
+- Verified jar metadata contains `<version>0.2.160</version>` and plugin id `com.github.btakita.agent-doc`.
+- Verified IntelliJ IDEA is running (`/home/brian/opt/idea-IU-252.26830.84/bin/idea`) and the live IDEA log is actively emitting Agent Doc plugin events (`PromptPoller`, `PatchWatcher`, `TypingTracker`) for the open agent-doc documents.
+
+Live stale-cache validation proof from `.agent-doc/logs/ops.log`:
+- `488975`: `[jbstalecache] editor_convergence_attempt ... patch_id=b3b5755f-80d6-491b-a166-5dc4ec7afc67 ...`
+- `488977`: `[jbstalecache] editor_convergence_succeeded ... patch_id=b3b5755f-80d6-491b-a166-5dc4ec7afc67 recovered_len=6233 transport=editor_ipc`
+- `488978`: `live_prompt_drift_auto_recovered ... ipc_listener_active=true transport=editor_ipc`
+
+I also checked the successful convergence window with `awk 'NR>=488287 && /auto_recovery_disk_write_during_ipc_listener/' .agent-doc/logs/ops.log`; it produced no output. The older `auto_recovery_disk_write_during_ipc_listener` entries are pre-success historical fallback entries, not part of the successful editor-IPC path.
+
+One operational note: the installer prints “Restart your IDE to activate” after replacing plugin files on disk. The live validation above is still meaningful because this IDEA process was already running the Agent Doc plugin and the pre-existing IntelliJ IDEA 2026.1 data-root install was already `0.2.160`; the reinstall leaves both enumerated IDEA 2026.1 roots on `0.2.160` for the next restart too.
+<!-- agent:boundary:1cc16b53 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).~~
-- ~~:pushpin: JB `Run Agent Doc` on a Codex session inputs into the prompt into Codex but does not submit the prompt to Codex. I have to manually submit the prompt in Codex (Press Enter). Please add diagnostics to all agent tmux interactions, such as fetching the tmux content, to log whether or not the prompt was actually submitted. If not submitted, this should be logged so we can tell if the system is behaving correctly. This should show up as an issue when reviewing logs. Keep documentation on tmux integrations with the various agents (Claude Code, Codex, Opencode). What works and what does not work.~~
-- ~~:round_pushpin: [#fencestrip]~~
-- do [#jblive160]
 <!-- /agent:queue -->
 ###
 <!--
@@ -261,7 +282,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
 <!-- /agent:backlog -->
 
 ## Review

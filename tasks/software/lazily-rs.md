@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -102,7 +102,48 @@ The core gap is **architectural**: lazily-zig destroys slots on invalidation whi
 Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation model. Items 8-10 are advanced features.
 
 **Top of backlog: `#lzinvmod`**
-<!-- agent:boundary:986656df -->
+
+### Re: #ce90 — gpt-5
+
+> **Queue prompt:**
+>
+> [#dtmx]
+
+
+Implemented the `#ce90` closeout as a direct regression lock for the node-storage invariant. The production `Context` already stores nodes in `Vec<Option<Node>>`, allocates sequential `SlotId` values, and reuses disposed effect IDs through `free_ids`, so I did not rewrite the storage path. I added an internal unit test in `src/context.rs` that verifies:
+
+- first allocations map directly to sequential `SlotId(0)`, `SlotId(1)`, and `SlotId(2)`;
+- those IDs correspond to contiguous `nodes` entries for `Cell`, `Slot`, and `Effect`;
+- disposing an effect leaves its vector slot empty and pushes the ID into the free list;
+- the next computed slot reuses that freed ID without growing `nodes` or advancing `next_id`.
+
+Changed paths:
+
+- `src/lazily-rs/src/context.rs`
+- `src/lazily-rs` submodule pointer in the superproject
+
+Commands run:
+
+- `cargo fmt --check`
+- `cargo test context_nodes_are_vec_indexed_by_sequential_slot_ids_and_reuse_effect_ids`
+- `make check`
+- `gh run list --workflow CI --limit 2` in `src/lazily-rs`
+
+Verification:
+
+- Targeted storage allocation test passed.
+- Full `make check` passed, including fmt, clippy, build, default/tokio/async/distributed/ffi/ipc/signaling tests, loom, doctests, and benchmark result check.
+- lazily-rs GitHub Actions CI started after push and is currently `in_progress` for run `27315337023`.
+- The prior lazily-rs CI run for `#r5an` is also still `in_progress`.
+
+Commits / push:
+
+- Pushed `lazily-rs` `main` to `origin/main` at `e32de87` (`test: lock context node storage allocation`).
+- Committed and pushed the superproject submodule pointer at `525ff8a79`; later concurrent agent-doc commits advanced root `origin/main` to `eeaac3834` and include that pointer commit.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:4f47394f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,10 +152,6 @@ Items 1-2 are foundational refactors. Items 3-7 build on the new invalidation mo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go=auto -->
-- ~~What are #next-steps to fix bugs in lazily-rs?~~
-- ~~[#r5an]~~
-- ~~[#ce90]~~
-- [#dtmx]
 <!-- /agent:queue -->
 <!--
 - [#1xk0]

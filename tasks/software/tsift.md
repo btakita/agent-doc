@@ -32,31 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260611-151219.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260611-151636.md`*
 
 Compacted content:
-- Archived 6 response topic(s): queue closeout recovery; log compression; #logfam log compression P1 (semantic line families); 3 more
+- Archived 1 response topic(s): #next-steps to fix tsift bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #next-steps to fix tsift bugs — opus-4-8
-
-> **Queue prompt:**
->
-> What are #next-steps to fix tsift bugs?
-
-
-First, the good news: the `#loggate` CI run (27324835879) is **green**, so all three shipped log-compression items are verified on CI's committed tree. The one red run was the earlier transient cache-step infra kill, not a code bug. So these next-steps are precision refinements, not blockers.
-
-I grounded the list in this session's actual changes (highest confidence) rather than guessing at the broader codebase — that deeper sweep is what the `#code-review` preset is for. Added three items to `agent:backlog` in priority order:
-
-1. **`#logsigfp`** (highest — a real false-positive risk I introduced) — the new classifier checks `contains("err!")` / `contains("err_pnpm")` as bare substrings, so a benign line (prose, a URL, a path) containing those fragments would be misflagged as an error signal. Anchor them to token boundaries.
-2. **`#logfixturecov`** — the fixture gate currently only proves false-negatives (`required_signals`). Add `forbidden_signals` cases so the gate also proves the classifier does NOT flag benign lines — this locks in the `#logsigfp` fix.
-3. **`#tsinflight`** `[recommended]` — 16 unrelated in-flight files (graph-db/surrealdb/token-gate) are uncommitted; session-check keeps flagging partial-staging. Land or revert them in their own cycle so the committed tree verifies cleanly.
-
-**Considered but NOT filed:** the line-family crate-name fold (`<word> v1.2.3` → `<name> <ver>`) applies beyond cargo, but that is defensible generic near-duplicate folding (the lines genuinely differ only by name+version), so I did not file it as a bug.
-
-**Top of backlog: `#logsigfp`.**
-<!-- agent:boundary:b481711f -->
+<!-- agent:boundary:c9648ad2 -->
 <!-- /agent:exchange -->
 
 ## Queue

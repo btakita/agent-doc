@@ -126,14 +126,57 @@ Both queue items are **operator-drive live-verify** — I cannot agent-complete 
 **Why both stay open (not `--done`):** `#ktw8` has zero genuine clear-decision emissions and I cannot fire a destructive `/clear`; `#lvbremain` has one residual marker (`visible_write_live_buffer_matches_disk`) that requires a live editor write I can't produce. Marking either done would be a fabricated completion. Both are correctly parked as operator-drive backlog items.
 
 **Halting the auto-drain.** The queue is exhausted of agent-completable work — both remaining items are yours to drive. Drive either and I'll read the logs; or halt the queue. I am **not** auto-looping and **not** editing the queue (the IPC supervisor is active on this doc — editing queue state mid-run races and corrupts it).
-<!-- agent:boundary:3a72d6bb -->
+
+### Re: mark #ktw8 + #lvbremain in review, log as pass/fail arbiter — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: agent-doc monsterrodholders.md had an issue:
+> ```
+> One bookkeeping note: the finalize hit an IPC drift (live_prompt_drift_after_preflight — the JetBrains buffer's stale
+> copy won the working tree). HEAD committed correctly (response + #anchor-deploy reaped + queue head struck), but the
+> buffer keeps re-winning), continuing to drain via preflight/finalize risks re-clobbering the clean commit. The
+> remaining queue items are also mostly not auto-deployable — #hydroweb-size-specs is blocked on merchant content,
+> #oos-inventory-decide is an operator call; only #pdp-upsells-deploy is a deploy-go-ahead like this one. Recommend:
+> close/revert the doc in JetBrains, then re-invoke /agent-doc to resume the drain (I'll take #pdp-upsells-deploy
+> next).
+> ```
+
+
+Done — both are now gated `[/]` items in `agent:review`, each carrying the exact `ops.log` predicate that decides PASS vs FAIL, so the **log is the arbiter** and neither needs another agent execution step (the code is already shipped). I re-ran the log check for the current verdict.
+
+**#ktw8 — auto-`/clear` between queue turns**
+- **PASS** = a genuine structured `[s760] clear-decision optIn=true … clear=true` line with `pct ≥ threshold`. **FAIL** = after a drive, no such line, or `clear=true` below threshold (false fire). Prose echoes inside `queue_diff_active_prompt_differs` don't count.
+- **Current verdict: UNDRIVEN** — 0 genuine emissions in `ops.log`.
+- **Resolves when:** you drive it once (throwaway doc, `agent_doc_queue_context_reset: true`, transcript past 50%, idle); I grep and `--review-resolve` on PASS or reopen with the failure detail on FAIL.
+
+**#lvbremain — `visible_write_live_buffer_matches_disk`** (the one residual; `#4wxr` / `#9adk` / `#saev` already proven)
+- **PASS** = a genuine structured `visible_write_live_buffer_matches_disk` line after a live editor edit-during-finalize. **FAIL** = you drove a live buffer==disk write but only prose matches appear.
+- **Current verdict: UNDRIVEN** — 0 genuine.
+- **Resolves when:** you make a live IntelliJ edit and let agent-doc finalize with the buffer live; I grep and resolve PASS/FAIL.
+
+**On the queue note you pasted (monsterrodholders IPC drift):** it's the same drift class already tracked as `#mrhpcdrift2` in the backlog (socket-ACK / live-buffer / content_ours divergence) — additional confirmation, no new code this cycle (it needs the same live monsterrodholders edit-during-finalize proof). Its "close/revert in JetBrains, re-invoke /agent-doc" line is operational advice for *that* session, out of scope here. By replacing `#ktw8` / `#lvbremain` in the queue with this note you also killed the churn loop; I'm letting this free-text note strike the queue head on finalize, which empties and deactivates the queue.
+
+No JB plugin install needed this round — these are log-verification gates, not code changes.
+<!-- agent:boundary:59128f80 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#ktw8]
-- [#lvbremain]
+~~~done
+:pushpin: agent-doc monsterrodholders.md had an issue:
+```
+One bookkeeping note: the finalize hit an IPC drift (live_prompt_drift_after_preflight — the JetBrains buffer's stale
+copy won the working tree). HEAD committed correctly (response + #anchor-deploy reaped + queue head struck), but the
+buffer keeps re-winning), continuing to drain via preflight/finalize risks re-clobbering the clean commit. The
+remaining queue items are also mostly not auto-deployable — #hydroweb-size-specs is blocked on merchant content,
+#oos-inventory-decide is an operator call; only #pdp-upsells-deploy is a deploy-go-ahead like this one. Recommend:
+close/revert the doc in JetBrains, then re-invoke /agent-doc to resume the drain (I'll take #pdp-upsells-deploy
+next).
+```
+~~~
+- [#mrhpcdrift2]
 <!-- /agent:queue -->
 ###
 <!--
@@ -173,13 +216,13 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority --> 
 - [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Fresh focused session; plan tasks/agent-doc/plan-ipc-crdt-response-drift.md.
-- [ ] [#ktw8] operator live-verify (was gated review #nnrt / #s760d): destructive /clear path. Stays open: current ops.log check still finds zero genuine structured [s760] clear-decision emissions; only queue_diff/prose false positives are present. On a throwaway doc with agent_doc_queue_context_reset set true, drive the exchange past the clear threshold; operator confirms ops.log shows a STRUCTURED [s760] clear-decision optIn=true ... clear=true line (not a prose mention) and /clear fires once at the boundary, no false fire below. Code shipped submodule 1edb20d2 (start.rs idle-queue watch + context_pct). Operator-drive (agent cannot fire a destructive /clear); auto-proof also blocked unless the structured marker exists. Converted from gated review per operator directive (no more gates; operator drives, agent checks logs).
-- [ ] [#lvbremain] OPERATOR-DRIVE live-verify residual. Harness FIXED (#x9ds, submodule 9b22d576): the binary markers now reach ops.log as structured lines. Per-marker: #4wxr cross-session-reject DRIVEN+verified live (2 structured [claim] markers in ops.log); #9adk run_clear_coalesce is plugin-side (idea.log InvocationCoalescer), operator-verified via #lvbatch, NOT an ops.log marker; #saev early_ack_pending needs EARLY_ACK_ENABLED flipped (#saevon) + a live SOCKET-IPC drive (0 structured markers yet); visible_write_live_buffer_matches_disk needs a live editor buffer==disk write. Operator drives the remaining two; agent checks ops.log for STRUCTURED markers only (bare-substring scan false-positives on prose — see the gate-verify bug item).
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#lvbremain] [live-verify gate] visible_write_live_buffer_matches_disk — the one residual marker (#4wxr cross-session-reject, #9adk run_clear_coalesce, #saev early_ack_pending already proven). Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] visible_write_live_buffer_matches_disk after an operator live-editor edit-during-finalize cycle; FAIL = operator drove a live IntelliJ buffer==disk write but only queue_diff prose matches appear. Current verdict: 0 genuine = UNDRIVEN. NEXT: operator makes a live IntelliJ edit and lets agent-doc finalize with the buffer live; agent greps ^\[[0-9]+\] visible_write_live_buffer_matches_disk and --review-resolve on PASS or --pending-ungate with detail on FAIL.
+- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. Code-complete (submodule 1edb20d2, start.rs idle-queue watch + context_pct); no agent execution step remains. Log arbiter = ops.log: PASS = a genuine structured line ^[epoch] [s760] clear-decision optIn=true threshold=N pct=M clear=true with pct>=threshold; FAIL = after an operator drive either no such line OR clear=true with pct<threshold (false fire). Prose echoes inside queue_diff_active_prompt_differs do NOT count. Current verdict: 0 genuine emissions = UNDRIVEN. NEXT: operator drives on a throwaway doc (agent_doc_queue_context_reset:true, queue an item, grow transcript past 50 pct, idle); agent greps ^\[[0-9]+\] \[s760\] clear-decision and --review-resolve on PASS or --pending-ungate with detail on FAIL.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

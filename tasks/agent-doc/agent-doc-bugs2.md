@@ -151,22 +151,19 @@ No source files changed in this recovery cycle. Verification was `agent-doc pref
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~[#q6js]~~
-- ~~[#ktw8]~~
-- ~~:pushpin: monsterrodholders.md has IPC drift.~~
 - :round_pushpin: do [#mrhipcdrift]
+<!-- /agent:queue -->
+###
+<!--
 - :pushpin: `/clear` is not being called between queue turns in codex.
 - :pushpin: The response was showing up committed then there was an uncommitted delete of the response. This happened in the last turn
 - :pushpin: I'm still getting JB `Stale File Cache` dialogs and losing some of my typing.
 - :pushpin: `:round_pushpin: do [#mrhipcdrift]`.
 - :pushpin: do [#lvbremain]
 - :round_pushpin: do [#mrhpcdrift]
-- ~~[#blgmangle]~~
 - :pushpin: If I manually place an item onto the queue, automatically place a `:pushpin:` do it doesn't unexpectedly get deprioritized.
 - do [#respdel]
-<!-- /agent:queue -->
-###
-<!--
+---
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---
 `'/clear' is disabled while a task is in progress
@@ -192,7 +189,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue --> 
+<!-- agent:backlog priority --> 
 - [ ] [#clearcodex] agent-doc-bug: `/clear` is not being called between active queue turns in Codex. Repro came from tasks/agent-doc/agent-doc-bugs2.md queue drain on 2026-06-10 after context-reset related work: operator reports queue turns continue without the expected Codex `/clear` boundary. Verify whether idle-queue continuation calls the Codex clear path when agent_doc_queue_context_reset is enabled and threshold is crossed; add a live/log proof for structured [s760] clear-decision and actual /clear dispatch.
 - [ ] [#jbstalecache] agent-doc-bug: JetBrains still shows `Stale File Cache` dialogs and operator typing can be lost during agent-doc closeout/live-buffer sync. Repro reported during tasks/agent-doc/agent-doc-bugs2.md recovery on 2026-06-10 while IPC/live-buffer drift was present. Root-cause JB plugin cache invalidation and socket ACK/live document adoption so editor-visible content, disk, snapshot, and user typing converge without stale-cache prompts or lost input.
 - [ ] [#respdel] agent-doc-bug: closeout can show a response as committed and then leave an uncommitted working-tree delete/rewrite of that same response. Live repro from tasks/agent-doc/agent-doc-bugs2.md on 2026-06-10: after the #blgmangle finalize/late sibling failure path, HEAD contained the committed response but the working tree showed an uncommitted deletion/rewrite of that response; the next preflight/session-check reported ipc_proof_insufficient with invariant=live_prompt_drift_after_preflight for cycle-1781137531085. Fix terminal closeout so late sibling/pre-write/IPC proof failures are atomic with the document write, or recover content_ours without deleting/requoting committed exchange content.

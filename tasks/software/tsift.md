@@ -85,14 +85,48 @@ Commits/push: pushed `btakita/tsift@dff637d` (`fix: scope graph evidence target 
 Verification: `cargo fmt`; `cargo test -p tsift-sqlite sqlite_resolves_evidence_targets_with_indexed_properties`; `cargo test -p tsift-cli --test graph_db_conformance graph_db_evidence_prefers_hinted_session_path_for_colliding_backlog_ids`; `cargo test -p tsift-cli --test graph_db_conformance`; `make check`; `cargo build`; `cargo install --path . --locked`; `tsift --version`. All passed locally, and the installed binary reports `tsift 0.1.67`. Latest tsift CI after the push is in progress (`27314796862`); the previous CI run on `main` was green, and local full-suite evidence is clean. The agent-loop repo has no workflow named `CI`.
 
 Confidence: high. Escalation: none. Note: unrelated dirty working-tree changes were already present in `src/tsift` and the superproject and remain unstaged.
-<!-- agent:boundary:a64e0309 -->
+
+### Re: token-pressure next actions — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsbugtok]
+
+
+`#tsbugtok` is already satisfied by the archived token-action work, so I did not change source for this queue item.
+
+Evidence checked:
+- `tasks/software/tsift.done.md` already records `#token-budget-guardrail`, `#token-action-coverage`, and `#token-actions-rewrite` as completed work covering the same prompt-budget/cache-resend/restart-loop/no-op closeout and rewrite-action surface.
+- `src/tsift/specs/digests-sessions.md` specifies that `session-review --next-context` emits prioritized `next_token_actions`, maps prompt-budget/cache-resend/restart-loop/no-op closeout guardrails to compact/restart/digest/rewrite commands, and adds `repeated_raw_read` plus `repeated_command_bundle` actions with exact rewrite/source-read commands.
+- `packages/tsift-cli/src/session_review_budget.rs` builds one deduped, priority-sorted action list for `prompt_budget`, `cache_resend`, `repeated_raw_read`, `repeated_command_bundle`, `restart_loop`, and `noop_closeout`, including digest commands and rewrite commands.
+- `packages/tsift-cli/src/lib.rs` has unit coverage asserting that the full action report orders those six action kinds exactly once and carries raw-read and command-bundle rewrite commands.
+- `packages/tsift-cli/tests/exit_code.rs` has fixture-backed CLI coverage for actionable guardrail collapse: prompt budget, cache resend, restart loop, and no-op closeout move into `next_token_actions` and disappear from unresolved guardrail failures.
+
+Changed paths: none for this queue item.
+
+Commands run:
+- `tsift status` from the superproject; it refreshed submodule indexes but reported one unrelated missing workspace scope.
+- `tsift status` from `src/tsift`; fresh.
+- `tsift --envelope source-read ...` / `rg ...` for the token-action implementation, spec, archived done rows, and tests.
+- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists`
+- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_actionable_guardrail_failures`
+- `cargo test -p tsift-cli --test exit_code session_review_next_context_collapses_noop_closeout_guidance`
+
+Verification: all focused tests passed.
+
+Build/install/commit/push: skipped for this cycle because there were no source changes to build, install, commit, or push.
+
+Confidence: high. The queue head is a duplicate of completed implementation plus spec/test coverage, and the focused tests passed.
+
+Escalation: none.
+<!-- agent:boundary:ab219286 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#tsbugev]~~
-- [#tsbugtok]
+- ~~[#tsbugtok]~~
 - [#tsbuglock]
 - [#tsbugcm]
 - [#tsbugidx]
@@ -105,7 +139,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsbugtok] Add fixture-backed session-review/context-pack token-pressure guardrails: dedupe prompt_budget, cache_resend, restart_loop, repeated_raw_read, and noop_closeout signals into one prioritized next_token_actions block with exact compact/restart/digest commands.
 - [ ] [#tsbuglock] Harden graph-db SQLite lock recovery for concurrent agent runs: document or add a safe release/diagnostic command, prefer WAL-safe reader behavior where appropriate, and cover hot-journal/locked-db failures in graph-db status/doctor tests.
 - [ ] [#tsbugcm] Clarify conflict-matrix dispatch semantics: split per-target fail_closed diagnostics from cross-target parallel-safety, expose previously_completed/worker_result evidence, and add contract tests for low-overlap targets with missing source ownership.
 - [ ] [#tsbugidx] Tighten stale index and summary-cache readiness: make graph-db refresh/status/context-pack fail closed or emit one clear repair command when indexes or summaries are stale/empty, and cover stale workspace/submodule cases with fixtures.

@@ -64,15 +64,15 @@ I converted the three gated review entries back into open backlog work instead o
 The review list is cleared by moving `#mrhpcdrift2`, `#ktw8`, and `#lvbremain` into backlog with actionable text. Each item now includes a concrete implementation/logging/check step so the next cycles complete the plan and then use your tests plus `ops.log` to prove or disprove behavior.
 
 No JB plugin install is needed from this cycle; I only changed the session document. I will call out a JB plugin install after a future cycle actually changes and builds the JetBrains plugin.
-<!-- agent:boundary:d5c4f488 -->
+<!-- agent:boundary:45bc6379 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- complete [#mrhpcdrift2]
-- complete [#ktw8]
-- complete [#lvbremain]
+- [#mrhpcdrift2]
+- [#ktw8]
+- [#lvbremain]
 <!-- /agent:queue -->
 ###
 <!--
@@ -99,7 +99,7 @@ The last run had a code fence stripped away by agent-doc.
 What are #next-steps to fix bugs?
 -->
 
-## Backlog
+##nn Backlog
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#mrhpcdrift2] Complete the fresh-session root-cause plan in tasks/agent-doc/plan-ipc-crdt-response-drift.md for socket-ACK/live-buffer/content_ours divergence: implement deterministic CRDT merge-base ordering and multi-writer write-back serialization, add SimWorld coverage for unrecovered response loss, update specs, build/install, and then check ops.log after the user's monsterrodholders live edit-during-finalize repro. Required logging: PASS markers must show live_prompt_drift_auto_recovered or ipc_socket_already_applied_missing_disk_response_repaired with the response intact in HEAD; FAIL markers are any lost-response line or missing response in HEAD.

@@ -178,19 +178,29 @@ This is the right instinct, and it's the deterministic answer to the *entire* op
 On the re-queued refs: **#sjwm + #kqr6** (stuck-handoff/IPC-drift) are now **code-complete and live** per the reaper above — their only remaining piece is live multi-process verification, which #swint Slice 4 makes deterministic. **#kp5z** (queue flood) also landed in `23a3ce5b` — the drain-owner lease (`agent-doc drain-claim`, TTL `AGENT_DOC_DRAIN_OWNER_TTL_SECS=90s`) + `SkipSelfDrivingLoopOwner` gate so the supervisor defers to `/loop` instead of double-injecting `agent-doc <FILE>`. **#rtwbcast** stays open — it's exactly Slice 3. **#rtwverify** is Slice 1.
 
 **Not implementing the harness from here** — same constraint as the reaper plan: this doc's controller is part of the system under test and races every write. And **not auto-looping** (the genuine new prompt is answered; the `go` queue's remaining refs are operator-drive live-verify or the #swint build, both of which need a clean session).
-<!-- agent:boundary:32cd48e4 -->
-<!-- agent:boundary:9e918e36 -->
+
+### Re: go-queue re-derivation — #nzmc done, reaper items closed, the rest is operator-drive — opus-4-8
+
+No genuinely new prompt this turn. The snapshot/wedge-controller question is the one I answered and committed last turn (`e25c833c3`); it re-surfaced only because the `go`-mode queue re-derives unstruck queue items. Everything else is the `go` queue re-deriving backlog into `do` prompts. I did the one item that's completable from here and closed the ones whose code has landed and is live:
+
+- **#nzmc — DONE.** lazily 0.10.2 → 0.10.3, build-verified (`cargo build --release`, `lazily v0.10.3` from `src/lazily-rs`, clean compile) and committed: submodule `b42fb366`, superproject pointer `a538878d5`. Building to verify writes `target/release`, not `~/.cargo/bin`, so it didn't self-race this session's closeout. (Left the unrelated AGENTS.md tsift code-nav version drift uncommitted — out of scope.)
+- **#sjwm + #kqr6 — DONE.** The stuck-handoff reaper landed (`23a3ce5b`) and is live in the installed binary — `agent-doc admin reap-stale-controllers --dry-run` runs ("0 would be terminated, 1 kept"). It detects a Preparing handoff older than 45s → terminates the wedged `controller serve` proc (verified `/proc` cmdline, never self) → supersedes the bootstrap `Failed` → fresh promote, breaking the 1002→1004→1006 loop; wired into the gc sweep + self-heal at `connect_or_launch`. The agent-side fix is complete; you own the live multi-process verify (your words: you test + file bugs, I check logs), and #swint Slice 4 makes it deterministic.
+- **#kp5z — stays open.** The drain-owner lease + `SkipSelfDrivingLoopOwner` gate landed (`23a3ce5b`; `agent-doc drain-claim` exists). But it only suppresses the flood when `/loop` actually claims the lease before re-invoking — and these manual `/agent-doc` invocations don't run that path, so the flood you keep deleting by hand isn't yet proven gone. Remaining: confirm the `/loop` skill refreshes the lease, then a live drain proof.
+- **#swint — needs a clean session** (its plan says so: this doc's controller is the system under test, racing every write). **#rtwbcast** is #swint Slice 3 (two emulated editors). **#rtwverify** is #swint Slice 1 (live editor proof, made deterministic).
+
+**Why this keeps churning:** the `go`-mode queue re-derives from the backlog every cycle, and answered free-text items aren't struck, so the same questions and refs re-surface. Closing #nzmc/#sjwm/#kqr6 trims three from that source. To stop the loop entirely until #swint lands, either pause the go-queue (`agent-doc admin queue pause tasks/agent-doc/agent-doc-bugs2.md --reason simworld-clean-session`) or drive #swint from a fresh session with cwd `src/agent-doc`. **Not auto-looping.**
+<!-- agent:boundary:8c8801ab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Can we add a Simworld that tests integration with the JB Plugin and a Simworld that test integration with the VSCode plugin? The Simworld harness can emulate JB editors and VSCode using their respective plugins. Ideally we can have the Simworld emulate integrated editor scenarios. Simworld testing multi-editor + document model sync scenarios would also be good. Can we also have a Simworld emulating tmux? And test the entirely integrated system?~~
-- [#rtwverify]
-- The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
-- [#rtwbcast]
-- [#sjwm]
-- [#kqr6]
+- :round_pushpin: do [#swint]
+- :pushpin: :round_pushpin: [#rtwbcast]
+- ~~:pushpin: :round_pushpin: [#sjwm]~~
+- ~~:pushpin: :round_pushpin: [#kqr6]~~
+- ~~:round_pushpin: do [#nzmc]~~
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
@@ -266,6 +276,9 @@ What is the root cause of the "stuck-handoff"? In addition to fixing the root ca
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
+- :round_pushpin: do [#kp5z]
+- [#rtwverify]
+- The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
 ###
@@ -299,9 +312,6 @@ What are #next-steps to fix bugs?
 - [ ] [#swint] #swint SimWorld editor + tmux integration harness — extend SimWorld to emulate JB plugin + VS Code plugin buffers, tmux, and the whole integrated system (editor buffer <-> FFI/IPC <-> controller <-> document model <-> tmux dispatch), incl. multi-editor + document-model sync. Turns the live-verify-only classes (File Cache Conflict, IPC drift, queue flood, #rtwbcast) into deterministic regression tests. 4 slices: SimEditor buffer actor -> JB/VSCode protocol parity -> multi-editor CRDT sync (only way to test #rtwbcast) -> tmux + integrated system. Implement from a CLEAN session (cwd src/agent-doc), NOT via /agent-doc on this doc. Plan: tasks/agent-doc/plan-simworld-editor-integration.md. Operator request 2026-06-11.
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
-- [ ] [#sjwm] #ipcdrift IPC drift continues post single-Project-Pane-Process / 08b migration. CONFIRMED root cause overlaps #stuckhandoff: controllers wedge in ControllerHandoffState::Preparing and keep writing the stale buffer (multi-owner race on ipc.sock vs the IDEA listener). The handoff state machine stores handoff_started_at but has NO stale-Preparing timeout/reaper (verified in project_controller.rs). Fix = stale-Preparing detect + force-fail/supersede + terminate the wedged live controller + self-heal on invoke. NEEDS a dedicated stable turn + live multi-process verification (cannot be verified from inside the affected session). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md (IPC section TBD).
-- [ ] [#kqr6] #stuckhandoff CONFIRMED: no handoff-timeout scaffold exists (project_controller.rs ControllerHandoffState has Preparing + handoff_started_at but nothing checks staleness). gc.rs reaps stale starting actor PROJECTIONS (>1h) but not wedged Preparing controller PROCESSES, and a projection-close would not stop a live wedged proc from writing. Real fix = detect stale Preparing by handoff_started_at age + terminate/transition the wedged controller + heal on next invoke, with live verification. IMMEDIATE RELIEF (operator-run): pkill the wedged controller serve --handoff-state preparing PIDs; they respawn clean. Operator request 2026-06-11.
-- [ ] [#nzmc] #lazilyup Upgrade lazily-rs (tsift is upgrading; build already resolves lazily 0.10.3 in Cargo.lock). Verify build + commit the lock bump. Operator request 2026-06-11.
 - [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc trigger submissions during queue-drain / finalize-while-typing. NEW FINDING (this turn, fresh-binary session): the new in-process binary IS now running (ops.log: supervisor_host_gate hosting=in-process, generation 300) — prior cycles blamed a stale old-binary controller; that is no longer the blocker. The actual trigger-injection path is the SUPERVISOR idle_queue_watch_drain in start.rs (ops.log: idle_queue_watch_drain payload_kind=trigger submit_mode=tmux_literal_cr target=%123 reason=auto_trigger_inject), NOT project_controller::authorize_dispatch — that is why zero real queue_dispatch_invoked markers ever logged: the 7b6f022e observability was added to the wrong path. The real path ALREADY has the busy gate (idle_queue_drain_decision::SkipNotIdle / no-inject-into-active-turn), the dedup (SkipAlreadyDispatched), and real observability (log_idle_queue_drain_submit). REFINED ROOT-CAUSE HYPOTHESIS: dual drain owners — Claude /loop AND the supervisor idle_queue_watch_drain both inject agent-doc <FILE>, so triggers pile up in the live CC input queue. FIX TARGET: a self-driving-harness gate in idle_queue_drain_decision (skip supervisor inject when /loop is the active drain owner) — pure logic, unit-testable in start.rs. NEEDS a dedicated stable turn + live multi-process verify (cannot be confirmed from inside this affected session; supervisor races writes here). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md.
 <!-- /agent:backlog -->
 

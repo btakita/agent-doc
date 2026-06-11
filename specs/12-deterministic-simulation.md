@@ -242,11 +242,64 @@ then drops), so no lazily-cached state survives across sync runs to drive
 duplicate pane creation, and `tmux-router` does not depend on `lazily-rs` at
 all.
 
+## Editor integration harness (`#swint`)
+
+The simulator also owns a deterministic editor-buffer actor, `SimEditor`, that
+speaks the same durable live-buffer protocol the JetBrains / VS Code plugins
+speak over socket IPC / FFI. It records the editor-visible buffer through the
+production `debounce::record_live_buffer_digest_content` digest path (`#pcp6`)
+and reads "current document" back through the production
+`realtime_model::resolve_current_doc` seam (rung 3b, `#rtwatch`) — the same seam
+`preflight` / `write` / `session-check` source the current document through.
+This turns the File-Cache-Conflict / IPC-drift / queue-flood classes — which
+previously only reproduced in a live IDE — into deterministic regressions.
+
+A `SimEditor` attaches to a real on-disk document and can type an unsaved edit,
+save (flush to disk), close (clear the sidecar via the production
+`debounce::clear_live_buffer` editor-close primitive), adopt a CRDT-merged
+broadcast from a peer editor, reload from disk, and absorb an external disk
+write (agent-doc patchback) while open. Each editor is one of `EditorKind`
+(`Generic`, `JetBrains`, `VsCode`); the read-authority contract is identical
+across kinds, and the kind only changes the surfaced `CacheConflict` signal
+(JetBrains modal dialog vs VS Code non-modal badge) for an external disk write
+that lands while the buffer is dirty.
+
+- Slice 1 (foundation): `simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit`
+  is the deterministic form of the live-only `#rtwverify` proof — an unsaved
+  buffer edit is authoritative over stale disk (`resolve` returns
+  `editor_buffer` and emits the grep-able `realtime_doc_resolve` ops.log marker),
+  and the edit survives the agent's commit instead of being clobbered.
+  `simeditor_save_then_close_falls_back_to_disk_authority` pins the "fall back to
+  disk" half: a present in-sync buffer is `in_sync` (disk canonical) at the pure
+  `reconcile_current_doc` seam, while the durable feed suppresses it to no-feed,
+  and closing the document clears the sidecar so resolve reports `editor_absent`.
+- Slice 2 (JB + VS Code parity): `simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict`
+  proves both editor kinds agree on read authority (a dirty buffer always wins,
+  a clean buffer defers to disk) while differing only on the surfaced
+  cache-conflict signal — the File-Cache-Conflict class (`#w42v`) made
+  deterministic. An external disk write never silently clobbers an unsaved edit.
+- Slice 3 (multi-editor `#rtwbcast`): `multi_editor_crdt_broadcast_converges_without_file_cache_conflict`
+  opens two editors on one document, merges a divergent edit from each through the
+  production `merge::merge_contents_crdt` path against the shared on-disk baseline,
+  asserts the merge unions both edits with zero conflict markers, and broadcasts
+  the merged document back so both buffers converge. This is the only way to test
+  `#rtwbcast` without two live IDEs.
+- Slice 4 (integrated system): `integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back`
+  connects the editor seam to the route/controller actor model and the public
+  `drain_owner` lease: an editor-queued edit routes to the owner pane, a fresh
+  drain-owner lease (`#kp5z`) gates the supervisor drain, the controller drain
+  applies + commits the document (the edit survives), the stuck-handoff reaper
+  rejects stale-generation handoff/reap under multi-owner contention, and the
+  committed document broadcasts back so both editors reconverge on disk.
+
 Real tmux tests are still required in `make tmux-ci` for pane/window movement,
 `tmux-router` reconcile behavior, shell/process ownership proof, and end-to-end
 editor smokes. Pure ownership/cardinality variants should be promoted to named
 SimWorld traces before the duplicate tmux-backed edge test is demoted from
-local default coverage to the ignored live-tmux sweep.
+local default coverage to the ignored live-tmux sweep. The `SimEditor` harness
+does not replace the live editor smokes either: it pins the deterministic
+read-authority / merge / drain contracts, while the live plugin smokes still
+prove the IPC socket, VFS watch, and Document API wiring end-to-end.
 
 The simulator tests print schedule count, command count, elapsed time, and the
 active budget for each corpus so CI logs show when generated coverage starts to

@@ -32,48 +32,11 @@ EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badge
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-150905.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-152632.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Admin dashboard Needs Attention accordion; Dashboard attention collapsed closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-Implemented and deployed.
-
-> **Queue prompt:**
->
-> On the portals and admin dashboard, if no items "Needs Attention", hide the "Needs Attention" section. deploy
-
-
-Changed the Needs Attention rendering so empty sections are hidden instead of showing a zero-state card:
-
-- Borrower dashboard: `NeedsAttention` now returns `null` when no loans need documents.
-- Broker dashboard: `NeedsAttention` now returns `null` when `docs_needed` is zero.
-- Admin dashboard: `AttentionItems` now returns `null` when the summed attention count is zero.
-- Investor dashboard already had the empty guard; I added a test assertion to keep that behavior covered.
-
-Verification:
-
-- `bun test tests/admin-dashboard.test.ts`
-- `bun test tests/broker-portal.test.ts`
-- `bun test tests/investor-portal-e2e.test.ts`
-- `make check` — 552 tests passed, app build passed, Worker build passed.
-- Remote D1 migrations: no pending migrations before and after deploy.
-- `make deploy` succeeded. Live Worker version: `930b742a-3138-4cd4-beb3-617d843ded47`.
-- Public live smoke test returned HTTP 200 for `https://equityfundingsource.brian-takita.workers.dev/`.
-
-GitHub Actions note: `gh run list --workflow CI --limit 1` failed because this repo has no workflow named `CI`; `gh workflow list` returned no workflows and there is no `.github` directory in the submodule.
-
-Code changes remain uncommitted, per repo instruction not to commit unless explicitly asked.
-
-Suggested commit message:
-
-```txt
-fix(portals): hide empty needs attention panels
-
-Hide borrower, broker, and admin Needs Attention cards when there are no action items, preserve the investor dashboard's existing empty guard, and cover the behavior in the portal/admin dashboard tests. Verified with focused Bun tests, make check, remote migration checks, and production Worker deploy 930b742a-3138-4cd4-beb3-617d843ded47.
-```
-<!-- agent:boundary:59fcceef -->
-<!-- agent:boundary:953c304d -->
+<!-- agent:boundary:a96c27c1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +44,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Make all boolean selections in /portal-borrower/new-application a radio button (Yes|No label) with the initial state unseleted in /portal-borrower/new-application. Same with similar form selections in other portals. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

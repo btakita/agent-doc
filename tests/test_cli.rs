@@ -781,7 +781,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `<!-- no-pending-done-guard -->` still matches the committed HEAD/archive
         // blob and `stuck_captured_cycle` stops false-alarming. Reuses the existing
         // `git::strip_guard_markers` helper — no new flow guard token.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 89,
+        // +1 (#mrhipcdrift) for the audited visible-write idle/current guard on
+        // the socket already_applied missing-disk-response repair path. The
+        // recovery writes only the visible response materialization, then keeps
+        // the committed snapshot on content_ours instead of falling back through
+        // stale file IPC.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 90,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

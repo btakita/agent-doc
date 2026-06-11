@@ -10520,6 +10520,23 @@ fn preserve_ipcfullprompt_forensic(
     let _ = std::fs::write(dir.join(format!("{stem}.candidate.md")), candidate);
 }
 
+fn materialize_response_in_current_exchange(
+    current: &str,
+    expected_response: &str,
+) -> Option<String> {
+    let response = response_materialization_probe_from_response(expected_response);
+    if response.trim().is_empty() || response_materialized_in_content(&response, current) {
+        return Some(current.to_string());
+    }
+    let components = component::parse(current).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let mut exchange_body = exchange.content(current).to_string();
+    push_materialization_segment(&mut exchange_body, &response);
+    Some(exchange.replace_content(current, &exchange_body))
+}
+
 fn persist_already_applied_socket_content_ours_snapshot(
     file: &Path,
     patch_id: &str,
@@ -10585,56 +10602,96 @@ fn persist_already_applied_socket_content_ours_snapshot(
         }
 
         if !response_present {
-            log_ipc_proof_failure(
-                file,
-                "socket_already_applied",
-                Some(patch_id),
-                "disk_missing_response_probe",
-                "file_ipc_fallback",
-                &format!(
-                    "response_sha256={} current_len={} current_hash={}",
-                    crate::ops_log::content_hash(expected_response),
-                    current.len(),
-                    crate::ops_log::content_hash(current)
-                ),
-            );
-            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
-        }
-
-        repair_decision = IpcRepairDecision::file_read(current.to_string());
-        if let Some(lines) = normalize_prefix_lines
-            && !lines.is_empty()
-        {
-            let normalized =
-                normalize_exchange_prefixes_for_targets(&repair_decision.snapshot_content, lines);
-            if normalized != repair_decision.snapshot_content {
-                repair_decision = IpcRepairDecision::content_ours_prefix_fallback(
-                    normalized,
-                    current.to_string(),
+            if let Some(repaired_current) =
+                materialize_response_in_current_exchange(current, expected_response)
+            {
+                log_ipc_proof_failure(
+                    file,
+                    "socket_already_applied",
+                    Some(patch_id),
+                    "disk_missing_response_probe",
+                    "content_ours_snapshot_visible_response_repair",
+                    &format!(
+                        "response_sha256={} current_len={} current_hash={} repaired_len={} repaired_hash={}",
+                        crate::ops_log::content_hash(expected_response),
+                        current.len(),
+                        crate::ops_log::content_hash(current),
+                        repaired_current.len(),
+                        crate::ops_log::content_hash(&repaired_current)
+                    ),
+                );
+                guard_visible_write_idle_and_current(
+                    file,
+                    "socket_already_applied_missing_disk_response",
+                    current,
+                )?;
+                atomic_write_pub(file, &repaired_current)?;
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_already_applied_missing_disk_response_repaired file={} patch_id={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
+                        file.display(),
+                        patch_id,
+                        repaired_current.len(),
+                        crate::ops_log::content_hash(&repaired_current),
+                        ours.len(),
+                        crate::ops_log::content_hash(ours)
+                    ),
+                );
+            } else {
+                log_ipc_proof_failure(
+                    file,
+                    "socket_already_applied",
+                    Some(patch_id),
+                    "disk_missing_response_probe",
+                    "file_ipc_fallback",
+                    &format!(
+                        "response_sha256={} current_len={} current_hash={}",
+                        crate::ops_log::content_hash(expected_response),
+                        current.len(),
+                        crate::ops_log::content_hash(current)
+                    ),
+                );
+                return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+            }
+        } else {
+            repair_decision = IpcRepairDecision::file_read(current.to_string());
+            if let Some(lines) = normalize_prefix_lines
+                && !lines.is_empty()
+            {
+                let normalized = normalize_exchange_prefixes_for_targets(
+                    &repair_decision.snapshot_content,
                     lines,
                 );
+                if normalized != repair_decision.snapshot_content {
+                    repair_decision = IpcRepairDecision::content_ours_prefix_fallback(
+                        normalized,
+                        current.to_string(),
+                        lines,
+                    );
+                }
             }
-        }
 
-        let before_response_dedupe = repair_decision.snapshot_content.clone();
-        let response_deduped =
-            dedupe_consecutive_response_blocks(&repair_decision.snapshot_content, file);
-        if response_deduped != repair_decision.snapshot_content {
-            repair_decision =
-                repair_decision.apply_ipc_dedupe(response_deduped, before_response_dedupe);
-        }
+            let before_response_dedupe = repair_decision.snapshot_content.clone();
+            let response_deduped =
+                dedupe_consecutive_response_blocks(&repair_decision.snapshot_content, file);
+            if response_deduped != repair_decision.snapshot_content {
+                repair_decision =
+                    repair_decision.apply_ipc_dedupe(response_deduped, before_response_dedupe);
+            }
 
-        let pre_dedupe_snap = repair_decision.snapshot_content.clone();
-        let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
-            file,
-            baseline,
-            &repair_decision.snapshot_content,
-            "socket_already_applied_disk",
-        )?;
-        if dedupe_repair {
-            repair_decision = repair_decision.apply_ipc_dedupe(effective_snap, pre_dedupe_snap);
-        } else {
-            repair_decision.snapshot_content = effective_snap;
+            let pre_dedupe_snap = repair_decision.snapshot_content.clone();
+            let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
+                file,
+                baseline,
+                &repair_decision.snapshot_content,
+                "socket_already_applied_disk",
+            )?;
+            if dedupe_repair {
+                repair_decision = repair_decision.apply_ipc_dedupe(effective_snap, pre_dedupe_snap);
+            } else {
+                repair_decision.snapshot_content = effective_snap;
+            }
         }
     }
 
@@ -22645,7 +22702,7 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn already_applied_socket_missing_disk_response_requests_file_fallback() {
+    fn already_applied_socket_missing_disk_response_repairs_visible_without_file_fallback() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
@@ -22657,6 +22714,12 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "<!-- /agent:exchange -->\n"
         );
+        let stale_disk_with_live_prompt = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ Follow-up typed while closeout saved\n",
+            "<!-- /agent:exchange -->\n"
+        );
         let content_ours = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
@@ -22664,8 +22727,17 @@ mod submodule_patch_routing_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
+        let repaired_visible = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ Follow-up typed while closeout saved\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
         fs::write(&doc, baseline).unwrap();
         crate::snapshot::save(&doc, baseline).unwrap();
+        fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
@@ -22677,11 +22749,23 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
         assert_eq!(
             crate::snapshot::load(&doc).unwrap().as_deref(),
-            Some(baseline),
-            "missing disk response must not save stale content_ours as the snapshot"
+            Some(content_ours),
+            "missing disk response must keep the committed snapshot at agent-owned content_ours"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            repaired_visible,
+            "visible repair must add the response without deleting the live follow-up prompt"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_missing_disk_response_repaired")
+                && log.contains("recovery=content_ours_snapshot_visible_response_repair")
+                && !log.contains("ipc_socket_already_applied_fallback_to_file_ipc"),
+            "missing-response already_applied must not reapply through file IPC:\n{log}"
         );
     }
 

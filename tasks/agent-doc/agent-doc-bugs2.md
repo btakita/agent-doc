@@ -149,18 +149,57 @@ CI:
 - `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:f9e78ec4 -->
+Fixed the response-commingling root cause and pushed it.
+
+> **Queue prompt:**
+>
+> :pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).
+
+
+Root cause: the already-committed/no-op closeout path only restored worktree drift when the live file matched `HEAD` modulo transient boundary / `(HEAD)` heading markers. The live failure was different: a stale agent-owned editor/cache replay collapsed the already-committed `#queueeditloss` response into the previous `#vbc1` response block, then left that malformed exchange in the worktree. Since the committed snapshot still matched `HEAD`, `commit` classified the malformed exchange as later `working_tree_edits` and intentionally left it uncommitted. The next turn then picked that malformed exchange up as a fresh diff.
+
+What changed:
+- Added a no-op closeout repair in `agent-doc-orchestration/src/git.rs` for stale agent response collapse.
+- The detector is intentionally narrow: the current `agent:exchange` must contain no line outside the committed `HEAD` exchange after transient marker / response-heading attribution normalization, at least one committed `### Re:` heading must be missing, and the current exchange must still contain a blockquoted queue prompt for the missing response id.
+- The repair replaces only the corrupted `agent:exchange` component from `HEAD`; independent local queue/backlog prompt drift outside exchange remains visible and uncommitted for the next cycle.
+- The repair refreshes editor/CRDT sidecars and logs `stale_agent_response_collapse_cleanup ... preserved_local_drift=<bool>` so future incidents are provable from `ops.log`.
+- Updated `SPEC.md` to make the exchange-collapse no-op repair contract explicit.
+
+Live proof on this document:
+- After installing the fixed binary, `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md` repaired the stale exchange and logged `stale_agent_response_collapse_cleanup file=tasks/agent-doc/agent-doc-bugs2.md basis=head preserved_local_drift=true`.
+- The committed `#queueeditloss` response is again a separate `### Re: #queueeditloss — gpt-5` block.
+- The newer JB submit-diagnostics queue prompt was preserved as local queue drift instead of being overwritten by the exchange repair.
+
+Verification:
+- `cargo test -p agent-doc-orchestration commit_already_current_repairs_stale_agent_response_collapse_preserving_queue_follow_up` passed.
+- `cargo test -p agent-doc-orchestration commit_already_current_repairs_response_heading_attribution_drift` passed.
+- `cargo test -p agent-doc-orchestration commit_identifies_post_commit_local_working_tree_edits` passed.
+- `cargo test -p agent-doc-orchestration commit_already_current_repairs_transient_working_tree_churn` passed.
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
+- `cargo fmt --check -- agent-doc-orchestration/src/git.rs` passed.
+- `git diff --check -- agent-doc-orchestration/src/git.rs SPEC.md` passed.
+- `make check` passed: clippy, 4266 nextest tests, doctests, and the ignored medium closeout sim. Existing unrelated warnings remain in `agent-doc-core` for an unused test import and duplicated `#[test]` attributes.
+- `make install` passed and updated both `/home/brian/.cargo/bin/agent-doc` and `libagent_doc-0.34.0.so`.
+
+Commits pushed:
+- `btakita/agent-doc@99ad5ab6` (`fix: repair stale response collapse on noop closeout`)
+- `btakita/agent-loop@049caa7e2` (`chore: update agent-doc submodule`)
+
+CI:
+- `btakita/agent-doc` CI run `27358784946` for `99ad5ab6` was `in_progress` when checked.
+- `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:90984a1a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#jblive160]~~
-- ~~[#queueeditloss]~~
-- ~~[#eqrecovery]~~
-- ~~:round_pushpin: [#opstdout]~~
-- :pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).
+- ~~:pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).~~
+- :pushpin: JB `Run Agent Doc` on a Codex session inputs into the prompt into Codex but does not submit the prompt to Codex. I have to manually submit the prompt in Codex (Press Enter). Please add diagnostics to all agent tmux interactions, such as fetching the tmux content, to log whether or not the prompt was actually submitted. If not submitted, this should be logged so we can tell if the system is behaving correctly. This should show up as an issue when reviewing logs. Keep documentation on tmux integrations with the various agents (Claude Code, Codex, Opencode). What works and what does not work.
 - :round_pushpin: [#fencestrip]
+- do [#jblive160]
 <!-- /agent:queue -->
 ###
 <!--

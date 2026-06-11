@@ -157,7 +157,6 @@ Commits pushed:
 CI:
 - `btakita/agent-doc` CI run `27357648241` for `f33c662c` was `in_progress` at the last poll.
 - `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
-- `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
 - `btakita/agent-doc` CI run `27358784946` for `99ad5ab6` was `in_progress` when checked.
 - `btakita/agent-loop@049caa7e2` (`chore: update agent-doc submodule`)
 - `btakita/agent-doc@99ad5ab6` (`fix: repair stale response collapse on noop closeout`)
@@ -180,7 +179,50 @@ CI:
 - Added a no-op closeout repair in `agent-doc-orchestration/src/git.rs` for stale agent response collapse.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:712fdc39 -->
+
+### Re: #fencestrip — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#fencestrip]
+
+
+> **Queue prompt:**
+>
+> [#fencestrip]
+
+Fixed the code-fence stripping path and pushed the change.
+
+Root causes:
+- Append-mode overlap stripping treated an identical trailing/leading code fence delimiter as duplicate prompt text, so a response starting with a bare fence after a fenced prompt could lose its opening delimiter.
+- Duplicate-prompt repair counted fenced prompt lines as prompt reconciliation candidates, so repair replay could remove response fence delimiters as apparent duplicates of the prompt fences.
+
+What changed:
+- `strip_leading_overlap` now treats markdown fence delimiters as structural and never strips them as overlap.
+- Exchange prompt reconciliation now ignores code-fence delimiters and fenced interiors before duplicate prompt repair decisions.
+- Added regressions for template/finalize append, native IPC apply, IPC patch JSON payloads, repair replay, and compact exchange summaries.
+- Removed two accidental duplicate `#[test]` attributes in the touched template test module.
+
+Verification:
+- `cargo test -p agent-doc-core code_fence`
+- `cargo test -p agent-doc-orchestration code_fence`
+- `cargo test -p agent-doc-core apply_mode_append_strips_leading_overlap`
+- `cargo fmt --check`
+- `git diff --check -- agent-doc-core/src/template.rs agent-doc-core/src/ffi.rs agent-doc-orchestration/src/write.rs agent-doc-orchestration/src/repair.rs agent-doc-orchestration/src/compact.rs`
+- `make check` passed locally: clippy, 4,275 nextest tests, doctests, and the ignored medium closeout sim.
+- `make install` passed and installed the fixed CLI/shared library.
+- `btakita/agent-doc` CI run `27361565263` passed for `d5729768`.
+
+Commits pushed:
+- `btakita/agent-doc@d5729768` (`fix: preserve response code fences`)
+- `btakita/agent-loop@847caaf7f` (`chore: update agent-doc submodule`)
+
+Notes:
+- The parent repo has no workflow named `CI`, so there was no parent CI run to check by that name.
+- Remaining local dirty files are unrelated pre-existing workspace/submodule changes and were not staged for this fix.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:43759b60 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -188,7 +230,7 @@ Escalation: none. Confidence: high.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: The response is still being commingled with previous responses...with parts of the commingled response not committed...which is picked up as a diff in the next turn. Please fix root cause(s).~~
 - ~~:pushpin: JB `Run Agent Doc` on a Codex session inputs into the prompt into Codex but does not submit the prompt to Codex. I have to manually submit the prompt in Codex (Press Enter). Please add diagnostics to all agent tmux interactions, such as fetching the tmux content, to log whether or not the prompt was actually submitted. If not submitted, this should be logged so we can tell if the system is behaving correctly. This should show up as an issue when reviewing logs. Keep documentation on tmux integrations with the various agents (Claude Code, Codex, Opencode). What works and what does not work.~~
-- :round_pushpin: [#fencestrip]
+- ~~:round_pushpin: [#fencestrip]~~
 - do [#jblive160]
 <!-- /agent:queue -->
 ###
@@ -220,7 +262,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
-- [ ] [#fencestrip] Reproduce and fix the code-fence stripping path so agent-doc preserves fenced blocks across finalize, compaction, IPC, and repair.
 <!-- /agent:backlog -->
 
 ## Review

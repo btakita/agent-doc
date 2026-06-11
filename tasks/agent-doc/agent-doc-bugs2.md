@@ -139,19 +139,103 @@ I dug into both before touching code, and the honest finding is that neither is 
 - Plans committed (`dbf98dbd7`); agent-doc submodule clean on `origin/main`.
 
 I'm not auto-looping (real prompts from you, queue paused). Tell me the compact direction and/or drop the repro log and I'll move.
-<!-- agent:boundary:9bcc5ef7 -->
+### Re: do #kp5z + do #w42v — both shipped per your decisions — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#kp5z]
+
+
+You confirmed both directions, so I implemented them. Committed `7b6f022e`, pushed to `origin/main`, binaries + cdylib reinstalled.
+
+**`#w42v` (Compact File Cache Conflict) — fixed, gated for your live check.** `compact::apply_compacted_document` (the single replacement boundary for all compact paths) now calls `write::try_compact_editor_converge` first: when a JB/VS Code listener is active it converges the compacted content through **component `op:replace` patches** (the `#q7jm` way — never `fullContent`) and verifies the editor ack matches the compacted target, logging `compact_writeback transport=editor_ipc`. The guarded direct write stays the fail-safe (no listener / no delta / no-or-mismatched ack / send failure → `transport=disk_fallback reason=…`), so compaction never silently drops content. The spec mandated guarded-direct-write for compact, so I updated `07-closeout-commands.md` too; the `fullContent` prohibition stays intact (I use component patches, which the spec *prefers*). `make check` green; new test `try_compact_editor_converge_falls_back_to_disk_without_listener`. **Gated** awaiting your live JB check: `Compact Exchange` with the buffer open should no longer raise `File Cache Conflict`; `ops.log` shows `compact_writeback transport=editor_ipc`.
+
+**`#kp5z` (queue flood) — dispatch-source logging shipped (your chosen first step).** `project_controller::authorize_dispatch` (the single production funnel every continuation dispatch passes through) now logs `queue_dispatch_invoked file=… pane=… generation=… command_kind=… payload=…` on every call — pure observability, no behavior change. **Next:** resume the queue briefly to reproduce, and I'll read `ops.log` to pin which `command_kind` re-fires `dispatch` while the pane is mid-turn, then write the pane-busy/dedupe gate. Stays the top actionable item.
+
+**Captured your new requests** (all big, all IPC-class — not safe to attempt in this paused/unstable session):
+- **`#ipcdrift`** — you report drift *continues* after the single-Project-Pane-Process / 08b migration that was supposed to root-fix it. Identify the races, fix the root cause.
+- **`#stuckhandoff`** — wedged `controller serve --handoff-state preparing` procs survive an IDE restart and fight the buffer (multi-owner race on `ipc.sock`). Your embedded diagnosis (kill wedged → respawn clean) is captured; the durable ask is binary self-mitigation (auto-reap wedged `preparing` controllers).
+- **`#lazilyup`** — upgrade lazily-rs (the build already resolved `lazily 0.10.3`; I left that Cargo.lock bump unstaged as out-of-scope for this commit).
+
+**Honest flag:** `#ipcdrift` / `#stuckhandoff` mean the 08b migration did **not** fully close the drift — these deserve a dedicated, stable (non-paused, fresh-binary) turn, not a blind change while the IPC is actively misbehaving. Recommend recycling the wedged controllers first (`make install` then `pkill -f 'agent-doc controller serve --project-root …'`) so the next turn runs on clean controllers + the fresh binary.
+
+**State:** queue still paused (flood mitigated); `7b6f022e` on `origin/main`; review has `#2v7b`, `#qt32`, `#w42v` (all operator-drive live proofs). Not auto-looping — paused queue, new heavy requests, and live verification needed.
+<!-- agent:boundary:badc5886 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#kp5z]
+- ~~:round_pushpin: do [#kp5z]~~
+- The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: I typed in an unrelated queue item into this queue and the queue stalled.
+- Upgrade lazily-rs + tsift-* dependencies.
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
 [route] target tmux session: 13
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
+```
+---
+What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
+```
+❯ How do I recover from the IPC-drift? Restart Idea?
+● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
+  helped at all. Let me show you why with the live state.
+● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+      echo "=== who holds the sockets right now ==="…)
+  ⎿  === who holds the sockets right now ===
+     --- .agent-doc/ipc.sock ---
+     COMMAND     PID  USER  FD   TYPE             DEVICE SIZE/OFF       NODE NAME
+     … +86 lines (ctrl+o to expand)
+● Now I have ground truth (my earlier ps | grep idea missed it — RTK/sandbox filtering). The picture is clearer and
+  more useful than "restart IDEA":
+  Two writers are fighting over your doc:
+  1. IDEA holds ipc.sock in LISTEN mode — PID 2144231, FD 325u. It acks its editor buffer as authoritative, which is
+  how content_ours keeps winning.
+  2. Two agent-doc controller serve procs are wedged in --handoff-state preparing — boost-client PID 3767411 and
+  superproject PID 3691684. That's a crashed/interrupted controller handoff; those stuck controllers are the active IPC
+  writers reverting your edits. (The /tmp/adrepro7 one is an unrelated test repo — ignore.)
+  So restarting IDEA is the blunt instrument, not the right first move — it releases ipc.sock, but the wedged
+  controllers are separate processes parented to init that survive an IDE restart, so a restart alone won't fix the
+  re-winning.
+  Let me clear the wedged controllers now (they're lazy-launched and respawn clean on the next agent-doc invoke):
+● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+      kill 3767411 3691684 2>&1 && echo "killed wedged handoff controllers 3767411 (boost-client) + 3691684 (a…)
+  ⎿  killed wedged handoff controllers 3767411 (boost-client) + 3691684 (agent-loop)
+     === remaining controllers ===
+     brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
+     … +8 lines (ctrl+o to expand)
+     … +8 lines (ctrl+o to expand)
+● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
+  (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
+  open; it's no longer fighting a stuck handoff.
+  So here's the actual answer to your question:
+  No — don't restart IDEA (it's the blunt instrument)
+  The drift this session wasn't caused by IDEA per se — it was two agent-doc controller serve procs wedged mid-handoff
+  (--handoff-state preparing), which survive an IDE restart anyway. I just killed them; the problem is cleared.
+  What causes IPC drift
+  A multi-owner race on .agent-doc/ipc.sock:
+  - IDEA holds the socket (LISTEN) and acks its editor buffer (content_ours) as the source of truth.
+  - A crashed/interrupted controller handoff leaves controllers stuck in preparing; those keep writing the stale buffer
+  back over your edits → live_prompt_drift_after_preflight, postcommit_worktree_check match=false.
+  Recovery ladder — least → most invasive
+  1. Working tree only (the common case): finalize usually commits the correct thing to HEAD; only the on-disk copy
+  drifts. Verify with git show HEAD:<file> | grep -c '<Re: topic>' → if 1, just git checkout HEAD -- <file> then
+  agent-doc session-check. One command. (This is exactly what fixed today's cycle.)
+  2. Wedged controllers (what I did): kill the controller serve … --handoff-state preparing PIDs — they're lazy and
+  respawn clean on next invoke.
+  3. IDEA fighting the buffer: close or revert the doc tab in IDEA (File → Revert, or close the
+  tasks/monsterrodholders.md tab). This releases its claim on the buffer — don't kill the whole IDE.
+  4. Restart IDEA: only if 1–3 don't release ipc.sock. Overkill, and it won't clear wedged controllers.
+  The durable fix (recommended)
+  Preflight flagged a stale install: your ~/.cargo/bin agent-doc cdylib predates source commit e6f7538e. Wedged
+  preparing handoffs are exactly the bug class a stale binary produces — the controllers I just respawned are still on
+  the old binary. Rebuild and recycle them:
+  cd /home/brian/work/btakita/agent-loop/src/agent-doc && make install
+  # then recycle so they respawn on the fresh binary:
+  pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
+  Want me to run the make install rebuild now?
 ```
 ---
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
@@ -187,13 +271,16 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc/`/agent-doc` trigger submissions while the queue drains and during finalize-while-typing; operator must manually delete the stacked prompts. Cross-harness (Claude Code + Codex on lazily-rs.md). Suspected: continuation dispatcher does not gate on proven pane-idle / does not dedupe an already-pending trigger. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md. MITIGATED this turn via admin queue pause (receipt_id=5).
-- [ ] [#w42v] #jbcompactconflict JB Compact Exchange writes the full doc to disk (atomic_write_if_current_pub, compact_exchange_direct_write), diverging from the open JB buffer = File Cache Conflict. The full-content editor-IPC path for compact (try_ipc_full_content_operator_mutation, source label compact_exchange) EXISTS but is HARD-DISABLED by design (always returns Ok(false), reason=disabled_by_default). Making it CRDT-driven = re-implement+re-enable that path with a component-scoped exchange op:replace convergence (mirror #q7jm) + JB-side apply + live verify. NEEDS OPERATOR DIRECTION before implementation (it was disabled deliberately). Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
+- [ ] [#sjwm] #ipcdrift IPC drift (live_prompt_drift_after_preflight + postcommit_worktree_check mismatch) CONTINUES after the single Project-Pane-Process / 08b migration that was supposed to root-fix it. Identify the race conditions and fix the root cause. Tightly related to #stuckhandoff. Operator request 2026-06-11.
+- [ ] [#kqr6] #stuckhandoff Root-cause + binary self-mitigation: agent-doc controller serve procs wedge in --handoff-state preparing, survive an IDE restart, and keep writing the stale buffer back over edits (multi-owner race on .agent-doc/ipc.sock vs the IDEA listener). Operator diagnosis in queue: kill wedged preparing controllers + they respawn clean. Mitigation idea: binary auto-reaps wedged preparing controllers and self-heals on next invoke. Operator request 2026-06-11.
+- [ ] [#nzmc] #lazilyup Upgrade lazily-rs (tsift is upgrading; build already resolves lazily 0.10.3 in Cargo.lock). Verify build + commit the lock bump. Operator request 2026-06-11.
+- [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc trigger submissions while the queue drains / during finalize-while-typing. OBSERVABILITY SHIPPED (commit 7b6f022e): project_controller::authorize_dispatch now logs queue_dispatch_invoked file=.. pane=.. generation=.. command_kind=.. payload=.. on every dispatch (no behavior change). NEXT: operator runs one live repro, agent reads ops.log to pin which command_kind floods while pane is mid-turn, then writes the pane-busy/dedupe gate + SimWorld coverage. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#w42v] #jbcompactconflict JB Compact Exchange writes the full doc to disk (atomic_write_if_current_pub, compact_exchange_direct_write), diverging from the open JB buffer = File Cache Conflict. The full-content editor-IPC path for compact (try_ipc_full_content_operator_mutation, source label compact_exchange) EXISTS but is HARD-DISABLED by design (always returns Ok(false), reason=disabled_by_default). Making it CRDT-driven = re-implement+re-enable that path with a component-scoped exchange op:replace convergence (mirror #q7jm) + JB-side apply + live verify. NEEDS OPERATOR DIRECTION before implementation (it was disabled deliberately). Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
 - [/] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).
 <!-- /agent:review -->

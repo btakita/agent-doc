@@ -77,7 +77,42 @@ Proof:
 - CI: latest `btakita/agent-doc` CI for `96b0b47e` was `in_progress` when checked; the parent repo has no workflow named `CI`.
 - Confidence: high; local full-suite verification passed and the prior live-queue addition absorption invariant still passes.
 - Escalation: none.
-<!-- agent:boundary:d3093046 -->
+
+### Re: #eqrecovery
+
+> **Queue prompt:**
+>
+> [#eqrecovery]
+
+
+Closed out the equityfundingsource recovery churn item by pinning the no-op recovery shape that had caused repeated repair noise.
+
+What changed:
+- Added `committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery` in `agent-doc-orchestration/src/session_check.rs`.
+- Clarified the closeout spec in `specs/07-closeout-commands.md` so the equityfundingsource drained queue/backlog shape remains terminal when `last_event = commit_already_current`.
+- Bumped and documented the `guard_` hot-path token budget in `tests/test_cli.rs` for the new regression proof.
+
+I left production transition code unchanged because current `session_check` already has the safe behavior: no-response closeout recovery skips the `committed_without_response_body` guard when the terminal cycle event is the no-op `commit_already_current`. The new test models the live `tasks/professional/equityfundingsource.md` shape: drained queue/backlog, recorded queue-turn evidence, no `### Re:` body, and a no-op terminal commit. It asserts both the direct guard skip and full `inspect()` success, plus the skip log event.
+
+Verification:
+- `agent-doc session-check tasks/professional/equityfundingsource.md` passed: committed cycle `cycle-1781157916817` is `commit_already_current`.
+- `cargo test -p agent-doc-orchestration committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery` passed.
+- `cargo test -p agent-doc-orchestration committed_without_response_body_guard` passed.
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed after the audited budget bump.
+- `git diff --check -- agent-doc-orchestration/src/session_check.rs specs/07-closeout-commands.md tests/test_cli.rs` passed.
+- `make check` passed: clippy, 4265 nextest tests, doctests, and the ignored medium closeout sim. It still reports the existing warnings in `agent-doc-core` for an unused test import and duplicated `#[test]` attributes.
+- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/agent-doc`.
+
+Commits pushed:
+- `btakita/agent-doc@968aa2b3` (`test: pin equityfundingsource no-op queue recovery`)
+- `btakita/agent-loop@b61e8e551` (`chore: update agent-doc submodule`)
+
+CI:
+- `btakita/agent-doc` CI run `27356794224` for `968aa2b3` is queued as of the last poll.
+- `btakita/agent-loop` still has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:23fde425 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -85,7 +120,8 @@ Proof:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#jblive160]~~
 - ~~[#queueeditloss]~~
-- [#eqrecovery]
+- ~~[#eqrecovery]~~
+- The response is still being comingled with previous responses. Please fix root cause(s).
 - [#opstdout]
 - [#fencestrip]
 <!-- /agent:queue -->
@@ -118,7 +154,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jblive160] Install JetBrains plugin 0.2.160 and run a live stale-cache validation cycle; verify ops.log shows editor_convergence_succeeded or transport=editor_ipc and no auto_recovery_disk_write_during_ipc_listener for the successful path.
-- [ ] [#eqrecovery] Reproduce the equityfundingsource reentrant recovery churn and tighten the recovery/closeout state transition that caused repeated repair noise.
 - [ ] [#opstdout] Fix console stdout bleeding in front of the OpenCode TUI; capture a regression that proves agent-doc progress output cannot corrupt the foreground TUI surface.
 - [ ] [#fencestrip] Reproduce and fix the code-fence stripping path so agent-doc preserves fenced blocks across finalize, compaction, IPC, and repair.
 <!-- /agent:backlog -->

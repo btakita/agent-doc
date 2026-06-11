@@ -7009,6 +7009,23 @@ pub fn try_auto_recover_live_prompt_drift(
         return Ok(None);
     }
 
+    // `#jbstalecache`: this recovery path writes the adopted snapshot straight to
+    // the working-tree file. When the JetBrains IPC listener is active the editor
+    // may hold a dirty (operator-typing) buffer, so a bare disk write is exactly
+    // what raises IntelliJ's "Stale File Cache" / File Cache Conflict dialog and
+    // can drop the operator's in-flight typing. The disk write is unavoidable here
+    // (the IPC patch proof already failed this cycle — that is why we are
+    // recovering), but emit a structured marker so the operator's "check the logs"
+    // workflow can positively correlate a stale-cache dialog with this binary disk
+    // write instead of guessing. The plugin still reconciles the change through its
+    // memory/disk-conflict path; this marker is the binary-side proof of the
+    // trigger event.
+    let ipc_listener_active = file
+        .canonicalize()
+        .map(|c| resolve_ipc_project_root_pub(&c))
+        .map(|root| crate::ipc_socket::is_listener_active(&root))
+        .unwrap_or(false);
+
     atomic_write(file, snapshot).with_context(|| {
         format!(
             "live_prompt_drift auto-recover write for {}",
@@ -7018,13 +7035,24 @@ pub fn try_auto_recover_live_prompt_drift(
     crate::ops_log::log_op(
         file,
         &format!(
-            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={}",
+            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={} ipc_listener_active={}",
             file.display(),
             snapshot.len(),
             file_content.len(),
-            crate::ops_log::content_hash(snapshot)
+            crate::ops_log::content_hash(snapshot),
+            ipc_listener_active
         ),
     );
+    if ipc_listener_active {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "[jbstalecache] auto_recovery_disk_write_during_ipc_listener file={} snap_len={} — JetBrains stale-cache dialog risk if the editor buffer is dirty",
+                file.display(),
+                snapshot.len()
+            ),
+        );
+    }
     crate::flow::proof::log_flow_event(
         file,
         crate::flow::types::FlowEvent::new(
@@ -17370,6 +17398,23 @@ scratch
             fs::read_to_string(&doc).unwrap(),
             snapshot,
             "auto-recovery must write the adopted snapshot to disk"
+        );
+
+        // `#jbstalecache`: the recovery write records the IPC-listener state so the
+        // operator can correlate a stale-cache dialog with this disk write. No live
+        // listener exists in the test env, so the canonical marker reports
+        // `ipc_listener_active=false` and the dedicated stale-cache-risk line stays
+        // silent (it only fires when a listener is genuinely active).
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("live_prompt_drift_auto_recovered")
+                && ops_log.contains("ipc_listener_active=false"),
+            "recovery marker must record the IPC-listener state:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("[jbstalecache]"),
+            "the stale-cache-risk marker must stay silent without an active listener:\n{ops_log}"
         );
     }
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -158,25 +158,28 @@ Done — both are now gated `[/]` items in `agent:review`, each carrying the exa
 **On the queue note you pasted (monsterrodholders IPC drift):** it's the same drift class already tracked as `#mrhpcdrift2` in the backlog (socket-ACK / live-buffer / content_ours divergence) — additional confirmation, no new code this cycle (it needs the same live monsterrodholders edit-during-finalize proof). Its "close/revert in JetBrains, re-invoke /agent-doc" line is operational advice for *that* session, out of scope here. By replacing `#ktw8` / `#lvbremain` in the queue with this note you also killed the churn loop; I'm letting this free-text note strike the queue head on finalize, which empties and deactivates the queue.
 
 No JB plugin install needed this round — these are log-verification gates, not code changes.
-<!-- agent:boundary:494576b0 -->
+
+### Re: recovery — #ktw8 restored to review; ops-proof false-complete filed — opus-4-8
+
+> **Queue prompt:**
+>
+> [#mrhpcdrift2]
+
+
+Heads-up on what the binary did and how I corrected it:
+
+- When I gated **#ktw8** into review, preflight's **ops-proof auto-completion** immediately archived it to done (`auto_complete_ops_proof id=ktw8 evidence=commit`) — it saw the `submodule 1edb20d2` hash in the gate text and treated "code is committed" as proof. But #ktw8 is a **live-verify gate**: the commit is not the proof, an operator drive is. I've **restored #ktw8 to review** with no commit hash in its text, so the scanner won't re-complete it. **#lvbremain** was never hit (no commit hash in its text), so both gates are now back in `agent:review`.
+- Filed **#opsproofgate**: live-verify / operator-drive gates must be excluded from `evidence=commit` auto-completion — the log arbiter must be the actual structured `^[epoch]` marker, not a referenced commit.
+- Both gates read the **anchored** structured marker line as the arbiter (prose inside `queue_diff` doesn't count). Current verdict for both: **UNDRIVEN** (0 genuine emissions).
+- The `priority go` queue auto-pulled **#mrhpcdrift2** (a fresh-focused-session task) as the next head. I kept it open with a do-not-auto-drain note and **I'm not auto-looping**. Halt the queue (drop `go`) or run #mrhpcdrift2 in a fresh session when you're ready.
+
+Note: this doc's supervisor is rewriting the working tree on every commit (`postcommit_worktree_check match=false`); I recover via `git checkout HEAD` each cycle, but a fresh session for this doc is advisable.
+<!-- agent:boundary:05526ab9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-:pushpin: agent-doc monsterrodholders.md had an issue:
-```
-One bookkeeping note: the finalize hit an IPC drift (live_prompt_drift_after_preflight — the JetBrains buffer's stale
-copy won the working tree). HEAD committed correctly (response + #anchor-deploy reaped + queue head struck), but the
-buffer keeps re-winning), continuing to drain via preflight/finalize risks re-clobbering the clean commit. The
-remaining queue items are also mostly not auto-deployable — #hydroweb-size-specs is blocked on merchant content,
-#oos-inventory-decide is an operator call; only #pdp-upsells-deploy is a deploy-go-ahead like this one. Recommend:
-close/revert the doc in JetBrains, then re-invoke /agent-doc to resume the drain (I'll take #pdp-upsells-deploy
-next).
-```
-~~~
-- [#mrhpcdrift2]
 <!-- /agent:queue -->
 ###
 <!--
@@ -215,7 +218,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority --> 
-- [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Fresh focused session; plan tasks/agent-doc/plan-ipc-crdt-response-drift.md.
+- [ ] [#opsproofgate] agent-doc-bug: preflight review ops-proof auto-completion falsely completed a live-verify GATE (#ktw8) on evidence=commit — it treated a submodule/commit hash referenced in the gate text as proof and archived the UNDRIVEN item to done (auto_complete_ops_proof id=ktw8 surface=review evidence=commit, while ktw8 had 0 genuine structured [s760] clear-decision emissions). Fix: items tagged live-verify/operator-drive must be excluded from evidence=commit auto-completion; require the actual structured ops.log marker (anchored ^[epoch] line, NOT prose). Distinct from #zwn5 (queue-head strike disposition) and #x9ds (prose false-positive scan). Repro 2026-06-10 agent-doc-bugs2.md.
+- [ ] [#mrhpcdrift2] agent-doc-bug: root-cause the socket-ACK / live-buffer / content_ours divergence still reproducing post-08b-cutover (ipc_socket_already_applied_live_buffer_diverged x94, live_prompt_drift_after_preflight x400 on tasks/monsterrodholders.md). Reframe target to zero UNRECOVERED drift (clean detect+recover acceptable; silent loss is not). Add SimWorld regression coverage for the already-applied-diverged + content_ours recovery path. Operator proof = one live monsterrodholders edit-during-finalize cycle (agent reads ops.log). Plan tasks/agent-doc/plan-ipc-crdt-response-drift.md. (stays open: FRESH focused session ONLY — do NOT auto-drain here; the priority go queue auto-pulled this head into a degraded session where it should not run.)
 <!-- /agent:backlog -->
 
 ## Review

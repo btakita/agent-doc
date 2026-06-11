@@ -77,15 +77,43 @@ So a wedged `Preparing` controller has no detector, no reaper, and no process te
 6. **Observability.** `stale_preparing_controller_reaped pid=… generation=… age_secs=…` on each kill (+ a `…_skipped reason=lease_fresh|within_threshold` line) — the live-verify proof.
 
 **Status / scope.** This is a diagnostic turn; the fix is planned (`plan-stuck-handoff-reaper.md`, committed this cycle) but **must be implemented in a clean session** — this doc's controller is the exact process the reaper terminates, so it cannot land here. Slice B (queue-flood drain gate, `#kp5z`) is in the same plan. `#rtwbcast` stays queued for that clean session (SimWorld Slice 3 coverage already landed; production rung-4 + multi-editor live verify remain). Not auto-looping — the remaining queue is operator-drive / clean-session work.
-<!-- agent:boundary:026fbd48 -->
+
+### Re: Do we still need separate snapshot + baseline files? — opus-4-8
+
+Short answer: **you still need a committed *base* for the merge, but not as two hand-maintained files that can drift.** The snapshot and baseline are not parallel to the document model — they are its persisted ancestor — and the churn you see is exactly that ancestor going stale against the live buffer.
+
+**What each file is:**
+- **snapshot** (`.agent-doc/snapshots/<hash>.md`) — the last-committed doc copy. Preflight diffs the live doc against it to compute "what the user changed"; it is also the on-disk recovery source (`content_ours snapshot`).
+- **baseline** (`.agent-doc/baselines/<hash>.md`) — preflight's stable post-commit copy handed to `finalize --baseline-file` as the **3-way merge base**: `base=baseline`, `ours=editor buffer`, `theirs=agent patch`.
+
+**Why they conflict on realtime docs:** a 3-way/CRDT merge is only correct if the *base* is the true common ancestor. The `#rtwatch` root cause is that the base is read from **disk**, while the authoritative content is the **live IDEA buffer** (unsaved, `content_ours` over IPC). When the buffer holds unsaved edits the base lags → the merge mis-attributes your edits → File Cache Conflict, churn, postcommit drift. The defect is not "we keep a base" — it is "the base is a separately-persisted file read from disk instead of `newest-of(disk, buffer)`."
+
+**Can we use document + buffers + the model as the only truth?** Mostly yes, and both things the files provide are already covered without separate files:
+- **git HEAD is already the durable last-committed state** → it can be the merge base directly, no snapshot file to drift.
+- **the realtime model** (`realtime_model::current_doc(disk, buffer)`, `#rtwwire`) is the authoritative "current" → no baseline file.
+
+So the consolidation is: **base = git HEAD; current = realtime model; merge = CRDT.** That removes the two drift-prone files and makes git + buffers + the document model the single source of truth — extending `#rtwwire`/`#rtwfeed` and killing the stale-snapshot failure mode. It is also the right fix for your *"finalize should tolerate unrelated user edits"* ask: a correct `newest-of(disk, buffer)` base stops treating concurrent user edits as conflicts.
+
+**The honest caveat (why it is a migration, not a delete):** the snapshot/baseline also back paths git HEAD does **not** cover — HEAD is committed state only, but these hold *uncommitted in-flight cycle* state: recovery sidecars (`content_ours_snapshot_next_cycle`), `reset --from-current` rebuild, and hash-keyed cycle/capture state. Every read site has to be re-homed to either git HEAD (committed base) or the CRDT/realtime model (uncommitted current) before the files can be removed. I captured the audit + 5 slices in `tasks/agent-doc/plan-snapshot-baseline-consolidation.md` (committed this cycle); it must land in a clean session, not here.
+
+(The stuck-handoff question above was already answered and committed last cycle — not repeating it.)
+<!-- agent:boundary:48380261 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: :round_pushpin: [#rtwbcast]
 - [#rtwverify]. Use simworld tests
+- :pushpin: :round_pushpin: [#rtwbcast]
 - :round_pushpin: do [#kp5z]
+- :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
+---
+:pushpin: agent-doc monsterrodholders.md had an error:
+```
+  Process note: the finalize hit IPC drift (the JetBrains editor buffer briefly overwrote the working-tree file after
+  the commit). The commit itself was correct; I reconciled the working tree to HEAD and rebuilt the snapshot, and
+  session-check is green.
+```
 ---
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
@@ -93,7 +121,7 @@ So a wedged `Preparing` controller has no detector, no reaper, and no process te
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
 ```
 ---
-What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
+:pushpin: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
 ```
 ❯ How do I recover from the IPC-drift? Restart Idea?
 ● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
@@ -192,6 +220,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#snbc] [recommended] Consolidate the separate snapshot + baseline files into git HEAD (durable committed merge base) + the realtime document model (uncommitted current via realtime_model::current_doc), eliminating the two drift-prone on-disk files that cause File Cache Conflicts / churn on realtime docs. Root cause: the merge base is read from disk and lags the authoritative editor buffer (same defect as #rtwwire/#rtwfeed). NEEDS a read-site audit first (recovery sidecars, reset --from-current, hash-keyed cycle state hold uncommitted state git HEAD does not cover) — migration, not a one-line delete. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md.
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc trigger submissions during queue-drain / finalize-while-typing. NEW FINDING (this turn, fresh-binary session): the new in-process binary IS now running (ops.log: supervisor_host_gate hosting=in-process, generation 300) — prior cycles blamed a stale old-binary controller; that is no longer the blocker. The actual trigger-injection path is the SUPERVISOR idle_queue_watch_drain in start.rs (ops.log: idle_queue_watch_drain payload_kind=trigger submit_mode=tmux_literal_cr target=%123 reason=auto_trigger_inject), NOT project_controller::authorize_dispatch — that is why zero real queue_dispatch_invoked markers ever logged: the 7b6f022e observability was added to the wrong path. The real path ALREADY has the busy gate (idle_queue_drain_decision::SkipNotIdle / no-inject-into-active-turn), the dedup (SkipAlreadyDispatched), and real observability (log_idle_queue_drain_submit). REFINED ROOT-CAUSE HYPOTHESIS: dual drain owners — Claude /loop AND the supervisor idle_queue_watch_drain both inject agent-doc <FILE>, so triggers pile up in the live CC input queue. FIX TARGET: a self-driving-harness gate in idle_queue_drain_decision (skip supervisor inject when /loop is the active drain owner) — pure logic, unit-testable in start.rs. NEEDS a dedicated stable turn + live multi-process verify (cannot be confirmed from inside this affected session; supervisor races writes here). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.

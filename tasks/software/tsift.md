@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,6 +37,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): install/trust UX comparison; next-steps; graph evidence target resolution; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
+
+### Re: queue closeout recovery — gpt-5
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix tsift bugs?
+
+
+Closeout recovery note for the already-visible queue responses. `#tsbugidx` and `#tsbugcache` are answered above, the backlog is empty, and no new actionable items are being added.
+<!-- agent:boundary:4dbe22b2 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -6561,13 +6561,26 @@ fn rescue_from_stash(
     false
 }
 
-fn send_command_unchecked(
+/// Outcome of one direct-pane submit-acceptance poll window.
+struct DirectPaneAcceptance {
+    status: CommandDispatchStatus,
+    elapsed: Duration,
+    /// Whether the trigger text was still visible in the pane when the window
+    /// closed (only meaningful when `status == TimedOut`).
+    trigger_visible: bool,
+}
+
+/// Poll the pane capture until the trigger text is consumed or the acceptance
+/// window expires, logging the resulting submit observation. Pure detection —
+/// it never sends input — so callers can re-run it after a re-submit attempt.
+fn poll_direct_pane_acceptance(
     tmux: &Tmux,
     pane: &str,
-    file_path: &str,
+    file: &Path,
     harness: &HarnessConfig,
-) -> Result<CommandDispatchResult> {
-    let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
+    trigger: &str,
+    phase: &str,
+) -> DirectPaneAcceptance {
     let start = std::time::Instant::now();
     let timeout = direct_pane_submit_acceptance_timeout();
     // `#run-agent-doc-latency`: capture-then-sleep, not sleep-then-capture. A pane
@@ -6575,13 +6588,12 @@ fn send_command_unchecked(
     // overhead) instead of paying a full poll interval before the first check, and
     // a tighter poll shortens the acceptance floor for slower panes.
     let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
-    let file = Path::new(file_path);
     let mut last_capture: Option<(bool, usize, String)> = None;
     let mut capture_failed = false;
     while start.elapsed() < timeout {
         match sessions::capture_pane(tmux, pane) {
             Ok(content) => {
-                let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
+                let cmd_still_in_input = recent_lines_contain_trigger(&content, trigger);
                 let capture_hash = short_content_hash(&content);
                 let capture_len = content.len();
                 last_capture = Some((cmd_still_in_input, capture_len, capture_hash));
@@ -6593,7 +6605,7 @@ fn send_command_unchecked(
                         file,
                         pane,
                         harness,
-                        phase: "direct_pane_acceptance",
+                        phase,
                         observation: RouteSubmitObservation::Accepted,
                         trigger_visible: Some(false),
                         elapsed,
@@ -6601,10 +6613,11 @@ fn send_command_unchecked(
                         capture_hash,
                         proof: None,
                     });
-                    return Ok(CommandDispatchResult {
+                    return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
-                    });
+                        trigger_visible: false,
+                    };
                 }
             }
             Err(_) => {
@@ -6614,18 +6627,22 @@ fn send_command_unchecked(
         std::thread::sleep(poll_interval);
     }
     let elapsed = start.elapsed();
-    if let Some((trigger_visible, capture_len, capture_hash)) = last_capture.as_ref() {
+    let trigger_visible = last_capture
+        .as_ref()
+        .map(|(visible, _, _)| *visible)
+        .unwrap_or(false);
+    if let Some((visible, capture_len, capture_hash)) = last_capture.as_ref() {
         log_route_submit_observation(RouteSubmitObservationFacts {
             file,
             pane,
             harness,
-            phase: "direct_pane_acceptance",
-            observation: if *trigger_visible {
+            phase,
+            observation: if *visible {
                 RouteSubmitObservation::TriggerStillVisible
             } else {
                 RouteSubmitObservation::Accepted
             },
-            trigger_visible: Some(*trigger_visible),
+            trigger_visible: Some(*visible),
             elapsed,
             capture_len: Some(*capture_len),
             capture_hash: Some(capture_hash.as_str()),
@@ -6636,7 +6653,7 @@ fn send_command_unchecked(
             file,
             pane,
             harness,
-            phase: "direct_pane_acceptance",
+            phase,
             observation: RouteSubmitObservation::CaptureFailed,
             trigger_visible: None,
             elapsed,
@@ -6645,9 +6662,96 @@ fn send_command_unchecked(
             proof: None,
         });
     }
-    Ok(CommandDispatchResult {
+    DirectPaneAcceptance {
         status: CommandDispatchStatus::TimedOut,
         elapsed,
+        trigger_visible,
+    }
+}
+
+/// `#jbcodexsubmit`: decide whether a timed-out direct-pane submit warrants a
+/// one-shot bare `Enter` re-submit. The Codex TUI composer can leave the routed
+/// prompt drafted when the trigger text and its trailing carriage return arrive
+/// as one `send-keys` payload — the operator then has to press Enter manually.
+/// Scope strictly to Codex (claude/opencode submit behavior is untouched), only
+/// when the first attempt timed out with the trigger still visible.
+fn direct_pane_needs_codex_resubmit(
+    harness_binary: &str,
+    status: CommandDispatchStatus,
+    trigger_visible: bool,
+) -> bool {
+    harness_binary == "codex"
+        && status == CommandDispatchStatus::TimedOut
+        && trigger_visible
+}
+
+fn send_command_unchecked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<CommandDispatchResult> {
+    let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
+    let file = Path::new(file_path);
+    let first =
+        poll_direct_pane_acceptance(tmux, pane, file, harness, &trigger, "direct_pane_acceptance");
+    if first.status == CommandDispatchStatus::Accepted {
+        return Ok(CommandDispatchResult {
+            status: first.status,
+            elapsed: first.elapsed,
+        });
+    }
+
+    // Try exactly one re-submit so we never loop on a genuinely stuck pane.
+    if direct_pane_needs_codex_resubmit(&harness.binary, first.status, first.trigger_visible) {
+        crate::input_diag::log_text_submit(
+            Some(file),
+            "route.direct_pane_resubmit",
+            &format!("pane:{pane}"),
+            "",
+            Some(&harness.binary),
+            "routed_resubmit_enter_key",
+            "Enter",
+        );
+        if let Err(e) = crate::sessions::send_key(tmux, pane, "Enter") {
+            eprintln!(
+                "[route] warning: codex resubmit Enter failed for pane {}: {}",
+                pane, e
+            );
+        }
+        let second = poll_direct_pane_acceptance(
+            tmux,
+            pane,
+            file,
+            harness,
+            &trigger,
+            "direct_pane_resubmit_acceptance",
+        );
+        let result = if second.status == CommandDispatchStatus::Accepted {
+            "accepted"
+        } else {
+            "still_visible"
+        };
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_submit_resubmit file={} pane={} harness={} action=enter_key result={} elapsed_ms={}",
+                file.display(),
+                pane,
+                harness.binary,
+                result,
+                second.elapsed.as_millis()
+            ),
+        );
+        return Ok(CommandDispatchResult {
+            status: second.status,
+            elapsed: first.elapsed + second.elapsed,
+        });
+    }
+
+    Ok(CommandDispatchResult {
+        status: first.status,
+        elapsed: first.elapsed,
     })
 }
 

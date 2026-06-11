@@ -2698,6 +2698,41 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
 }
 
 #[test]
+fn direct_pane_codex_resubmit_only_on_timeout_with_trigger_visible() {
+    // `#jbcodexsubmit`: a Codex direct-pane submit that times out with the
+    // trigger still drafted in the composer earns exactly one bare-Enter
+    // re-submit.
+    assert!(direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Trigger consumed → no re-submit even on a timeout report.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        false
+    ));
+    // Accepted → already submitted, never re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::Accepted,
+        true
+    ));
+    // Other harnesses are untouched — only Codex needs the separate Enter event.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "claude",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    assert!(!direct_pane_needs_codex_resubmit(
+        "opencode",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+}
+
+#[test]
 fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
     let tracker = RoutedDispatchStartTracker::CodexHook {
         trigger: "agent-doc /tmp/task.md".to_string(),

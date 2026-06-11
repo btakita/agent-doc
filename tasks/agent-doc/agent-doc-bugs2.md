@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,6 +60,24 @@ I repaired the live backlog invariant by restoring `#lvbremain` to `agent:backlo
 
 ### Re: queue mirror recovery — gpt-5
 
+❯ > **Queue prompt:**
+❯ >
+❯ > The continuation prompt from the previous turn was entered into the codex input but not submitted. I had to manually submit the prompt.
+❯ > ```
+❯ >   :pushpin: Fix the root cause of the IPC drift.
+❯ >
+❯ >   Continue in this owner pane: answer the queue head, then persist with `agent-doc finalize tasks/agent-doc/agent-doc-
+❯ >   bugs2.md` or `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`. Do NOT run `agent-doc tasks/agent-doc/
+❯ >   agent-doc-bugs2.md` from this pane; that re-invokes the owner pane and hits the recursive-direct-invocation guard. Do
+❯ >   not send a final answer until `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md --codex-final-gate` passes.
+❯ > ```
+
+
+❯ > **Queue prompt:**
+❯ >
+❯ > :pushpin: Fix the root cause of the IPC drift.
+
+
 I repaired the document-state blocker. `#lvbremain` was already present in `tasks/agent-doc-bugs2.done.md`, so the live queue copy was a stale open mirror. I marked the queue-side copy complete; preflight then recognized it as already resolved from the done archive and drained the queue.
 
 No new implementation work was started in this recovery cycle. The document is back on the normal agent-doc closeout path.
@@ -69,24 +87,16 @@ No new implementation work was started in this recovery cycle. The document is b
 The IPC drift root-cause fix is implemented, installed, committed, and pushed. The earlier detailed response in this exchange has the full path/verification list; the durable code commits are `src/agent-doc` `5a2beca4` and superproject pointer `6f6ac7bcb`.
 
 I also consumed the follow-up queue note about the continuation prompt being entered into Codex input but not submitted. That is not the same root cause as this IPC convergence fix, so I captured it as a new backlog item instead of silently folding it into this code change.
-<!-- agent:boundary:c0d8e5ef -->
+
+### Re: Codex continuation final-gate — gpt-5
+
+Closed the current Codex continuation turn after the queue drain. The IPC drift fix remains the pushed `src/agent-doc` commit `5a2beca4` plus superproject pointer `6f6ac7bcb`; no additional code changes were made in this final-gate recovery closeout.
+<!-- agent:boundary:a62630b6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: Fix the root cause of the IPC drift.
----
-The continuation prompt from the previous turn was entered into the codex input but not submitted. I had to manually submit the prompt.
-```
-  :pushpin: Fix the root cause of the IPC drift.
-
-  Continue in this owner pane: answer the queue head, then persist with `agent-doc finalize tasks/agent-doc/agent-doc-
-  bugs2.md` or `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`. Do NOT run `agent-doc tasks/agent-doc/
-  agent-doc-bugs2.md` from this pane; that re-invokes the owner pane and hits the recursive-direct-invocation guard. Do
-  not send a final answer until `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md --codex-final-gate` passes.
-```
----
 <!-- /agent:queue -->
 ###
 <!--

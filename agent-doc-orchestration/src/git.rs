@@ -83,6 +83,7 @@
 //! - commit_skips_terminal_user_follow_up_noop_closeout: terminal committed cycle + later user follow-up → leave the prompt untouched without re-emitting closeout lifecycle bookkeeping
 //! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
 //! - commit_already_current_repairs_transient_working_tree_churn_refreshes_crdt_and_signal: no-op closeout cleanup also refreshes CRDT/editor-facing sidecars so stale transient churn cannot reappear from cached live state
+//! - commit_already_current_repairs_stale_agent_response_collapse_preserving_queue_follow_up: already-committed no-op closeout restores a collapsed committed exchange heading while preserving later queue prompt drift outside `agent:exchange`
 //! - verify_snapshot_committed_returns_committed_when_matching: snapshot matches HEAD → `Committed`
 //! - verify_snapshot_committed_returns_differs_when_snapshot_ahead: snapshot has content not in HEAD → `SnapshotDiffersFromHead`
 //! - verify_snapshot_committed_no_snapshot: no snapshot file → `NoSnapshot`
@@ -92,7 +93,7 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1859,6 +1860,13 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         snapshot_content = Some(cleaned);
         snapshot_matches_head = false;
     }
+    if snapshot_matches_head
+        && let Some(head) = head_doc.as_deref()
+        && let Some(repaired) =
+            repair_stale_agent_response_collapse_worktree(file, head, &file_content)?
+    {
+        file_content = repaired;
+    }
     let post_commit_local_drift = if snapshot_matches_head {
         head_doc
             .as_deref()
@@ -3122,6 +3130,159 @@ fn classify_post_commit_local_drift(
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
 }
 
+fn exchange_component(doc: &str) -> Option<crate::component::Component> {
+    crate::component::parse(doc)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "exchange")
+}
+
+fn first_hash_id(text: &str) -> Option<String> {
+    let mut chars = text.char_indices().peekable();
+    while let Some((_, ch)) = chars.next() {
+        if ch != '#' {
+            continue;
+        }
+        let mut id = String::new();
+        while let Some((_, next)) = chars.peek().copied() {
+            if next.is_ascii_alphanumeric() || next == '-' || next == '_' {
+                id.push(next);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn normalized_response_heading_key(line: &str) -> Option<String> {
+    let normalized = normalize_post_commit_re_heading_drift(line);
+    let trimmed = normalized.trim();
+    if trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalized_exchange_inventory_line(line: &str) -> Option<String> {
+    let normalized = normalize_post_commit_re_heading_drift(line);
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() || trimmed.starts_with("<!-- agent:boundary:") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn exchange_line_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for line in exchange
+        .lines()
+        .filter_map(normalized_exchange_inventory_line)
+    {
+        *counts.entry(line).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn current_exchange_is_committed_line_subset(head_exchange: &str, current_exchange: &str) -> bool {
+    let head_counts = exchange_line_counts(head_exchange);
+    let current_counts = exchange_line_counts(current_exchange);
+    if current_counts.is_empty() {
+        return false;
+    }
+    current_counts
+        .into_iter()
+        .all(|(line, count)| head_counts.get(&line).copied().unwrap_or(0) >= count)
+}
+
+fn exchange_has_blockquoted_prompt_for_id(exchange: &str, id: &str) -> bool {
+    let bracketed = format!("[#{id}]");
+    let bare = format!("#{id}");
+    exchange.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed
+            .strip_prefix('>')
+            .is_some_and(|rest| rest.contains(&bracketed) || rest.contains(&bare))
+    })
+}
+
+fn stale_agent_response_collapse_exchange(head_exchange: &str, current_exchange: &str) -> bool {
+    if normalize_post_commit_re_heading_drift(current_exchange)
+        == normalize_post_commit_re_heading_drift(head_exchange)
+    {
+        return false;
+    }
+    if !current_exchange_is_committed_line_subset(head_exchange, current_exchange) {
+        return false;
+    }
+
+    let head_headings: Vec<String> = head_exchange
+        .lines()
+        .filter_map(normalized_response_heading_key)
+        .collect();
+    let current_headings: HashSet<String> = current_exchange
+        .lines()
+        .filter_map(normalized_response_heading_key)
+        .collect();
+
+    head_headings.into_iter().any(|heading| {
+        !current_headings.contains(&heading)
+            && first_hash_id(&heading)
+                .as_deref()
+                .is_some_and(|id| exchange_has_blockquoted_prompt_for_id(current_exchange, id))
+    })
+}
+
+fn repair_stale_agent_response_collapse_doc(head_doc: &str, current_doc: &str) -> Option<String> {
+    if head_doc == current_doc {
+        return None;
+    }
+    let head_exchange = exchange_component(head_doc)?;
+    let current_exchange = exchange_component(current_doc)?;
+    if !stale_agent_response_collapse_exchange(
+        head_exchange.content(head_doc),
+        current_exchange.content(current_doc),
+    ) {
+        return None;
+    }
+    Some(current_exchange.replace_content(current_doc, head_exchange.content(head_doc)))
+}
+
+fn repair_stale_agent_response_collapse_worktree(
+    file: &Path,
+    head_doc: &str,
+    file_content: &str,
+) -> Result<Option<String>> {
+    let Some(repaired) = repair_stale_agent_response_collapse_doc(head_doc, file_content) else {
+        return Ok(None);
+    };
+
+    crate::write::atomic_write_pub(file, &repaired)?;
+    if repaired == head_doc {
+        crate::snapshot::save(file, head_doc)?;
+    }
+    refresh_live_closeout_sidecars(file, &repaired, true)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "stale_agent_response_collapse_cleanup file={} basis=head preserved_local_drift={}",
+            file.display(),
+            repaired != head_doc
+        ),
+    );
+    Ok(Some(repaired))
+}
+
 fn repair_clean_head_if_only_transient_worktree_drift(
     file: &Path,
     file_content: &str,
@@ -3131,6 +3292,11 @@ fn repair_clean_head_if_only_transient_worktree_drift(
     };
     if file_content == head_doc {
         return Ok(None);
+    }
+    if let Some(repaired) =
+        repair_stale_agent_response_collapse_worktree(file, &head_doc, file_content)?
+    {
+        return Ok(Some((Some(head_doc.clone()), repaired)));
     }
     if normalize_transient_agent_doc_markers(file_content)
         != normalize_transient_agent_doc_markers(&head_doc)
@@ -7032,6 +7198,165 @@ Done.
         assert_eq!(
             snap, committed,
             "snapshot should also return to committed HEAD"
+        );
+    }
+
+    #[test]
+    fn commit_already_current_repairs_stale_agent_response_collapse_preserving_queue_follow_up() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: #vbc1 next backlog — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> [#jblive160]\n\n",
+            "Backlog complete.\n\n",
+            "Proof:\n",
+            "- Confidence: high.\n",
+            "- Escalation: none.\n\n",
+            "### Re: #queueeditloss — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> [#queueeditloss]\n\n",
+            "Implemented queue fix.\n\n",
+            "Proof:\n",
+            "- Changed paths: `write.rs`.\n",
+            "- Verification: `make check`.\n",
+            "- Confidence: high.\n",
+            "- Escalation: none.\n",
+            "<!-- agent:boundary:head-boundary -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let drifted = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: #vbc1 next backlog — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> [#queueeditloss]\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> [#jblive160]\n\n",
+            "Backlog complete.\n\n",
+            "Proof:\n",
+            "- Confidence: high.\n",
+            "- Escalation: none.\n",
+            "Implemented queue fix.\n\n",
+            "Proof:\n",
+            "- Verification: `make check`.\n",
+            "- Changed paths: `write.rs`.\n",
+            "- Confidence: high.\n",
+            "- Escalation: none.\n",
+            "<!-- agent:boundary:live-boundary -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n",
+            "<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, drifted).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        let stale_crdt = crate::crdt::CrdtDoc::from_text(drifted).encode_state();
+        crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
+
+        let did_commit = commit(&doc).expect("stale response collapse should self-heal");
+        assert!(
+            !did_commit,
+            "repair should close as already committed and leave queue follow-up local"
+        );
+
+        let expected_working = committed.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n<!-- /agent:queue -->",
+        );
+        let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working, expected_working,
+            "only the stale exchange collapse should be restored; queue follow-up drift must remain visible"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap, committed,
+            "snapshot must stay on clean HEAD so the queue follow-up is not committed"
+        );
+
+        let crdt = crate::snapshot::load_crdt(&doc)
+            .unwrap()
+            .expect("CRDT state should be refreshed for the repaired visible document");
+        let crdt_text = crate::crdt::CrdtDoc::decode_state(&crdt).unwrap().to_text();
+        assert_eq!(
+            crdt_text, expected_working,
+            "CRDT state should match the repaired visible worktree, including preserved queue drift"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("stale_agent_response_collapse_cleanup file=")
+                && log.contains("preserved_local_drift=true"),
+            "repair should leave durable evidence that only the exchange collapse was cleaned:\n{log}"
         );
     }
 

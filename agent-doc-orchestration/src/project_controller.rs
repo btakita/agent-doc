@@ -2188,6 +2188,27 @@ pub fn authorize_dispatch(
     project_root: &Path,
     request: DispatchRequest,
 ) -> Result<DispatchAuthorization> {
+    // `#qflood`: every dispatch caller (route auto-start on file change, idle
+    // queue continuation, `/loop`) funnels through here. Log the invocation —
+    // command_kind / diagnostic_payload identify the caller — so an operator
+    // flood repro reveals which path re-invokes dispatch while the pane is
+    // mid-turn. Pure observability: no behavior change, paired with the existing
+    // dispatch receipt (the outcome) to show invoke→outcome per dispatch.
+    crate::ops_log::log_op(
+        &request.file,
+        &format!(
+            "queue_dispatch_invoked file={} pane={} generation={} command_kind={} payload={}",
+            request.file.display(),
+            request.pane_id,
+            request.generation,
+            request.command_kind,
+            request
+                .diagnostic_payload
+                .chars()
+                .take(160)
+                .collect::<String>(),
+        ),
+    );
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {

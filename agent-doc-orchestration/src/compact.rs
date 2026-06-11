@@ -324,12 +324,18 @@ fn apply_compacted_document(
     // malformed (#jb-compact-malformed-response-commit).
     validate_compacted_exchange(file, compacted)?;
 
-    crate::write::atomic_write_if_current_pub(
-        file,
-        compacted,
-        source_content,
-        "compact_exchange_direct_write",
-    )?;
+    // `#w42v`: when a JB editor listener is active, converge the compacted
+    // content through the editor (component `op:replace`) so it does not diverge
+    // from the open buffer and raise a `File Cache Conflict`. The guarded disk
+    // write stays the fail-safe (no listener / unconfirmed convergence).
+    if !crate::write::try_compact_editor_converge(file, compacted, source_content)? {
+        crate::write::atomic_write_if_current_pub(
+            file,
+            compacted,
+            source_content,
+            "compact_exchange_direct_write",
+        )?;
+    }
 
     snapshot::save(file, snapshot_content)?;
 

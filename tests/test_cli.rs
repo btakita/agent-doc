@@ -824,7 +824,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // adoption removes live-deleted baseline queue prompts instead of
         // resurrecting them; live additions remain covered by the existing
         // dropped-queue evidence path.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 33,
+        // +6 (#w42v) for the audited `compact_writeback ... transport=disk_fallback
+        // reason=<no_listener|no_component_delta|no_ack_content|ack_mismatch|no_ack|
+        // send_failed>` markers in `try_compact_editor_converge`. These are
+        // diagnostic disk-fallback reasons on the compact editor-IPC convergence
+        // path (not flow guards), each proving why compact fell back to the
+        // guarded disk write instead of converging through the editor.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 39,
         _ => 0,
     }
 }

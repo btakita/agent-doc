@@ -7348,6 +7348,153 @@ fn try_editor_converge_live_prompt_drift(
     }
 }
 
+/// `#w42v`: converge a compacted document through the editor instead of a direct
+/// disk write that diverges from the open JB buffer (`File Cache Conflict`).
+///
+/// Mirrors the `#q7jm` live_prompt_drift convergence: when a JB IPC listener is
+/// active, send component `op:replace` patches for the changed components
+/// (`exchange`, etc.) and verify the editor's ack content matches the compacted
+/// target. Returns `Ok(true)` when converged via editor IPC (the caller skips
+/// the disk write), `Ok(false)` to fall back to the guarded disk write (no
+/// listener, no delta, no/mismatched ack, or send failure). The disk write
+/// remains the fail-safe so compaction never silently drops content.
+pub fn try_compact_editor_converge(
+    file: &Path,
+    compacted: &str,
+    current_content: &str,
+) -> Result<bool> {
+    let Some(project_root) = file
+        .canonicalize()
+        .ok()
+        .map(|c| resolve_ipc_project_root_pub(&c))
+    else {
+        return Ok(false);
+    };
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "compact_writeback file={} transport=disk_fallback reason=no_listener",
+                file.display()
+            ),
+        );
+        return Ok(false);
+    }
+
+    let patches = live_prompt_drift_convergence_patches(current_content, compacted)?;
+    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, compacted);
+    if patches.is_empty() && frontmatter.is_none() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "compact_writeback file={} transport=disk_fallback reason=no_component_delta",
+                file.display()
+            ),
+        );
+        return Ok(false);
+    }
+
+    let canonical = file.canonicalize()?;
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let mut payload = serde_json::json!({
+        "type": "patch",
+        "file": canonical.to_string_lossy(),
+        "patches": patches,
+        "node_patches": [],
+        "unmatched": "",
+        "baseline": current_content,
+        "reposition_boundary": false,
+        "patch_id": patch_id.clone(),
+    });
+    if let Some(frontmatter) = frontmatter {
+        payload["frontmatter"] = serde_json::Value::String(frontmatter);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "compact_editor_convergence_attempt file={} patch_id={} patches={} frontmatter={}",
+            file.display(),
+            patch_id,
+            payload
+                .get("patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload.get("frontmatter").is_some(),
+        ),
+    );
+
+    match crate::ipc_socket::send_message(&project_root, &payload) {
+        Ok(Some(_ack)) => {
+            let sidecar = poll_ack_content_sidecar(
+                &project_root,
+                &patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )?;
+            let Some(recovered) = sidecar else {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "compact_writeback file={} patch_id={} transport=disk_fallback reason=no_ack_content",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                return Ok(false);
+            };
+            if crate::git::normalize_transient_agent_doc_markers(&recovered)
+                == crate::git::normalize_transient_agent_doc_markers(compacted)
+            {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "compact_writeback file={} patch_id={} recovered_len={} transport=editor_ipc",
+                        file.display(),
+                        patch_id,
+                        recovered.len()
+                    ),
+                );
+                Ok(true)
+            } else {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "compact_writeback file={} patch_id={} transport=disk_fallback reason=ack_mismatch recovered_len={} target_len={}",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        compacted.len()
+                    ),
+                );
+                Ok(false)
+            }
+        }
+        Ok(None) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "compact_writeback file={} transport=disk_fallback reason=no_ack",
+                    file.display()
+                ),
+            );
+            Ok(false)
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "compact_writeback file={} transport=disk_fallback reason=send_failed error={}",
+                    file.display(),
+                    err
+                ),
+            );
+            Ok(false)
+        }
+    }
+}
+
 fn live_prompt_drift_convergence_patches(
     file_content: &str,
     snapshot: &str,
@@ -17792,6 +17939,25 @@ scratch
                 .unwrap()
                 .contains("### Re: do #fix"),
             "replace payload should carry the recovered response body: {patches:?}"
+        );
+    }
+
+    #[test]
+    fn try_compact_editor_converge_falls_back_to_disk_without_listener() {
+        // `#w42v`: with no live JB IPC listener, compact convergence must report
+        // disk fallback (Ok(false)) so the caller does the guarded disk write —
+        // never silently skip the compaction.
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let current = drift_baseline();
+        let compacted = drift_content_ours();
+        std::fs::write(&doc, &current).unwrap();
+
+        let converged = try_compact_editor_converge(&doc, &compacted, &current).unwrap();
+        assert!(
+            !converged,
+            "without a live JB IPC listener, compact must fall back to the disk write"
         );
     }
 

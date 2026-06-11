@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -30,161 +30,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260610-235022.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260611-003800.md`*
 
 Compacted content:
-- Archived 11 response topic(s): do [#dav9]; do [#dsqa]; "complete all items, override the blockers, just finish"; 8 more
+- Archived 5 response topic(s): do [#q6js]; monsterrodholders.md IPC drift; #ktw8; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#q6js]. Pause before the finalize so I can drive the edits during finalize. #spec-test-build-install-commit-push
-### Re: do [#q6js] — build + install for the live zero-drift proof — opus-4-8
-
-> **Queue prompt:**
->
-> [#q6js]
-
-
-Closed the actionable gap for #q6js (the `build + install` leg of `#spec-test-build-install-commit-push`). The 08b removal-rung code, spec, and tests already landed at submodule `79d46c0b` and are pushed to `origin/main`; only the local install was stale.
-
-**Done this cycle:**
-- `make install` in `src/agent-doc` → replaced `~/.cargo/bin/agent-doc` (tmux binary), rebuilt the cdylib, and `agent-doc lib-install` refreshed `libagent_doc-0.34.0.so` (JB plugin mtime hot-reload).
-- Verified the `stale_install` warning is cleared — installed binary + cdylib now match source commit `79d46c0b`.
-- After that, the same document still logs `prompt_duplication_in_ack_content` at `1781135048`, `live_prompt_drift_after_preflight` at `1781135262` and `1781136313`, and `ipc_socket_already_applied_live_buffer_diverged` plus `crdt_merge_base_overlay_stale` at `1781135644` / `1781135645`.
-- GitHub Actions CI run `27315037356` passed after push, including remote `make check` and `make tmux-ci`.
-- `make install` passed.
-- `make build` passed.
-- `make check` passed via tsift digest-runner.
-- `cargo test -p agent-doc-core --quiet` passed via tsift digest-runner.
-- `cargo test -p agent-doc-core legacy_tilde_checkbox --quiet` passed.
-- `specs/pending-system.md`: documented the lazy-backfill invariant that `[~] [#id]` must preserve the existing id and must not get a prepended fresh `[ ] [#new]`.
-- Added parser and backfill regression tests for the exact broken shape: `- [~] [#q6js] ...` canonicalizes to `- [ ] [#q6js] ...` and contains only one hash token.
-- `agent-doc-core/src/pending.rs`: `parse_item_line` now treats legacy `[~]` task markers as open `[ ]` markers, so a following existing `[#id]` is parsed as the item id instead of being left in text for backfill to re-key.
-- `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` appears at `1781134502`, `1781134954`, and `1781136077`.
-
-**Live zero-drift proof (driven via this finalize):** this very `finalize` ran while you drove concurrent edits — the edit-during-finalize stress the proof needs. Post-finalize I check `ops.log` for `write_authority action=routed` + `plugin_watch_readonly` + `supervisor_host_gate hosting=in-process` and **zero** `ipc_socket_already_applied_live_buffer_diverged` / `live_prompt_drift_after_preflight` / `crdt_merge_base_overlay_stale` lines. Note: a supervisor started before the `make install` still runs the pre-`79d46c0b` binary — restart it for a valid proof.
-
-### Re: monsterrodholders.md IPC drift — gpt-5
-
-Captured the new pinned queue item: `monsterrodholders.md has IPC drift.` It is now part of the active queue after `#ktw8` and before `#blgmangle`.
-
-I treated this cycle as queue bookkeeping and response only. The frontmatter now reflects the active harness as `agent: codex`; no repo code changed, and I did not mark any backlog item done. Preflight also raised semantic-completion candidates for `test t`, `#lvbremain`, `#ktw8`, and `#blgmangle`; I left them open because those were candidate matches, not authoritative completions.
-
-Proof: changed path is this session document via finalize; commands run were `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, and `agent-doc plan`. No code-test suite was run because this cycle did not edit code, specs, tests, or instruction surfaces.
-
-### Re: #ktw8 — destructive `/clear` live-verify log check — gpt-5
-
-> **Queue prompt:**
->
-> [#ktw8]
-
-
-I re-checked the live proof for `#ktw8`. It is still **not complete**.
-
-**Verification result:** `.agent-doc/logs/ops.log` has exactly two `[s760]` hits, and both are `queue_diff_active_prompt_differs ... prompt_changes=["..."]` prose echoes from this document. There is still no genuine structured emission shaped like `[s760] clear-decision optIn=true ... clear=true`.
-
-**Code/logging status:** the marker path is still adequate for proof; the item is waiting on the operator-driven destructive path, not more agent code in this cycle. I did not run `make check` because I made no source changes.
-
-**Lifecycle:** `#ktw8` stays open with a narrowed pending edit. This is the correct non-completable operator-drive disposition: you drive a throwaway doc with `agent_doc_queue_context_reset: true` past the clear threshold, then I check ops.log for the genuine structured marker and close it only when it appears.
-
-**Commands run:** `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read`, `tsift status --json`, `git status --short`, targeted `rg` scans for `[s760]` / `clear-decision`, `agent-doc queue --help`, and archive/done-file checks for prior `#ktw8` disposition.
-
-Confidence: high. Escalation: do not auto-loop this head; another loop can only repeat the same log check until the operator drive happens.
-
-### Re: monsterrodholders.md IPC drift — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: monsterrodholders.md has IPC drift.
-
-
-I checked the actual `monsterrodholders.md` runtime evidence instead of treating this as queue bookkeeping. This is a real residual agent-doc bug, not a Monster Rod Holders content issue.
-
-**Finding:** it is the same editor-boundary IPC/CRDT drift family as the cut-over proof, and it is **not green** after the in-process supervisor marker. In `src/boost-client/.agent-doc/logs/ops.log`, `supervisor_host_gate ... hosting=in-process` appears at `1781134502`, `1781134954`, and `1781136077`, but drift continues after that: `live_prompt_drift_after_preflight` at `1781135262` and `1781136313`, `ipc_socket_already_applied_live_buffer_diverged` at `1781135644`, `crdt_merge_base_overlay_stale` at `1781135645`, and `postcommit_worktree_check ... match=false` at `1781135262`, `1781135645`, and `1781136314`.
-
-**Current recovery status:** `git -C src/boost-client status --short tasks/monsterrodholders.md` is clean, and the owner actor is alive/idle on pane `%115` with a healthy in-process supervisor. However, `agent_doc_session_check` for that document reports an interrupted `preflight_started` cycle and the next queue head `Add a strikethrough pricing for the father's day pricing.` I did not repair or finalize `monsterrodholders.md` from this pane; this cycle is for `agent-doc-bugs2.md`, and cross-document writes from the wrong pane are part of the failure class.
-
-**Disposition:** I added `#mrhipcdrift` to the backlog as the concrete residual bug. `#q6js` should not be considered a clean proof; the remaining failure is likely in live-buffer/CRDT queue-consume adoption or parent/submodule closeout ordering, not simply the old out-of-process supervisor.
-
-No source files changed and I did not run `make check`. Commands run included `agent_doc_preflight`/`plan`/`read`, targeted `rg` scans of root and `src/boost-client` ops logs, `agent-doc session status src/boost-client/tasks/monsterrodholders.md`, `agent_doc_session_check` for the monsterrodholders document, and focused git status/diff/log checks for `tasks/monsterrodholders.md`.
-
-### Re: monsterrodholders.md IPC drift — gpt-5
-
-This is related to the `#q6js` / IPC-CRDT cut-over family, but it is not resolved by the code that already landed. The Monster Rod Holders local ops log has post-cutover drift evidence after in-process hosting was active.
-
-Concrete evidence from `src/boost-client/.agent-doc/logs/ops.log`:
-- `supervisor_host_gate file=tasks/monsterrodholders.md hosting=in-process` appears at `1781134502`, `1781134954`, and `1781136077`.
-- After that, the same document still logs `prompt_duplication_in_ack_content` at `1781135048`, `live_prompt_drift_after_preflight` at `1781135262` and `1781136313`, and `ipc_socket_already_applied_live_buffer_diverged` plus `crdt_merge_base_overlay_stale` at `1781135644` / `1781135645`.
-
-So the right conclusion is: `#q6js` landed the authority cut-over, but the live zero-drift proof failed on `monsterrodholders.md`. I added new top backlog item `#mrhpcdrift` with the exact evidence and the next implementation target: root-cause the socket ACK / live-buffer / `content_ours` path after authority routing, add regression coverage, then build/install/commit/push from a fresh focused session.
-
-I did not modify source code in this cycle. Commands run: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read`, `agent_doc_session_check`, `tsift --envelope session-review`, and targeted `rg` scans over the root and Boost Client `.agent-doc` logs. Verification was log-based; no code suite was run because this cycle only triaged and captured the follow-up.
-Implemented and shipped the `#blgmangle` fix.
-
-What changed in `src/agent-doc` commit `843137c5` (`fix pending backfill legacy tilde ids`), pushed to `main`:
-
-- `agent-doc-core/src/pending.rs`: `parse_item_line` now treats legacy `[~]` task markers as open `[ ]` markers, so a following existing `[#id]` is parsed as the item id instead of being left in text for backfill to re-key.
-- Added parser and backfill regression tests for the exact broken shape: `- [~] [#q6js] ...` canonicalizes to `- [ ] [#q6js] ...` and contains only one hash token.
-- `specs/pending-system.md`: documented the lazy-backfill invariant that `[~] [#id]` must preserve the existing id and must not get a prepended fresh `[ ] [#new]`.
-
-Verification completed:
-
-- `cargo test -p agent-doc-core legacy_tilde_checkbox --quiet` passed.
-- `cargo test -p agent-doc-core --quiet` passed via tsift digest-runner.
-- `make check` passed via tsift digest-runner.
-- `make build` passed.
-- `make install` passed.
-- GitHub Actions CI run `27315037356` passed after push, including remote `make check` and `make tmux-ci`.
-
-I left unrelated existing/unowned dirt in the submodule untouched: `AGENTS.md` and an unstaged `agent-doc-orchestration/src/write.rs` change that appeared after the scoped commit. The root closeout should only carry the session document and the `src/agent-doc` submodule pointer update for `843137c5`.
-Confirmed. I saw the same failure shape in this session: the `#blgmangle` response had made it into a committed cycle, then the working tree showed an uncommitted delete/rewrite of that response after the late sibling-pointer finalize failure and recovery path.
-
-I captured it as new backlog item `#respdel`. The bug is not just cosmetic: `session-check` now reports `ipc_proof_insufficient` with `invariant=live_prompt_drift_after_preflight` for `cycle-1781137531085`, which is the same class of committed-content versus live-buffer/content_ours divergence we need to make atomic or recover without deleting/requoting committed exchange content.
-
-No source files changed in this cycle; verification was the live document/session state and `agent_doc_session_check` diagnostic.
-Recovery closeout for the prompt-tail artifact: the `❯ - supervisor_host_gate ...` lines are stale prompt-prefix artifacts from the failed closeout/recovery path, not a new source-code task.
-
-I captured the new actionable reports as backlog items: `#clearcodex` for `/clear` not firing between Codex queue turns, and `#jbstalecache` for JetBrains `Stale File Cache` dialogs plus lost typing. The committed-response/delete report is already captured as `#respdel`; the Monster Rod Holders drift items already exist as `#mrhipcdrift` / `#mrhpcdrift`.
-
-No source files changed in this recovery cycle. Verification was `agent-doc preflight`, `agent-doc repair --apply-recovery`, and `agent_doc_session_check` showing the unresolved prompt-tail condition before this closeout.
-<!-- no-queue-removal-guard -->
-Closed `#mrhipcdrift` as the code-fix and verification leg for the post-cutover Monster Rod Holders IPC/CRDT drift.
-
-> **Queue prompt:**
->
-> :round_pushpin: do [#mrhipcdrift]
-
-
-The relevant fix had already landed in `src/agent-doc` at `17c20732` (`fix: repair socket already-applied response drift`), and the root repo already points at that submodule commit. That patch changes the socket `already_applied` missing-disk-response path so it materializes the expected assistant response into the current visible `agent:exchange`, guards the visible write, keeps the committed snapshot on `content_ours`, and avoids falling back through stale file IPC.
-
-Verification I ran this cycle:
-
-- `cargo test -p agent-doc-orchestration already_applied_socket_missing_disk_response_repairs_visible_without_file_fallback --quiet` passed.
-- GitHub Actions CI run `27315421938` passed for `17c20732`, including remote `make check` and `make tmux-ci`.
-- `make install` passed via tsift digest-runner, refreshing the local binary/cdylib for the new source commit.
-
-I did not repair or drive the live `src/boost-client/tasks/monsterrodholders.md` session from this pane. The remaining live proof/repro is still represented by the separate open item `#mrhpcdrift`; `#mrhipcdrift` is complete as the implemented socket-ACK response-repair fix.
-
-Changed paths this cycle: no source edits by me; install artifacts only. Existing unrelated dirt remains in `src/agent-doc/AGENTS.md` and other root submodules. Confidence: medium-high. Escalation: use `#mrhpcdrift` for the live Monster Rod Holders proof if it still reproduces after the installed `17c20732` binary/cdylib.
-### Correction: #mrhipcdrift closeout — gpt-5
-
-The earlier `#mrhipcdrift` closeout understated this turn. I did make and ship source changes for the socket `already_applied` missing-disk-response path.
-
-Actual shipped work:
-- `btakita/agent-doc@17c20732` changes `agent-doc-orchestration/src/write.rs` so an `already_applied` socket ACK with a missing visible disk response materializes the expected response into the current `agent:exchange` under the visible-write guard, keeps the committed snapshot on `content_ours`, and avoids the stale file-IPC fallback.
-- `tests/test_cli.rs` carries the FlowCore hot-path guard budget audit for that visible-write guard reuse.
-- `btakita/agent-loop@5da9cc72` updated the `src/agent-doc` submodule pointer; current parent HEAD still records `src/agent-doc` at `17c20732` after concurrent session commits.
-
-Verification completed:
-- `cargo test -p agent-doc-orchestration already_applied_socket` passed.
-- `cargo test -p agent-doc-orchestration file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot` passed.
-- `cargo test -p agent-doc finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_not_duplicate_response` passed.
-- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed.
-- `make check` passed locally: clippy, 4,248 nextest tests, doctests, and the ignored medium SimWorld run.
-- `cargo build -p agent-doc` passed.
-- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/agent-doc`.
-- GitHub Actions `btakita/agent-doc` CI run `27315421938` passed, including remote `make check` and `make tmux-ci`.
-
-I left unrelated dirty work untouched, including `src/agent-doc/AGENTS.md` and the broader dirty root/submodule/task-doc state. `#mrhpcdrift` remains open as the separate live Monster Rod Holders proof/repro item if the product workflow still reproduces after the installed `17c20732` binary.
-<!-- agent:boundary:74c3c42f -->
+<!-- agent:boundary:d2de204d -->
 <!-- /agent:exchange -->
 
 ## Queue

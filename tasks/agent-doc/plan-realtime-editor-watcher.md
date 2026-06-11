@@ -25,6 +25,22 @@ Where the editor watcher is often more recent than the file on disk?... This
 system needs to act real-time... These updates should not cause performance
 issues with the rest of the project control pane."
 
+## Operator refinements (2026-06-11, live)
+
+- **"Reliable", not just "durable".** The pre-CPC dual-watcher implementation had
+  too many `File Cache Conflict`s. The target is **zero** File Cache Conflicts —
+  reliability is the acceptance bar, not merely surviving restart.
+- **Sync before apply.** The realtime document model must be **in sync with the
+  editor buffer (or disk when no editor has the file open) BEFORE applying
+  changes.** Reconcile-then-write, never write-against-stale.
+- **Multi-editor CRDT broadcast (expands rung 2/3).** If the file changes on disk
+  OR another editor's buffer changes it, the realtime model updates and the
+  change is **broadcast to all editor buffers and merged via CRDT**. With the
+  same agent-doc open in JB and VS Code, editing either buffer must show in the
+  other — with no `File Cache Conflict`. So the model is not just a read
+  authority; it is the convergence point that fans changes back out to every
+  open buffer.
+
 ## Design (FFI-first, per CLAUDE.md Shared Foundation pattern)
 
 1. **Editor watcher (realtime model feed).** The IDEA/VS Code plugin already

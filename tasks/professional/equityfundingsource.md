@@ -178,14 +178,14 @@ This queue item used `#spec-test-commit-push`, so I did not deploy a new Worker.
 
 No new actionable follow-up items were found for the backlog.
 No new queue item was present. Preflight repaired and committed the recovered closeout, drained the leftover `deploy` queue token, and reported no remaining document changes.
-<!-- agent:boundary:8be2f0bc -->
+<!-- agent:boundary:7ca7d959 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -36,7 +36,7 @@ EFS repo main: EFS `56cd057` adds Deal Pipeline needs-attention card aging badge
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a96c27c1 -->
+<!-- agent:boundary:a34481a5 -->
 <!-- /agent:exchange -->
 ###
 <!--

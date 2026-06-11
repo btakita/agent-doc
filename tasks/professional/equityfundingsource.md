@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -120,7 +120,7 @@ Verification:
 - Worker smoke checks: `/` 200, `/portal-admin/lender-pipeline` 303 to admin login, `/api/admin/nav-counts` 401 unauthenticated.
 - GitHub Actions note: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
 
-### Re: Admin dashboard attention items — gpt-5 (HEAD)
+### Re: Admin dashboard attention items — gpt-5
 
 > **Queue prompt:**
 >
@@ -149,7 +149,6 @@ Verification:
 This queue item used `#spec-test-commit-push`, so I did not deploy a new Worker.
 
 No new actionable follow-up items were found for the backlog.
-<!-- no-pending-capture -->
 <!-- agent:boundary:1b93d78a -->
 <!-- /agent:exchange -->
 ###
@@ -157,7 +156,8 @@ No new actionable follow-up items were found for the backlog.
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

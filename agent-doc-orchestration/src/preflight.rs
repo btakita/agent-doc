@@ -5737,15 +5737,16 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 /// `file` by queue maintenance.
 ///
 /// Queue maintenance writes the corrected queue body, opening-tag `auto`
-/// attribute, and `queue_active:` frontmatter to disk + snapshot. When a live
+/// attribute, and `queue:` frontmatter to disk + snapshot. When a live
 /// IPC listener owns the document it keeps its own working buffer; without this
-/// push it overwrites the disk write on its next flush — re-adding `auto` and
-/// `queue_active: true` — and the snapshot/HEAD drift regenerates on every
-/// preflight (`#adoc-queue-ipc-buffer-divergence`). A content-only IPC patch
-/// cannot converge an opening-tag attribute or frontmatter, so we send the
-/// dedicated convergence message carrying the desired `auto` state plus the
-/// `queue_active` frontmatter. Best-effort: a missing listener or send failure
-/// is logged, never fatal — the disk/snapshot write remains the source of truth.
+/// push it overwrites the disk write on its next flush — re-adding stale queue
+/// body lines, `auto`, and `queue_active: true` — and the snapshot/HEAD drift
+/// regenerates on every preflight (`#adoc-queue-ipc-buffer-divergence`). A
+/// content-only IPC patch cannot converge an opening-tag attribute or
+/// frontmatter, so we send a dedicated convergence message carrying the queue
+/// body, desired `auto` state, and canonical queue frontmatter. Best-effort: a
+/// missing listener or send failure is logged, never fatal — the disk/snapshot
+/// write remains the source of truth.
 fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Option<&Path>) {
     let Some(root) = project_root else {
         return;
@@ -5753,12 +5754,17 @@ fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Op
     if !crate::ipc_socket::is_listener_active(root) {
         return;
     }
-    let want_auto = match crate::component::parse(content) {
+    let (want_auto, queue_body) = match crate::component::parse(content) {
         Ok(comps) => comps
             .iter()
             .find(|c| c.name == "queue")
-            .map(|q| crate::queue::has_auto_attr(&q.attrs))
-            .unwrap_or(false),
+            .map(|q| {
+                (
+                    crate::queue::has_auto_attr(&q.attrs),
+                    Some(q.content(content).to_string()),
+                )
+            })
+            .unwrap_or((false, None)),
         Err(e) => {
             eprintln!("[preflight] queue: live convergence skipped — component parse failed: {e}");
             return;
@@ -5781,6 +5787,7 @@ fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Op
         &canonical.to_string_lossy(),
         want_auto,
         Some(&fm_yaml),
+        queue_body.as_deref(),
     ) {
         Ok(_) => eprintln!(
             "[preflight] queue: converged live editor buffer (auto={want_auto}, queue_active={queue_active})"
@@ -8583,7 +8590,8 @@ mod tests {
         assert!(updated.contains("queue: stop"));
 
         // Listener received exactly one queue convergence message carrying the
-        // queue-tag + frontmatter shape that a content-only patch cannot deliver.
+        // queue body plus the tag + frontmatter shape that a content-only patch
+        // cannot deliver.
         std::thread::sleep(std::time::Duration::from_millis(100));
         {
             let msgs = received.lock().unwrap();
@@ -8601,6 +8609,18 @@ mod tests {
             // #queue-active-deprecated-line-stuck: convergence carries the
             // canonical `queue:` control, never the deprecated `queue_active:`.
             assert_eq!(conv["frontmatter"], serde_json::json!("queue: stop"));
+            assert_eq!(conv["patches"][0]["component"], serde_json::json!("queue"));
+            assert_eq!(
+                conv["patches"][0]["content"],
+                serde_json::json!(
+                    crate::component::parse(&updated)
+                        .unwrap()
+                        .iter()
+                        .find(|c| c.name == "queue")
+                        .unwrap()
+                        .content(&updated)
+                )
+            );
         }
 
         // Idempotency: a follow-up maintenance pass on the converged document

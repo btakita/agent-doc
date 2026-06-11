@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue convergence IPC now carries the queue body (`#mrhpcdrift`).** The
+  preflight halt/drain convergence patch now sends the corrected `agent:queue`
+  component body alongside `queue_auto` and canonical `queue:` frontmatter.
+  This closes the live-editor gap where an open IntelliJ buffer could accept
+  tag/frontmatter convergence yet keep stale queue lines and flush them back
+  over the disk/snapshot repair, regenerating IPC drift on the next preflight.
 - **Structured live-buffer-equals-disk marker carries proof fields
   (`#lvbremain`).** `visible_write_live_buffer_matches_disk` now logs
   `source`, `expected_len/hash`, `disk_len/hash`, `live_len/hash`, and

@@ -329,20 +329,30 @@ pub fn send_patch(
 /// every preflight (`#adoc-queue-ipc-buffer-divergence`). A content-only patch
 /// cannot converge an opening-tag attribute or frontmatter, so this message
 /// carries `queue_auto` (the desired state of the queue tag's `auto` attribute,
-/// applied via the `agent_doc_converge_queue_auto` FFI seam) alongside the
-/// `frontmatter` field (`queue_active: …`, applied via the existing
-/// frontmatter-merge seam). No component patches are sent; component bodies are
-/// converged by the normal disk write + editor reload.
+/// applied via the `agent_doc_converge_queue_auto` FFI seam), the `frontmatter`
+/// field (`queue: …`, applied via the existing frontmatter-merge seam), and the
+/// corrected queue component body. Sending the body closes the live-editor gap
+/// where an open buffer can keep stale queue lines and flush them back over the
+/// disk/snapshot repair.
 pub fn send_queue_convergence(
     project_root: &Path,
     file: &str,
     queue_auto: bool,
     frontmatter_yaml: Option<&str>,
+    queue_body: Option<&str>,
 ) -> Result<bool> {
+    let patches = queue_body
+        .map(|content| {
+            serde_json::json!([{
+                "component": "queue",
+                "content": content,
+            }])
+        })
+        .unwrap_or_else(|| serde_json::json!([]));
     let message = serde_json::json!({
         "type": "patch",
         "file": file,
-        "patches": [],
+        "patches": patches,
         "unmatched": "",
         "frontmatter": frontmatter_yaml,
         "queue_auto": queue_auto,

@@ -6,22 +6,25 @@ import org.junit.Test
 /**
  * Coverage for the queue-convergence field of the IPC patch protocol
  * (#adoc-queue-ipc-buffer-divergence). A queue convergence message carries
- * `queue_auto` (desired opening-tag `auto` state) plus a `queue_active`
- * frontmatter merge and an empty `patches` array.
+ * `queue_auto` (desired opening-tag `auto` state), canonical `queue:`
+ * frontmatter, and the corrected queue component body.
  */
 class ParsePatchJsonQueueAutoTest {
 
     @Test
     fun `parses queue_auto false convergence message`() {
         val json = """
-            {"type":"patch","file":"/tmp/plan.md","patches":[],"unmatched":"",
-             "frontmatter":"queue_active: false","queue_auto":false}
+            {"type":"patch","file":"/tmp/plan.md",
+             "patches":[{"component":"queue","content":"- next\n"}],"unmatched":"",
+             "frontmatter":"queue: stop","queue_auto":false}
         """.trimIndent()
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertEquals(false, patch!!.queueAuto)
-        assertEquals("queue_active: false", patch.frontmatter)
-        assertTrue(patch.patches.isEmpty())
+        assertEquals("queue: stop", patch.frontmatter)
+        assertEquals(1, patch.patches.size)
+        assertEquals("queue", patch.patches.single().component)
+        assertEquals("- next\n", patch.patches.single().content)
     }
 
     @Test

@@ -38,11 +38,6 @@ Compacted content:
 - Archived 1 response topic(s): Boolean application radios
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
 - GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
-- Remote D1 migrations: no pending migrations
-- `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
-- `make check` after rebase: 557 tests, build, and worker build passed
-- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
 Implemented and deployed.
 
 The borrower/broker full application now routes explicit submission failures through the shared form error reporter, so Save & continue validation failures, final submit validation failures, and e-sign missing-field failures show the existing top-of-form red error plus an error toast. Silent autosave remains silent.
@@ -56,7 +51,16 @@ Verification:
 ❯ - Remote D1 migrations: no pending migrations
 ❯ - Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
 - GitHub Actions CI lookup: unavailable, repo has no workflow named `CI`
-<!-- agent:boundary:b4cae3ed -->
+
+
+Also preserved the active session deployed full-application Yes/No radio work and rebased over the newer dashboard funded-deals work from origin/main. EFS submodule commit `7d4fb0d` was pushed to `origin/main`.
+
+- `bun test tests/form-error-standard.test.ts tests/full-application-boolean-radios.test.ts`
+- `make check` after rebase: 557 tests, build, and worker build passed
+- `make deploy` deployed Worker version `0e6f83d8-80bf-41cd-8978-fdab09816e1e`
+- Remote D1 migrations: no pending migrations
+- Smoke checks: `/` returned 200; `/portal-borrower/new-application` returned 303 unauthenticated
+<!-- agent:boundary:84a38259 -->
 <!-- /agent:exchange -->
 ###
 <!--

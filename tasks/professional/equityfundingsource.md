@@ -65,7 +65,13 @@ Verification:
 - Remote D1 migrations: none pending before and after deploy.
 - Smoke checks: `/` returned `200`; `/portal-admin/pipeline` returned expected `303` auth redirect.
 - GitHub Actions: no `CI` workflow exists here; latest parent `Agent Doc` run failed to start because GitHub billing/spending-limit blocked runner startup, so there were no failing logs to fix.
-<!-- agent:boundary:3f2f3826 -->
+
+### Re: Deal Pipeline queue-head closeout — gpt-5
+
+> The Deal Pipeline has needs attention items. Please annotate those items with a similar annotation and bg color to the Investor Pipeline. "Stalled 16d" is good. Is there a better term than Stalled? This is for Commercial Restate "loan originators" admins. deploy
+
+Closed by EFS `56cd057` and deployed as Worker version `cb9184c9-a67c-41f4-97e8-b33a04b20fd6`. The implemented badge copy is `Aging Nd`, which is a better CRE loan-originator term than `Stalled Nd`; it describes pipeline age without implying the deal is dead. The cards use the matching amber attention background/border for open Leads and active Deal Pipeline loan stages.
+<!-- agent:boundary:fd70bf2a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -47,6 +47,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 
 **Mode resolution:**
 - Parse `patch=<value>` (or `mode=<value>` as backward-compatible alias) from the open tag's inline attributes (the `(\s[^>]*)` capture group). `patch=` takes precedence if both are present.
+- If a component patch object carries `op: "replace"`, `op: "append"`, or `op: "prepend"`, that explicit operation overrides the component marker's `patch=` / `mode=` attribute. This lets the binary send repair/convergence patches that replace an append-mode component without rewriting the open tag first.
 - Supported modes:
   - `replace` (default): replace content region with `\n` + trimmed content + `\n`
   - `append`: preserve existing content, append `\n` + trimmed content + `\n` before close tag
@@ -220,7 +221,8 @@ Three states must be reconciled:
   "patches": [
     {
       "component": "exchange",
-      "content": "New content for the component"
+      "content": "New content for the component",
+      "op": "replace"
     }
   ],
   "unmatched": "Content that didn't match any component",
@@ -232,7 +234,7 @@ Three states must be reconciled:
 ```
 
 - `file` (required): Absolute path to the target document.
-- `patches` (required): Array of component-level patches. May be empty.
+- `patches` (required): Array of component-level patches. May be empty. Each patch may carry `op` (`replace`, `append`, or `prepend`) to override the target component's marker mode for that patch.
 - `unmatched` (required): Content that didn't match a named component. Falls back to `exchange` then `output`.
 - `frontmatter` (optional): YAML key/value pairs to merge into the document's frontmatter.
 - `fullContent` (optional): Disabled legacy/foreign complete document replacement. First-party CLI paths no longer emit this field, and plugins must not apply it when present.

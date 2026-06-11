@@ -223,6 +223,28 @@ One.
     }
 
     @Test
+    fun `component patch op override accepts known modes`() {
+        assertEquals("replace", componentPatchModeOverrideUtil(" REPLACE "))
+        assertEquals("append", componentPatchModeOverrideUtil("append"))
+        assertEquals("prepend", componentPatchModeOverrideUtil("Prepend"))
+        assertNull(componentPatchModeOverrideUtil(null))
+        assertNull(componentPatchModeOverrideUtil("delete"))
+    }
+
+    @Test
+    fun `component patch op override is wired into document and vfs apply paths`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+
+        assertTrue(source.contains("componentPatchModeOverrideUtil(modeOverride) ?: extractComponentMode(doc, component)"))
+        assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId, p.op)"))
+        assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId, p.op)"))
+    }
+
+    @Test
     fun `plugin rejects full content patch application paths`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),

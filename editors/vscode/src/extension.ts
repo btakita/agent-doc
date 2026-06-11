@@ -1757,7 +1757,7 @@ class PatchWatcher implements vscode.Disposable {
                 this.outputChannel.appendLine(`PatchWatcher: skipping legacy component patch for node-patched ${p.component}`);
                 continue;
             }
-            content = this.applyComponentPatch(content, p.component, p.content);
+            content = this.applyComponentPatch(content, p.component, p.content, p.op);
         }
 
         // Apply unmatched content to exchange or output component
@@ -2002,7 +2002,7 @@ class PatchWatcher implements vscode.Disposable {
      * Handles open tags with inline attributes (e.g., `<!-- agent:exchange patch=append -->` or `mode=append` as alias).
      * Skips matches that fall inside fenced code blocks.
      */
-    private applyComponentPatch(doc: string, component: string, content: string): string {
+    private applyComponentPatch(doc: string, component: string, content: string, modeOverride?: string): string {
         // Match open tag with optional attributes: <!-- agent:NAME ... -->
         const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`, 'g');
         const closeTag = `<!-- /agent:${component} -->`;
@@ -2032,8 +2032,9 @@ class PatchWatcher implements vscode.Disposable {
         }
 
         // Parse mode from inline attributes: patch= takes precedence, mode= as fallback
-        let mode = 'replace';
-        if (openMatch[1]) {
+        const overrideMode = this.componentPatchModeOverride(modeOverride);
+        let mode = overrideMode ?? 'replace';
+        if (overrideMode == null && openMatch[1]) {
             const patchMatch = /patch=(\S+)/.exec(openMatch[1]);
             const modeMatch = /mode=(\S+)/.exec(openMatch[1]);
             if (patchMatch) {
@@ -2064,6 +2065,14 @@ class PatchWatcher implements vscode.Disposable {
 
         // Default: replace mode
         return before + '\n' + trimmedContent + '\n' + after;
+    }
+
+    private componentPatchModeOverride(op?: string): string | undefined {
+        const normalized = op?.trim().toLowerCase();
+        if (normalized === 'append' || normalized === 'prepend' || normalized === 'replace') {
+            return normalized;
+        }
+        return undefined;
     }
 
     /**

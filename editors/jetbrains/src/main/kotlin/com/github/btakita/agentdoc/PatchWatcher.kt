@@ -862,7 +862,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             } else {
                 p.boundaryId
             }
-            result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId)
+            result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId, p.op)
         }
 
         // Apply unmatched content to exchange or output component
@@ -1086,7 +1086,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 } else {
                     p.boundaryId
                 }
-                result = applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId)
+                result = applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId, p.op)
             }
 
             if (patch.unmatched.isNotBlank()) {
@@ -1160,8 +1160,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * The native library handles code block detection, attribute parsing,
      * and mode resolution identically to the CLI — eliminating duplicated logic.
      */
-    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null): String {
-        val mode = extractComponentMode(doc, component)
+    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null, modeOverride: String? = null): String {
+        val mode = componentPatchModeOverrideUtil(modeOverride) ?: extractComponentMode(doc, component)
         if (mode == "append" && appendPatchAlreadyPresentUtil(doc, component, content)) {
             LOG.info("Patch dedup: append content already present in $component")
             return doc
@@ -1758,6 +1758,12 @@ internal fun memoryDiskConflictCancelLikelyUtil(
     fileModificationStamp: Long,
 ): Boolean =
     wasDeferredForConflict && documentUnsaved && documentModificationStamp != fileModificationStamp
+
+internal fun componentPatchModeOverrideUtil(op: String?): String? =
+    when (op?.trim()?.lowercase()) {
+        "append", "prepend", "replace" -> op.trim().lowercase()
+        else -> null
+    }
 
 internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
     val ranges = mutableListOf<Pair<Int, Int>>()

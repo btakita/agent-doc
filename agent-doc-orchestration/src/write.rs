@@ -7015,22 +7015,56 @@ pub fn try_auto_recover_live_prompt_drift(
         return Ok(None);
     }
 
-    // `#jbstalecache`: this recovery path writes the adopted snapshot straight to
-    // the working-tree file. When the JetBrains IPC listener is active the editor
-    // may hold a dirty (operator-typing) buffer, so a bare disk write is exactly
-    // what raises IntelliJ's "Stale File Cache" / File Cache Conflict dialog and
-    // can drop the operator's in-flight typing. The disk write is unavoidable here
-    // (the IPC patch proof already failed this cycle — that is why we are
-    // recovering), but emit a structured marker so the operator's "check the logs"
-    // workflow can positively correlate a stale-cache dialog with this binary disk
-    // write instead of guessing. The plugin still reconciles the change through its
-    // memory/disk-conflict path; this marker is the binary-side proof of the
-    // trigger event.
-    let ipc_listener_active = file
+    let ipc_project_root = file
         .canonicalize()
-        .map(|c| resolve_ipc_project_root_pub(&c))
-        .map(|root| crate::ipc_socket::is_listener_active(&root))
+        .ok()
+        .map(|c| resolve_ipc_project_root_pub(&c));
+    let ipc_listener_active = ipc_project_root
+        .as_deref()
+        .map(crate::ipc_socket::is_listener_active)
         .unwrap_or(false);
+
+    if let Some(project_root) = ipc_project_root.as_deref()
+        && ipc_listener_active
+    {
+        match try_editor_converge_live_prompt_drift(file, project_root, snapshot, file_content) {
+            Ok(Some(recovered)) => {
+                log_live_prompt_drift_auto_recovered(
+                    file,
+                    snapshot,
+                    file_content,
+                    true,
+                    "editor_ipc",
+                );
+                crate::flow::proof::log_flow_event(
+                    file,
+                    crate::flow::types::FlowEvent::new(
+                        crate::flow::types::FlowName::DocumentMutation,
+                        crate::flow::types::FlowStage::IpcSnapshotAdoption,
+                        crate::flow::types::FlowOutcome::Completed,
+                    )
+                    .with_reason("live_prompt_drift_auto_recovered"),
+                );
+                eprintln!(
+                    "[commit] auto-recovered live_prompt_drift wedge for {} via editor IPC convergence ({} bytes)",
+                    file.display(),
+                    snapshot.len()
+                );
+                return Ok(Some(recovered));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_error file={} error={}",
+                        file.display(),
+                        err
+                    ),
+                );
+            }
+        }
+    }
 
     atomic_write(file, snapshot).with_context(|| {
         format!(
@@ -7038,16 +7072,12 @@ pub fn try_auto_recover_live_prompt_drift(
             file.display()
         )
     })?;
-    crate::ops_log::log_op(
+    log_live_prompt_drift_auto_recovered(
         file,
-        &format!(
-            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={} ipc_listener_active={}",
-            file.display(),
-            snapshot.len(),
-            file_content.len(),
-            crate::ops_log::content_hash(snapshot),
-            ipc_listener_active
-        ),
+        snapshot,
+        file_content,
+        ipc_listener_active,
+        "disk_fallback",
     );
     if ipc_listener_active {
         crate::ops_log::log_op(
@@ -7074,6 +7104,207 @@ pub fn try_auto_recover_live_prompt_drift(
         snapshot.len()
     );
     Ok(Some(snapshot.to_string()))
+}
+
+fn log_live_prompt_drift_auto_recovered(
+    file: &Path,
+    snapshot: &str,
+    file_content: &str,
+    ipc_listener_active: bool,
+    transport: &str,
+) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={} ipc_listener_active={} transport={}",
+            file.display(),
+            snapshot.len(),
+            file_content.len(),
+            crate::ops_log::content_hash(snapshot),
+            ipc_listener_active,
+            transport
+        ),
+    );
+}
+
+fn try_editor_converge_live_prompt_drift(
+    file: &Path,
+    project_root: &Path,
+    snapshot: &str,
+    file_content: &str,
+) -> Result<Option<String>> {
+    let patches = live_prompt_drift_convergence_patches(file_content, snapshot)?;
+    let frontmatter = live_prompt_drift_convergence_frontmatter(file_content, snapshot);
+    if patches.is_empty() && frontmatter.is_none() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "[jbstalecache] editor_convergence_skipped file={} skip=no_component_or_frontmatter_delta",
+                file.display()
+            ),
+        );
+        return Ok(None);
+    }
+
+    let canonical = file.canonicalize()?;
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let mut payload = serde_json::json!({
+        "type": "patch",
+        "file": canonical.to_string_lossy(),
+        "patches": patches,
+        "node_patches": [],
+        "unmatched": "",
+        "baseline": file_content,
+        "reposition_boundary": false,
+        "patch_id": patch_id,
+    });
+    if let Some(frontmatter) = frontmatter {
+        payload["frontmatter"] = serde_json::Value::String(frontmatter);
+    }
+    if let Ok(Some(ref cycle)) = crate::cycle_state::load(file) {
+        payload["cycle_id"] = serde_json::Value::String(cycle.cycle_id.clone());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "[jbstalecache] editor_convergence_attempt file={} patch_id={} patches={} frontmatter={} snap_hash={}",
+            file.display(),
+            payload
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-"),
+            payload
+                .get("patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload.get("frontmatter").is_some(),
+            crate::ops_log::content_hash(snapshot)
+        ),
+    );
+
+    match crate::ipc_socket::send_message(project_root, &payload) {
+        Ok(Some(_ack)) => {
+            let patch_id = payload
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-");
+            let sidecar = poll_ack_content_sidecar(
+                project_root,
+                patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )?;
+            let Some(recovered) = sidecar else {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_no_ack_content file={} patch_id={} action=disk_fallback",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                return Ok(None);
+            };
+            if crate::git::normalize_transient_agent_doc_markers(&recovered)
+                == crate::git::normalize_transient_agent_doc_markers(snapshot)
+            {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} transport=editor_ipc",
+                        file.display(),
+                        patch_id,
+                        recovered.len()
+                    ),
+                );
+                Ok(Some(recovered))
+            } else {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_ack_mismatch file={} patch_id={} recovered_len={} snap_len={} action=disk_fallback",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        snapshot.len()
+                    ),
+                );
+                Ok(None)
+            }
+        }
+        Ok(None) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "[jbstalecache] editor_convergence_no_ack file={} action=disk_fallback",
+                    file.display()
+                ),
+            );
+            Ok(None)
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "[jbstalecache] editor_convergence_send_failed file={} error={} action=disk_fallback",
+                    file.display(),
+                    err
+                ),
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn live_prompt_drift_convergence_patches(
+    file_content: &str,
+    snapshot: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let current_components = component::parse(file_content)
+        .with_context(|| "failed to parse current document for editor convergence")?;
+    let snapshot_components = component::parse(snapshot)
+        .with_context(|| "failed to parse adopted snapshot for editor convergence")?;
+    let current_by_name: HashMap<&str, &component::Component> = current_components
+        .iter()
+        .map(|component| (component.name.as_str(), component))
+        .collect();
+    let mut patches = Vec::new();
+    for snapshot_component in &snapshot_components {
+        let Some(current_component) = current_by_name.get(snapshot_component.name.as_str()) else {
+            continue;
+        };
+        let current_body = current_component.content(file_content);
+        let snapshot_body = snapshot_component.content(snapshot);
+        if crate::git::normalize_transient_agent_doc_markers(current_body)
+            == crate::git::normalize_transient_agent_doc_markers(snapshot_body)
+        {
+            continue;
+        }
+        patches.push(serde_json::json!({
+            "component": snapshot_component.name,
+            "content": snapshot_body,
+            "op": "replace",
+        }));
+    }
+    Ok(patches)
+}
+
+fn live_prompt_drift_convergence_frontmatter(file_content: &str, snapshot: &str) -> Option<String> {
+    let file_frontmatter = raw_frontmatter_yaml(file_content);
+    let snapshot_frontmatter = raw_frontmatter_yaml(snapshot)?;
+    if file_frontmatter == Some(snapshot_frontmatter) {
+        None
+    } else {
+        Some(snapshot_frontmatter.to_string())
+    }
+}
+
+fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
+    let rest = content.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
 }
 
 /// Guard against accidental exchange content truncation.
@@ -17258,6 +17489,41 @@ scratch
         .to_string()
     }
 
+    fn start_live_prompt_drift_ack_listener(
+        project_root: &Path,
+        ack_content: String,
+    ) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = fs::create_dir_all(&ack_dir);
+                if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
+                    let _ = fs::write(file_path, &ack_content);
+                }
+                let _ = fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    fn wait_for_live_prompt_drift_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+
     #[test]
     fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {
         // Snapshot owns the response the fragmented disk file lost; no disk-only
@@ -17267,6 +17533,25 @@ scratch
         assert!(
             live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
             "benign live-prompt-drift wedge should be recoverable"
+        );
+    }
+
+    #[test]
+    fn live_prompt_drift_convergence_patches_builds_replace_patch_for_exchange() {
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+
+        let patches = live_prompt_drift_convergence_patches(&fragmented, &snapshot).unwrap();
+
+        assert_eq!(patches.len(), 1, "only exchange should need convergence");
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["op"], "replace");
+        assert!(
+            patches[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("### Re: do #fix"),
+            "replace payload should carry the recovered response body: {patches:?}"
         );
     }
 
@@ -17341,6 +17626,54 @@ scratch
         assert!(
             log.contains("live_prompt_drift_auto_recovered"),
             "auto-recovery must leave an observable ops.log marker:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_prefers_editor_ipc_when_listener_active() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let _listener = start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
+        wait_for_live_prompt_drift_listener(dir.path());
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert_eq!(
+            recovered.as_deref(),
+            Some(snapshot.as_str()),
+            "recovery should accept the editor-applied snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "the fake editor listener should converge the working tree through IPC"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("[jbstalecache] editor_convergence_attempt")
+                && log.contains("[jbstalecache] editor_convergence_succeeded"),
+            "active listener recovery should be observable as editor convergence:\n{log}"
+        );
+        assert!(
+            log.contains("live_prompt_drift_auto_recovered")
+                && log.contains("transport=editor_ipc")
+                && log.contains("ipc_listener_active=true"),
+            "recovery marker should name the editor transport:\n{log}"
+        );
+        assert!(
+            !log.contains("auto_recovery_disk_write_during_ipc_listener")
+                && !log.contains("transport=disk_fallback"),
+            "successful editor convergence must not take the stale-cache disk fallback:\n{log}"
         );
     }
 

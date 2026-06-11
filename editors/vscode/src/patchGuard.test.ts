@@ -133,4 +133,13 @@ describe('patchGuard', () => {
         assert.ok(socketFullContentGuardIdx >= 0 && socketFullContentGuardIdx < componentEditIdx);
         assert.strictEqual(source.indexOf('fullRange, patch.fullContent'), -1);
     });
+
+    it('honors explicit component op overrides for convergence patches', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+
+        assert.ok(source.includes('content = this.applyComponentPatch(content, p.component, p.content, p.op);'));
+        assert.ok(source.includes('const overrideMode = this.componentPatchModeOverride(modeOverride);'));
+        assert.ok(source.includes('if (overrideMode == null && openMatch[1])'));
+        assert.ok(source.includes("normalized === 'append' || normalized === 'prepend' || normalized === 'replace'"));
+    });
 });

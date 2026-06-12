@@ -3148,7 +3148,7 @@ mod converge;
 pub use converge::*;
 
 mod exchange_reconcile;
-pub use exchange_reconcile::*;
+pub(crate) use exchange_reconcile::*;
 
 fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> bool {
     patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()

@@ -510,7 +510,33 @@ The recovery ladder stays: verify HEAD first, reset only the working copy if HEA
 Status: `#stuckhandoff2` is review-gated, not done. M1/M3 are in source; M2/M4/M5 plus clean install/recycle remain for a clean `src/agent-doc` session because this pane still has dirty `#fintol` closeout-path work. No new backlog item is needed.
 
 Changed paths this cycle: session document only. Commands/context: prior `agent_doc_preflight` / `agent_doc_plan`; prior source/history checks for `project_controller.rs`, `gc.rs`, `#stuckhandoff2`, and commit `08dfc27b`. Verification: no source tests run because no source files changed. Confidence: high. Escalation: none.
-<!-- agent:boundary:f9516765 -->
+
+### Re: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex. — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
+
+
+> Queue prompt:
+>
+> :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
+
+This is the same Codex direct-pane submit failure already tracked as `#2v7b` / `#jbcodexsubmit` and duplicated by the EFS repro `#efscodexsubmit`; I am not opening another backlog item for the lazily-rs instance.
+
+Root cause: the direct-pane route sent merged `text + \r` to the Codex TUI, then observed `TriggerStillVisible` / `prompt_not_submitted`. The previous route path reported the miss but did not issue a separate Enter re-submit, so the operator had to press Enter manually.
+
+Source status:
+
+- `src/agent-doc` commit `d14dd12f` (`fix(jbcodexsubmit): one-shot Enter re-submit for Codex direct-pane route`) adds the Codex-only retry.
+- `449a87e9` is the follow-up rustfmt cleanup.
+- `route.rs` now has `direct_pane_needs_codex_resubmit(...)`, sends a one-shot bare Enter for Codex direct-pane misses, and logs `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
+- `route/tests.rs` has deterministic coverage for the retry predicate around this case.
+
+Remaining work is live/install proof, not a separate lazily-rs diagnosis: use a clean `src/agent-doc` session, decide whether the route-level deterministic test satisfies the requested SimWorld coverage or add a SimWorld fixture, install/recycle the binary, then live-verify with ops-log evidence for `route_submit_resubmit action=enter_key result=accepted`. The existing review items `#2v7b` and `#efscodexsubmit` already carry that closure path.
+
+Changed paths this cycle: session document only. Commands/context: `agent-doc preflight`; `agent_doc_plan`; `agent_doc_read` for queue/review/backlog; `rg` for `route_submit_resubmit`, `direct_pane_needs_codex_resubmit`, `prompt_not_submitted`; `git -C src/agent-doc show --stat --oneline d14dd12f 449a87e9`. Verification: no source tests run because no source files changed. Confidence: high. Escalation: none.
+<!-- agent:boundary:ebce0948 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -593,7 +619,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   Want me to run the make install rebuild now?
 ```
 ~~~
-- :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
+- ~~:pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.~~
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.

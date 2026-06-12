@@ -480,7 +480,37 @@ The remaining caveat is install/live-state, not source implementation: preflight
 I also repaired the previous document splice in this cycle by removing the duplicated EFS Codex-submit bullets that had been inserted under the `#stuckhandoff2` response; the standalone EFS response remains below it.
 
 Changed paths this cycle: session document only. Commands/context: `agent_doc_plan`; `rg` for `#kp5z/#qflood`, `SkipSelfDrivingLoopOwner`, `drain-claim`; `git -C src/agent-doc show --stat --oneline 23a3ce5b`; document diff inspection/repair. Verification: no source tests run because no source files changed. Confidence: high. Escalation: none.
-<!-- agent:boundary:acb6d339 -->
+
+### Re: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues? — gpt-5
+
+> Queue prompt:
+>
+> :pushpin: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
+
+This is already answered and tracked as `#stuckhandoff2`; I am not opening a second implementation item for the same root cause.
+
+The root cause is the client-driven two-phase controller handoff. The replacement path calls `prepare_handoff`, which records `handoff_state = Preparing`, and then a later `promote_handoff`, which clears it back to `Stable`. If the client dies, is interrupted, or loses the RPC between those calls, the controller can remain in `Preparing` forever. That process survives IDE restarts because it is a separate `agent-doc controller serve` process, and while it is wedged it can keep serving IPC / writing stale buffer state back over the working tree.
+
+Why the old reaper missed the live failures:
+
+- It was bootstrap-record scoped, so it only saw the pid currently recorded in the bootstrap file; orphaned older controllers were invisible.
+- It was same-project scoped, so an `agent-loop` invoke did not reap a `boost-client` wedged controller.
+- It only ran on bind/gc/new invoke, so a wedged process with no subsequent project activity could live indefinitely.
+
+The durable mitigation stack is defense in depth:
+
+- M1: controller self-watchdog / suicide timer on `Preparing`, so the wedged process terminates itself. This is landed in `src/agent-doc` HEAD `08dfc27b`.
+- M3: orphan `Preparing` proc-scan reaper, so old wedged processes outside the bootstrap record can be found. This is also landed in `08dfc27b`.
+- M2: gate worktree / IPC writes on `Stable`, so even a still-alive `Preparing` controller cannot corrupt the working tree. This remains the most important unlanded symptom-killer and overlaps `#pcwc`.
+- M4: client handoff drop-guard, so an interrupted client tries to retire/shutdown instead of abandoning `Preparing`.
+- M5: cross-project gc sweep, so one project can clear known wedged controllers from sibling project roots.
+
+The recovery ladder stays: verify HEAD first, reset only the working copy if HEAD is correct, kill `agent-doc controller serve ... --handoff-state preparing` processes when present, then close/revert the editor tab if the IDE buffer is the writer. Restarting the IDE is last resort and does not by itself kill orphaned controller processes.
+
+Status: `#stuckhandoff2` is review-gated, not done. M1/M3 are in source; M2/M4/M5 plus clean install/recycle remain for a clean `src/agent-doc` session because this pane still has dirty `#fintol` closeout-path work. No new backlog item is needed.
+
+Changed paths this cycle: session document only. Commands/context: prior `agent_doc_preflight` / `agent_doc_plan`; prior source/history checks for `project_controller.rs`, `gc.rs`, `#stuckhandoff2`, and commit `08dfc27b`. Verification: no source tests run because no source files changed. Confidence: high. Escalation: none.
+<!-- agent:boundary:f9516765 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -501,7 +531,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 [route] target tmux session: 13
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
 ```
----
+~~~done
 :pushpin: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
 ```
 ❯ How do I recover from the IPC-drift? Restart Idea?
@@ -562,7 +592,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
   Want me to run the make install rebuild now?
 ```
----
+~~~
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.

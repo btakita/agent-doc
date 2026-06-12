@@ -18223,6 +18223,119 @@ scratch
         );
     }
 
+    /// Pre-compact document with a multi-item `queue` an operator could be
+    /// concurrently editing while compaction archives the exchange tail.
+    fn compact_convergence_source() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #a\n",
+            "### Re: do #a — opus-4-8\n\n",
+            "A long historical response body that compaction will archive and replace\n",
+            "with a summary marker so the exchange shrinks substantially past the\n",
+            "stale-drift threshold and a genuine convergence patch is produced.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    /// Post-compact document: the `exchange` collapses to a summary marker while
+    /// the `queue` is byte-identical to the source (compaction never touches it).
+    fn compact_convergence_compacted() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "*Compacted. Content archived to `.agent-doc/archives/test.md`*\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits() {
+        // `#jbcompactcrdt`/`#w42v`: compaction only rewrites `exchange`, so the
+        // editor-IPC convergence patch must be component-scoped to `exchange` and
+        // never carry a `queue` replace. That scoping is exactly what lets an
+        // operator concurrently typing queue items survive compaction without a
+        // JB `File Cache Conflict` — the editor applies the exchange `op:replace`
+        // via the Document API and leaves the live queue buffer untouched.
+        let source = compact_convergence_source();
+        let compacted = compact_convergence_compacted();
+
+        let patches = live_prompt_drift_convergence_patches(&source, &compacted).unwrap();
+
+        assert_eq!(
+            patches.len(),
+            1,
+            "only exchange changed during compaction; queue must not be patched: {patches:?}"
+        );
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["op"], "replace");
+        assert!(
+            patches[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("*Compacted. Content archived"),
+            "the exchange replace must carry the compacted summary body: {patches:?}"
+        );
+        assert!(
+            !patches
+                .iter()
+                .any(|patch| patch["component"] == "queue"),
+            "a queue replace would clobber the operator's concurrent edits: {patches:?}"
+        );
+    }
+
+    #[test]
+    fn try_compact_editor_converge_converges_via_editor_ipc_with_listener() {
+        // `#jbcompactcrdt`/`#w42v`: with a live JB IPC listener, compaction must
+        // converge the compacted document through the editor (`transport=editor_ipc`)
+        // instead of a direct disk write that diverges from the open buffer and
+        // raises a `File Cache Conflict`.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = compact_convergence_source();
+        let compacted = compact_convergence_compacted();
+        fs::write(&doc, &source).unwrap();
+
+        // The fake editor acks with the compacted content, mirroring a JB plugin
+        // that applied the exchange `op:replace` and converged its buffer.
+        let _listener = start_live_prompt_drift_ack_listener(dir.path(), compacted.clone());
+        wait_for_live_prompt_drift_listener(dir.path());
+
+        let converged = try_compact_editor_converge(&doc, &compacted, &source).unwrap();
+        assert!(
+            converged,
+            "an active JB IPC listener that converges the buffer must report editor_ipc transport"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_editor_convergence_attempt"),
+            "compact convergence attempt should be observable in ops.log:\n{log}"
+        );
+        assert!(
+            log.contains("compact_writeback") && log.contains("transport=editor_ipc"),
+            "successful compaction must record the editor_ipc writeback transport:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "a converged compaction must not also take the disk fallback:\n{log}"
+        );
+    }
+
     #[test]
     fn live_prompt_drift_auto_recovery_safe_rejects_no_wedge() {
         // Snapshot == file: no wedge, nothing to recover, must not fire.

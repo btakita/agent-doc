@@ -278,6 +278,13 @@ that lands while the buffer is dirty.
   a clean buffer defers to disk) while differing only on the surfaced
   cache-conflict signal — the File-Cache-Conflict class (`#w42v`) made
   deterministic. An external disk write never silently clobbers an unsaved edit.
+  Compaction-specific convergence (`#jbcompactcrdt`) is pinned by the write-path
+  tests `compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits`
+  (the editor-IPC patch only `op:replace`s the changed `exchange`, so an operator
+  concurrently typing `queue` items is never clobbered) and
+  `try_compact_editor_converge_converges_via_editor_ipc_with_listener` (a live JB
+  listener converges compaction through `transport=editor_ipc` instead of the
+  direct disk write that raises a `File Cache Conflict`).
 - Slice 3 (multi-editor `#rtwbcast`): `multi_editor_crdt_broadcast_converges_without_file_cache_conflict`
   opens two editors on one document, merges a divergent edit from each through the
   production `merge::merge_contents_crdt` path against the shared on-disk baseline,

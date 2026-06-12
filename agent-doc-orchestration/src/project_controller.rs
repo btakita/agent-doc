@@ -1693,6 +1693,109 @@ pub fn reap_orphaned_preparing_controllers(
     reap_orphaned_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
+/// Parse a `/proc/<pid>/cmdline` arg vector and, if it is an `agent-doc ...
+/// controller serve --project-root <root> ...` process, return that `<root>` —
+/// regardless of which project it belongs to. The project-scoped
+/// [`args_match_same_project_controller`] only answers "is this MY project's
+/// controller?"; M5 needs "is this ANY project's controller, and which one?".
+fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBuf> {
+    if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
+        return None;
+    }
+    if !args
+        .windows(2)
+        .any(|window| window[0] == "controller" && window[1] == "serve")
+    {
+        return None;
+    }
+    args.windows(2)
+        .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
+}
+
+fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).to_string())
+        .collect();
+    controller_serve_project_root_from_args(&args)
+}
+
+/// M5 (#stuckhandoff2) — cross-project process-scan sweep for wedged `Preparing`
+/// controllers.
+///
+/// The per-project reaper [`reap_orphaned_preparing_controllers_for_caller`] only
+/// reaps controllers whose `--project-root` matches the caller's, and gc runs only
+/// for the triggering project. A controller wedged in ANOTHER project root (a
+/// `boost-client` handoff that died while the operator is working in `agent-loop`)
+/// stays invisible until agent-doc is next invoked there. M1's self-watchdog
+/// already covers this without any external tick, but this sweep is the
+/// belt-and-suspenders breadth rung: it walks `/proc` for ANY `agent-doc ...
+/// controller serve --handoff-state preparing` process (across all project roots)
+/// whose start age exceeds `stale_after` and reaps each through the verified-pid
+/// path keyed to that process's OWN `--project-root`. This is the cross-project
+/// equivalent of the operator's `pkill -f 'controller serve ... --handoff-state
+/// preparing'`, and it needs no global registry — `/proc` is the index. Returns
+/// `(reaped, kept)`.
+pub fn reap_orphaned_preparing_controllers_all_projects(
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Ok((0, 0));
+    };
+    let mut reaped = 0;
+    let mut kept = 0;
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let Some(root) = controller_serve_project_root(pid) else {
+            continue;
+        };
+        if !cmdline_has_preparing_handoff(pid) {
+            continue;
+        }
+        let age = process_start_age_secs(pid).unwrap_or(0);
+        if age <= stale_after.as_secs() {
+            // Freshly-launched replacement still inside a healthy handoff window.
+            kept += 1;
+            continue;
+        }
+        if dry_run {
+            eprintln!(
+                "[{caller}] would reap cross-project preparing controller: pid={pid} root={} age_secs={age}",
+                root.display()
+            );
+            reaped += 1;
+            continue;
+        }
+        let generation = read_bootstrap(&root)?
+            .map(|bootstrap| bootstrap.controller_generation)
+            .unwrap_or(0);
+        reap_verified_controller_pid(&root, pid, generation);
+        crate::ops_log::log_op(
+            &root,
+            &format!(
+                "orphaned_preparing_controller_reaped_cross_project pid={pid} root={} age_secs={age} threshold_secs={} caller={caller}",
+                root.display(),
+                stale_after.as_secs()
+            ),
+        );
+        reaped += 1;
+    }
+    Ok((reaped, kept))
+}
+
 /// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": repair-only
 /// cleanup for stale actor aliases. Normal actor binding paths must refuse a
 /// non-closed cross-document pane alias before storing the new owner; they must
@@ -3073,6 +3176,58 @@ fn shutdown_stale_controller(project_root: &Path) {
     }
 }
 
+/// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
+/// driven by the invoking client: it launches a replacement controller in
+/// `Preparing`, then promotes it to `Stable` via `promote_handoff`. If the client
+/// is interrupted or an RPC fails between those two steps (a `?` early-return /
+/// panic in `handoff_stale_controller`), the half-launched replacement is left
+/// wedged in `Preparing` forever — the exact orphan M1's self-watchdog and the
+/// M3/M5 reapers exist to clean up *after the fact*. This guard prevents the wedge
+/// at the source: on drop without a completed promotion it tells that replacement
+/// (still listening on the temp socket) to `shutdown`, so an aborted handoff never
+/// leaves a `Preparing` controller behind. The success path calls
+/// [`HandoffDropGuard::complete`] after the socket rename + reap so a promoted,
+/// now-authoritative controller is never shut down.
+struct HandoffDropGuard<'a> {
+    project_root: &'a Path,
+    temp_sock: &'a Path,
+    completed: bool,
+}
+
+impl<'a> HandoffDropGuard<'a> {
+    fn new(project_root: &'a Path, temp_sock: &'a Path) -> Self {
+        Self {
+            project_root,
+            temp_sock,
+            completed: false,
+        }
+    }
+
+    fn complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for HandoffDropGuard<'_> {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        // Aborted before promotion: best-effort shutdown of the half-launched
+        // replacement so it never lingers in `Preparing`. If the temp socket is
+        // already gone (the abort happened before the replacement came up) the
+        // request fails harmlessly and M1's self-watchdog remains the backstop.
+        let _ = request_path(self.temp_sock, "shutdown");
+        crate::ops_log::log_op(
+            self.project_root,
+            &format!(
+                "handoff_drop_guard_aborted_handoff_shutdown temp_sock={}",
+                self.temp_sock.display()
+            ),
+        );
+    }
+}
+
 fn handoff_stale_controller(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -3098,6 +3253,9 @@ fn handoff_stale_controller(
         old_pid,
         ControllerHandoffState::Preparing,
     )?;
+    // M4: from here until the promotion+rename succeed, any early return aborts the
+    // handoff and must not leak the `Preparing` replacement.
+    let mut drop_guard = HandoffDropGuard::new(project_root, &temp_sock);
     let _temp_stream = wait_for_controller_path(&temp_sock)?;
     let replacement_status: ControllerStatus = serde_json::from_str(
         &request_path(&temp_sock, "status").context("failed to read replacement status")?,
@@ -3120,6 +3278,9 @@ fn handoff_stale_controller(
     })?;
 
     reap_stale_duplicate_controllers(project_root, replacement_status.pid, new_generation);
+    // Promotion + rename succeeded — the replacement is the authoritative public
+    // controller now, so the drop-guard must not shut it down.
+    drop_guard.complete();
 
     wait_for_controller(project_root)
 }
@@ -7581,6 +7742,183 @@ agent:queue\n\
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+    }
+
+    // ---- M4 (#stuckhandoff2): client handoff drop-guard ----
+
+    #[test]
+    fn handoff_drop_guard_aborted_handoff_sends_shutdown_and_logs() {
+        // An aborted handoff (guard dropped before `complete`) must tell the
+        // half-launched replacement on the temp socket to shut down, and record it.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+
+        // Stand up a one-shot listener standing in for the Preparing replacement so
+        // we can prove the exact `shutdown` command crosses the socket. Binding on
+        // this thread before spawning means the guard's connect always succeeds.
+        let name = temp_sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut reader = BufReader::new(reader_half);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            // Respond so the guard's bounded `request_path` read returns promptly.
+            writer_half.write_all(b"{\"ok\":true}\n").unwrap();
+            writer_half.flush().unwrap();
+            tx.send(line).unwrap();
+        });
+
+        {
+            let _guard = HandoffDropGuard::new(dir.path(), &temp_sock);
+            // Dropped here without `complete()` ⇒ abort path fires.
+        }
+
+        let received = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("aborted drop-guard must send a request to the replacement");
+        assert!(
+            received.contains("\"command\":\"shutdown\""),
+            "aborted handoff must send shutdown, got: {received}"
+        );
+        server.join().unwrap();
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"));
+        assert!(ops_log.contains(&format!("temp_sock={}", temp_sock.display())));
+    }
+
+    #[test]
+    fn handoff_drop_guard_completed_handoff_does_not_shut_down() {
+        // The success path calls `complete()`: a promoted, now-authoritative
+        // controller must never be shut down or logged as an aborted handoff.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+        {
+            let mut guard = HandoffDropGuard::new(dir.path(), &temp_sock);
+            guard.complete();
+            // Dropped here after `complete()` ⇒ shutdown branch must be skipped.
+        }
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"),
+            "a completed handoff must not log an aborted shutdown"
+        );
+    }
+
+    // ---- M5 (#stuckhandoff2): cross-project orphaned-preparing sweep ----
+
+    #[test]
+    fn controller_serve_project_root_from_args_extracts_root_for_any_project() {
+        // The cmdline shape a sentinel/real controller presents in `/proc`, for a
+        // project root that is NOT the caller's — the breadth M5 adds over the
+        // per-project reaper.
+        let args = vec![
+            "/some/bin/agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            "/home/me/work/boost-client".to_string(),
+            "--handoff-state".to_string(),
+            "preparing".to_string(),
+        ];
+        assert_eq!(
+            controller_serve_project_root_from_args(&args),
+            Some(PathBuf::from("/home/me/work/boost-client"))
+        );
+    }
+
+    #[test]
+    fn controller_serve_project_root_from_args_rejects_non_controllers() {
+        // `controller serve` window present but no `--project-root`.
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "controller".to_string(),
+                "serve".to_string(),
+            ]),
+            None
+        );
+        // An agent-doc invocation that is not `controller serve`.
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "status".to_string(),
+                "--project-root".to_string(),
+                "/x".to_string(),
+            ]),
+            None
+        );
+        // Not an agent-doc process at all (no arg ends with `agent-doc`).
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "sleep".to_string(),
+                "controller".to_string(),
+                "serve".to_string(),
+                "--project-root".to_string(),
+                "/x".to_string(),
+            ]),
+            None
+        );
+    }
+
+    #[test]
+    #[ignore = "global /proc preparing-controller sweep: would reap the per-project M3 \
+                sentinel tests' processes under nextest concurrency. Runs in the \
+                `make check` --ignored leg, where it is the only such sweeper."]
+    fn all_projects_reaper_reaps_aged_cross_project_preparing_sentinel() {
+        // The all-projects API takes no project_root: it must discover this wedged
+        // Preparing controller purely from `/proc` and reap it keyed to its OWN root.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(cmdline_has_preparing_handoff(pid));
+        assert_eq!(
+            controller_serve_project_root(pid).as_deref(),
+            Some(dir.path()),
+            "the sweep must recover the sentinel's own --project-root from /proc"
+        );
+        // Age past a zero threshold (start age = /proc dir mtime).
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let (reaped, _kept) = reap_orphaned_preparing_controllers_all_projects(
+            Duration::from_secs(0),
+            false,
+            "test",
+        )
+        .unwrap();
+        assert!(
+            reaped >= 1,
+            "cross-project sweep must reap the aged preparing sentinel"
+        );
+
+        // The live orphan must actually be terminated. The sentinel is our child, so
+        // a killed process lingers as a zombie until `wait()` — poll `try_wait`.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("aged cross-project preparing orphan must be reaped");
+        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("orphaned_preparing_controller_reaped_cross_project pid="));
+        assert!(ops_log.contains("caller=test"));
     }
 
     /// Spawn a long-sleep sentinel whose `/proc/<pid>/cmdline` matches the

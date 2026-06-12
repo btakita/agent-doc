@@ -229,6 +229,27 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += orphan_reaped;
     total_skipped += orphan_kept;
 
+    // M5 (#stuckhandoff2): cross-project sweep. The two reapers above are scoped to
+    // the triggering `project_root`; a controller wedged in ANOTHER project root is
+    // invisible to them until agent-doc is invoked there. This walks `/proc` for any
+    // `controller serve --handoff-state preparing` process across all project roots
+    // and reaps each keyed to its own root, so a gc tick in one project also clears
+    // wedged controllers everywhere (`/proc` is the index; no global registry).
+    let (xproj_reaped, xproj_kept) =
+        crate::project_controller::reap_orphaned_preparing_controllers_all_projects(
+            crate::project_controller::stale_preparing_controller_threshold(),
+            dry_run,
+            "gc",
+        )?;
+    if xproj_reaped > 0 {
+        eprintln!(
+            "[gc] controllers: {} cross-project orphaned preparing reaped, {} kept",
+            xproj_reaped, xproj_kept
+        );
+    }
+    total_deleted += xproj_reaped;
+    total_skipped += xproj_kept;
+
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
     if sock_deleted > 0 {

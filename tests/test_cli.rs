@@ -607,6 +607,14 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/route/dispatch_only.rs",
+        "agent-doc-orchestration/src/route/authoritative_actor.rs",
+        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-orchestration/src/route/cycle_ack.rs",
+        "agent-doc-orchestration/src/route/busy_pane.rs",
+        "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/queue_consume.rs",
@@ -672,7 +680,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/preflight.rs", "reason=") => 4,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
-        ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,
+        ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,
         ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
         // +5 for the audited `#snrun` blocked-in-interactive-substate guard:
         // the `dispatch_only_blocked_guard_reason` import + its `guard_reason`
@@ -682,12 +690,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // generic busy actor on the dispatch-only fail-closed path. Routed
         // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
         // FlowEvent.
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 12,
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
         // +2 (#jb-run-agent-doc-submit-diagnostics): the redacted
         // `route_submit_observation` / `route_submit_issue` helpers can include
         // dispatch-start proof labels while keeping prompt-submit failures
         // visible in ops-log review.
-        ("agent-doc-orchestration/src/route.rs", "proof=") => 4,
+        ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
         // when the existing agent:queue is polluted/unparseable the route
@@ -698,7 +706,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the busy-pane reroute now logs when it skips the editor-opening `C-g`
         // because the live Codex pane is not in a shell reverse-i-search /
         // history-search state, and goes straight to the Escape + C-c path.
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 12,
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 6,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 2,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 2,
+        ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 1,
+        ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
+        ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 2,
+        ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 2,
+        ("agent-doc-orchestration/src/route/busy_pane.rs", "reason=") => 1,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
         // `expect_done_or_gate_guard_*` test names. +1 for the audited

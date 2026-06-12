@@ -1824,7 +1824,6 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
-    #![allow(unused_imports)]
     use super::*;
     use fs2::FileExt;
     use std::fs;

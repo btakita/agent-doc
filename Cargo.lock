@@ -779,7 +779,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1355,13 +1355,18 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03fbf1adaabdffddc91ff1ff400fadb1404bf18c108472490c35d0033f8273af"
+version = "0.10.3"
+dependencies = [
+ "arc-swap",
+ "parking_lot",
+ "smallvec",
+]
 
 [[package]]
 name = "lazily"
 version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7006d091eda7f35e3c9ecc605cad71e74e2f73b2c0680ef5321e205524e05166"
 dependencies = [
  "arc-swap",
  "parking_lot",
@@ -1613,7 +1618,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2122,7 +2127,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2581,7 +2586,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2872,22 +2877,22 @@ dependencies = [
 
 [[package]]
 name = "tsift-core"
-version = "0.1.64"
+version = "0.1.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "638877c37256b750da924032ab8b8c8d10f5d102f57666f8a4865489f9e2cd9a"
+checksum = "d085f68967206ef775481d4aa739f65ee512605da72a54d853ac06bdf6e733ce"
 dependencies = [
  "anyhow",
  "blake3",
- "lazily 0.2.0",
+ "lazily 0.10.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "tsift-memory"
-version = "0.1.64"
+version = "0.1.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc5eb0dc542b969e00a1f05228f60a660f49cf28dcd838e93a3889d0959b87c9"
+checksum = "9bfef8dcf33ff2baee8c6bb7fa824993520806ded0addcd6ba8f5226a4ec5f73"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3254,7 +3259,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

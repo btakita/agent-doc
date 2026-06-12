@@ -54,7 +54,7 @@ alacritty_terminal = "0.26"
 signal-hook = "0.3"
 tagpath = { version = "0.12.1", default-features = false }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
-tsift-memory = "0.1.64"
+tsift-memory = "0.1.69"
 
 [dev-dependencies]
 tempfile = "3"

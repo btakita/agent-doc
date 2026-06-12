@@ -194,7 +194,11 @@ fn buffer_state_from_divergence(
 ) -> Option<BufferState> {
     let snapshot = divergence?;
     let content = snapshot.content.clone()?;
-    Some(BufferState::new(content, true, snapshot.timestamp_ms as u64))
+    Some(BufferState::new(
+        content,
+        true,
+        snapshot.timestamp_ms as u64,
+    ))
 }
 
 /// Canonical path string used to key the editor-buffer sidecar lookup. Mirrors
@@ -260,6 +264,38 @@ pub struct BroadcastMerge {
     pub originator_echo_suppressed: bool,
 }
 
+/// One peer editor buffer participating in a multi-editor broadcast merge.
+#[derive(Debug, Clone)]
+pub struct BroadcastPeer {
+    pub editor_id: String,
+    pub content: String,
+}
+
+impl BroadcastPeer {
+    pub fn new(editor_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            editor_id: editor_id.into(),
+            content: content.into(),
+        }
+    }
+}
+
+/// A target editor that should receive a merged document update.
+#[derive(Debug, Clone)]
+pub struct BroadcastTarget {
+    pub editor_id: String,
+    pub merged: String,
+}
+
+/// File-IPC delivery queued for one peer editor.
+#[derive(Debug, Clone)]
+pub struct BroadcastDelivery {
+    pub editor_id: String,
+    pub patch_id: String,
+    pub patch_file: std::path::PathBuf,
+    pub merged_len: usize,
+}
+
 /// `#rtwbcast` Option C — the MERGE-ONLY multi-editor broadcast seam.
 ///
 /// Given the shared on-disk `base` and two open editor buffers (`originator`
@@ -282,13 +318,223 @@ pub fn compute_broadcast(
     peer: &str,
 ) -> anyhow::Result<BroadcastMerge> {
     let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
-    let (merged, _state) =
-        crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
+    let (merged, _state) = crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
     let originator_echo_suppressed = merged == originator;
     Ok(BroadcastMerge {
         merged,
         originator_echo_suppressed,
     })
+}
+
+/// Production-shaped N-buffer broadcast planner.
+///
+/// The originator is never returned as a target. Each peer receives a CRDT union
+/// of the originator buffer and that peer's current buffer over the shared disk
+/// base, unless the peer already equals that merged result.
+pub fn compute_broadcast_plan(
+    base: &str,
+    originator_editor_id: &str,
+    originator: &str,
+    peers: &[BroadcastPeer],
+) -> anyhow::Result<Vec<BroadcastTarget>> {
+    let mut targets = Vec::new();
+    for peer in peers {
+        if peer.editor_id == originator_editor_id {
+            continue;
+        }
+        let merge = compute_broadcast(base, originator, &peer.content)?;
+        if merge.merged == peer.content {
+            continue;
+        }
+        targets.push(BroadcastTarget {
+            editor_id: peer.editor_id.clone(),
+            merged: merge.merged,
+        });
+    }
+    Ok(targets)
+}
+
+/// Broadcast one editor's new full-buffer report to every other open editor
+/// sidecar for the same document.
+///
+/// This is the FFI-first production delivery rung for `#rtwbcast`: plugins only
+/// report their visible buffer and consume targeted patch files. Rust owns the
+/// merge, echo suppression, per-editor patch filename, and payload shape.
+pub fn broadcast_editor_change(
+    file: &std::path::Path,
+    originator_editor_id: &str,
+    originator_content: &str,
+) -> anyhow::Result<Vec<BroadcastDelivery>> {
+    let originator_editor_id = originator_editor_id.trim();
+    if originator_editor_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let canonical_str = canonical.to_string_lossy().to_string();
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        return Ok(Vec::new());
+    };
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let disk = std::fs::read_to_string(&canonical).unwrap_or_default();
+    let peers: Vec<BroadcastPeer> = crate::debounce::live_buffer_snapshots(&canonical_str)
+        .into_iter()
+        .filter_map(|snapshot| {
+            let editor_id = snapshot.editor_id?;
+            let content = snapshot.content?;
+            Some(BroadcastPeer::new(editor_id, content))
+        })
+        .collect();
+    let targets = compute_broadcast_plan(&disk, originator_editor_id, originator_content, &peers)?;
+    let doc_hash = crate::snapshot::doc_hash(&canonical)?;
+    let mut deliveries = Vec::new();
+    for target in targets {
+        let Some((patches, frontmatter)) =
+            broadcast_component_delta_for_peer(file, &target.merged, &target.editor_id, &peers)?
+        else {
+            continue;
+        };
+        let patch_id = uuid::Uuid::new_v4().to_string();
+        let patch_file = patches_dir.join(format!(
+            "{}.{}.json",
+            doc_hash,
+            sanitize_editor_id_for_filename(&target.editor_id)
+        ));
+        let peer_baseline = peers
+            .iter()
+            .find(|peer| peer.editor_id == target.editor_id)
+            .map(|peer| peer.content.as_str())
+            .unwrap_or("");
+        let mut payload = serde_json::json!({
+            "type": "patch",
+            "file": canonical_str.clone(),
+            "editor_id": target.editor_id.clone(),
+            "origin_editor_id": originator_editor_id,
+            "patch_id": patch_id.clone(),
+            "patches": patches,
+            "node_patches": [],
+            "unmatched": "",
+            "baseline": peer_baseline,
+            "reposition_boundary": false,
+        });
+        if let Some(frontmatter) = frontmatter {
+            payload["frontmatter"] = serde_json::Value::String(frontmatter);
+        }
+        crate::write::atomic_write_pub(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "realtime_broadcast_queued file={} origin_editor_id={} target_editor_id={} patch_id={} merged_len={}",
+                file.display(),
+                originator_editor_id,
+                payload
+                    .get("editor_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-"),
+                patch_id,
+                target.merged.len()
+            ),
+        );
+        deliveries.push(BroadcastDelivery {
+            editor_id: payload
+                .get("editor_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            patch_id,
+            patch_file,
+            merged_len: target.merged.len(),
+        });
+    }
+    Ok(deliveries)
+}
+
+fn broadcast_component_delta_for_peer(
+    file: &std::path::Path,
+    merged: &str,
+    peer_editor_id: &str,
+    peers: &[BroadcastPeer],
+) -> anyhow::Result<Option<(Vec<serde_json::Value>, Option<String>)>> {
+    let Some(peer) = peers.iter().find(|peer| peer.editor_id == peer_editor_id) else {
+        return Ok(None);
+    };
+    if peer.content == merged {
+        return Ok(None);
+    }
+    let patches = broadcast_convergence_patches(&peer.content, merged)?;
+    let frontmatter = raw_frontmatter_yaml(merged)
+        .filter(|merged_fm| raw_frontmatter_yaml(&peer.content) != Some(*merged_fm))
+        .map(ToString::to_string);
+    if patches.is_empty() && frontmatter.is_none() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "realtime_broadcast_skipped file={} target_editor_id={} reason=no_component_delta",
+                file.display(),
+                peer_editor_id
+            ),
+        );
+        return Ok(None);
+    }
+    Ok(Some((patches, frontmatter)))
+}
+
+fn broadcast_convergence_patches(
+    before: &str,
+    after: &str,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let before_components = crate::component::parse(before)?;
+    let after_components = crate::component::parse(after)?;
+    let before_by_name: std::collections::HashMap<&str, &crate::component::Component> =
+        before_components
+            .iter()
+            .map(|component| (component.name.as_str(), component))
+            .collect();
+    let mut patches = Vec::new();
+    for after_component in &after_components {
+        let Some(before_component) = before_by_name.get(after_component.name.as_str()) else {
+            continue;
+        };
+        let before_body = before_component.content(before);
+        let after_body = after_component.content(after);
+        if crate::git::normalize_transient_agent_doc_markers(before_body)
+            == crate::git::normalize_transient_agent_doc_markers(after_body)
+        {
+            continue;
+        }
+        patches.push(serde_json::json!({
+            "component": after_component.name,
+            "content": after_body,
+            "op": "replace",
+        }));
+    }
+    Ok(patches)
+}
+
+fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
+    let rest = content.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
+}
+
+fn sanitize_editor_id_for_filename(editor_id: &str) -> String {
+    let sanitized: String = editor_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "editor".to_string()
+    } else {
+        sanitized
+    }
 }
 
 #[cfg(test)]
@@ -406,6 +652,7 @@ mod tests {
             len: body.len(),
             hash: crate::debounce::content_hash(body),
             timestamp_ms: generation,
+            editor_id: None,
             content: content.map(|c| c.to_string()),
         }
     }
@@ -484,6 +731,82 @@ mod tests {
         let disk = "plain disk body\n";
         let (_dir, file, _canonical) = temp_doc(disk);
         assert!(durable_buffer_state(&file, disk).is_none());
-        assert_eq!(resolve_current_doc(&file, disk).authority, DocAuthority::Disk);
+        assert_eq!(
+            resolve_current_doc(&file, disk).authority,
+            DocAuthority::Disk
+        );
+    }
+
+    #[test]
+    fn compute_broadcast_plan_skips_originator_and_unchanged_peer() {
+        let base = "one\n";
+        let origin = "one\norigin\n";
+        let peer_changed = BroadcastPeer::new("peer-a", "one\npeer\n");
+        let peer_unchanged = BroadcastPeer::new("peer-b", origin);
+        let origin_peer = BroadcastPeer::new("origin", "one\norigin peer should skip\n");
+
+        let targets = compute_broadcast_plan(
+            base,
+            "origin",
+            origin,
+            &[peer_changed, peer_unchanged, origin_peer],
+        )
+        .unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].editor_id, "peer-a");
+        assert!(targets[0].merged.contains("origin"));
+        assert!(targets[0].merged.contains("peer"));
+    }
+
+    #[test]
+    fn broadcast_editor_change_writes_targeted_peer_patch_file() {
+        let disk = concat!(
+            "# Doc\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "base\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let origin = disk.replace("base\n", "base\norigin edit\n");
+        let peer = disk.replace("base\n", "base\npeer edit\n");
+        let (_dir, file, canonical) = temp_doc(disk);
+        std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
+
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            &origin,
+            Some("editor-A"),
+        )
+        .unwrap();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            &peer,
+            Some("editor-B"),
+        )
+        .unwrap();
+
+        let deliveries = broadcast_editor_change(&file, "editor-A", &origin).unwrap();
+        assert_eq!(deliveries.len(), 1);
+        assert_eq!(deliveries[0].editor_id, "editor-B");
+        assert!(
+            deliveries[0]
+                .patch_file
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(".editor-B.json")
+        );
+
+        let payload: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&deliveries[0].patch_file).unwrap())
+                .unwrap();
+        assert_eq!(payload["editor_id"], "editor-B");
+        assert_eq!(payload["origin_editor_id"], "editor-A");
+        assert_eq!(payload["file"], canonical);
+        assert_eq!(payload["patches"][0]["component"], "exchange");
+        assert_eq!(payload["patches"][0]["op"], "replace");
+        let body = payload["patches"][0]["content"].as_str().unwrap();
+        assert!(body.contains("origin edit"));
+        assert!(body.contains("peer edit"));
     }
 }

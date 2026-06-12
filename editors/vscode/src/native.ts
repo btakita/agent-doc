@@ -93,6 +93,9 @@ function resetBindings(): void {
     _await_idle = null;
     _document_changed = null;
     _is_tracked = null;
+    _document_changed_digest_for_editor = null;
+    _document_changed_digest_content_for_editor = null;
+    _document_closed_for_editor = null;
     _resolve_project_path = null;
     _free_string = null;
     _version = null;
@@ -196,6 +199,9 @@ let _await_idle: any = null;
 let _document_changed: any = null;
 let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
+let _document_changed_digest_for_editor: any = null;
+let _document_changed_digest_content_for_editor: any = null;
+let _document_closed_for_editor: any = null;
 let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_string: any = null;
@@ -279,6 +285,28 @@ function bindFunctions(): void {
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
+    try {
+        _document_changed_digest_for_editor = lib.func(
+            'agent_doc_document_changed_digest_for_editor',
+            'void',
+            ['str', 'int64', 'str', 'str'],
+        );
+        _document_changed_digest_content_for_editor = lib.func(
+            'agent_doc_document_changed_digest_content_for_editor',
+            'void',
+            ['str', 'str', 'str'],
+        );
+        _document_closed_for_editor = lib.func(
+            'agent_doc_document_closed_for_editor',
+            'void',
+            ['str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] per-editor live-buffer ABI unavailable: ${e.message}`);
+        _document_changed_digest_for_editor = null;
+        _document_changed_digest_content_for_editor = null;
+        _document_closed_for_editor = null;
+    }
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
@@ -619,10 +647,15 @@ export function documentChangedDigest(
     contentLen: number,
     contentHash: string,
     projectRoot?: string,
+    editorId?: string,
 ): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
-    _document_changed_digest(filePath, contentLen, contentHash);
+    if (editorId && _document_changed_digest_for_editor) {
+        _document_changed_digest_for_editor(filePath, contentLen, contentHash, editorId);
+    } else {
+        _document_changed_digest(filePath, contentLen, contentHash);
+    }
 }
 
 /**
@@ -636,10 +669,31 @@ export function documentChangedDigestContent(
     filePath: string,
     content: string,
     projectRoot?: string,
+    editorId?: string,
 ): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
-    _document_changed_digest_content(filePath, content);
+    if (editorId && _document_changed_digest_content_for_editor) {
+        _document_changed_digest_content_for_editor(filePath, content, editorId);
+    } else {
+        _document_changed_digest_content(filePath, content);
+    }
+}
+
+/**
+ * Clear this editor instance's durable live-buffer sidecar on close.
+ */
+export function documentClosedForEditor(
+    filePath: string,
+    projectRoot?: string,
+    editorId?: string,
+): void {
+    if (!editorId) return;
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    if (_document_closed_for_editor) {
+        _document_closed_for_editor(filePath, editorId);
+    }
 }
 
 /**

@@ -142,4 +142,17 @@ describe('patchGuard', () => {
         assert.ok(source.includes('if (overrideMode == null && openMatch[1])'));
         assert.ok(source.includes("normalized === 'append' || normalized === 'prepend' || normalized === 'replace'"));
     });
+
+    it('uses per-editor identity for live-buffer reports and targeted patch filtering', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
+
+        assert.ok(source.includes('const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`'));
+        assert.ok(source.includes('this.targetsThisEditor(patch)'));
+        assert.ok(source.includes('patch.editor_id && patch.editor_id !== EDITOR_ID'));
+        assert.ok(source.includes('patch.origin_editor_id === EDITOR_ID'));
+        assert.ok(source.includes('native.documentClosedForEditor(document.uri.fsPath'));
+        assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor'));
+        assert.ok(nativeSource.includes('agent_doc_document_closed_for_editor'));
+    });
 });

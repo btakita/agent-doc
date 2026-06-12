@@ -103,8 +103,21 @@ pub fn document_changed(file: &str) {
 /// can cheaply compute a digest. The CLI uses the digest sidecar to fail closed
 /// before direct disk writes when an editor buffer is idle but still unsaved.
 pub fn document_changed_with_digest(file: &str, content_len: usize, content_hash: &str) {
+    document_changed_with_digest_for_editor(file, content_len, content_hash, None);
+}
+
+/// Record a document change and the editor-visible buffer digest for one editor
+/// instance. `editor_id` keys the durable live-buffer sidecar per editor so
+/// multiple open editors on the same document do not overwrite each other.
+pub fn document_changed_with_digest_for_editor(
+    file: &str,
+    content_len: usize,
+    content_hash: &str,
+    editor_id: Option<&str>,
+) {
     document_changed(file);
-    if let Err(e) = record_live_buffer_digest(file, content_len, content_hash) {
+    if let Err(e) = record_live_buffer_digest_for_editor(file, content_len, content_hash, editor_id)
+    {
         eprintln!(
             "[debounce] live buffer digest write failed for {:?}: {}",
             file, e
@@ -117,8 +130,19 @@ pub fn document_changed_with_digest(file: &str, content_len: usize, content_hash
 /// prefer this so the visible-write reconcile guard can positively confirm the
 /// editor buffer equals on-disk content.
 pub fn document_changed_with_content(file: &str, content: &str) {
+    document_changed_with_content_for_editor(file, content, None);
+}
+
+/// Record a document change plus the editor-visible full buffer content for one
+/// editor instance. This is the multi-editor form of
+/// [`document_changed_with_content`].
+pub fn document_changed_with_content_for_editor(
+    file: &str,
+    content: &str,
+    editor_id: Option<&str>,
+) {
     document_changed(file);
-    if let Err(e) = record_live_buffer_digest_content(file, content) {
+    if let Err(e) = record_live_buffer_digest_content_for_editor(file, content, editor_id) {
         eprintln!(
             "[debounce] live buffer content digest write failed for {:?}: {}",
             file, e
@@ -206,6 +230,8 @@ pub struct LiveBufferSnapshot {
     pub len: usize,
     pub hash: String,
     pub timestamp_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -341,18 +367,45 @@ pub fn record_live_buffer_digest(
     content_len: usize,
     content_hash: &str,
 ) -> std::io::Result<()> {
-    write_live_buffer_snapshot(file, content_len, content_hash.to_ascii_lowercase(), None)
+    record_live_buffer_digest_for_editor(file, content_len, content_hash, None)
+}
+
+/// Record the latest editor-visible buffer digest for one editor instance.
+pub fn record_live_buffer_digest_for_editor(
+    file: &str,
+    content_len: usize,
+    content_hash: &str,
+    editor_id: Option<&str>,
+) -> std::io::Result<()> {
+    write_live_buffer_snapshot(
+        file,
+        content_len,
+        content_hash.to_ascii_lowercase(),
+        None,
+        editor_id,
+    )
 }
 
 /// Record the latest editor-visible buffer digest WITH the full buffer content
 /// (#pcp6). The plugin reports the editor's text so the visible-write reconcile
 /// guard can positively confirm the editor buffer equals on-disk content.
 pub fn record_live_buffer_digest_content(file: &str, content: &str) -> std::io::Result<()> {
+    record_live_buffer_digest_content_for_editor(file, content, None)
+}
+
+/// Record the latest editor-visible full buffer content for one editor
+/// instance.
+pub fn record_live_buffer_digest_content_for_editor(
+    file: &str,
+    content: &str,
+    editor_id: Option<&str>,
+) -> std::io::Result<()> {
     write_live_buffer_snapshot(
         file,
         content.len(),
         content_hash(content),
         Some(content.to_string()),
+        editor_id,
     )
 }
 
@@ -361,8 +414,9 @@ fn write_live_buffer_snapshot(
     content_len: usize,
     hash: String,
     content: Option<String>,
+    editor_id: Option<&str>,
 ) -> std::io::Result<()> {
-    let live_path = live_buffer_snapshot_path(file);
+    let live_path = live_buffer_snapshot_path_for_editor(file, editor_id);
     if let Some(parent) = live_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -374,6 +428,10 @@ fn write_live_buffer_snapshot(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis(),
+        editor_id: editor_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToString::to_string),
         content,
     };
     let encoded = serde_json::to_string(&snapshot)?;
@@ -382,14 +440,43 @@ fn write_live_buffer_snapshot(
 
 /// Return the latest editor-visible buffer digest for a document.
 pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
-    let path = live_buffer_snapshot_path(file);
+    live_buffer_snapshots(file)
+        .into_iter()
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+}
+
+/// Return every live-buffer snapshot for a document: the legacy single-editor
+/// sidecar plus any per-editor sidecars (`<pathhash>.<editorid>`).
+pub fn live_buffer_snapshots(file: &str) -> Vec<LiveBufferSnapshot> {
+    let (dir, stem) = live_buffer_snapshot_dir_and_stem(file);
+    let mut snapshots = Vec::new();
+    let legacy = dir.join(&stem);
+    if let Some(snapshot) = read_live_buffer_snapshot(file, &legacy) {
+        snapshots.push(snapshot);
+    }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return snapshots;
+    };
+    let prefix = format!("{stem}.");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        if let Some(snapshot) = read_live_buffer_snapshot(file, &path) {
+            snapshots.push(snapshot);
+        }
+    }
+    snapshots
+}
+
+fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveBufferSnapshot> {
     let content = std::fs::read_to_string(path).ok()?;
     let snapshot: LiveBufferSnapshot = serde_json::from_str(&content).ok()?;
-    if snapshot.path == file {
-        Some(snapshot)
-    } else {
-        None
-    }
+    (snapshot.path == file).then_some(snapshot)
 }
 
 /// Clear the durable live-buffer sidecar for a document.
@@ -403,8 +490,39 @@ pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
 /// sidecar is success; any other IO error is returned so callers log rather than
 /// silently ignore it (per the no-`let _ =` rule).
 pub fn clear_live_buffer(file: &str) -> std::io::Result<()> {
-    let path = live_buffer_snapshot_path(file);
-    match std::fs::remove_file(&path) {
+    clear_live_buffer_for_editor(file, None)
+}
+
+/// Clear the durable live-buffer sidecar for one editor instance. Passing
+/// `None` clears the legacy sidecar and every per-editor sidecar for the file.
+pub fn clear_live_buffer_for_editor(file: &str, editor_id: Option<&str>) -> std::io::Result<()> {
+    if editor_id.map(str::trim).is_some_and(|id| !id.is_empty()) {
+        return remove_live_buffer_snapshot_path(&live_buffer_snapshot_path_for_editor(
+            file, editor_id,
+        ));
+    }
+
+    let (dir, stem) = live_buffer_snapshot_dir_and_stem(file);
+    remove_live_buffer_snapshot_path(&dir.join(&stem))?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    let prefix = format!("{stem}.");
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with(&prefix) {
+            remove_live_buffer_snapshot_path(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_live_buffer_snapshot_path(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
@@ -490,11 +608,21 @@ fn file_mtime_ms(file: &str) -> Option<u128> {
 /// sidecar's `timestamp_ms`, the editor digest describes superseded content and
 /// cannot represent unsaved edits against the *current* disk, so it is ignored.
 pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<LiveBufferSnapshot> {
-    let snapshot = live_buffer_snapshot(file)?;
+    live_buffer_snapshots(file)
+        .into_iter()
+        .filter(|snapshot| live_buffer_snapshot_diverges_from_content(file, snapshot, content))
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+}
+
+fn live_buffer_snapshot_diverges_from_content(
+    file: &str,
+    snapshot: &LiveBufferSnapshot,
+    content: &str,
+) -> bool {
     let expected_len = content.len();
     let expected_hash = content_hash(content);
     if snapshot.len == expected_len && snapshot.hash.eq_ignore_ascii_case(&expected_hash) {
-        return None;
+        return false;
     }
 
     // #pcp6 content-based positive confirmation: when the plugin reported the
@@ -513,7 +641,7 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
         // returned None silently, so a "agent-doc didn't detect my unsaved edit"
         // bug report could not tell content-match from provenance from mtime-stale.
         log_live_buffer_decision(file, "suppressed", "editor_content_equals_disk");
-        return None;
+        return false;
     }
 
     // #pcp2 write-provenance positive attribution: if agent-doc recorded a disk
@@ -529,7 +657,7 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
         && prov.timestamp_ms > snapshot.timestamp_ms
     {
         log_live_buffer_decision(file, "suppressed", "write_provenance_newer_than_buffer");
-        return None;
+        return false;
     }
 
     // Stale-sidecar suppression (fallback): if disk changed after the editor last
@@ -543,11 +671,11 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
                 .saturating_add(LIVE_BUFFER_STALE_SKEW_MS)
     {
         log_live_buffer_decision(file, "suppressed", "disk_mtime_stale_vs_buffer");
-        return None;
+        return false;
     }
 
     log_live_buffer_decision(file, "diverges", "unsaved_buffer_ahead_of_disk");
-    Some(snapshot)
+    true
 }
 
 /// Best-effort prove/disprove diagnostic for the live-buffer divergence
@@ -560,6 +688,28 @@ fn log_live_buffer_decision(file: &str, decision: &str, reason: &str) {
         std::path::Path::new(file),
         &format!("live_buffer_classify decision={decision} reason={reason} file={file}"),
     );
+}
+
+fn live_buffer_snapshot_dir_and_stem(file: &str) -> (PathBuf, String) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut hasher);
+    let hash = hasher.finish();
+    let stem = format!("{:016x}", hash);
+    let mut dir = PathBuf::from(file);
+    dir.pop();
+    loop {
+        if dir.join(".agent-doc").is_dir() {
+            return (dir.join(LIVE_BUFFER_DIR), stem);
+        }
+        if !dir.pop() {
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
+            return (parent.join(LIVE_BUFFER_DIR), stem);
+        }
+    }
 }
 
 /// Compute the typing indicator file path for a document.
@@ -586,25 +736,36 @@ fn typing_indicator_path(file: &str) -> PathBuf {
     }
 }
 
-/// Compute the live-buffer snapshot file path for a document.
-fn live_buffer_snapshot_path(file: &str) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut hasher);
-    let hash = hasher.finish();
-    let mut dir = PathBuf::from(file);
-    dir.pop();
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return dir.join(LIVE_BUFFER_DIR).join(format!("{:016x}", hash));
-        }
-        if !dir.pop() {
-            let parent = PathBuf::from(file)
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .to_path_buf();
-            return parent.join(LIVE_BUFFER_DIR).join(format!("{:016x}", hash));
-        }
+fn live_buffer_snapshot_path_for_editor(file: &str, editor_id: Option<&str>) -> PathBuf {
+    let (dir, stem) = live_buffer_snapshot_dir_and_stem(file);
+    let Some(editor_id) = editor_id
+        .map(str::trim)
+        .filter(|editor_id| !editor_id.is_empty())
+    else {
+        return dir.join(stem);
+    };
+    dir.join(format!(
+        "{}.{}",
+        stem,
+        sanitize_editor_id_for_filename(editor_id)
+    ))
+}
+
+fn sanitize_editor_id_for_filename(editor_id: &str) -> String {
+    let sanitized: String = editor_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "editor".to_string()
+    } else {
+        sanitized
     }
 }
 

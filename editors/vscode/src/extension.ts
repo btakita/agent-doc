@@ -52,6 +52,7 @@ import {
 let resolvedAgentDoc: string | null = null;
 const SYNC_CLI_TIMEOUT_MS = 30_000;
 const FOCUS_CLI_TIMEOUT_MS = 750;
+const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 
 function resolveAgentDoc(): string {
     if (resolvedAgentDoc) return resolvedAgentDoc;
@@ -1403,6 +1404,8 @@ interface IpcNodePatch {
 
 interface IpcPatch {
     file: string;
+    editor_id?: string;
+    origin_editor_id?: string;
     patches: IpcComponentPatch[];
     node_patches?: IpcNodePatch[];
     unmatched: string;
@@ -1474,6 +1477,7 @@ class PatchWatcher implements vscode.Disposable {
                     fsPath,
                     text,
                     this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined,
+                    EDITOR_ID,
                 );
             }
         });
@@ -1535,6 +1539,16 @@ class PatchWatcher implements vscode.Disposable {
         }
     }
 
+    private targetsThisEditor(patch: IpcPatch): boolean {
+        if (patch.editor_id && patch.editor_id !== EDITOR_ID) {
+            return false;
+        }
+        if (!patch.editor_id && patch.origin_editor_id === EDITOR_ID) {
+            return false;
+        }
+        return true;
+    }
+
     private async onPatchFileCreated(uri: vscode.Uri): Promise<void> {
         try {
             const raw = fs.readFileSync(uri.fsPath, 'utf-8');
@@ -1542,6 +1556,11 @@ class PatchWatcher implements vscode.Disposable {
 
             if (!patch.file) {
                 this.outputChannel.appendLine(`PatchWatcher: invalid patch (no file field): ${uri.fsPath}`);
+                return;
+            }
+
+            if (!this.targetsThisEditor(patch)) {
+                this.outputChannel.appendLine(`PatchWatcher: ignoring patch for editor_id ${patch.editor_id ?? '-'}: ${path.basename(uri.fsPath)}`);
                 return;
             }
 
@@ -2202,6 +2221,13 @@ export function activate(context: vscode.ExtensionContext): void {
                 args.push('--rename');
                 runCli(args, root).catch(() => {});
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidCloseTextDocument((document) => {
+            if (document.languageId !== 'markdown') return;
+            native.documentClosedForEditor(document.uri.fsPath, getWorkspaceRoot(document.uri), EDITOR_ID);
         })
     );
 

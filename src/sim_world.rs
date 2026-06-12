@@ -3496,7 +3496,8 @@ fn finalize_carries_directive_edit_forward_instead_of_merging() {
         "### Re: Please reply — gpt-5\n\nThe agent's answer body, long enough to matter.\n<!-- /agent:exchange -->",
     );
     // The user typed a scratch dispatch directive into the comment block.
-    let candidate = content_ours.replace("<!--\n-->", "<!--\ndispatch #spec-test-build-install\n-->");
+    let candidate =
+        content_ours.replace("<!--\n-->", "<!--\ndispatch #spec-test-build-install\n-->");
 
     world.finalize_ipc_candidate_with_tolerance(baseline, &content_ours, &candidate);
 
@@ -4512,7 +4513,9 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
 // See tasks/agent-doc/plan-simworld-editor-integration.md.
 // ============================================================================
 
-use agent_doc_orchestration::realtime_model::{BufferState, DocAuthority, Reconciliation};
+use agent_doc_orchestration::realtime_model::{
+    BroadcastPeer, BufferState, DocAuthority, Reconciliation,
+};
 
 /// Which editor's live-buffer protocol a [`SimEditor`] emulates. The read
 /// authority contract is identical across kinds (a dirty buffer is always
@@ -4688,14 +4691,15 @@ impl SimEditor {
     fn resolve(&self) -> Result<Reconciliation> {
         let disk = std::fs::read_to_string(&self.path)
             .map_err(|err| anyhow!("SimEditor resolve read {}: {err}", self.path.display()))?;
-        Ok(agent_doc_orchestration::realtime_model::resolve_current_doc(
-            &self.path, &disk,
-        ))
+        Ok(agent_doc_orchestration::realtime_model::resolve_current_doc(&self.path, &disk))
     }
 
     fn record_buffer(&self) -> Result<()> {
-        agent_doc_orchestration::debounce::record_live_buffer_digest_content(&self.key, &self.buffer)
-            .map_err(|err| anyhow!("SimEditor record live buffer: {err}"))
+        agent_doc_orchestration::debounce::record_live_buffer_digest_content(
+            &self.key,
+            &self.buffer,
+        )
+        .map_err(|err| anyhow!("SimEditor record live buffer: {err}"))
     }
 
     /// The pure [`BufferState`] this editor currently holds — what the plugin
@@ -4813,8 +4817,7 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
     // editor saves (buffer == disk) disk is canonical, and once it closes (sidecar
     // cleared) the realtime model reports `editor_absent`.
     let disk = editor_baseline_doc();
-    let buffer =
-        editor_doc_with_backlog("- [ ] [#unsaved-then-saved] typed then saved\n");
+    let buffer = editor_doc_with_backlog("- [ ] [#unsaved-then-saved] typed then saved\n");
     let (dir, doc) = editor_project(&disk);
 
     let mut editor = SimEditor::generic(&doc).unwrap();
@@ -4826,7 +4829,10 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
 
     editor.save().unwrap();
     let disk_now = std::fs::read_to_string(&doc).unwrap();
-    assert!(disk_now.contains("#unsaved-then-saved"), "save flushed to disk");
+    assert!(
+        disk_now.contains("#unsaved-then-saved"),
+        "save flushed to disk"
+    );
     // Pure seam: a present, in-sync buffer is disk-canonical with reason `in_sync`.
     let in_sync = agent_doc_orchestration::realtime_model::reconcile_current_doc(
         &disk_now,
@@ -4932,17 +4938,22 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
     editor_b.type_unsaved(&buffer_b).unwrap();
 
     // The realtime model merges the two divergent buffers against the shared
-    // on-disk baseline through the production `#rtwbcast` Option C seam
-    // (`compute_broadcast`) — conflict-free by construction.
-    let broadcast = agent_doc_orchestration::realtime_model::compute_broadcast(
-        &disk, &buffer_a, &buffer_b,
+    // on-disk baseline through the production-shaped `#rtwbcast` planner — it
+    // skips the originator and targets the peer editor with the conflict-free
+    // merged document.
+    let targets = agent_doc_orchestration::realtime_model::compute_broadcast_plan(
+        &disk,
+        "editor-A",
+        &buffer_a,
+        &[
+            BroadcastPeer::new("editor-A", &buffer_a),
+            BroadcastPeer::new("editor-B", &buffer_b),
+        ],
     )
     .unwrap();
-    let merged = broadcast.merged;
-    assert!(
-        !broadcast.originator_echo_suppressed,
-        "editor B contributed a genuine edit, so the merge differs from editor A → no echo suppression"
-    );
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].editor_id, "editor-B");
+    let merged = targets[0].merged.clone();
 
     assert!(
         merged.contains("#edit-A") && merged.contains("#edit-B"),
@@ -5022,8 +5033,11 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     let lease = agent_doc_orchestration::drain_owner::read_drain_owner_lease(&doc_key)
         .expect("drain-owner lease present after refresh");
     assert!(
-        agent_doc_orchestration::drain_owner::fresh_drain_owner_lease(&doc_key, lease.heartbeat_secs)
-            .is_some(),
+        agent_doc_orchestration::drain_owner::fresh_drain_owner_lease(
+            &doc_key,
+            lease.heartbeat_secs
+        )
+        .is_some(),
         "a fresh drain-owner lease must gate the supervisor drain to the loop owner"
     );
 

@@ -353,6 +353,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         return when (type) {
             "patch" -> {
                 val patch = parsePatchJson(json) ?: return 0
+                if (!patch.targetsThisEditor()) {
+                    LOG.info("[socket] patch_id ${patch.patchId} targets editor_id ${patch.editorId}; this editor is ${EditorIdentity.id}")
+                    return APPLY_FAILED
+                }
                 if (isClaimedByForceDisk(patch.patchId, patch.file)) {
                     LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — emitting already_applied")
                     return APPLY_ALREADY_APPLIED
@@ -595,6 +599,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             val parseMs = (System.nanoTime() - parseStart) / 1_000_000
             if (parseMs > 10) LOG.info("[perf] processPatchFile parse: ${parseMs}ms ${patchFile.name}")
 
+            if (!patch.targetsThisEditor()) {
+                LOG.info("[patch-watcher] ignoring ${patchFile.name}: target editor_id ${patch.editorId ?: "-"} does not match ${EditorIdentity.id}")
+                return
+            }
+
             // Startup dedup guard: check if this patch was already applied in a previous cycle.
             // Uses snapshot timestamp — if the snapshot is newer than the patch file, the
             // binary already saved a snapshot after applying this patch, so it's stale.
@@ -634,7 +643,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             // the file in place for that path; the dedup/stale checks above
             // already removed anything stale, so this is a genuine pending apply
             // that only the controller-owned writer may perform.
-            if (isFileWatchApplyDemoted(patch.file)) {
+            if (patch.editorId == null && isFileWatchApplyDemoted(patch.file)) {
                 LOG.info("[patch-watcher] read-only demotion (#dsqa): not applying ${patchFile.name} via WatchService; controller-owned watcher + socket IPC are sole writer")
                 return
             }
@@ -1773,7 +1782,21 @@ data class IpcPatch(
     val baselineHash: String? = null,
     /** Node-keyed mutation plan carried alongside legacy component patches. */
     val nodePatches: List<NodePatch> = emptyList(),
-)
+    /** Target editor id for per-editor broadcast patches. */
+    val editorId: String? = null,
+    /** Originating editor id for echo suppression. */
+    val originEditorId: String? = null,
+) {
+    fun targetsThisEditor(): Boolean {
+        if (editorId != null && editorId != EditorIdentity.id) {
+            return false
+        }
+        if (editorId == null && originEditorId == EditorIdentity.id) {
+            return false
+        }
+        return true
+    }
+}
 
 data class ComponentPatch(
     val component: String,
@@ -2289,6 +2312,8 @@ fun parsePatchJson(json: String): IpcPatch? {
         val root = com.google.gson.JsonParser.parseString(json).asJsonObject
 
         val file = root.get("file")?.asString ?: return null
+        val editorId = root.get("editor_id")?.let { if (it.isJsonNull) null else it.asString }
+        val originEditorId = root.get("origin_editor_id")?.let { if (it.isJsonNull) null else it.asString }
         val unmatched = root.get("unmatched")?.asString ?: ""
         val frontmatter = root.get("frontmatter")?.asString
         val fullContent = root.get("fullContent")?.asString
@@ -2351,6 +2376,8 @@ fun parsePatchJson(json: String): IpcPatch? {
             cycleId,
             baselineHash,
             nodePatches,
+            editorId,
+            originEditorId,
         )
     } catch (e: Exception) {
         return null

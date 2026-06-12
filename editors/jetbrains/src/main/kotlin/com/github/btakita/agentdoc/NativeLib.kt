@@ -223,6 +223,24 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_document_changed_digest_content(file_path: String, content: String)
 
+    /** Per-editor digest report used by the multi-editor broadcast sidecar bus. */
+    fun agent_doc_document_changed_digest_for_editor(
+        file_path: String,
+        content_len: Long,
+        content_hash: String,
+        editor_id: String,
+    )
+
+    /** Per-editor full-content report used by the multi-editor broadcast sidecar bus. */
+    fun agent_doc_document_changed_digest_content_for_editor(
+        file_path: String,
+        content: String,
+        editor_id: String,
+    )
+
+    /** Clear this editor instance's live-buffer sidecar for a closed document. */
+    fun agent_doc_document_closed_for_editor(file_path: String, editor_id: String)
+
     /** Non-blocking idle check. Returns true if no document_changed event within debounce_ms. */
     fun agent_doc_is_idle(file_path: String, debounce_ms: Long): Boolean
 

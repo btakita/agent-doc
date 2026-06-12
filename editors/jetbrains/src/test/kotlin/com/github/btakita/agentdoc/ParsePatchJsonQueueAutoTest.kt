@@ -53,4 +53,19 @@ class ParsePatchJsonQueueAutoTest {
         assertNotNull(patch)
         assertNull(patch!!.queueAuto)
     }
+
+    @Test
+    fun `parses per-editor broadcast ids`() {
+        val json = """
+            {"type":"patch","file":"/tmp/plan.md",
+             "editor_id":"jetbrains-1","origin_editor_id":"vscode-1",
+             "patches":[{"component":"exchange","content":"merged\n","op":"replace"}],
+             "unmatched":""}
+        """.trimIndent()
+        val patch = parsePatchJson(json)
+        assertNotNull(patch)
+        assertEquals("jetbrains-1", patch!!.editorId)
+        assertEquals("vscode-1", patch.originEditorId)
+        assertEquals("replace", patch.patches.single().op)
+    }
 }

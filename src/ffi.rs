@@ -222,6 +222,42 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest(
     agent_doc_orchestration::debounce::document_changed_with_digest(path, len, hash);
 }
 
+/// Record a document change plus digest for one editor instance.
+///
+/// # Safety
+///
+/// `file_path`, `content_hash`, and `editor_id` must be valid, NUL-terminated
+/// UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest_for_editor(
+    file_path: *const c_char,
+    content_len: i64,
+    content_hash: *const c_char,
+    editor_id: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
+        Ok(hash) => hash,
+        Err(_) => return,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return,
+    };
+    let Ok(len) = usize::try_from(content_len) else {
+        return;
+    };
+    agent_doc_orchestration::debounce::document_changed_with_digest_for_editor(
+        path,
+        len,
+        hash,
+        Some(editor),
+    );
+}
+
 /// Record a document change plus the editor's FULL visible buffer content (#pcp6).
 ///
 /// Unlike [`agent_doc_document_changed_digest`], this sends the buffer text so the
@@ -248,6 +284,79 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
         Err(_) => return,
     };
     agent_doc_orchestration::debounce::document_changed_with_content(path, text);
+}
+
+/// Record a document change plus full visible buffer content for one editor
+/// instance, then enqueue CRDT broadcast patches for peer editors.
+///
+/// # Safety
+///
+/// `file_path`, `content`, and `editor_id` must be valid, NUL-terminated UTF-8
+/// strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
+    file_path: *const c_char,
+    content: *const c_char,
+    editor_id: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return,
+    };
+    agent_doc_orchestration::debounce::document_changed_with_content_for_editor(
+        path,
+        text,
+        Some(editor),
+    );
+    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
+        Path::new(path),
+        editor,
+        text,
+    ) {
+        Ok(deliveries) if !deliveries.is_empty() => {
+            eprintln!(
+                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
+                deliveries.len(),
+                editor
+            );
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("[ffi] realtime broadcast failed for {path}: {e}"),
+    }
+}
+
+/// Clear one editor instance's live-buffer sidecar when the editor closes the
+/// document.
+///
+/// # Safety
+///
+/// `file_path` and `editor_id` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
+    file_path: *const c_char,
+    editor_id: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return,
+    };
+    if let Err(e) =
+        agent_doc_orchestration::debounce::clear_live_buffer_for_editor(path, Some(editor))
+    {
+        eprintln!("[ffi] clear live buffer for editor failed for {path}: {e}");
+    }
 }
 
 /// Check if the document has been tracked (at least one `document_changed` call recorded).

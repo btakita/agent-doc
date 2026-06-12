@@ -3,6 +3,11 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import java.util.UUID
+
+object EditorIdentity {
+    val id: String = "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
+}
 
 /**
  * Tracks document changes and provides debounce via the FFI shared library.
@@ -31,7 +36,17 @@ object TypingTracker : DocumentListener {
             // editor buffer equals on-disk content (no unsaved edit ahead of disk)
             // instead of inferring from a len/hash digest. The text stays local to
             // the project .agent-doc/ state dir.
-            lib.agent_doc_document_changed_digest_content(vFile.path, text)
+            try {
+                lib.agent_doc_document_changed_digest_content_for_editor(
+                    vFile.path,
+                    text,
+                    EditorIdentity.id,
+                )
+            } catch (_: UnsatisfiedLinkError) {
+                lib.agent_doc_document_changed_digest_content(vFile.path, text)
+            } catch (_: NoSuchMethodError) {
+                lib.agent_doc_document_changed_digest_content(vFile.path, text)
+            }
             LOG.debug("[native] document_changed (content): ${vFile.name}")
         } else {
             // Fallback: track locally if FFI unavailable

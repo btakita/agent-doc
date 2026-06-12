@@ -207,31 +207,26 @@ committed. Three architectural gaps block a correct broadcast bus today:
   wiring (no delivery) — landing it before the delivery protocol is chosen would
   imply a capability that doesn't exist.
 
-### Status — AGENT-DOABLE RUNG 4 LANDED (2026-06-12)
+### Status — DEFERRED (operator, 2026-06-12)
 
-Operator chose **Option A** and the three agent-doable rungs are now wired
-in commit `cddad87b`:
-per-editor live-buffer identity, targeted per-editor patch files, and the
-production N-buffer CRDT broadcast seam. The remaining rung is the operator-only
-two-live-IDE proof (`#rtwbcast-verify`): edit in JB + VS Code, confirm both
-buffers converge, and confirm zero File Cache Conflict / sync-before-apply.
+Operator chose **Option A** as the eventual delivery design but **deferred the
+implementation to a later session** — no rung is being landed now. The
+`compute_broadcast` seam + SimWorld Slice 3 harness groundwork stay committed
+(`97df6d8e`); the four rungs below remain unstarted. When resumed: confirm scope
+(start with `#rtwbcast-id` per "one shippable rung per phase", or batch the three
+agent-doable rungs), run in a CLEAN session, and leave `#rtwbcast-verify` for the
+operator two-live-IDE step.
 
 ### Decomposition once Option A is chosen (one shippable rung per phase)
 
-- **#rtwbcast-id (LANDED 2026-06-12)** — `editor_id` added to the FFI
-  buffer-report ABI and patch JSON; live-buffer sidecars can now be keyed per
-  editor while legacy path-only sidecars remain readable.
-- **#rtwbcast-deliver (LANDED 2026-06-12)** — per-editor
-  `<hash>.<editorid>.json` patch delivery is wired in Rust plus JB/VS Code patch
-  watchers; non-target editors ignore targeted files and the originator is
-  skipped.
-- **#rtwbcast-merge (LANDED 2026-06-12)** — production
-  `compute_broadcast_plan` / `broadcast_editor_change` merge all known editor
-  buffers against the on-disk base with echo suppression; SimWorld Slice 3 now
-  points at the production seam.
-- **#rtwbcast-verify (OPERATOR-ONLY)** — two-live-IDE verify: edit in JB + VS
-  Code, both converge, zero File Cache Conflict, sync-before-apply. CANNOT be
-  agent-done.
+- **#rtwbcast-id** — add `editor_id` to the FFI buffer-report ABI + patch JSON;
+  per-editor live-buffer sidecar keying. Deterministic unit coverage.
+- **#rtwbcast-deliver** — per-editor `<hash>.<editorid>.json` delivery + plugin
+  apply/ACK (JB `PatchWatcher.kt` + VS Code watcher); originator skip.
+- **#rtwbcast-merge** — production `compute_broadcast` seam (CRDT merge of N
+  buffers vs the on-disk base + echo-suppress); re-point SimWorld Slice 3 onto it.
+- **#rtwbcast-verify** — operator two-live-IDE verify: edit in JB + VS Code, both
+  converge, zero File Cache Conflict, sync-before-apply. CANNOT be agent-done.
 
 All of the above must run in a CLEAN session (touches the live IPC/patch path) and
 the verify needs two live IDEs.
@@ -251,5 +246,5 @@ Completed Rung 4 Option A’s agent-doable work.
 Implemented per-editor live-buffer identity, targeted per-editor patch delivery, and the production N-buffer CRDT broadcast planner/delivery path in `src/agent-doc` commit `cddad87b`. The local CLI/cdylib are installed (`agent-doc 0.34.0`), JetBrains plugin version is bumped to `0.2.162` with signed/unsigned zips built, and VS Code extension version is bumped to `0.2.26`.
 
 Verification passed: `make check`, `npm test` for VS Code, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`, `make plugin-version-check`, `make bump-plugin`, `make install`, and latest GitHub Actions CI on `main` is green. Remaining gate is still `#rtwbcast-verify`, which requires the operator’s two-live-IDE test with JB + VS Code.
-<!-- agent:boundary:eafa4915 -->
+<!-- agent:boundary:420cf91d -->
 <!-- /agent:exchange -->

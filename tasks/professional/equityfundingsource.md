@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -229,7 +229,7 @@ feat(admin): show incomplete applications in Deal Pipeline (#tg04)
 
 Deal Pipeline now has a read-only Incomplete Applications entry column that unifies draft/submitted/in-review full applications with open prequalification leads while deduping lead-linked full applications. Adds application card UI, full-application deep links, and dashboard/pipeline coverage.
 ```
-<!-- agent:boundary:e6b84dd9 -->
+<!-- agent:boundary:cbca659f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,6 +237,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -161,7 +161,32 @@ fix(admin): show emails in needs attention items
 
 Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
 ```
-<!-- agent:boundary:423f4a61 -->
+No. A loan application created at `/portal-borrower/new-application` should not create a new `application_leads` row.
+
+> **Queue prompt:**
+>
+> I'm making a new loan application https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application but it does not show up in the admin portal Deal Pipeline. Should this be an application lead?
+
+
+The intended split is:
+- Public `/apply` is the lightweight prequalification path. It creates `application_leads` and shows in the Deal Pipeline's read-only Leads column while the lead is `new` or `contacted`.
+- Authenticated `/portal-borrower/new-application` is the full application path. It creates or resumes a `full_applications` draft, then `POST /api/borrower/applications/:id/submit` moves it to `submitted` after e-signature.
+- If the borrower entered the portal from an invited lead, the full application should link back to the existing `lead_id`; it still should not create a second lead.
+
+The reason you are not seeing it in the admin Deal Pipeline is current implementation, not because it should be an application lead. `GET /api/admin/pipeline` currently builds cards from TMO-backed `loans` plus open `application_leads`. Submitted `full_applications` are reviewed through Admin Full Applications and only become loan pipeline cards after admin approval/TMO writeback creates/persists a loan. That conflicts with the product expectation in the PRD that "open applications and new leads land in Deal Pipeline cards."
+
+So the fix should be: keep drafts hidden, keep public quick-apps as application leads, and add submitted borrower full applications to the Deal Pipeline as Open Applications/full-application cards before TMO writeback. I added this as a backlog bug.
+
+Changed paths: none in source code; agent-doc backlog updated only.
+
+Commands/context checked:
+- `tsift status` at repo root and in `src/equityfundingsource-dev`
+- source inspection of borrower application draft/submit routes, admin pipeline API, admin full-application API, and PRD/current-progress notes
+
+Verification: no tests run because this was an analysis/backlog update, not a code change.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:67749ce9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,7 +194,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- I'm making a new loan application https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application but it does not show up in the admin portal Deal Pipeline. Should this be an application lead?
 <!-- /agent:queue -->
 
 ## Backlog
@@ -203,6 +227,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [ ] [#kf1p] Tier 3: Ragie Parse + Index for approved docs
 - [ ] [#4ktv] Discuss Ragie content validation with Bob Remeika (scheduled call)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
+- [ ] [#tg04] [bug] Submitted borrower full applications from /portal-borrower/new-application should appear in the admin Deal Pipeline as Open Applications/full-application cards before TMO writeback, not as new application_leads. Drafts should stay hidden from admin pipeline until submitted; public /apply remains the application_leads source. Current /api/admin/pipeline only renders TMO-backed loans plus open application_leads, so submitted full_applications are visible via Full Applications but missing from the Deal Pipeline.
 intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 <!-- /agent:backlog -->
 

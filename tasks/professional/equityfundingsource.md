@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -108,7 +108,7 @@ Verification:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:622ae31b -->
+<!-- agent:boundary:9518a2a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,6 +116,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Remove Stripe and Paypal integration. We are not taking payments from borrowers.
 <!-- /agent:queue -->
 
 ## Backlog

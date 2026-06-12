@@ -861,7 +861,7 @@ pub struct ActorBindingResponse {
     pub record: Option<crate::session_actor::ActorRecord>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ControllerRequest {
     command: String,
     file: Option<PathBuf>,
@@ -2609,11 +2609,10 @@ pub fn authorize_dispatch(
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
-    request_controller(
-        project_root,
-        ControllerRequest {
+    {
+        let controller_request = ControllerRequest {
             command: "dispatch".to_string(),
-            file: Some(request.file),
+            file: Some(request.file.clone()),
             session_id: Some(request.session_id),
             pane_id: Some(request.pane_id),
             window_id: None,
@@ -2625,8 +2624,27 @@ pub fn authorize_dispatch(
             supervisor_socket: None,
             command_kind: Some(request.command_kind),
             diagnostic_payload: Some(request.diagnostic_payload),
-        },
-    )
+        };
+        // `#ctlstalebin`: if the dispatch reached a stale controller and was refused,
+        // retry exactly once. The retry's `request_controller` → `connect_or_launch`
+        // promotes the freshly-installed binary via the two-phase handoff, so the
+        // re-dispatch lands on the fresh controller. One retry only — a still-failing
+        // recycle surfaces the error to the caller instead of looping.
+        match request_controller::<DispatchAuthorization>(project_root, controller_request.clone())
+        {
+            Err(err) if err.to_string().contains("controller_binary_stale") => {
+                crate::ops_log::log_op(
+                    &request.file,
+                    &format!(
+                        "dispatch_retry_after_stale_binary file={}",
+                        request.file.display()
+                    ),
+                );
+                request_controller(project_root, controller_request)
+            }
+            other => other,
+        }
+    }
 }
 
 pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<SessionOperatorStatus> {
@@ -3076,6 +3094,30 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
 
 fn controller_status_matches_current_binary(status: &ControllerStatus) -> Result<bool> {
     Ok(status.controller_binary.as_ref() == Some(&current_binary_identity()?))
+}
+
+/// `#ctlstalebin` (#stuckhandoff2 follow-up) — is the SERVING controller's own
+/// recorded binary stale relative to the freshly-installed agent-doc binary?
+///
+/// `connect_or_launch` already hands a *cross-process* caller off to a fresh
+/// controller when the active controller's binary no longer matches (the common
+/// `cargo install` recycle path). This predicate is the dispatch-admission backstop
+/// for the residual gap: a dispatch that still reaches a stale controller's
+/// `handle_dispatch` — an in-process co-hosted call, or a narrow handoff race —
+/// must be refused so the stale process cannot keep driving session writes (the
+/// "already-running supervisor uses the OLD binary until restarted" churn class).
+///
+/// True only when both identities resolve and differ. Any stat/resolution error is
+/// treated as "not stale" so a transiently-unreadable binary path can never block a
+/// live dispatch (fail-open — staleness is a recycle hint, never a hard stop).
+fn controller_binary_is_stale(bootstrap: &ControllerBootstrap) -> bool {
+    let Some(running) = bootstrap.controller_binary.as_ref() else {
+        return false;
+    };
+    match current_binary_identity() {
+        Ok(current) => running != &current,
+        Err(_) => false,
+    }
 }
 
 fn discover_stale_duplicate_pids(project_root: &Path, authoritative_pid: Option<u32>) -> Vec<u32> {
@@ -4124,6 +4166,43 @@ fn handle_dispatch(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
+    // `#ctlstalebin` (#stuckhandoff2 follow-up): a controller whose own binary no
+    // longer matches the installed agent-doc keeps running OLD code. `connect_or_launch`
+    // hands cross-process callers to a fresh controller, but any dispatch that still
+    // reaches this stale `handle_dispatch` (in-process co-host, handoff race) must be
+    // refused so the stale process cannot keep driving session writes — the operator's
+    // observed "old binary churns for ~1h until manual restart" failure. The caller
+    // (`authorize_dispatch`) re-runs the dispatch once; the retry's `connect_or_launch`
+    // promotes the freshly-installed binary, then the dispatch admits normally.
+    if controller_binary_is_stale(bootstrap) {
+        let receipt = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some("controller_binary_stale"),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Rejected,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        crate::ops_log::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "dispatch_refused_stale_binary file={} generation={} receipt_id={}",
+                file.display(),
+                generation,
+                receipt.receipt_id,
+            ),
+        );
+        anyhow::bail!(
+            "dispatch refused for {}: controller_binary_stale (running controller binary no longer matches the installed agent-doc; reconnect to promote the fresh binary)",
+            file.display()
+        );
+    }
     // M2 (#stuckhandoff2): only a `Stable` controller is authoritative for mutating
     // dispatch admission. A controller still `Preparing` (mid-handoff, or wedged
     // because the client died before `promote_handoff`), `Promoted`, `Retiring`, or
@@ -8064,6 +8143,97 @@ agent:queue\n\
             assert!(
                 !format!("{err:#}").contains("controller not authoritative"),
                 "a Stable controller must not be refused for authority: {err:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_refused_when_controller_binary_stale() {
+        // `#ctlstalebin` (#stuckhandoff2 follow-up): a Stable controller whose own
+        // recorded binary no longer matches the installed agent-doc must refuse
+        // dispatch admission, so a stale (old-binary) controller cannot keep driving
+        // session writes between a `cargo install` and the next handoff — the
+        // operator's observed "old binary churns until manual restart" failure. The
+        // refusal records a `controller_binary_stale` receipt + ops-log line so the
+        // recycle backstop is provable from the logs.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/stale-bin.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-sb\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-sb", "%51", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-sb",
+            "%51",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let dispatch_request = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-sb".to_string()),
+            pane_id: Some("%51".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("idle_queue_continuation".to_string()),
+            diagnostic_payload: Some("stale binary test".to_string()),
+        };
+
+        // Stable handoff state, but the recorded binary is an old/different build.
+        let stale = ControllerBootstrap {
+            controller_binary: Some(ControllerBinaryIdentity {
+                path: PathBuf::from("/nonexistent/old-agent-doc"),
+                version: "0.0.0-stale".to_string(),
+                len: 1,
+                modified_secs: 1,
+                modified_nanos: 0,
+            }),
+            ..test_bootstrap(&dir)
+        };
+        let err = handle_dispatch(&stale, None, dispatch_request()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("controller_binary_stale"),
+            "a stale-binary controller must refuse dispatch admission: {err:#}"
+        );
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let refused: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'controller_binary_stale'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            refused, 1,
+            "stale-binary dispatch refusal must record a receipt"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("dispatch_refused_stale_binary"));
+
+        // A current-binary Stable controller is never refused for staleness (it may
+        // admit, or fail for an unrelated reason, but never `controller_binary_stale`).
+        let current = test_bootstrap(&dir);
+        if let Err(err) = handle_dispatch(&current, None, dispatch_request()) {
+            assert!(
+                !format!("{err:#}").contains("controller_binary_stale"),
+                "a current-binary controller must not be refused for staleness: {err:#}"
             );
         }
     }

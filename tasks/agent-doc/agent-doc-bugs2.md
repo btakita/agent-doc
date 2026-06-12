@@ -450,7 +450,37 @@ Current source status:
 Unblock condition for the gated item: use a clean `src/agent-doc` worktree, decide whether the existing route-level deterministic test satisfies the coverage requirement or add a SimWorld fixture in `src/sim_world.rs`, then run the route/SimWorld tests and live-verify the operator path by checking `ops.log` for `route_submit_resubmit action=enter_key result=accepted`.
 
 Changed paths this cycle: session document only. Commands/context: read `tasks/agent-doc/plan-jb-codex-submit.md`; inspected `route.rs`, `route/tests.rs`, `src/sim_world.rs`; checked `git -C src/agent-doc show --stat d14dd12f`, `git -C src/agent-doc show --stat 449a87e9`, and `git -C src/agent-doc diff -- src/sim_world.rs`. Verification: no code tests run because no source edits were made. Confidence: high. Escalation: none.
-<!-- agent:boundary:a4d830fb -->
+
+### Re: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt: — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+
+
+> Queue prompt:
+>
+> :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+> ```
+> [route] target tmux session: 13
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
+> ```
+
+This is the older `#qflood` / `#kp5z` queue-dispatch flooding report. It is already implemented in the committed `src/agent-doc` source, so I am not adding code from this dirty queue pane.
+
+Current status:
+
+- `#kp5z` / `#qflood` landed in `src/agent-doc` commit `23a3ce5b` (`fix(stuckhandoff,kp5z): reap wedged Preparing controllers + drain-owner gate`).
+- The fix is the drain-owner lease: `/loop` claims `agent-doc drain-claim <FILE>`, and the supervisor idle-queue watch sees the fresh lease and returns `SkipSelfDrivingLoopOwner` instead of also injecting `agent-doc <FILE>` into the live harness input.
+- Source proof is present in `drain_owner.rs`, `start.rs` (`idle_queue_drain_decision`, `SkipSelfDrivingLoopOwner`), `skill.rs` (`agent-doc drain-claim <FILE>` before `/loop`), and `specs/07-session-tmux-commands.md`.
+- The live proof signal is `idle_queue_drain_decision decision=SkipSelfDrivingLoopOwner owner=claude_loop lease_age=<n>` in `.agent-doc/logs/ops.log`, plus no stacked duplicate `agent-doc <FILE>` triggers while `/loop` owns the drain.
+
+The remaining caveat is install/live-state, not source implementation: preflight still warns the live `~/.cargo/bin` / cdylib is stale relative to `08dfc27b`. A clean install/recycle is still required before relying on the current source behavior in JB/tmux sessions.
+
+I also repaired the previous document splice in this cycle by removing the duplicated EFS Codex-submit bullets that had been inserted under the `#stuckhandoff2` response; the standalone EFS response remains below it.
+
+Changed paths this cycle: session document only. Commands/context: `agent_doc_plan`; `rg` for `#kp5z/#qflood`, `SkipSelfDrivingLoopOwner`, `drain-claim`; `git -C src/agent-doc show --stat --oneline 23a3ce5b`; document diff inspection/repair. Verification: no source tests run because no source files changed. Confidence: high. Escalation: none.
+<!-- agent:boundary:acb6d339 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -466,7 +496,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ~~~
 - ~~:pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.~~
-- :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+- ~~:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:~~
 ```
 [route] target tmux session: 13
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263

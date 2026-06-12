@@ -15,14 +15,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
 
  <!-- agent:status patch=replace -->
 
-#pcwc done; code, tests, build, local binary/library install complete; JetBrains plugin artifact 0.2.161 built, manual IDE-profile install still needed.
+#pcwc closed; queue maintenance committed; remaining inactive queue residue preserved for #rtwbcast and #jbcompactcrdt.
 <!-- /agent:status -->
 
 ## Exchange
@@ -30,51 +30,19 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260612-144033.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260612-161955.md`*
 
 Compacted content:
-❯ - Archived 25 response topic(s): do [#swint]; Root cause of "stuck-handoff" + how the binary mitigates it; Do we still need separate snapshot + baseline files?; 22 more
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- The local JetBrains plugin install command could not complete because multiple IDE profiles were detected and the command has no non-interactive selector. Install the built plugin zip into the active IntelliJ IDEA profile: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.161.zip`.
-- Retried `make install` with escalation after the crates.io HTTP/2 failure; it failed the same way, so I used offline Cargo install from the already-verified local cache.
-- parent repo: `62c8687f agent-doc(#pcwc): update submodule pointer`
-- `src/agent-doc`: `b679a932 agent-doc(#pcwc): JB plugin refresh_content handler + stale-buffer guard`
-- `src/agent-doc`: `3cb4265a agent-doc(#pcwc): push committed content to editor after worktree repair`
-- `agent-doc lib-install` installed `libagent_doc-0.34.0.so`.
-- `cargo build --release --lib --offline` passed.
-- `cargo install --path . --offline` passed after online `make install` failed on crates.io HTTP/2 registry errors.
-- `./gradlew test buildPlugin` passed and built `agent-doc-jetbrains-0.2.161.zip`.
-- `make check` passed via `tsift digest-runner`.
-- `./gradlew test --tests com.github.btakita.agentdoc.RefreshContentPreconditionTest` passed.
-- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture` passed.
-- `cargo test -p agent-doc-orchestration postcommit_worktree -- --nocapture` passed.
-- In the submodule: `agent-doc-orchestration/src/git.rs`, `agent-doc-orchestration/src/ipc_socket.rs`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/RefreshContentPreconditionTest.kt`, `editors/jetbrains/gradle.properties`, `SPEC.md`, `VERSIONS.md`, and the hot-path budget in `tests/test_cli.rs`.
-- `src/agent-doc` submodule now points at `b679a932` on `origin/main`.
-
-### Re: struck `do [#fintol]` — opus-4-8
-
-Confirmed — `#fintol` is genuinely complete, so striking it is correct. The finalize forward-merge tolerance landed in the agent-doc submodule at `849ad9d9` (`agent-doc(#fintol2/#fintol3): land finalize forward-merge tolerance + green re-baseline`); current submodule HEAD is `9d1235cd`. No further work needed for `#fintol`.
-
-Queue state after this strike: the active head is now `#pcwc` (post-commit IPC worktree corruption — note `#pcwc` already has groundwork at `8aea7e3d agent-doc(#pcwc): auto-reconcile post-commit worktree corruption to HEAD`), followed by `#rtwbcast` and `#jbcompactcrdt`, then two free-text questions.
-
-One caution before draining further: this session is heavily bloated (largest turn ~477k tokens, ~97% cached resend, restart churn, ~18k no-op closeouts per next-context). Both `#pcwc` and `#rtwbcast` carry known blockers (carry-forward invariant; editor-plugin protocol decision + two-live-IDE verify) that won't close cleanly in one auto-loop cycle. Recommend `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` (or a fresh `agent-doc start`) before taking on the remaining implementation items.
-
-### Re: queue maintenance after #pcwc
-
-Committed the queue maintenance left after #pcwc closeout: #pcwc is reaped from backlog and struck in the inactive queue residue, while #rtwbcast and #jbcompactcrdt remain open and preserved. No source changes in this maintenance cycle.
-
-Verification: session-check was clean before this maintenance preflight, and this cycle only normalizes the queue state surfaced by preflight. The #pcwc implementation proof remains the prior closeout: submodule commits 3cb4265a and b679a932, parent pointer commit 62c8687f, make check green, JetBrains buildPlugin green, binary/native library installed.
-<!-- agent:boundary:11a047db -->
+- Archived 2 response topic(s): struck `do [#fintol]`; queue maintenance after #pcwc
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+<!-- agent:boundary:60f32312 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.~~
-- ~~:pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.~~
-- ~~:round_pushpin: do [#snbc2]~~
-- ~~:round_pushpin: do [#fintol]~~
-- ~~do [#pcwc]~~
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: :round_pushpin: do [#rtwbcast]
+- :pushpin: :round_pushpin: do [#jbcompactcrdt]
 <!-- /agent:queue -->
 ###
 <!--

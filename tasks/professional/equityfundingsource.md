@@ -37,7 +37,12 @@ EFS deployed Worker 0336450c-126f-49da-9321-1d4c74a6d2c1 on 2026-06-11: full-app
 Compacted content:
 - Archived 8 response topic(s): Admin Needs Attention default-open + deploy; Pipeline card email + deploy; Needs Attention item emails + deploy; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:83c863a8 -->
+Implemented and pushed EFS commit 3ffcc32 (`feat(admin): edit subject property fields`). The admin full-application detail now has an editable Step 4 - Subject property card backed by `PATCH /api/admin/full-applications/:id/subject-property`.
+
+Change history was not previously tracked for subject-property edits. It is now: migration `0061_application_subject_property_admin_history.sql` adds the extended subject-property columns plus `application_subject_property_change_logs`, and the admin endpoint records one history row per changed field with old value, new value, admin user, and timestamp. The Step 4 card also shows that history.
+
+Verification passed: targeted `bun test tests/admin-subject-property-edit.test.ts tests/apply4-full-application-p5.test.ts tests/admin-full-application-approve-ui.test.ts`, full `make check`, and a second clean committed-tree `make check` after stashing unrelated local EFS edits. GitHub CI lookup is still unavailable because this repo has no workflow named `CI`. Existing unrelated EFS local changes were restored and remain unstaged.
+<!-- agent:boundary:80b9fee9 -->
 <!-- /agent:exchange -->
 ###
 <!--

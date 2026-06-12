@@ -495,3 +495,277 @@ pub(crate) fn push_unique_prompt_bearing_changes(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+use std::io::Write;
+use std::process::Command;
+use tempfile::TempDir;
+#[test]
+fn semantic_diff_summary_reports_components_nodes_and_prompt_previews() {
+    let before = concat!(
+        "---\n",
+        "queue: stop\n",
+        "---\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#alpha]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#task] old wording\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    let current = concat!(
+        "---\n",
+        "queue: go\n",
+        "---\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#task] new wording\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    let prompt_changes = vec![crate::diff::PromptBearingChange {
+        kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+        text: "do [#beta]".to_string(),
+    }];
+
+    let summary = semantic_diff_summary(before, current, &prompt_changes).unwrap();
+
+    assert_eq!(summary.schema_version, 1);
+    assert!(
+        summary
+            .changed_components
+            .contains(&"frontmatter".to_string())
+    );
+    assert!(summary.changed_components.contains(&"queue".to_string()));
+    assert!(summary.changed_components.contains(&"backlog".to_string()));
+    assert!(summary.changed_components.contains(&"exchange".to_string()));
+    assert!(summary.component_changes.iter().any(|change| {
+        change.component == "frontmatter" && change.op == SemanticComponentOp::Changed
+    }));
+    assert!(summary.component_changes.iter().any(|change| {
+        change.component == "queue"
+            && change.op == SemanticComponentOp::Changed
+            && change
+                .after
+                .as_ref()
+                .is_some_and(|target| target.handle == "component:after:queue:0")
+    }));
+    assert!(summary.component_changes.iter().any(|change| {
+        change.component == "backlog" && change.op == SemanticComponentOp::Changed
+    }));
+    assert!(summary.node_events.iter().any(|event| {
+        event.component == "queue"
+            && event.op == "insert"
+            && event.node_key == "queue:0:beta:0"
+            && event.after_preview.as_deref() == Some("- do [#beta]")
+    }));
+    assert_eq!(
+        summary.prompt_changes[0].kind,
+        crate::diff::PromptBearingChangeKind::PromptTarget
+    );
+    assert_eq!(summary.prompt_changes[0].text_preview, "do [#beta]");
+}
+#[test]
+fn semantic_diff_summary_omits_empty_summary() {
+    assert!(semantic_diff_summary("same\n", "same\n", &[]).is_none());
+}
+#[test]
+fn sibling_queue_insert_beside_driver_is_independent() {
+    // The motivating case: the turn answers queue item A while the user
+    // inserts queue item B beside it. B must classify Independent and the
+    // turn must not be affected (#op-scoped-drift-3).
+    let before = "<!-- agent:queue -->\n- do [#driver-a]\n<!-- /agent:queue -->\n";
+    let after =
+        "<!-- agent:queue -->\n- do [#driver-a]\n- do [#sibling-b]\n<!-- /agent:queue -->\n";
+    let summary = semantic_diff_summary(before, after, &[]).unwrap();
+    let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+    // The turn is answering driver-a.
+    let scope = derive_turn_scope(after, &["do [#driver-a]".to_string()]).unwrap();
+    let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+    assert!(
+        !affectedness.turn_affected,
+        "a sibling queue insert must not affect the turn"
+    );
+    assert!(
+        affectedness
+            .classified
+            .iter()
+            .all(|op| op.class == agent_doc_core::turn_scope::AffectednessClass::Independent)
+    );
+}
+#[test]
+fn exchange_old_block_edit_is_independent_but_tail_append_affects() {
+    // #loop-guard-exchange-node-granularity end-to-end: while the turn answers
+    // a queue driver, an edit to an OLD bulleted exchange block must classify
+    // Independent (must not preempt the auto-loop drain), while a genuine new
+    // bulleted prompt appended at the exchange tail must still affect the turn.
+    let base = "\
+<!-- agent:exchange -->
+### Re: prior topic
+
+- old context bullet one
+- old context bullet two
+<!-- agent:boundary:b1 -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue go -->
+- do [#driver]
+<!-- /agent:queue -->
+";
+    let targets = vec!["do [#driver]".to_string()];
+    let scope = derive_turn_scope(base, &targets).expect("scope derived");
+    assert_eq!(
+        scope.exchange_tail_floor,
+        Some(2),
+        "two committed exchange bullets => tail floor 2"
+    );
+
+    // Old-block edit: change the FIRST (index 0) exchange bullet.
+    let old_edit = base.replace(
+        "- old context bullet one",
+        "- old context bullet one EDITED",
+    );
+    let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
+    let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+    let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+    assert!(
+        !affectedness.turn_affected,
+        "editing an old exchange block must not affect the turn: {:?}",
+        affectedness.classified
+    );
+
+    // Tail append: a new bulleted prompt after the last committed bullet.
+    let tail_append = base.replace(
+        "- old context bullet two\n",
+        "- old context bullet two\n- please also cover the retry path\n",
+    );
+    let summary2 = semantic_diff_summary(base, &tail_append, &[]).unwrap();
+    let ops2 = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary2);
+    let affectedness2 = agent_doc_core::turn_scope::classify_cycle(&ops2, &scope);
+    assert!(
+        affectedness2.turn_affected,
+        "a new tail-appended exchange prompt must still affect the turn: {:?}",
+        affectedness2.classified
+    );
+}
+#[test]
+fn derive_turn_scope_resolves_queue_driver_and_sets() {
+    let content =
+        "<!-- agent:queue -->\n- do [#op-scoped-drift-2]\n- do [#later]\n<!-- /agent:queue -->\n";
+    let targets = vec!["do [#op-scoped-drift-2]".to_string()];
+    let scope = derive_turn_scope(content, &targets).expect("scope derived");
+    let driver = scope.driver.as_ref().expect("driver resolved");
+    assert_eq!(driver.component, "queue");
+    assert_eq!(
+        driver.node_key.as_deref(),
+        Some("queue:0:op-scoped-drift-2:0")
+    );
+    // driver is read (input) and written (the strike).
+    assert!(scope.read_set.contains(driver));
+    assert!(scope.write_set.contains(driver));
+    assert!(
+        scope
+            .write_set
+            .contains(&agent_doc_core::turn_scope::Address::component(
+                "backlog", 0
+            ))
+    );
+}
+#[test]
+fn derive_turn_scope_none_without_prompt_targets() {
+    let content = "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+    assert!(derive_turn_scope(content, &[]).is_none());
+}
+#[test]
+fn derive_turn_scope_without_matching_queue_node_has_no_driver() {
+    // A prompt target whose id is not present in the queue still yields a
+    // scope (output components) but no driver.
+    let content = "<!-- agent:queue -->\n- do [#present]\n<!-- /agent:queue -->\n";
+    let targets = vec!["do [#absent]".to_string()];
+    let scope = derive_turn_scope(content, &targets).expect("scope derived");
+    assert!(scope.driver.is_none());
+    assert!(scope.write_set.iter().all(|a| a.component != "queue"));
+}
+#[test]
+fn user_intent_empty_for_synthetic_queue_continuation() {
+    // A pure auto-queue continuation is never user intent, regardless of the
+    // affectedness verdict.
+    let changes = vec![user_prompt_change("do [#next]")];
+    assert!(
+        compute_user_intent_prompt_changes(&changes, true, Some(&affectedness(true))).is_empty()
+    );
+}
+#[test]
+fn user_intent_drops_turn_independent_edits() {
+    // #queue-no-stop-unrelated-edit: a real (non-managed) edit that the
+    // classifier scoped as independent of the turn must NOT halt the drain.
+    let changes = vec![user_prompt_change("a stray note in the parking lot")];
+    let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(false)));
+    assert!(
+        out.is_empty(),
+        "independent edit should not preempt: {out:?}"
+    );
+}
+#[test]
+fn user_intent_keeps_turn_affecting_prompt() {
+    // A genuine new user prompt edits the in-scope exchange tail, so the
+    // classifier reports turn_affected — it must still preempt.
+    let changes = vec![user_prompt_change("please also handle the error case")];
+    let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+    assert_eq!(out.len(), 1, "turn-affecting prompt must preempt");
+}
+#[test]
+fn user_intent_filters_managed_state_when_turn_affected() {
+    // Even when the turn is affected, managed-component bookkeeping (a backlog
+    // item line) stays filtered — it is not a real prompt.
+    let changes = vec![crate::diff::PromptBearingChange {
+        kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+        text: "- [ ] [#newitem] track a follow-up".to_string(),
+    }];
+    let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+    assert!(
+        out.is_empty(),
+        "managed-state edit must not preempt: {out:?}"
+    );
+}
+#[test]
+fn user_intent_conservative_without_classifier() {
+    // No affectedness classifier (semantic-diff skip): fall back to the
+    // managed-state filter only, so a real change still preempts.
+    let changes = vec![user_prompt_change("a real prompt with no classifier")];
+    let out = compute_user_intent_prompt_changes(&changes, false, None);
+    assert_eq!(out.len(), 1, "without classifier, a real change preempts");
+}
+#[test]
+fn extract_target_id_handles_bracket_and_bare_forms() {
+    assert_eq!(
+        extract_target_id("do [#op-scoped-drift-2]").as_deref(),
+        Some("op-scoped-drift-2")
+    );
+    assert_eq!(extract_target_id("do #fix1").as_deref(), Some("fix1"));
+    assert_eq!(extract_target_id("no id here"), None);
+}
+#[test]
+fn build_ops_from_semantic_diff_tags_user_actor_and_session() {
+    let before = "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n";
+    let after = "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n";
+    let summary = semantic_diff_summary(before, after, &[]).unwrap();
+    let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "100", &summary);
+    assert!(!ops.is_empty());
+    let beta = ops
+        .iter()
+        .find(|op| op.node_key == "queue:0:beta:0")
+        .expect("beta op present");
+    assert_eq!(beta.actor, agent_doc_core::op_log::OpActor::User);
+    assert_eq!(beta.op_kind, "insert");
+    assert_eq!(beta.component, "queue");
+    assert_eq!(beta.clock.origin_session.as_deref(), Some("sess-1"));
+    // Lamport assignment is owned by the durable store; the builder leaves 0.
+    assert_eq!(beta.clock.lamport, 0);
+}
+}

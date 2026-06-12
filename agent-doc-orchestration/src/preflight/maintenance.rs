@@ -2075,3 +2075,2206 @@ pub(crate) fn queue_entries_are_drained_residue(entries: &[crate::queue::QueueEn
             )
         })
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+use std::io::Write;
+use std::process::Command;
+use tempfile::TempDir;
+#[test]
+fn run_queue_maintenance_syncs_backlog_into_empty_queue() {
+    // #backlog-queue-sync-attr: a backlog carrying `queue=sync` regenerates
+    // the (empty) queue with `do [#id]` for active items; gated/done excluded.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#alpha] first\n",
+        "- [/] [#gated] blocked\n",
+        "- [ ] [#beta] second\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        state.synced_queue_ids,
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
+    assert!(
+        updated.contains("- do [#alpha]"),
+        "synced queue:\n{updated}"
+    );
+    assert!(updated.contains("- do [#beta]"));
+    assert!(
+        !updated.contains("- do [#gated]"),
+        "gated item must not be queued:\n{updated}"
+    );
+    assert!(
+        state
+            .warnings
+            .iter()
+            .any(|w| w.code == "backlog_queue_sync_pending"),
+        "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
+        state.warnings
+    );
+}
+#[test]
+fn run_queue_maintenance_enqueue_marker_populates_queue_without_backlog_attr() {
+    // #queue-enqueue-action: a single marked backlog item appends to the
+    // queue without a component-level `queue` attr. Explicit markers bypass
+    // the active-loop fresh-item hold because the user is directly enqueueing
+    // that one id.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#running]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#alpha] :inbox_tray: queue this now\n",
+        "- [ ] [#beta] leave this unqueued\n",
+        "- [/] [#gated] :inbox_tray: blocked\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert_eq!(state.synced_queue_ids, vec!["alpha".to_string()]);
+    assert!(
+        updated.contains("- do [#running]"),
+        "running head stays:\n{updated}"
+    );
+    assert!(
+        updated.contains("- do [#alpha]"),
+        "marked item should append:\n{updated}"
+    );
+    assert!(
+        !updated.contains("- do [#beta]"),
+        "unmarked item must not append:\n{updated}"
+    );
+    assert!(
+        !updated.contains("- do [#gated]"),
+        "gated marked item must not append:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_holds_fresh_backlog_item_out_of_active_queue() {
+    // #backlog-queue-sync-pending-add-amplification (decision B/C): a backlog
+    // item added while the auto-queue is already running (queue_active: true)
+    // must NOT be promoted into the live queue this cycle — it waits for the
+    // next activation. Prevents unbounded queue growth + pending_done_guard
+    // churn when an agent captures follow-ups mid-loop.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#alpha]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=append -->\n",
+        "- [ ] [#alpha] already running\n",
+        "- [ ] [#beta] freshly added mid-loop\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert!(
+        updated.contains("- do [#alpha]"),
+        "the already-running head stays:\n{updated}"
+    );
+    assert!(
+        !updated.contains("- do [#beta]"),
+        "a freshly-added backlog item must NOT be promoted into the active queue mid-loop:\n{updated}"
+    );
+    assert!(
+        !state.synced_queue_ids.contains(&"beta".to_string()),
+        "beta must not be a newly-synced queue id while the loop is active: {:?}",
+        state.synced_queue_ids
+    );
+}
+#[test]
+fn run_queue_maintenance_go_mode_repopulates_drained_active_queue() {
+    // #backlog-queue-empty-active-repopulate: with the `go` control
+    // (`queue: go`, continuous-backlog-loop) and a fully drained live queue
+    // (0 un-struck prompts), the amplification hold is skipped and the full
+    // active backlog repopulates the queue so the loop keeps working it.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue: go\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=append -->\n",
+        "- [ ] [#alpha] first\n",
+        "- [ ] [#beta] second\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert!(
+        updated.contains("- do [#alpha]"),
+        "go-mode must repopulate a drained active queue:\n{updated}"
+    );
+    assert!(
+        updated.contains("- do [#beta]"),
+        "go-mode must repopulate ALL open backlog ids:\n{updated}"
+    );
+    assert!(
+        state.synced_queue_ids.contains(&"alpha".to_string())
+            && state.synced_queue_ids.contains(&"beta".to_string()),
+        "both ids must be newly synced under go-mode repopulation: {:?}",
+        state.synced_queue_ids
+    );
+}
+#[test]
+fn run_queue_maintenance_go_mode_appends_fresh_backlog_into_nondrained_queue() {
+    // #backlog-queue-attr-populates-in-go-mode: with the `go` control and a
+    // NON-drained live queue, a freshly-added backlog `queue`-attr item still
+    // appends to the queue immediately (the operator opted into the
+    // continuous-backlog-loop, so the `queue` attribute must populate it).
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue: go\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#alpha]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=append -->\n",
+        "- [ ] [#alpha] already running\n",
+        "- [ ] [#beta] freshly added mid-loop\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let updated_state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert!(
+        updated.contains("- do [#alpha]"),
+        "the running head stays:\n{updated}"
+    );
+    assert!(
+        updated.contains("- do [#beta]"),
+        "go-mode must append a fresh backlog `queue`-attr item even when the queue is not drained:\n{updated}"
+    );
+    assert!(
+        updated_state.synced_queue_ids.contains(&"beta".to_string()),
+        "beta must be a newly-synced queue id under go-mode: {:?}",
+        updated_state.synced_queue_ids
+    );
+}
+#[test]
+fn run_queue_maintenance_no_go_keeps_drain_then_stop_on_empty_active_queue() {
+    // #backlog-queue-empty-active-repopulate: WITHOUT the `go` control, a
+    // drained persisted-active queue stays drained (drain-then-stop). The
+    // amplification hold drops every backlog id because none are already
+    // live queue heads, so nothing repopulates.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=append -->\n",
+        "- [ ] [#alpha] first\n",
+        "- [ ] [#beta] second\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert!(
+        !updated.contains("- do [#alpha]") && !updated.contains("- do [#beta]"),
+        "without `go`, a drained active queue must stay drained:\n{updated}"
+    );
+    assert!(
+        state.synced_queue_ids.is_empty(),
+        "no ids may be synced into a drained active queue without `go`: {:?}",
+        state.synced_queue_ids
+    );
+}
+#[test]
+fn run_queue_maintenance_no_warning_when_queue_already_synced() {
+    // When the queue already matches the backlog, no backlog_queue_sync_pending
+    // warning should fire (sync_backlog_into_queue returns None → no warning path).
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#alpha]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#alpha] first\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert!(
+        !state
+            .warnings
+            .iter()
+            .any(|w| w.code == "backlog_queue_sync_pending"),
+        "already-synced queue must NOT emit backlog_queue_sync_pending warning, got {:?}",
+        state.warnings
+    );
+}
+#[test]
+fn run_queue_maintenance_marker_go_activates_like_auto() {
+    // #queue-state-unify: a `go`/`start` marker control freshly activates the
+    // queue through the Auto trigger, identical to the legacy `auto` attribute.
+    for token in ["go", "start"] {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n",
+                "agent_doc_write: crdt\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue {} -->\n- please do the thing\n<!-- /agent:queue -->\n",
+            ),
+            token
+        );
+        std::fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, &content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.queue_active,
+            Some(true),
+            "marker `{token}` must activate the queue"
+        );
+        assert_eq!(state.queue_trigger, Some(crate::queue::QueueTrigger::Auto));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("queue: start"),
+            "marker `{token}` must persist queue_active:\n{updated}"
+        );
+    }
+}
+#[test]
+fn run_queue_maintenance_marker_stop_halts_active_queue() {
+    // #queue-state-unify: a `stop` marker control forces an otherwise-active
+    // queue inactive and clears persisted queue_active.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n",
+        "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue stop -->\n- please do the thing\n<!-- /agent:queue -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    assert_eq!(
+        state.queue_active,
+        Some(false),
+        "marker `stop` must halt the active queue"
+    );
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("queue: stop"),
+        "marker `stop` must clear queue_active:\n{updated}"
+    );
+    assert!(
+        !updated.contains("agent:queue stop"),
+        "marker `stop` token must be stripped after halt:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_excludes_done_ids_from_backlog_sync() {
+    // #ynra: a lingering active backlog `[ ]` bullet whose id is also archived
+    // in `agent:done` must NOT be re-minted into the queue (it would be struck
+    // every cycle and re-injected the next → forever churn). The fresh active
+    // id is still minted.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#na3x] completed-but-lingering\n",
+        "- [ ] [#fresh] genuinely open\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:done -->\n",
+        "- 2026-06-01 [#na3x] completed-but-lingering\n",
+        "<!-- /agent:done -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        !updated.contains("[#na3x]") || !updated.contains("do [#na3x]"),
+        "completed id must not be minted into the queue:\n{updated}"
+    );
+    assert!(
+        !updated.contains("do [#na3x]"),
+        "completed id must not appear as a queue do-prompt:\n{updated}"
+    );
+    assert!(
+        updated.contains("do [#fresh]"),
+        "fresh active id must still be queued:\n{updated}"
+    );
+    assert_eq!(state.synced_queue_ids, vec!["fresh".to_string()]);
+}
+#[test]
+fn run_queue_maintenance_excludes_external_archive_done_ids() {
+    // #ynra (external-archive variant): a completed id reaped to the EXTERNAL
+    // `agent:done archive=<file>` (not inline) must also be excluded from the
+    // backlog→queue sync and struck from the queue. Done-id collection reads
+    // the archive file, so the queue must not churn on an externally-archived
+    // completed ref.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let archive_rel = "session.done.md";
+    std::fs::write(
+        dir.path().join(archive_rel),
+        "# Done\n\n- 2026-06-01 [#extdone] archived externally\n",
+    )
+    .unwrap();
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#extdone]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#extdone] lingering active dup of an externally-archived id\n",
+        "- [ ] [#fresh] genuinely open\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:done archive=session.done.md -->\n",
+        "<!-- /agent:done -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        !updated.contains("- do [#extdone]"),
+        "externally-archived completed ref must be struck/excluded, not left live:\n{updated}"
+    );
+    assert!(
+        updated.contains("do [#fresh]"),
+        "fresh active id must still be queued:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_strikes_external_archive_done_queue_prompt() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    std::fs::write(
+        dir.path().join("session.done.md"),
+        "# Done\n\n- 2026-06-01 [#extdone] archived externally\n",
+    )
+    .unwrap();
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#extdone]\n",
+        "- do [#fresh]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:done archive=session.done.md -->\n",
+        "<!-- /agent:done -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- ~~do [#extdone]~~"),
+        "externally-archived live queue mirror must be struck:\n{updated}"
+    );
+    assert!(
+        updated.contains("- do [#fresh]"),
+        "fresh live queue prompt must remain:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_backlog_sync_is_idempotent() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#alpha]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=append -->\n",
+        "- [ ] [#alpha] first\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        state.synced_queue_ids.is_empty(),
+        "idempotent sync should not report freshly-added ids"
+    );
+    assert_eq!(
+        updated.matches("- do [#alpha]").count(),
+        1,
+        "append must not duplicate an already-queued id:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_records_only_newly_synced_ids() {
+    // The existing queue head must stay outside the synced-id exclusion set
+    // so pending_done_guard still requires the consumed `do [#worked]` item
+    // to be done/gated.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#worked]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=prepend -->\n",
+        "- [ ] [#worked] the real queue head\n",
+        "- [ ] [#alpha] freshly synced\n",
+        "- [ ] [#beta] freshly synced\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(
+        state.synced_queue_ids,
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
+    let open_backlog: std::collections::HashSet<String> = ["worked", "alpha", "beta"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let synced_queue_ids = state
+        .synced_queue_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<String>>();
+    let result = filter_expect_done_or_gate_ids(
+        &[
+            "worked".to_string(),
+            "alpha".to_string(),
+            "beta".to_string(),
+        ],
+        &open_backlog,
+        &synced_queue_ids,
+    );
+    assert_eq!(result, vec!["worked".to_string()]);
+}
+#[test]
+fn run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue auto -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync priority -->\n",
+        "- [ ] [#slow] slower follow-up priority=9\n",
+        "- [ ] [#fast] fast follow-up priority=1\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(state.queue_active, Some(true));
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- :round_pushpin: do [#fast]\n- do [#slow]"),
+        "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_pins_operator_moved_priority_queue_item() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue priority auto -->\n",
+        "- do [#fast]\n",
+        "- do [#medium]\n",
+        "- do [#slow]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority -->\n",
+        "- [ ] [#fast] priority=1 first by rank\n",
+        "- [ ] [#medium] priority=5 middle by rank\n",
+        "- [ ] [#slow] priority=9 operator moved this up\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let current_content = snapshot_content.replace(
+        "- do [#fast]\n- do [#medium]\n- do [#slow]",
+        "- do [#slow]\n- do [#fast]\n- do [#medium]",
+    );
+    std::fs::write(&doc, &current_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(state.queue_active, Some(true));
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- :pushpin: do [#slow]\n- do [#fast]\n- do [#medium]"),
+        "operator-moved queue prompt should become sticky with :pushpin::\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_auto_dag_intersperses_blocker_with_pinned_batch() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue priority auto -->\n",
+        "- :pushpin: do [#ops]\n",
+        "- :pushpin: do [#ship]\n",
+        "- :pushpin: do [#notify]\n",
+        "- :round_pushpin: do [#setup]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority -->\n",
+        "- [ ] [#ops] priority=5 independent operator-pinned task\n",
+        "- [ ] [#ship] priority=1 after=#setup depends on setup\n",
+        "- [ ] [#notify] priority=2 after=#ship depends on ship\n",
+        "- [ ] [#setup] priority=9 required setup work\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(state.queue_active, Some(true));
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains(
+            "- :pushpin: do [#ops]\n\
+                 - :round_pushpin: do [#setup]\n\
+                 - :pushpin: do [#ship]\n\
+                 - :pushpin: do [#notify]"
+        ),
+        "auto-dag must let dependency blockers intersperse a pinned batch:\n{updated}"
+    );
+}
+#[test]
+fn preflight_new_auto_queue_from_inactive_snapshot_does_not_halt_on_changed_head() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "dispatch #spec-test-build-install-commit-push\n",
+        "- do [#oldhead]\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#newhead] Run the newly queued head.\n",
+        "- [ ] [#nexthead] Run the next queued item.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    let current_content = snapshot_content
+        .replace("<!-- agent:queue -->", "<!-- agent:queue auto -->")
+        .replace("- do [#oldhead]", "- do [#newhead]\n- do [#nexthead]");
+    std::fs::write(&doc, &current_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(state.queue_active, Some(true));
+    assert_eq!(state.queue_halted, None);
+    assert_eq!(
+        state.queue_prompts,
+        vec!["do [#newhead]".to_string(), "do [#nexthead]".to_string()]
+    );
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: start"));
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("- do [#newhead]"));
+    assert!(!updated.contains("- do [#oldhead]"));
+
+    let snap = snapshot::load(&doc).unwrap().unwrap();
+    assert!(
+        snap.contains("queue: start")
+            && snap.contains("<!-- agent:queue auto -->")
+            && snap.contains("- do [#newhead]")
+            && !snap.contains("- do [#oldhead]"),
+        "newly activated queue must be snapshotted as the closeout baseline:\n{snap}"
+    );
+
+    let done_ids = vec!["newhead".to_string()];
+    let outcome = crate::write::consume_queue_prompts_for_done_ids_with_outcome(&doc, &done_ids)
+        .unwrap()
+        .expect("newly activated queue head should be consumable");
+    assert_eq!(outcome.consumed_count, 1);
+    assert_eq!(outcome.remaining, 1);
+
+    let consumed = std::fs::read_to_string(&doc).unwrap();
+    assert!(consumed.contains("- ~~do [#newhead]~~"));
+    assert!(consumed.contains("- do [#nexthead]"));
+}
+#[test]
+fn queue_maintenance_drains_all_done_queue_without_item_modified_halt() {
+    // #drained-done-queue-clear: a fully resolved auto-queue (every `do
+    // [#id]` already in agent:done) plus a batch dispatch directive must
+    // drain — not false-halt as `item_modified`. Before the fix the
+    // strike pass converted every live head to Completed, leaving the
+    // post-strike head `None` vs a still-live snapshot head, which
+    // detect_head_prompt_modified read as an edit and halted before the
+    // drain-cleanup path ran. The Corky live-repro shape: template doc,
+    // dispatch preset, multiple bracketed `do [#id]` prompts, no diff.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "dispatch #spec-test-build-install-commit-push\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Completed / Reaped\n\n",
+        "<!-- agent:done -->\n",
+        "- [x] [#alpha] First done.\n",
+        "- [x] [#beta] Second done.\n",
+        "<!-- /agent:done -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(
+        state.queue_halted, None,
+        "fully-resolved queue must drain, not halt as item_modified"
+    );
+    assert_eq!(state.queue_active, Some(false));
+    assert!(state.queue_prompts.is_empty());
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: stop"), "file: {updated}");
+    assert!(
+        !updated.contains("agent:queue auto"),
+        "auto must be stripped on drain: {updated}"
+    );
+    assert!(
+        !updated.contains("- do [#alpha]") && !updated.contains("- do [#beta]"),
+        "drained queue body must be cleared: {updated}"
+    );
+
+    // Snapshot matches the drained file so the closeout commit boundary
+    // does not strand the maintenance mutation.
+    let snap = snapshot::load(&doc).unwrap().unwrap();
+    assert!(snap.contains("queue: stop"));
+    assert!(!snap.contains("agent:queue auto"));
+    assert!(!snap.contains("- do [#alpha]"));
+}
+#[test]
+fn queue_maintenance_partial_done_strike_advances_to_live_head_without_halt() {
+    // #drained-done-queue-clear (partial case): a leading queue head that
+    // is already done must be struck and the queue advanced to the next
+    // live head — without false-halting as item_modified. The snapshot is
+    // struck the same way before the head-modified comparison so only a
+    // genuine operator head edit can halt.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Completed / Reaped\n\n",
+        "<!-- agent:done -->\n",
+        "- [x] [#alpha] First done.\n",
+        "<!-- /agent:done -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(
+        state.queue_halted, None,
+        "striking a done head must not halt while a live head remains"
+    );
+    assert_eq!(state.queue_active, Some(true));
+    assert_eq!(state.queue_prompts, vec!["do [#beta]".to_string()]);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- ~~do [#alpha]~~"),
+        "done head struck to completed: {updated}"
+    );
+    assert!(updated.contains("- do [#beta]"));
+    assert!(updated.contains("agent:queue auto"));
+    assert!(updated.contains("queue_active: true"));
+}
+#[test]
+fn queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt() {
+    // SimWorld repro for #adoc-queue-ipc-buffer-divergence (root cause #2):
+    // a live route-owned IPC listener owns the document. When an
+    // already-active auto-queue's head prompt changes between cycles, queue
+    // maintenance halts (item_modified), strips `auto`, and clears
+    // `queue_active` on disk + snapshot. Without convergence the live editor
+    // buffer would re-add `auto`/`queue_active: true` on its next flush and
+    // the snapshot/HEAD drift loop regenerates every preflight. This test
+    // proves maintenance pushes a queue-tag + frontmatter convergence message
+    // to the listener, and that a follow-up maintenance pass is idempotent
+    // (no second divergence, no second convergence send).
+    use std::sync::{Arc, Mutex};
+
+    let dir = setup_project();
+    let root = dir.path().canonicalize().unwrap();
+    let doc = root.join("session.md");
+
+    let received: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let received_clone = received.clone();
+    let listener_root = root.clone();
+    let server = std::thread::spawn(move || {
+        crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(msg) {
+                received_clone.lock().unwrap().push(v);
+            }
+            Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+        })
+        .ok();
+    });
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#oldhead]\n",
+        "- do [#nexthead]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+    std::fs::write(&doc, &current_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    // A live editor is actively mid-edit on the head prompt, so the loop
+    // must still pause/halt rather than adopt a half-typed head
+    // (#queue-no-stall-on-head-edit gates adopt on a settled buffer).
+    crate::debounce::document_changed(&doc.to_string_lossy());
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    assert_eq!(state.queue_halted, Some("item_modified".into()));
+    assert_eq!(state.queue_active, Some(false));
+
+    // Disk converged to the inactive shape.
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(updated.contains("queue: stop"));
+
+    // Listener received exactly one queue convergence message carrying the
+    // queue body plus the tag + frontmatter shape that a content-only patch
+    // cannot deliver.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    {
+        let msgs = received.lock().unwrap();
+        let convergences: Vec<&serde_json::Value> = msgs
+            .iter()
+            .filter(|m| m.get("queue_auto").is_some())
+            .collect();
+        assert_eq!(
+            convergences.len(),
+            1,
+            "expected exactly one queue convergence message, got: {msgs:?}"
+        );
+        let conv = convergences[0];
+        assert_eq!(conv["queue_auto"], serde_json::json!(false));
+        // #queue-active-deprecated-line-stuck: convergence carries the
+        // canonical `queue:` control, never the deprecated `queue_active:`.
+        assert_eq!(conv["frontmatter"], serde_json::json!("queue: stop"));
+        assert_eq!(conv["patches"][0]["component"], serde_json::json!("queue"));
+        assert_eq!(
+            conv["patches"][0]["content"],
+            serde_json::json!(
+                crate::component::parse(&updated)
+                    .unwrap()
+                    .iter()
+                    .find(|c| c.name == "queue")
+                    .unwrap()
+                    .content(&updated)
+            )
+        );
+    }
+
+    // Idempotency: a follow-up maintenance pass on the converged document
+    // mutates nothing and sends no further convergence.
+    let state2 = run_queue_maintenance(&doc, None).unwrap();
+    assert_eq!(state2.queue_halted, None);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    {
+        let msgs = received.lock().unwrap();
+        let convergences = msgs
+            .iter()
+            .filter(|m| m.get("queue_auto").is_some())
+            .count();
+        assert_eq!(
+            convergences, 1,
+            "follow-up maintenance must not re-diverge / re-send convergence"
+        );
+    }
+
+    let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+    drop(server);
+}
+#[test]
+fn preflight_pauses_when_active_queue_head_changes_mid_edit() {
+    // #queue-no-stall-on-head-edit (pause case): while a live editor is
+    // actively mid-edit on the head prompt, the loop must still pause/halt
+    // rather than grab a half-typed head. The settled-buffer adopt path is
+    // covered separately by
+    // `preflight_adopts_edited_queue_head_when_buffer_settled`.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#oldhead]\n",
+        "- do [#nexthead]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+    std::fs::write(&doc, &current_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    // Mark the document as actively being typed so the head edit reads as
+    // a half-typed buffer.
+    crate::debounce::document_changed(&doc.to_string_lossy());
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(state.queue_active, Some(false));
+    assert_eq!(state.queue_halted.as_deref(), Some("item_modified"));
+    assert!(state.queue_prompts.is_empty());
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: stop"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(updated.contains("- do [#newhead]"));
+}
+#[test]
+fn preflight_adopts_edited_queue_head_when_buffer_settled() {
+    // #queue-no-stall-on-head-edit (adopt case): when an already-active
+    // auto-queue's head prompt changes between cycles and the buffer is
+    // settled (no live typing indicator), the loop must adopt the edited
+    // head as the new prompt and stay armed — NOT strip `auto` / force
+    // queue_active:false. The snapshot must absorb the edited head so
+    // closeout queue-consume proves the same prompt and the next cycle sees
+    // no spurious item_modified edit.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#oldhead]\n",
+        "- do [#nexthead]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+    std::fs::write(&doc, &current_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+    // No typing indicator written → buffer is settled.
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert_eq!(
+        state.queue_halted, None,
+        "settled head edit must adopt + continue, not halt"
+    );
+    assert_eq!(state.queue_active, Some(true));
+    assert_eq!(
+        state.queue_prompts,
+        vec!["do [#newhead]".to_string(), "do [#nexthead]".to_string()],
+        "loop continues with the edited head as the new prompt"
+    );
+
+    // File keeps the armed auto-queue with the edited head.
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("agent:queue auto"),
+        "auto preserved: {updated}"
+    );
+    assert!(
+        updated.contains("queue_active: true"),
+        "active preserved: {updated}"
+    );
+    assert!(updated.contains("- do [#newhead]"));
+
+    // Snapshot absorbed the edited head so a follow-up pass is idempotent
+    // (no spurious item_modified on the now-converged head).
+    let snap = snapshot::load(&doc).unwrap().unwrap();
+    assert!(
+        snap.contains("- do [#newhead]"),
+        "snapshot must absorb the adopted head: {snap}"
+    );
+    assert!(
+        !snap.contains("- do [#oldhead]"),
+        "snapshot must drop the stale head: {snap}"
+    );
+    let state2 = run_queue_maintenance(&doc, None).unwrap();
+    assert_eq!(
+        state2.queue_halted, None,
+        "converged head must not re-halt on the next pass"
+    );
+    assert_eq!(state2.queue_active, Some(true));
+}
+#[test]
+fn preflight_preserves_intentional_duplicate_tracked_queue_prompt() {
+    // #queue-dedup-destroys-intentional-duplicates / #md-ast-document-model:
+    // duplicate `do [#id]` text can be intentional user queue intent. Preflight
+    // must not collapse it by raw prompt/id matching; only duplicate AST node
+    // keys are eligible for cleanup.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "preset #spec-test-build-install-commit-push\n",
+        "- ~do [#adoc-sqlite-seam]~\n",
+        "- do [#adoc-orch-shim-cleanup]\n",
+        "- do [#adoc-orch-shim-cleanup]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+        2,
+        "duplicate tracked prompts must remain executable queue intent:\n{updated}"
+    );
+    assert_eq!(
+        state.queue_prompts,
+        vec![
+            "do [#adoc-orch-shim-cleanup]".to_string(),
+            "do [#adoc-orch-shim-cleanup]".to_string()
+        ],
+        "duplicate tracked prompts should remain queued: {state:?}"
+    );
+    // Re-running maintenance on the converged doc is a no-op (stable).
+    let before = std::fs::read_to_string(&doc).unwrap();
+    let _ = run_queue_maintenance(&doc, None).unwrap();
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        before, after,
+        "queue maintenance must be idempotent after dedup"
+    );
+}
+#[test]
+fn preflight_keeps_intentional_duplicate_free_text_prompt() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do deploy\n",
+        "- do deploy\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    assert_eq!(
+        state.queue_prompts,
+        vec!["do deploy".to_string(), "do deploy".to_string()],
+        "intentional duplicate free-text prompts should remain queued: {state:?}"
+    );
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated.matches("- do deploy").count(),
+        2,
+        "maintenance should preserve intentional duplicate free-text prompts:\n{updated}"
+    );
+}
+#[test]
+fn preflight_does_not_reflag_stable_inactive_queue_as_residue() {
+    // #adoc-queue-ipc-drift root cause #1: after an `item_modified` halt the
+    // queue goes inactive (queue_active: false, no `auto`) with a retained
+    // live tail, and the halt synced that shape into the snapshot. On the
+    // NEXT preflight the inactive queue is unchanged from the snapshot, so
+    // re-emitting `inactive_queue_residue` every cycle (with no user edit)
+    // is pure loop noise and must be suppressed.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    // Snapshot == file: a stable, already-committed inactive queue with a
+    // retained tail (the post-halt steady state).
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- ~do [#first-done]~\n",
+        "- do [#second-live]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+
+    assert!(
+        !state
+            .warnings
+            .iter()
+            .any(|w| w.code == "inactive_queue_residue"),
+        "stable inactive queue (unchanged vs snapshot) must not re-warn residue: {:?}",
+        state.warnings
+    );
+    // The retained tail is preserved, and maintenance is idempotent.
+    let before = std::fs::read_to_string(&doc).unwrap();
+    assert!(before.contains("- do [#second-live]"));
+    let _ = run_queue_maintenance(&doc, None).unwrap();
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(before, after, "stable inactive queue must not be mutated");
+}
+#[test]
+fn pending_maintenance_reaps_completed_items_from_file_and_snapshot() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Pending / Not Built\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [x] [#reap1] Reap me\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert!(!report.reordered);
+    assert_eq!(report.pending_gated_count, 0);
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let file_backlog_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    assert!(!file_backlog_after.contains("[#reap1]"));
+    assert!(file_after.contains("[#keep1]"));
+    assert!(file_after.contains("## Completed / Reaped"));
+    assert!(file_after.contains("<!-- agent:done -->"));
+    assert!(file_after.contains("[#reap1] Reap me"));
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    let snapshot_backlog_after = crate::component::parse(&snapshot_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    assert!(!snapshot_backlog_after.contains("[#reap1]"));
+    assert!(snapshot_after.contains("[#keep1]"));
+    assert!(snapshot_after.contains("## Completed / Reaped"));
+    assert!(snapshot_after.contains("<!-- agent:done -->"));
+    assert!(snapshot_after.contains("[#reap1] Reap me"));
+}
+#[test]
+fn pending_maintenance_auto_reaps_ops_proof_done_items() {
+    let dir = setup_project();
+    let root = dir.path();
+    let doc = root.join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#doneci] #agent-doc-bug DONE 7b60fcdc (CI 27075841879 green): supervisor idle-queue watch self-heals stale busy state\n",
+        "- [ ] [#partial] #agent-doc-bug PARTIAL SHIPPED 9df1244f: committed first slice. REMAINING: live proof gate\n",
+        "- [ ] [#reopened] #agent-doc-bug REOPENED false closeout: previous closeout DONE 1234567 (CI 1 green)\n",
+        "- [ ] [#noproof] DONE: lacks deterministic proof\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#reviewdone] SHIPPED abcdef1 (CI 2 passed): review-gated shipped marker\n",
+        "- [/] [#reviewkeep] Needs release review\n",
+        "<!-- /agent:review -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert_eq!(report.pending_gated_count, 0);
+    assert_eq!(report.review_count, 1);
+    assert_eq!(report.review_gated_count, 1);
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let backlog_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| is_backlog_component(&c.name))
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    let review_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| is_review_component(&c.name))
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+
+    assert!(!backlog_after.contains("[#doneci]"));
+    assert!(!review_after.contains("[#reviewdone]"));
+    assert!(backlog_after.contains("[#partial]"));
+    assert!(backlog_after.contains("[#reopened]"));
+    assert!(backlog_after.contains("[#noproof]"));
+    assert!(review_after.contains("[#reviewkeep]"));
+    assert!(file_after.contains("## Completed / Reaped"));
+    assert!(file_after.contains("[#doneci] #agent-doc-bug DONE 7b60fcdc"));
+    assert!(file_after.contains("[#reviewdone] SHIPPED abcdef1"));
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    assert!(!snapshot_after.contains("- [ ] [#doneci]"));
+    assert!(!snapshot_after.contains("- [/] [#reviewdone]"));
+    assert!(snapshot_after.contains("[#partial]"));
+    assert!(snapshot_after.contains("[#reopened]"));
+    assert!(snapshot_after.contains("[#noproof]"));
+    assert!(snapshot_after.contains("[#reviewkeep]"));
+
+    let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(log.contains("auto_complete_ops_proof"));
+    assert!(log.contains("id=doneci"));
+    assert!(log.contains("id=reviewdone"));
+}
+#[test]
+fn ops_proof_does_not_reap_same_cycle_added_gated_item() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#freshgate] operator live-verify the destructive path. Code SHIPPED 1edb20d2; this is the live gate only\n",
+        "<!-- /agent:review -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    // The snapshot already contains the item — this models the finalize path
+    // where the same invocation's --review-add re-synced the snapshot, so the
+    // snapshot-only guard cannot tell this is a brand-new add.
+    snapshot::save(&doc, content).unwrap();
+    // cycle_state records #freshgate as added this cycle.
+    crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+    crate::cycle_state::record_pending_added_ids(&doc, &["freshgate".to_string()]).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    // The freshly added gated item survives — not reaped on its first cycle.
+    assert!(
+        file_after.contains("[#freshgate]"),
+        "same-cycle-added gated item must not be ops-proof reaped: {file_after}"
+    );
+    let log =
+        std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        !log.contains("auto_complete_ops_proof"),
+        "no ops-proof auto-completion should fire for a same-cycle add"
+    );
+}
+#[test]
+fn ops_proof_does_not_reap_cited_dependency_marker() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#citeddep] wire the predicate into dispatch. The predicate already shipped in 600797b3 and is unit-tested\n",
+        "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate into dispatch\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let backlog_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| is_backlog_component(&c.name))
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+
+    // Cited-dependency marker stays open; leading-status marker is reaped.
+    assert!(
+        backlog_after.contains("[#citeddep]"),
+        "cited-dependency item must not be reaped: {backlog_after}"
+    );
+    assert!(!backlog_after.contains("[#leadstatus]"));
+    assert!(file_after.contains("[#leadstatus] DONE 7b60fcdc"));
+}
+#[test]
+fn ops_proof_does_not_reap_live_verify_gate_on_commit_hash() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#ktw8] [live-verify gate] destructive auto-/clear between queue turns. ",
+        "Code SHIPPED 1edb20d2; a shipped commit is NOT proof, an operator drive is. ",
+        "PASS = a genuine anchored ops.log line; current verdict UNDRIVEN.\n",
+        "<!-- /agent:review -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        file_after.contains("[#ktw8]"),
+        "live-verify gate must not be ops-proof reaped on a cited commit hash: {file_after}"
+    );
+    let log =
+        std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        !log.contains("auto_complete_ops_proof"),
+        "no ops-proof auto-completion should fire for a live-verify gate"
+    );
+}
+#[test]
+fn pending_maintenance_does_not_reap_same_cycle_add() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    // Snapshot baseline: an existing leading-status done item + a keeper.
+    let snapshot_content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate\n",
+        "- [ ] [#keep] keep this open item\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    // File adds a brand-new same-cycle item with a leading-status marker that
+    // would normally reap — but it is absent from the snapshot.
+    let file_content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#freshdone] DONE abc1234: just landed this cycle\n",
+        "- [ ] [#leadstatus] DONE 7b60fcdc: wired the predicate\n",
+        "- [ ] [#keep] keep this open item\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, file_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let backlog_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| is_backlog_component(&c.name))
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+
+    // Same-cycle add survives; pre-existing leading-status item is reaped.
+    assert!(
+        backlog_after.contains("[#freshdone]"),
+        "same-cycle add must not be reaped: {backlog_after}"
+    );
+    assert!(backlog_after.contains("[#keep]"));
+    assert!(!backlog_after.contains("[#leadstatus]"));
+}
+#[test]
+fn pending_maintenance_reaps_inline_done_backlog_and_review_mirrors() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#done1] stale backlog mirror\n",
+        "- [ ] [#keep1] keep backlog\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#done2] stale review mirror\n",
+        "- [/] [#keep2] keep review\n",
+        "<!-- /agent:review -->\n\n",
+        "## Completed / Reaped\n\n",
+        "<!-- agent:done -->\n",
+        "- [x] [#done1] already archived backlog\n",
+        "- [x] [#done2] already archived review\n",
+        "<!-- /agent:done -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert_eq!(report.pending_gated_count, 0);
+    assert_eq!(report.review_count, 1);
+    assert_eq!(report.review_gated_count, 1);
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let file_components = crate::component::parse(&file_after).unwrap();
+    let file_backlog = file_components
+        .iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    let file_review = file_components
+        .iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    assert!(!file_backlog.contains("[#done1]"));
+    assert!(file_backlog.contains("[#keep1] keep backlog"));
+    assert!(!file_review.contains("[#done2]"));
+    assert!(file_review.contains("[#keep2] keep review"));
+    assert_eq!(file_after.matches("[#done1]").count(), 1);
+    assert_eq!(file_after.matches("[#done2]").count(), 1);
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    let snapshot_components = crate::component::parse(&snapshot_after).unwrap();
+    let snapshot_backlog = snapshot_components
+        .iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    let snapshot_review = snapshot_components
+        .iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    assert!(!snapshot_backlog.contains("[#done1]"));
+    assert!(!snapshot_review.contains("[#done2]"));
+    assert_eq!(snapshot_after.matches("[#done1]").count(), 1);
+    assert_eq!(snapshot_after.matches("[#done2]").count(), 1);
+}
+#[test]
+fn pending_maintenance_reaps_external_done_archive_backlog_and_review_mirrors() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let archive_rel = "session.done.md";
+    let archive_path = dir.path().join(archive_rel);
+    let archive_content = concat!(
+        "# Done\n\n",
+        "- [x] [#extdone1] externally archived backlog\n",
+        "- [x] [#extdone2] externally archived review\n",
+    );
+    std::fs::write(&archive_path, archive_content).unwrap();
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#extdone1] stale backlog mirror\n",
+        "- [ ] [#fresh1] fresh backlog\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#extdone2] stale review mirror\n",
+        "- [/] [#fresh2] fresh review\n",
+        "<!-- /agent:review -->\n\n",
+        "<!-- agent:done archive=session.done.md -->\n",
+        "<!-- /agent:done -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert_eq!(report.review_count, 1);
+    assert_eq!(report.review_gated_count, 1);
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let file_components = crate::component::parse(&file_after).unwrap();
+    let file_backlog = file_components
+        .iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    let file_review = file_components
+        .iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    assert!(!file_backlog.contains("[#extdone1]"));
+    assert!(file_backlog.contains("[#fresh1] fresh backlog"));
+    assert!(!file_review.contains("[#extdone2]"));
+    assert!(file_review.contains("[#fresh2] fresh review"));
+    assert_eq!(
+        std::fs::read_to_string(&archive_path).unwrap(),
+        archive_content
+    );
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    assert!(!snapshot_after.contains("stale backlog mirror"));
+    assert!(!snapshot_after.contains("stale review mirror"));
+    assert!(snapshot_after.contains("[#fresh1] fresh backlog"));
+    assert!(snapshot_after.contains("[#fresh2] fresh review"));
+}
+#[test]
+fn preflight_allows_user_marked_done_item_reaped_in_same_cycle() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let baseline = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Pending / Not Built\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [/] [#done1] Waiting on manual validation\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, baseline).unwrap();
+    snapshot::save(&doc, baseline).unwrap();
+    Command::new("git")
+        .current_dir(dir.path())
+        .args(["add", "session.md"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(dir.path())
+        .args(["commit", "-m", "baseline", "--no-verify"])
+        .output()
+        .unwrap();
+
+    let current = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Pending / Not Built\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [x] [#done1] Waiting on manual validation\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, current).unwrap();
+    crate::cycle_state::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert!(!report.reordered);
+    assert_eq!(report.pending_gated_count, 0);
+    let rc = crate::graph::RunContext::new(doc.clone());
+    enforce_no_dropped_backlog(&doc, &rc)
+        .expect("same-cycle reap should count as intentional completion");
+}
+#[test]
+fn pending_maintenance_reaps_completed_icebox_items_from_file_and_snapshot() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Pending / Not Built\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Icebox\n\n",
+        "<!-- agent:icebox -->\n",
+        "- [x] [#ice01] Reap me from icebox\n",
+        "- [ ] [#keep2] Keep me parked\n",
+        "<!-- /agent:icebox -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    let report = run_pending_maintenance(&doc).unwrap();
+    assert!(!report.reordered);
+    assert_eq!(report.pending_gated_count, 0);
+
+    let file_after = std::fs::read_to_string(&doc).unwrap();
+    let file_icebox_after = crate::component::parse(&file_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "icebox")
+        .unwrap()
+        .content(&file_after)
+        .to_string();
+    assert!(!file_icebox_after.contains("[#ice01]"));
+    assert!(file_after.contains("[#keep2]"));
+    assert!(file_after.contains("## Completed / Reaped"));
+    assert!(file_after.contains("[#ice01] Reap me from icebox"));
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    let snapshot_icebox_after = crate::component::parse(&snapshot_after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "icebox")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    assert!(!snapshot_icebox_after.contains("[#ice01]"));
+    assert!(snapshot_after.contains("[#keep2]"));
+    assert!(snapshot_after.contains("## Completed / Reaped"));
+    assert!(snapshot_after.contains("[#ice01] Reap me from icebox"));
+}
+#[test]
+fn pending_maintenance_syncs_snapshot_for_write_phase_gate_without_reap() {
+    // #pending-gate-snapshot-desync: the write phase moved #g1 from backlog
+    // to review (a --pending-gate) on the FILE, but the content_ours snapshot
+    // still shows #g1 in backlog and an empty review. Maintenance makes no
+    // reap/backfill change, yet it must re-sync the snapshot's tracked
+    // surfaces to the file so the upcoming commit stages the gate instead of
+    // stranding it as post-commit drift.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let file_content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#g1] Gated, awaiting review\n",
+        "<!-- /agent:review -->\n"
+    );
+    // Snapshot lags the file: #g1 still in backlog, review empty (the
+    // baseline+response content_ours saved before the gate mutation).
+    let snapshot_content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep1] Keep me\n",
+        "- [ ] [#g1] Gated, awaiting review\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "<!-- /agent:review -->\n"
+    );
+    std::fs::write(&doc, file_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+    let comps = crate::component::parse(&snapshot_after).unwrap();
+    let snap_backlog = comps
+        .iter()
+        .find(|c| c.name == "backlog")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    let snap_review = comps
+        .iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&snapshot_after)
+        .to_string();
+    // Snapshot now matches the file: #g1 gated into review, gone from backlog.
+    assert!(
+        !snap_backlog.contains("[#g1]"),
+        "snapshot backlog must drop the gated item: {snap_backlog}"
+    );
+    assert!(
+        snap_review.contains("[/] [#g1]"),
+        "snapshot review must carry the gated item: {snap_review}"
+    );
+    assert!(snap_backlog.contains("[#keep1]"));
+}
+#[test]
+fn gate_verify_surfaces_provable_without_flipping_when_optin_off() {
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some("early_ack_pending".to_string()),
+        disproof: Some("false ack-timeout".to_string()),
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+
+    let results = run_gate_verify(&doc, false).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, "saev");
+    assert_eq!(results[0].status, "provable");
+    assert!(
+        !results[0].auto_resolved,
+        "opt-in off must not flip the gate"
+    );
+
+    // The document still shows the gated item — never silently flipped.
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+}
+#[test]
+fn gate_verify_auto_resolves_provable_when_optin_on() {
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some("early_ack_pending".to_string()),
+        disproof: None,
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "provable");
+    assert!(results[0].auto_resolved);
+
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("[x] [#saev]"),
+        "gate must be flipped: {after}"
+    );
+    // Snapshot kept in lockstep for the upcoming commit.
+    let snap = snapshot::load(&doc).unwrap().unwrap();
+    assert!(
+        snap.contains("[x] [#saev]"),
+        "snapshot must flip too: {snap}"
+    );
+}
+#[test]
+fn gate_verify_failed_never_auto_resolves_even_with_optin() {
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some("early_ack_pending".to_string()),
+        disproof: Some("manual cleanup".to_string()),
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(
+        &dir,
+        "[150] early_ack_pending emitted\n[160] looks like a manual cleanup\n",
+    );
+
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert_eq!(results[0].status, "failed", "disproof wins");
+    assert!(!results[0].auto_resolved);
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("- [/] [#saev]"),
+        "failed gate must remain: {after}"
+    );
+}
+#[test]
+fn gate_verify_empty_without_predicate() {
+    let dir = setup_project();
+    let doc = write_optverify_doc(&dir, "");
+    write_ops_log(&dir, "[150] early_ack_pending emitted\n");
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert!(results.is_empty(), "no predicate → no results");
+}
+#[test]
+fn gate_verify_ignores_marker_quoted_in_content_logging_lines() {
+    // #gng8: queue_diff_active_prompt_differs embeds document prose via
+    // {:?}; a gate must not auto-prove from its own backlog description.
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some("early_ack_pending".to_string()),
+        disproof: None,
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(
+        &dir,
+        "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect early_ack_pending emitted before apply\"] queue_head=\"[#saev]\"\n",
+    );
+
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "pending", "quoted prose must not prove");
+    assert!(!results[0].auto_resolved);
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+}
+#[test]
+fn gate_verify_s760_builtin_ignores_queue_diff_prose_only() {
+    // #ktw8: the destructive clear gate is proven only by an anchored
+    // structured [s760] line, never by prose embedded in queue_diff logs.
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+        disproof: None,
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(
+        &dir,
+        "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"PASS requires [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\"] queue_head=\"[#ktw8]\"\n",
+    );
+
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "pending", "quoted prose must not prove");
+    assert!(!results[0].auto_resolved);
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("- [/] [#saev]"), "gate must remain: {after}");
+}
+#[test]
+fn gate_verify_s760_builtin_auto_resolves_on_anchored_clear_true() {
+    let dir = setup_project();
+    let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
+        verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
+        disproof: None,
+        set_at: Some(100),
+    });
+    let doc = write_optverify_doc(&dir, &pred);
+    write_ops_log(
+        &dir,
+        "[150] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
+    );
+
+    let results = run_gate_verify(&doc, true).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "provable");
+    assert!(results[0].auto_resolved);
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("[x] [#saev]"),
+        "gate must be flipped: {after}"
+    );
+}
+#[test]
+fn pending_maintenance_fails_closed_when_snapshot_backlog_cannot_be_synced() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let file_content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Pending / Not Built\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [x] [#reap1] Reap me\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    let snapshot_content =
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\nNo backlog here.\n";
+    std::fs::write(&doc, file_content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    let err = run_pending_maintenance(&doc).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("snapshot is missing the backlog component")
+    );
+}
+#[test]
+fn run_pending_maintenance_sorts_backlog_by_priority() {
+    // #backlog-priority-attribute: a backlog carrying `priority` stable-sorts
+    // items by their per-item priority token each cycle.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:backlog priority -->\n",
+        "- [ ] [#low] priority=5 later\n",
+        "- [ ] [#high] priority=1 first\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_pending_maintenance(&doc).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    let high = updated.find("[#high]").unwrap();
+    let low = updated.find("[#low]").unwrap();
+    assert!(
+        high < low,
+        "priority=1 item must sort before priority=5:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_orders_synced_queue_by_priority() {
+    // #backlog-priority-attribute + #backlog-queue-sync-attr: a priority queue
+    // synced from a priority backlog comes out prioritized.
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "---\n\n",
+        "<!-- agent:queue priority -->\n",
+        "- do [#low]\n",
+        "- do [#high]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#low] priority=5 later\n",
+        "- [ ] [#high] priority=1 first\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    snapshot::save(&doc, content).unwrap();
+
+    run_queue_maintenance(&doc, None).unwrap();
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    let q = updated.find("<!-- agent:queue").unwrap();
+    let qend = updated[q..].find("<!-- /agent:queue").unwrap() + q;
+    let queue_region = &updated[q..qend];
+    let high = queue_region.find("do [#high]").unwrap();
+    let low = queue_region.find("do [#low]").unwrap();
+    assert!(
+        queue_region.contains(":round_pushpin: do [#high]"),
+        "auto-promoted queue item should carry an agent-priority marker:\n{queue_region}"
+    );
+    assert!(
+        high < low,
+        "priority=1 must sort before priority=5 in queue:\n{queue_region}"
+    );
+}
+#[test]
+fn collect_backlog_queue_sync_reads_mode_and_active_ids() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#a] one\n",
+        "- [/] [#g] gated\n",
+        "- [ ] [#b] two\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let components = crate::component::parse(content).unwrap();
+    let request = collect_backlog_queue_sync(&components, content)
+        .expect("backlog with queue attr should produce a sync request");
+    assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Sync);
+    assert_eq!(request.ids, vec!["a".to_string(), "b".to_string()]);
+    assert!(request.enqueue_ids.is_empty());
+}
+#[test]
+fn collect_backlog_queue_sync_reads_enqueue_markers_without_attr() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a] :inbox_tray: one\n",
+        "- [/] [#g] :inbox_tray: gated\n",
+        "- [ ] [#b] unmarked\n",
+        "- [ ] [#c] **enqueue** marked\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let components = crate::component::parse(content).unwrap();
+    let request = collect_backlog_queue_sync(&components, content)
+        .expect("enqueue markers should produce an append request");
+    assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Append);
+    assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
+    assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
+}
+#[test]
+fn filter_expect_done_or_gate_excludes_synced_queue_ids() {
+    // #queue-sync-auto-pending-done-guard-misfire: a cycle that works one
+    // directive (#worked) while the backlog→queue sync auto-populated
+    // do[#a]/do[#b]/#worked into the active queue must demand only the
+    // genuine worked directive, never the freshly-synced siblings.
+    let directive_ids = vec!["worked".to_string(), "a".to_string(), "b".to_string()];
+    let open_backlog: std::collections::HashSet<String> =
+        ["worked", "a", "b"].iter().map(|s| s.to_string()).collect();
+    let synced_queue_ids: std::collections::HashSet<String> =
+        ["a", "b"].iter().map(|s| s.to_string()).collect();
+    let result = filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+    assert_eq!(result, vec!["worked".to_string()]);
+}
+#[test]
+fn filter_expect_done_or_gate_keeps_open_directives_without_sync() {
+    // No sync attribute → no exclusion; an open user directive stays demanded,
+    // a directive whose backlog item is already resolved drops out, and
+    // duplicates collapse.
+    let directive_ids = vec![
+        "open".to_string(),
+        "open".to_string(),
+        "resolved".to_string(),
+    ];
+    let open_backlog: std::collections::HashSet<String> =
+        ["open"].iter().map(|s| s.to_string()).collect();
+    let synced_queue_ids = std::collections::HashSet::new();
+    let result = filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+    assert_eq!(result, vec!["open".to_string()]);
+}
+#[test]
+fn collect_backlog_queue_sync_none_without_attr() {
+    let content = concat!(
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a] one\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let components = crate::component::parse(content).unwrap();
+    assert!(collect_backlog_queue_sync(&components, content).is_none());
+}
+#[test]
+fn resolve_pipeline_state_none_without_cycle_or_frontmatter() {
+    let dir = setup_project();
+    let doc = dir.path().join("doc.md");
+    std::fs::write(&doc, "body\n").unwrap();
+    assert!(resolve_pipeline_state(&doc).unwrap().is_none());
+}
+#[test]
+fn resolve_pipeline_state_falls_back_to_frontmatter_block() {
+    // No cycle-state on disk → read the document `agent_doc_pipeline:` mirror.
+    let dir = setup_project();
+    let doc = dir.path().join("doc.md");
+    std::fs::write(
+        &doc,
+        "---\nagent_doc_pipeline:\n  run_id: cycle-77\n  step: write_applied\n---\n\nbody\n",
+    )
+    .unwrap();
+    let p = resolve_pipeline_state(&doc)
+        .unwrap()
+        .expect("frontmatter fallback");
+    assert_eq!(p.run_id.as_deref(), Some("cycle-77"));
+    assert_eq!(p.step.as_deref(), Some("write_applied"));
+}
+#[test]
+fn resolve_pipeline_state_cycle_state_wins_over_frontmatter() {
+    // Cycle-state is authoritative; a stale frontmatter block must not override it.
+    let dir = setup_project();
+    let doc = dir.path().join("doc.md");
+    std::fs::write(
+        &doc,
+        "---\nagent_doc_pipeline:\n  run_id: stale-mirror\n  step: committed\n---\n\nbody\n",
+    )
+    .unwrap();
+    let state = crate::cycle_state::start_preflight_with_task(
+        &doc,
+        Some("snap"),
+        Some("body"),
+        Some("#fmrunid-wire"),
+        Some("#fmrunid-wire"),
+    )
+    .unwrap();
+
+    let p = resolve_pipeline_state(&doc)
+        .unwrap()
+        .expect("cycle-state present");
+    assert_eq!(p.run_id.as_deref(), Some(state.cycle_id.as_str()));
+    assert_eq!(p.step.as_deref(), Some("preflight_started"));
+    assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
+    assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
+}
+}

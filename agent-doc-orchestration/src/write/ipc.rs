@@ -3898,3 +3898,4487 @@ pub(crate) fn next_existing_node_key(
         .map(|node| node.node_key.clone())
 }
 
+
+#[cfg(test)]
+mod ack_content_snapshot_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_ack_content_sidecar_read() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "test-patch-abc123";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+        let sidecar = ack_dir.join(format!("{patch_id}.md"));
+        std::fs::write(&sidecar, "applied content from plugin").unwrap();
+
+        let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
+        assert_eq!(result, Some("applied content from plugin".to_string()));
+        assert!(!sidecar.exists(), "sidecar should be deleted after read");
+    }
+
+    #[test]
+    fn test_poll_sidecar_present_immediately() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-immediate";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+        std::fs::write(ack_dir.join(format!("{patch_id}.md")), "immediate content").unwrap();
+
+        let result = poll_ack_content_sidecar(
+            &project_root,
+            patch_id,
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap();
+        assert_eq!(result, Some("immediate content".to_string()));
+    }
+
+    #[test]
+    fn test_poll_sidecar_appears_after_delay() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-delayed";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+
+        // Spawn a thread that writes the sidecar after 50ms using atomic
+        // rename to avoid the poll reading a partially-written file.
+        let sidecar_path = ack_dir.join(format!("{patch_id}.md"));
+        let tmp_path = ack_dir.join(format!("{patch_id}.md.tmp"));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::fs::write(&tmp_path, "delayed content").unwrap();
+            std::fs::rename(&tmp_path, &sidecar_path).unwrap();
+        });
+
+        let result = poll_ack_content_sidecar(
+            &project_root,
+            patch_id,
+            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap();
+        assert_eq!(result, Some("delayed content".to_string()));
+    }
+
+    #[test]
+    fn test_poll_sidecar_timeout() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-timeout";
+
+        // Don't create the sidecar — poll should timeout
+        std::fs::create_dir_all(project_root.join(".agent-doc/ack-content")).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_ack_content_sidecar(
+            &project_root,
+            patch_id,
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(25),
+        )
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, None);
+        assert!(
+            elapsed >= std::time::Duration::from_millis(100),
+            "should wait at least the timeout"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(300),
+            "should not wait much longer than timeout"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_uses_content_ours_when_sidecar_missing_prefix() {
+        // When the sidecar is missing a ❯ prefix expected by normalize_prefix_lines,
+        // try_ipc must fall back to content_ours for the snapshot (#jbpfx2).
+        // Simulates the IntelliJ exact-match failure: plugin wrote sidecar without
+        // the ❯ prefix, so content_ours (binary's authoritative state) is used.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\n<!-- agent:boundary:test-bnd-001 -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+
+        // content_ours has the ❯ prefix — binary's authoritative state
+        let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
+        let normalize_prefix_lines = vec!["do #jbpfx2".to_string()];
+
+        // Simulate plugin: reads patch_id, writes sidecar WITHOUT prefix (bug), ACKs
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            // Write sidecar WITHOUT ❯ prefix (plugin failure)
+                            let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        // Snapshot must use content_ours (has ❯ prefix), NOT the sidecar
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #jbpfx2"),
+            "snapshot must use content_ours with ❯ prefix; got: {}",
+            snap
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_repairs_bare_content_ours_prompt_prefix() {
+        // Regression for #bppfxstrip: if sidecar verification rejects the plugin
+        // snapshot, the content_ours fallback must still apply normalize_prefix_lines
+        // before saving the snapshot.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines =
+            vec!["do #bppfxstrip. spec-test-build-install-commit-push".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
+            "content_ours fallback must be normalized before snapshot save; got: {}",
+            snap
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
+            "content_ours fallback must repair the working tree before commit; got: {}",
+            disk
+        );
+    }
+
+    #[test]
+    fn normfallback_records_repaired_working_tree_when_sidecar_strips_prompt_prefix() {
+        // Regression for #normfallback: the observed ops-log signal should be
+        // backed by deterministic coverage. A plugin sidecar that drops a
+        // required prompt prefix must be rejected, and the binary fallback must
+        // repair the live file before any commit can capture the stripped form.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("agent-doc-bugs2.md");
+        let original = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+do [#normfallback]
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: #normfallback — gpt-5\n\nCovered.",
+        );
+        let content_ours = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do [#normfallback]
+### Re: #normfallback — gpt-5
+
+Covered.
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines = vec!["do [#normfallback]".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+do [#normfallback]
+### Re: #normfallback — gpt-5
+
+Covered.
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do [#normfallback]"),
+            "snapshot must use the normalized fallback rather than the stripped sidecar: {snap}"
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do [#normfallback]"),
+            "working tree must be repaired to match the normalized fallback: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback")
+                && ops_log.contains("reason=prefix_divergence"),
+            "ops log should record why the primary sidecar snapshot was rejected:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_repaired_working_tree"),
+            "ops log should record the explicit working-tree repair:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_redelivers_narrow_patch_before_full_content() {
+        // A disk-only fallback can leave an editor buffer stale. If the rejected
+        // editor state differs only by prompt-prefix normalization, the repair
+        // should converge the editor with a narrow normalization patch.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #sidecar-diverge. spec-test-build-install-commit-push
+### Re: #sidecar-diverge — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #sidecar-diverge. spec-test-build-install-commit-push
+### Re: #sidecar-diverge — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, bad_state).unwrap();
+        let normalize_prefix_lines =
+            vec!["do #sidecar-diverge. spec-test-build-install-commit-push".to_string()];
+
+        let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen_repair_payloads =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let listener_root = dir.path().to_path_buf();
+        let listener_doc = doc.clone();
+        let listener_count = call_count.clone();
+        let listener_repair_payloads = seen_repair_payloads.clone();
+        std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
+        let _listener = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
+                    let _ = std::fs::write(&listener_doc, full_content);
+                    listener_repair_payloads.lock().unwrap().push(v.clone());
+                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                }
+
+                let patches_empty = v
+                    .get("patches")
+                    .and_then(|value| value.as_array())
+                    .is_none_or(|patches| patches.is_empty());
+                if patches_empty
+                    && let Some(lines) = v.get("normalize_prefix_lines").and_then(|value| {
+                        value.as_array().map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(str::to_string))
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                {
+                    let current = std::fs::read_to_string(&listener_doc).ok()?;
+                    let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
+                    let _ = std::fs::write(&listener_doc, repaired);
+                    listener_repair_payloads.lock().unwrap().push(v.clone());
+                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                }
+
+                Some(serde_json::json!({"type": "ack"}).to_string())
+            });
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(dir.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(dir.path()),
+            "fake socket listener did not start"
+        );
+
+        let result = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &normalize_prefix_lines,
+            Some("source-patch"),
+        );
+        assert!(result, "narrow normalization repair should be delivered");
+
+        assert!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "fallback should send a narrow IPC repair"
+        );
+        let repair_payloads = seen_repair_payloads.lock().unwrap();
+        assert_eq!(
+            repair_payloads.len(),
+            1,
+            "expected exactly one narrow repair payload"
+        );
+        assert!(
+            repair_payloads[0].get("fullContent").is_none(),
+            "eligible prefix repair should avoid fullContent payloads: {}",
+            repair_payloads[0]
+        );
+        assert_eq!(
+            repair_payloads[0]["normalize_prefix_lines"][0],
+            "do #sidecar-diverge. spec-test-build-install-commit-push"
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #sidecar-diverge. spec-test-build-install-commit-push"),
+            "editor narrow repair should leave disk/editor content normalized: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repaired_editor"),
+            "ops log should record the narrow editor repair:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_file_ipc_queues_narrow_patch_before_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #sidecar-file. spec-test-build-install-commit-push
+### Re: #sidecar-file — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #sidecar-file. spec-test-build-install-commit-push
+### Re: #sidecar-file — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, bad_state).unwrap();
+        let normalize_prefix_lines =
+            vec!["do #sidecar-file. spec-test-build-install-commit-push".to_string()];
+        let patch_hash = snapshot::doc_hash(&doc).unwrap();
+        let patch_file = agent_doc_dir
+            .join("patches")
+            .join(format!("{patch_hash}.json"));
+
+        let seen_repair_payloads =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let watcher_doc = doc.clone();
+        let watcher_patch_file = patch_file.clone();
+        let watcher_ack_dir = agent_doc_dir.join("ack-content");
+        let watcher_repair_payloads = seen_repair_payloads.clone();
+        let watcher = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_secs(3) {
+                if !watcher_patch_file.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                let payload_text = match std::fs::read_to_string(&watcher_patch_file) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                let payload: serde_json::Value = match serde_json::from_str(&payload_text) {
+                    Ok(payload) => payload,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                watcher_repair_payloads
+                    .lock()
+                    .unwrap()
+                    .push(payload.clone());
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap()
+                    .to_string();
+                let lines = payload
+                    .get("normalize_prefix_lines")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let current = std::fs::read_to_string(&watcher_doc).unwrap();
+                let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
+                std::fs::write(&watcher_doc, &repaired).unwrap();
+                std::fs::write(watcher_ack_dir.join(format!("{patch_id}.md")), repaired).unwrap();
+                std::fs::remove_file(&watcher_patch_file).unwrap();
+                return true;
+            }
+            false
+        });
+
+        let result = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &normalize_prefix_lines,
+            Some("source-patch-file"),
+        );
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+        assert!(result, "file IPC narrow normalization repair should apply");
+
+        let repair_payloads = seen_repair_payloads.lock().unwrap();
+        assert_eq!(
+            repair_payloads.len(),
+            1,
+            "expected exactly one file IPC repair payload"
+        );
+        let payload = &repair_payloads[0];
+        assert!(
+            payload.get("fullContent").is_none(),
+            "eligible file IPC prefix repair should avoid fullContent payloads: {payload}"
+        );
+        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
+        assert_eq!(payload["unmatched"], "");
+        assert_eq!(payload["reposition_boundary"], true);
+        assert_eq!(payload["preserve_head"], true);
+        assert_eq!(
+            payload["normalize_prefix_lines"][0],
+            "do #sidecar-file. spec-test-build-install-commit-push"
+        );
+        assert_eq!(payload["expected_content_len"], bad_state.len());
+        assert_eq!(
+            payload["expected_content_hash"],
+            crate::ops_log::content_hash(bad_state)
+        );
+
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #sidecar-file. spec-test-build-install-commit-push"),
+            "file IPC narrow repair should leave disk/editor content normalized: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repaired_editor")
+                && ops_log.contains("transport=file"),
+            "ops log should record the file IPC narrow editor repair:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("sidecar_normalization_fallback_redelivered_editor"),
+            "file IPC normalization-only repair should not fall back to fullContent:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_redelivery_skips_when_bad_state_is_stale() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+<!-- agent:exchange patch=append -->
+do #stale. spec-test-build-install-commit-push
+### Re: #stale — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        let live_state = "\
+<!-- agent:exchange patch=append -->
+do #stale. spec-test-build-install-commit-push
+live prompt typed after sidecar fallback
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+<!-- agent:exchange patch=append -->
+❯ do #stale. spec-test-build-install-commit-push
+### Re: #stale — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, live_state).unwrap();
+
+        let delivered = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &["do #stale. spec-test-build-install-commit-push".to_string()],
+            Some("source-patch"),
+        );
+
+        assert!(
+            !delivered,
+            "normalization fallback redelivery must skip stale bad-state proof"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), live_state);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repair_skipped")
+                && ops_log.contains("skip=stale_bad_state")
+                && ops_log.contains("sidecar_normalization_fallback_editor_redelivery_skipped"),
+            "stale proof skip should be logged for narrow and full-content fallback:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_dedupes_already_applied_editor_response() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+do #duppb. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let editor_already_applied = "\
+<!-- agent:exchange patch=append -->
+do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, editor_already_applied).unwrap();
+
+        let fallback = normalized_content_ours_fallback(
+            &doc,
+            Some(baseline),
+            content_ours,
+            &["do #duppb. spec-test-build-install-commit-push".to_string()],
+        );
+
+        assert_eq!(
+            fallback.matches("### Re: #duppb — gpt-5").count(),
+            1,
+            "fallback full-content repair must not redeliver duplicate responses: {fallback}"
+        );
+        assert!(fallback.contains("❯ do #duppb. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
+    fn normalization_fallback_adopts_ack_content_response_delta_before_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+do #ackdelta
+<!-- agent:boundary:base -->
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #ackdelta
+### Re: ack delta — gpt-5
+
+Done.
+<!-- agent:boundary:ours -->
+<!-- /agent:exchange -->
+";
+        let disk_after_ack_content = "\
+<!-- agent:exchange patch=append -->
+do #ackdelta
+while typing next prompt
+### Re: ack delta — gpt-5
+
+Done.
+<!-- agent:boundary:current -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, disk_after_ack_content).unwrap();
+
+        let fallback = normalized_content_ours_fallback(
+            &doc,
+            Some(baseline),
+            content_ours,
+            &["do #ackdelta".to_string()],
+        );
+
+        assert_eq!(
+            fallback.matches("### Re: ack delta — gpt-5").count(),
+            1,
+            "ack-content normalization fallback must not replay an already-applied response: {fallback}"
+        );
+        assert!(
+            fallback.contains("while typing next prompt"),
+            "ack-content fallback should preserve concurrent disk edits: {fallback}"
+        );
+        assert!(
+            fallback.contains("❯ do #ackdelta"),
+            "ack-content fallback should still normalize the prompt prefix: {fallback}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_splices_pending_mutations_from_disk() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+        let on_disk_with_pending = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] [#keepme] Preserve pending add from disk
+<!-- /agent:backlog -->
+";
+        std::fs::write(&doc, on_disk_with_pending).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do #splpend
+agent response
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+        let normalize_prefix_lines = vec!["do #splpend".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+agent response
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #splpend"),
+            "snapshot must preserve normalized prompt prefix; got: {}",
+            snap
+        );
+        assert!(
+            snap.contains("- [ ] [#keepme] Preserve pending add from disk"),
+            "snapshot must preserve pending mutations from disk during normalization fallback; got: {}",
+            snap
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_preserves_concurrent_comment_deletion() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #commentdel
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!--
+The tmux focus should be snappy.
+-->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do #commentdel
+agent response
+<!-- /agent:exchange -->
+
+<!--
+The tmux focus should be snappy.
+-->
+";
+        let normalize_prefix_lines = vec!["do #commentdel".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #commentdel
+agent response
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #commentdel"),
+            "normalization fallback must still repair the prompt prefix: {disk}"
+        );
+        assert!(
+            !disk.contains("The tmux focus should be snappy."),
+            "normalization fallback must not restore a concurrently deleted scratch comment: {disk}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snap.contains("The tmux focus should be snappy."),
+            "snapshot must also respect the concurrent comment deletion: {snap}"
+        );
+    }
+
+    #[test]
+    fn verify_sidecar_normalization_requires_duplicate_occurrences() {
+        let sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5
+
+Done.
+
+❯ follow-up
+spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines = vec![
+            "do [#dup]. Are repeated presets handled?".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+            "follow-up".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+        ];
+
+        assert!(
+            !verify_sidecar_normalization(sidecar, &normalize_prefix_lines),
+            "one earlier prefixed preset line must not mask a later bare duplicate"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_normalization_targets_preserves_duplicate_missing_lines() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5
+
+Done.
+
+❯ Why follow up?
+❯ spec-test-build-install-commit-push
+<!-- agent:boundary:committed -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5 (HEAD)
+
+Done.
+
+❯ Why follow up?
+spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert_eq!(
+            targets,
+            vec!["spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_repairs_late_duplicate_occurrence() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5 (HEAD)
+
+Done.
+
+❯ Why follow up?
+spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[String::from("spec-test-build-install-commit-push")],
+        );
+
+        assert_eq!(
+            repaired
+                .matches("❯ spec-test-build-install-commit-push")
+                .count(),
+            2,
+            "repair should prefix the later bare duplicate without losing the earlier one"
+        );
+        assert!(
+            !repaired.contains("\n❯ ❯ spec-test-build-install-commit-push"),
+            "repair must not double-prefix existing matches"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_assistant_verification_lists() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Implemented.
+
+Verification:
+- Passed focused tests:
+  - `cargo test normalize_prefix`
+- `cargo test` is still red on a pre-existing failure.
+<!-- agent:boundary:previous -->
+do #verfpfx. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "- Passed focused tests:".to_string(),
+                "  - `cargo test normalize_prefix`".to_string(),
+                "- `cargo test` is still red on a pre-existing failure.".to_string(),
+                "do #verfpfx. spec-test-build-install-commit-push".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired.contains("Verification:\n- Passed focused tests:\n  - `cargo test normalize_prefix`\n- `cargo test` is still red on a pre-existing failure."),
+            "assistant verification list must stay unprefixed:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n❯ do #verfpfx. spec-test-build-install-commit-push\n"),
+            "real prompt after the response boundary must still be repaired:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ - Passed focused tests:")
+                && !repaired.contains("\n❯   - `cargo test normalize_prefix`")
+                && !repaired.contains("\n❯ - `cargo test` is still red on a pre-existing failure."),
+            "assistant list items must not receive prompt prefixes:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_requires_targeted_prompt_start_after_response() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Why did this keep happening?
+spec-test-build-install-commit-push
+<!-- agent:boundary:previous -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "spec-test-build-install-commit-push".to_string(),
+                "do #spfxnorm. spec-test-build-install-commit-push".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired
+                .contains("\nWhy did this keep happening?\nspec-test-build-install-commit-push\n"),
+            "assistant question and preset-looking prose must stay bare:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n❯ do #spfxnorm. spec-test-build-install-commit-push\n"),
+            "real prompt after the boundary must still be repaired:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ spec-test-build-install-commit-push\n"),
+            "a stale target inside assistant prose must not be enough to start repair:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_assistant_commit_label() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #done — gpt-5
+Verification:
+- `cargo test`
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let repaired =
+            normalize_exchange_prefixes_for_targets(working, &[String::from("Commit / push:")]);
+
+        assert!(
+            repaired.contains("\nCommit / push:\n"),
+            "assistant commit evidence label must stay unprefixed:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Commit / push:\n"),
+            "assistant commit evidence label must not receive prompt prefix:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_later_assistant_commit_label_after_stale_target()
+     {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+Commit / push:
+- `old-sha`
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `new-sha`
+<!-- agent:boundary:abc --> (HEAD)
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[String::from("Commit / push:"), String::from("- `old-sha`")],
+        );
+
+        assert!(
+            repaired.contains("\nCommit / push:\n- `new-sha`\n"),
+            "later assistant commit label/list must stay bare:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Commit / push:\n- `new-sha`\n"),
+            "later assistant commit label must not become a prompt:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_treats_prefixed_response_heading_as_assistant_boundary()
+     {
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#done]. spec-test-build-install-commit-push
+❯ ### Re: #done — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test normalize_prefix`
+
+Commit / push:
+- `abc123`
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "Implemented.".to_string(),
+                "Verification:".to_string(),
+                "- `cargo test normalize_prefix`".to_string(),
+                "Commit / push:".to_string(),
+                "- `abc123`".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired.contains("\n❯ ### Re: #done — gpt-5\n\nImplemented.\n"),
+            "prefixed response heading must still start an assistant block:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Implemented.")
+                && !repaired.contains("\n❯ Verification:")
+                && !repaired.contains("\n❯ - `cargo test normalize_prefix`")
+                && !repaired.contains("\n❯ Commit / push:")
+                && !repaired.contains("\n❯ - `abc123`"),
+            "assistant response body after a prefixed heading must not be prompt-prefixed:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_skips_assistant_commit_label() {
+        let patch = "\
+### Re: #done — gpt-5
+Verification:
+- `cargo test`
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+";
+
+        let normalized = normalize_patch_content(patch, &[String::from("Commit / push:")]);
+
+        assert!(
+            normalized.contains("\nCommit / push:\n"),
+            "assistant commit evidence label must stay unprefixed:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("\n❯ Commit / push:\n"),
+            "assistant commit evidence label must not receive prompt prefix:\n{normalized}"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_targets_ignores_prefixed_assistant_commit_label() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+❯ Commit / push:
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+❯ Commit / push:
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc --> (HEAD)
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            !targets.iter().any(|target| target == "Commit / push:"),
+            "assistant evidence label must not become a prefix repair target: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_targets_ignores_prefixed_assistant_prose_before_next_heading() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+### Re: sync latency — gpt-5
+
+❯ The current tree has already started making this accountable.
+### Re: closeout guard — gpt-5
+
+Done.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: sync latency — gpt-5
+
+The current tree has already started making this accountable.
+### Re: closeout guard — gpt-5 (HEAD)
+
+Done.
+<!-- agent:boundary:def -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            targets.is_empty(),
+            "a stale prefixed assistant sentence must not become a repair target: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_targets_ignores_prefixed_markdown_lists() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+❯ Please compare these options:
+❯ - keep this bullet bare
+❯   - keep this nested bullet bare
+❯ 1. keep this ordered bullet bare
+### Re: options — gpt-5
+Done.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ Please compare these options:
+- keep this bullet bare
+  - keep this nested bullet bare
+1. keep this ordered bullet bare
+### Re: options — gpt-5 (HEAD)
+Done.
+<!-- agent:boundary:def -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            targets.is_empty(),
+            "stale prefixed markdown list items must not become repair targets: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn verify_sidecar_normalization_rejects_assistant_list_prefix_substitute() {
+        let sidecar = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Verification:
+❯ - Passed focused tests:
+<!-- agent:boundary:previous -->
+do #verfpfx. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        assert!(
+            !verify_sidecar_normalization(sidecar, &["- Passed focused tests:".to_string()]),
+            "a prefixed assistant list item must not satisfy prompt-prefix sidecar verification"
+        );
+    }
+}
+
+#[cfg(test)]
+mod late_fallback_patch_guard_tests {
+    use super::{
+        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, WriteFlags,
+        cleanup_fallback_patch_files, cycle_already_committed, recover_dedupe_only_drift,
+        recover_empty_response_for_strict_closeout, redeliver_ipc_dedupe_to_editor,
+        repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
+        try_ipc_full_content_operator_mutation_from_source,
+    };
+    use crate::snapshot;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        fs::write(&doc, content).unwrap();
+        doc
+    }
+
+    struct TsiftDuplicateContentFixture {
+        bad_state_before_live_typing: &'static str,
+        repaired_snapshot: &'static str,
+        live_buffer_after_typing: &'static str,
+    }
+
+    fn tsift_md_duplicate_content_corruption_fixture() -> TsiftDuplicateContentFixture {
+        TsiftDuplicateContentFixture {
+            bad_state_before_live_typing: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "<!-- agent:boundary:tsift-bad -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+            repaired_snapshot: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "<!-- agent:boundary:tsift-repaired -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+            live_buffer_after_typing: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "The duplicate content corrupt document bug happened on tsift.md as I was tying in a prompt. ",
+                "What are #next-steps to ensure full-document IPC is not over-eager? #next-steps\n",
+                "<!-- agent:boundary:tsift-live -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+        }
+    }
+
+    #[test]
+    fn ipc_repair_decision_records_prefix_fallback_bad_state() {
+        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+            "fixed snapshot".to_string(),
+            "bad editor state".to_string(),
+            &["bad editor state".to_string()],
+        );
+
+        assert_eq!(decision.snapshot_content, "fixed snapshot");
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergence)
+        );
+        assert!(decision.redeliver_editor);
+        let bad_state = decision
+            .editor_bad_state
+            .as_ref()
+            .expect("prefix fallback should capture bad editor state");
+        assert_eq!(bad_state.content(), "bad editor state");
+        assert_eq!(bad_state.len, "bad editor state".len());
+        assert_eq!(
+            bad_state.hash,
+            crate::ops_log::content_hash("bad editor state")
+        );
+        assert_eq!(decision.normalize_prefix_lines, vec!["bad editor state"]);
+    }
+
+    #[test]
+    fn ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_fallback() {
+        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+            "prefix fallback with duplicate response".to_string(),
+            "visible sidecar before fallback".to_string(),
+            &["visible sidecar before fallback".to_string()],
+        )
+        .apply_ipc_dedupe(
+            "deduped snapshot".to_string(),
+            "prefix fallback with duplicate response".to_string(),
+        );
+
+        assert_eq!(decision.snapshot_content, "deduped snapshot");
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)
+        );
+        assert!(decision.redeliver_editor);
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .expect("combined repair should keep original bad editor proof")
+                .content(),
+            "visible sidecar before fallback"
+        );
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_none_when_no_state() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("nonexistent.md");
+        assert!(cycle_already_committed(&doc).is_none());
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_some_for_committed_cycle() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let result = cycle_already_committed(&doc);
+        assert!(result.is_some(), "should return Some for committed cycle");
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_none_for_open_cycle() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert!(cycle_already_committed(&doc).is_none());
+    }
+
+    #[test]
+    fn cleanup_fallback_patch_files_removes_patch_and_writes_sentinel() {
+        let tmp = TempDir::new().unwrap();
+        let doc =
+            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        let patch_content = serde_json::json!({
+            "patch_id": "test-patch-123",
+            "type": "patch",
+        });
+        fs::write(
+            &patch_path,
+            serde_json::to_string_pretty(&patch_content).unwrap(),
+        )
+        .unwrap();
+        assert!(patch_path.exists());
+
+        cleanup_fallback_patch_files(&doc);
+
+        assert!(
+            !patch_path.exists(),
+            "fallback patch file should be removed"
+        );
+        let sentinel = tmp
+            .path()
+            .join(".agent-doc/claimed-patches")
+            .join("test-patch-123");
+        assert!(sentinel.exists(), "claimed sentinel should be written");
+    }
+
+    #[test]
+    fn cleanup_fallback_patch_files_noop_when_no_patch() {
+        let tmp = TempDir::new().unwrap();
+        let doc =
+            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
+        cleanup_fallback_patch_files(&doc);
+    }
+
+    #[test]
+    fn try_ipc_marks_committed_cycle_skip_as_not_consumed() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let stale_patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        fs::write(
+            &stale_patch_path,
+            serde_json::json!({"patch_id": "late-patch-123"}).to_string(),
+        )
+        .unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "late response");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            None,
+            None,
+            None,
+            Some("current-patch-456"),
+        )
+        .unwrap();
+
+        assert!(
+            !result.success,
+            "committed-cycle IPC skip must not look like a consumed write"
+        );
+        assert_eq!(result.patch_id, "current-patch-456");
+        assert!(
+            result.skipped_committed_cycle,
+            "caller must be able to stop terminal fallback handling"
+        );
+        assert!(
+            !stale_patch_path.exists(),
+            "stale fallback patch should be removed"
+        );
+        assert!(
+            tmp.path()
+                .join(".agent-doc/claimed-patches/late-patch-123")
+                .exists(),
+            "removed stale patch should be claimed so watchers cannot replay it"
+        );
+
+        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("late_fallback_patch_rejected"));
+        assert!(ops_log.contains("patch_id=current-patch-456"));
+        assert!(ops_log.contains(
+            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
+        ));
+        assert!(
+            !ops_log.contains("ipc_write_consumed"),
+            "terminal skip must not be logged as an IPC consume"
+        );
+    }
+
+    #[test]
+    fn full_content_ipc_skips_committed_cycle_before_socket_or_file_fallback() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let stale_patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        fs::write(
+            &stale_patch_path,
+            serde_json::json!({"patch_id": "full-content-stale"}).to_string(),
+        )
+        .unwrap();
+
+        let result = try_ipc_full_content(&doc, "stale full-content repair").unwrap();
+
+        assert!(!result, "committed-cycle full-content IPC must be skipped");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            content,
+            "full-content IPC must not dirty an already committed cycle"
+        );
+        assert!(
+            !stale_patch_path.exists(),
+            "stale full-content fallback patch should be removed"
+        );
+        assert!(
+            tmp.path()
+                .join(".agent-doc/claimed-patches/full-content-stale")
+                .exists(),
+            "removed full-content fallback patch should be claimed"
+        );
+
+        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("late_fallback_patch_rejected"));
+        assert!(ops_log.contains("patch_id=full_content"));
+        assert!(ops_log.contains(
+            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
+        ));
+        assert!(
+            !ops_log.contains("socket_full_content"),
+            "full-content socket diagnostic must not be emitted after committed-cycle skip"
+        );
+    }
+
+    #[test]
+    fn full_content_operator_ipc_is_disabled_before_source_buffer_delivery() {
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let live = "before\nlive prompt\n";
+        let target = "after\n";
+        fs::write(&doc, live).unwrap();
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+
+        assert!(
+            !result,
+            "operator full-content IPC must not be emitted when the disk buffer already contains live drift"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale full-content replacement must not overwrite live prompt drift"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "failed full-content IPC must not save a snapshot"
+        );
+        let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            patch_count, 0,
+            "disabled full-content path must not hand a patch to file IPC"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_disabled")
+                && ops_log.contains("source=compact_exchange"),
+            "disabled full-content path should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn full_content_operator_ipc_rejects_late_post_exchange_scratch_comment() {
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let prompt = "The full-document IPC scratch comment was typed below exchange after target computation. #spec-test-build-install-commit-push";
+        let source = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let live = source.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->"));
+        let target = source.replace(
+            "### Re: previous — gpt-5\n\nDone.\n",
+            "### Session Summary\n\nCompacted.\n",
+        );
+        fs::write(&doc, &live).unwrap();
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, &target, source).unwrap();
+
+        assert!(
+            !result,
+            "operator full-content IPC must not be emitted after a late post-exchange scratch edit"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale full-content replacement must preserve the live scratch comment"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "failed full-content IPC must not save a snapshot"
+        );
+        let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            patch_count, 0,
+            "scope/source guards must not hand a full-content patch to file IPC"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_scope_rejected")
+                && ops_log.contains("source=compact_exchange"),
+            "component-scope rejection should be logged before source-buffer proof:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn response_fallback_full_content_is_disabled_before_socket_delivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let fallback = "before\n";
+        let live = "before\nlive prompt typed after fallback was computed\n";
+        fs::write(&doc, live).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let result = try_ipc_full_content(&doc, fallback).unwrap();
+
+        assert!(
+            !result,
+            "stale response fallback full-content IPC must be skipped before socket delivery"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "socket listener must not receive stale response fallback full-content payloads"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale response fallback must not overwrite live prompt drift"
+        );
+        assert!(snapshot::load(&doc).unwrap().is_none());
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_disabled")
+                && ops_log.contains("source=response_fallback"),
+            "disabled full-content path should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn ipc_dedupe_full_content_redelivery_is_disabled() {
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let bad_state = "before\n### Re: issue — gpt-5\nDone.\n### Re: issue — gpt-5\nDone.\n";
+        let repaired = "before\n### Re: issue — gpt-5\nDone.\n";
+        fs::write(&doc, bad_state).unwrap();
+
+        let seen_payload = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let listener_seen = seen_payload.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *listener_seen.lock().unwrap() = Some(payload.clone());
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+
+        assert!(!delivered, "full-content redelivery is disabled");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            bad_state,
+            "disabled full-content redelivery must not mutate the editor-visible file"
+        );
+        assert!(
+            seen_payload.lock().unwrap().is_none(),
+            "listener should not receive a disabled full-content payload"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_disabled")
+                && ops_log.contains("source=response_fallback"),
+            "disabled redelivery should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn ipc_dedupe_redelivery_skips_when_bad_state_is_stale() {
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let bad_state = "before\n### Re: issue — gpt-5\nDone.\n### Re: issue — gpt-5\nDone.\n";
+        let live_state = "before\nlive prompt typed after repair planning\n";
+        let repaired = "before\n### Re: issue — gpt-5\nDone.\n";
+        fs::write(&doc, live_state).unwrap();
+
+        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+
+        assert!(
+            !delivered,
+            "redelivery must be skipped when the visible bad-state proof is stale"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live_state,
+            "stale redelivery must not overwrite live content"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_dedupe_editor_redelivery_skipped")
+                && ops_log.contains("skip=stale_bad_state"),
+            "stale redelivery skip should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn template_ipc_dedupe_repair_uses_disk_not_full_content_redelivery() {
+        let tmp = TempDir::new().unwrap();
+        let bad_state = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let repaired = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let doc = doc_in_agent_doc_project(&tmp, bad_state);
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let decision = IpcRepairDecision::file_read(bad_state.to_string())
+            .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
+        repair_ipc_decision_visible_state(&doc, &decision, Some("source-patch")).unwrap();
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "component-scoped template repairs must not send socket fullContent payloads"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            repaired,
+            "template duplicate repair should fall back to guarded disk repair"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_scope_rejected")
+                && ops_log.contains("scope=template_frontmatter")
+                && ops_log.contains("ipc_dedupe_repaired_working_tree"),
+            "template fullContent rejection and disk repair should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let fixture = tsift_md_duplicate_content_corruption_fixture();
+        let doc = tmp.path().join("tasks/software/tsift.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, fixture.live_buffer_after_typing).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let delivered = redeliver_ipc_dedupe_to_editor(
+            &doc,
+            fixture.repaired_snapshot,
+            fixture.bad_state_before_live_typing,
+        );
+
+        assert!(
+            !delivered,
+            "tsift.md fixture must skip full-document redelivery when the visible buffer changed after repair planning"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "stale tsift.md repair proof must be rejected before any socket fullContent payload"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fixture.live_buffer_after_typing,
+            "live tsift.md prompt text typed after repair planning must remain untouched"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_dedupe_editor_redelivery_proof")
+                && ops_log.contains("redeliver=false")
+                && ops_log.contains("ipc_dedupe_editor_redelivery_skipped")
+                && ops_log.contains("skip=stale_bad_state"),
+            "stale tsift.md fixture should log proof and skip diagnostics:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn socket_full_content_is_disabled_before_payload_delivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let live = "before\nlive prompt typed during compact\n";
+        let target = "after\n";
+        fs::write(&doc, live).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+
+        assert!(
+            !result,
+            "disabled full-content path should reject before socket delivery"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "socket listener must not receive stale full-content payloads"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), live);
+        assert!(snapshot::load(&doc).unwrap().is_none());
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(ops_log.contains("full_content_ipc_disabled"));
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn socket_full_content_disabled_path_does_not_save_snapshot() {
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let target = "after\n";
+        fs::write(&doc, source).unwrap();
+
+        let root = tmp.path().to_path_buf();
+        let listener_root = root.clone();
+        let ack_root = root.clone();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = payload.get("patch_id")?.as_str()?;
+                let ack_dir = ack_root.join(".agent-doc/ack-content");
+                fs::create_dir_all(&ack_dir).ok()?;
+                fs::write(ack_dir.join(format!("{patch_id}.md")), "wrong\n").ok()?;
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+
+        assert!(
+            !result,
+            "socket full-content IPC must be disabled before payload delivery"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "mismatched socket ack-content must not become the saved snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "socket mismatch rejection must leave disk content untouched"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_disabled"),
+            "disabled full-content path should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(&root));
+        drop(server);
+    }
+
+    fn init_git_repo(root: &Path) {
+        use std::process::Command;
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "commit.gpgsign", "false"])
+            .output()
+            .unwrap();
+    }
+
+    fn git_commit_file(root: &Path, rel: &str, content: &str, msg: &str) {
+        use std::process::Command;
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "--", rel])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
+
+    fn head_count(root: &Path) -> usize {
+        use std::process::Command;
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_commits_when_file_matches_dedupe_of_head() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+
+        // Simulate what `agent-doc dedupe` produced: file + snapshot both equal
+        // the deduped form, HEAD still holds the duplicate.
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        assert_ne!(
+            deduped, duplicated,
+            "test setup: duplicated content must actually dedupe"
+        );
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let head_before = head_count(root);
+        let recovered =
+            recover_dedupe_only_drift(&doc).expect("dedupe-only drift recovery should succeed");
+        assert!(
+            recovered,
+            "file matching dedupe(HEAD) must be recognized as a dedupe-only drift"
+        );
+
+        // Commit landed through the binary path.
+        let head_after = head_count(root);
+        assert_eq!(
+            head_after,
+            head_before + 1,
+            "dedupe-only recovery must produce exactly one new commit"
+        );
+        let head_content = crate::git::show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head_content.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "committed HEAD must hold the deduped response"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "snapshot must hold the deduped response (boundary markers may differ from disk)"
+        );
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_skips_when_file_matches_head() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let clean = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", clean, "add clean");
+        let doc = root.join("session.md");
+        crate::snapshot::save(&doc, clean).unwrap();
+
+        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        assert!(
+            !recovered,
+            "no drift between file and HEAD should not trigger dedupe-only recovery"
+        );
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_skips_when_drift_is_not_a_dedupe_outcome() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let original = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", original, "add original");
+        let doc = root.join("session.md");
+
+        // Working tree differs from HEAD by an arbitrary user edit, not by
+        // dedupe. Recovery must refuse so we don't auto-commit unrelated drift.
+        let user_edit = original.replace("Implemented.", "Implemented and tested.");
+        fs::write(&doc, &user_edit).unwrap();
+        crate::snapshot::save(&doc, &user_edit).unwrap();
+
+        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        assert!(
+            !recovered,
+            "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"
+        );
+    }
+
+    // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+    // Phase 4 + Phase 5 regression coverage. Exercises the full
+    // `agent-doc dedupe` → `agent-doc write --commit` (empty stdin) recovery
+    // path through the strict-closeout entry point that the four `run` /
+    // `stream` / `write` call sites use.
+    #[test]
+    fn recover_empty_response_for_strict_closeout_lands_dedupe_only_drift_through_binary_commit() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let strict = WriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        let head_before = head_count(root);
+        let recovered = recover_empty_response_for_strict_closeout(&doc, &strict)
+            .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
+        assert!(
+            recovered,
+            "empty stdin + strict closeout + dedupe-only drift must commit through the binary path"
+        );
+        assert_eq!(
+            head_count(root),
+            head_before + 1,
+            "exactly one new commit should land via the dedupe recovery wrapper"
+        );
+
+        let head_after = crate::git::show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head_after.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "committed HEAD must hold the deduped response"
+        );
+    }
+
+    #[test]
+    fn recover_empty_response_for_strict_closeout_refuses_when_not_strict_closeout() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let lenient = WriteFlags::default();
+        let head_before = head_count(root);
+        let recovered = recover_empty_response_for_strict_closeout(&doc, &lenient).unwrap();
+        assert!(
+            !recovered,
+            "non-strict empty-stdin path must not silently auto-commit dedupe drift"
+        );
+        assert_eq!(
+            head_count(root),
+            head_before,
+            "non-strict path should not produce a commit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod submodule_patch_routing_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Helper: run a git command in `dir` with isolated user.name/email so the
+    /// command works in CI environments that lack global git config. Asserts
+    /// the command succeeds and prints stderr on failure.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "init.defaultBranch=main",
+                "-c",
+                "protocol.file.allow=always",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git command failed to spawn");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: stderr={}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn resolve_ipc_project_root_uses_nearest_agent_doc_for_submodule_file() {
+        // Build a parent+submodule layout. Verify that a document inside the
+        // submodule resolves to the SUBMODULE's .agent-doc/ root, not the
+        // superproject. This matches the IDE plugin's resolveRootFor logic so
+        // ack-content paths agree between Rust and Kotlin.
+        let parent_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        // Bootstrap a "remote" submodule repo with one committed file.
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
+
+        // Bootstrap parent repo and add the submodule under src/submodule.
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
+
+        // Submodule has its own .agent-doc — the IDE plugin registers it as a root.
+        let submodule_root = parent.join("src/submodule");
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/patches")).unwrap();
+
+        // Place a document inside the submodule.
+        let doc = submodule_root.join("test.md");
+        std::fs::write(
+            &doc,
+            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let canonical = doc.canonicalize().unwrap();
+        let project_root = resolve_ipc_project_root(&canonical);
+
+        assert_eq!(
+            project_root, submodule_root,
+            "submodule file must resolve to submodule root (nearest .agent-doc/) to match IDE plugin routing"
+        );
+
+        // The superproject must NOT be returned — ack-content would diverge.
+        assert_ne!(
+            project_root, parent,
+            "must not return the superproject — ack-content written at submodule root would not be found"
+        );
+    }
+
+    #[test]
+    fn resolve_ipc_project_root_ignores_agent_doc_outside_git_toplevel() {
+        let outer_dir = TempDir::new().unwrap();
+        let outer = outer_dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(outer.join(".agent-doc/patches")).unwrap();
+
+        let nested = outer.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        git(&nested, &["init"]);
+        let doc = nested.join("session.md");
+        std::fs::write(
+            &doc,
+            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let canonical = doc.canonicalize().unwrap();
+        let project_root = resolve_ipc_project_root(&canonical);
+
+        assert_eq!(
+            project_root, nested,
+            "a parent .agent-doc outside the current git toplevel must not capture IPC routing"
+        );
+    }
+
+    #[test]
+    fn required_closeout_fails_when_parent_submodule_pointer_commit_fails() {
+        let parent_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
+
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
+        git(&parent, &["commit", "-m", "add submodule"]);
+
+        let submodule_root = parent.join("src/submodule");
+        git(
+            &submodule_root,
+            &["config", "user.email", "test@example.com"],
+        );
+        git(&submodule_root, &["config", "user.name", "Test"]);
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/state/cycles")).unwrap();
+
+        let doc = submodule_root.join("session.md");
+        let initial = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, initial).unwrap();
+        git(&submodule_root, &["add", "session.md"]);
+        git(&submodule_root, &["commit", "-m", "add doc"]);
+        git(&parent, &["add", "src/submodule"]);
+        git(&parent, &["commit", "-m", "record doc commit"]);
+
+        let parent_git_dir = Command::new("git")
+            .current_dir(&parent)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(parent_git_dir.status.success());
+        let parent_git_dir = PathBuf::from(String::from_utf8_lossy(&parent_git_dir.stdout).trim());
+        std::fs::write(parent_git_dir.join("index.lock"), "held by test").unwrap();
+
+        let updated = initial.replace(
+            "<!-- /agent:exchange -->\n",
+            "### Re: reply — gpt-5\nbody\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, &updated).unwrap();
+        crate::snapshot::save(&doc, &updated).unwrap();
+
+        let err = super::complete_required_closeout(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("parent submodule pointer is not committed"),
+            "strict closeout should name the missing parent layer, got: {message}"
+        );
+        assert!(
+            message.contains("agent-doc commit"),
+            "strict closeout should prescribe the idempotent commit recovery, got: {message}"
+        );
+        assert!(
+            crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+            "parent gitlink should remain stale when parent commit fails"
+        );
+    }
+
+    // Note: a "not in git repo" fallback test is intentionally omitted because
+    // /tmp tempdirs are typically nested inside the developer's checkout (the
+    // agent-doc workspace itself is a git repo), so `git rev-parse
+    // --show-toplevel` from `/tmp/...` walks up into the source tree. The
+    // fallback path is exercised in production by non-git workspaces.
+
+    /// Helper: start a fake socket listener that ACKs every message.
+    /// Returns a handle that keeps the listener alive until dropped.
+    fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                // Write ack-content sidecar so poll_ack_content_sidecar succeeds
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
+                let content = if !file_path.is_empty() {
+                    let file = Path::new(file_path);
+                    let before = std::fs::read_to_string(file).unwrap_or_default();
+                    let patches = v
+                        .get("patches")
+                        .and_then(|value| value.as_array())
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| {
+                                    let name = item
+                                        .get("component")
+                                        .or_else(|| item.get("name"))
+                                        .and_then(|value| value.as_str())?;
+                                    let content =
+                                        item.get("content").and_then(|value| value.as_str())?;
+                                    Some(crate::template::PatchBlock::new(name, content))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    let unmatched = v
+                        .get("unmatched")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    let after = crate::template::apply_patches(&before, &patches, unmatched, file)
+                        .unwrap_or(before);
+                    let _ = std::fs::write(file, &after);
+                    after
+                } else {
+                    String::new()
+                };
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    fn start_already_applied_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&root, |_msg| {
+                Some(
+                    serde_json::json!({
+                        "type": "ack",
+                        "status": "error",
+                        "reason": "already_applied"
+                    })
+                    .to_string(),
+                )
+            });
+        })
+    }
+
+    fn start_fixed_ack_content_listener(
+        project_root: &Path,
+        ack_content: String,
+    ) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
+                    let _ = std::fs::write(file_path, &ack_content);
+                }
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    /// Helper: wait for the socket listener to become connectable (up to 1s).
+    fn wait_for_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+
+    #[test]
+    fn try_ipc_routes_to_submodule_root_not_superproject() {
+        // Verify that try_ipc routes patches to the SUBMODULE's own .agent-doc/
+        // root, not the superproject. The submodule has its own .agent-doc/ so
+        // the IDE plugin's resolveRootFor and Rust's find_project_root both
+        // return the submodule root, keeping ack-content paths in sync.
+        let parent_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        // Bootstrap "remote" submodule repo with one commit.
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
+
+        // Bootstrap parent repo and add the submodule.
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
+
+        // Submodule has its own .agent-doc/ — mirrors the real boost-client layout.
+        let submodule_root = parent.join("src/submodule");
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/crdt")).unwrap();
+
+        // Start a fake socket listener on the SUBMODULE root (not the parent).
+        let _listener = start_fake_listener(&submodule_root);
+        wait_for_listener(&submodule_root);
+
+        // Place a document inside the submodule.
+        let doc = submodule_root.join("test.md");
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "test response");
+
+        // try_ipc should route to the submodule's socket listener and succeed.
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            result.success,
+            "try_ipc should succeed via socket IPC routed to the submodule root"
+        );
+
+        // Verify the parent did NOT get the patch file.
+        let parent_patches = parent.join(".agent-doc/patches");
+        assert!(
+            !parent_patches.exists(),
+            "parent should NOT receive patch files — submodule routes to its own .agent-doc/"
+        );
+    }
+
+    #[test]
+    fn try_ipc_routes_to_git_toplevel_for_non_submodule() {
+        // Verify that try_ipc routes patches to the git toplevel (not a
+        // superproject) when the document lives in a plain git repo. This
+        // exercises the git_toplevel_at path (step 2 in resolve_ipc_project_root).
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+
+        // Initialize a plain git repo (not a submodule of anything).
+        git(&root, &["init"]);
+        std::fs::write(root.join("README.md"), "root").unwrap();
+        git(&root, &["add", "README.md"]);
+        git(&root, &["commit", "-m", "init"]);
+
+        // Create .agent-doc structure.
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/crdt")).unwrap();
+
+        // Start a fake socket listener.
+        let _listener = start_fake_listener(&root);
+        wait_for_listener(&root);
+
+        // Create a document in a subdirectory.
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/test.md");
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "response");
+
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            result.success,
+            "try_ipc should succeed via socket IPC routed to the git toplevel"
+        );
+    }
+
+    #[test]
+    fn try_ipc_already_applied_socket_adopts_disk_when_response_is_present() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let live_already_applied_with_user_edit = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "User typed the next prompt while finalize was running.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        fs::write(&doc, live_already_applied_with_user_edit).unwrap();
+
+        let _listener = start_already_applied_listener(&root);
+        wait_for_listener(&root);
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("already-applied-patch"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "already_applied socket ack is a consumed editor write"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(live_already_applied_with_user_edit),
+            "already_applied must adopt disk content when it contains the response plus live user edits"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live_already_applied_with_user_edit,
+            "live editor content should remain the committed snapshot candidate"
+        );
+        assert!(
+            !crate::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .ipc_snapshot_adoption_blocked,
+            "safe disk adoption must not leave a later snapshot-absorb block"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_skip_file_fallback")
+                && log.contains("ipc_socket_already_applied_live_buffer_diverged")
+                && log.contains("ipc_socket_already_applied_snapshot")
+                && log.contains("snap_source=file_read"),
+            "already_applied disk adoption should be auditable:\n{log}"
+        );
+        // #6cmx/#wy0y: this scenario IS typing-during-finalize (live buffer has a
+        // user edit beyond our content), so it must emit the explicit verification
+        // marker with the response intact — one greppable line proving completion.
+        assert!(
+            log.contains("prompt_drift=true"),
+            "user-edit divergence is a prompt-drift case:\n{log}"
+        );
+        assert!(
+            log.contains("finalize_typing_during_write") && log.contains("response_present=true"),
+            "typing-during-finalize must log finalize_typing_during_write with response_present:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_ipc_already_applied_socket_dedupes_duplicate_response_before_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let duplicated_live_buffer = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        fs::write(&doc, duplicated_live_buffer).unwrap();
+
+        let _listener = start_already_applied_listener(&root);
+        wait_for_listener(&root);
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("already-applied-duplicate"),
+        )
+        .unwrap();
+
+        assert!(result.success);
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap.matches("### Re: Please reply — gpt-5").count(),
+            1,
+            "already_applied snapshot must dedupe duplicate response headings: {snap}"
+        );
+        let disk = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            disk.matches("### Re: Please reply — gpt-5").count(),
+            1,
+            "already_applied disk repair must converge with deduped snapshot: {disk}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_dedupe_repaired_working_tree")
+                && log.contains("ipc_socket_already_applied_snapshot"),
+            "dedupe repair should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn already_applied_socket_missing_disk_response_repairs_visible_without_file_fallback() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let stale_disk_with_live_prompt = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ Follow-up typed while closeout saved\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let repaired_visible = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ Follow-up typed while closeout saved\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        fs::write(&doc, stale_disk_with_live_prompt).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            "already-applied-missing",
+            Some(baseline),
+            Some(content_ours),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "missing disk response must keep the committed snapshot at agent-owned content_ours"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            repaired_visible,
+            "visible repair must add the response without deleting the live follow-up prompt"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_missing_disk_response_repaired")
+                && log.contains("recovery=content_ours_snapshot_visible_response_repair")
+                && !log.contains("ipc_socket_already_applied_fallback_to_file_ipc"),
+            "missing-response already_applied must not reapply through file IPC:\n{log}"
+        );
+    }
+
+    #[test]
+    fn socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let agent_doc_dir = root.join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
+
+        let doc = root.join("doc.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:before -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "### Re: Production key — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:ours -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let duplicated_ack_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "### Re: Production key — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:bad -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
+        wait_for_listener(&root);
+
+        let patch =
+            crate::template::PatchBlock::new("exchange", "### Re: Production key — gpt-5\n\nDone.");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("duplicated-ack-content"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery should remain successful while snapshot adoption falls back"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "duplicated ack-content must not become the committed snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            content_ours,
+            "visible duplicated ack-content should be repaired from the guarded response image"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .ipc_snapshot_adoption_blocked,
+            "later commit stages must not absorb the rejected duplicate sidecar"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=prompt_duplication_in_ack_content")
+                && log.contains("duplicate_prompt_count=1")
+                && log.contains("ipc_dedupe_repaired_working_tree"),
+            "duplicate sidecar rejection and visible repair should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=prompt_duplication_in_ack_content")
+                && log.contains("recovery=content_ours_snapshot_and_visible_repair"),
+            "duplicate prompt ACK should name its failed invariant and recovery:\n{log}"
+        );
+    }
+
+    #[test]
+    fn cleanup_legacy_ipc_degraded_removes_marker() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let marker = root.join(".agent-doc/ipc-degraded");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::write(&marker, "").unwrap();
+        assert!(marker.exists());
+        cleanup_legacy_ipc_degraded(root);
+        assert!(!marker.exists(), "legacy marker should be removed");
+    }
+
+    #[test]
+    fn cleanup_resolved_backlog_prompts_removes_new_prompt_target_only() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep this tracked item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep this tracked item\n",
+            "commit + push uncommitted files\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let final_content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "### Re: backlog prompt — gpt-5\n\n",
+            "Committed and pushed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#keep1] Keep this tracked item\n",
+            "commit + push uncommitted files\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let cleaned =
+            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, final_content)
+                .unwrap()
+                .expect("prompt target should be cleaned");
+
+        assert!(cleaned.contains("### Re: backlog prompt — gpt-5"));
+        assert!(cleaned.contains("- [x] [#keep1] Keep this tracked item"));
+        assert!(!cleaned.contains("commit + push uncommitted files"));
+    }
+
+    #[test]
+    fn cleanup_resolved_backlog_prompts_preserves_non_prompt_backlog_edits() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Existing item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Existing item\n",
+            "- [ ] [#new1] Added tracked item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let cleaned =
+            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, current).unwrap();
+        assert!(
+            cleaned.is_none(),
+            "ordinary tracked backlog additions are not prompt cleanup targets"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_detects_plugin_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        // Plugin applied the response AND user added an edit
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User added this line.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "should detect plugin-applied response"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_rejects_partial_line_overlap() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — gpt-5
+Done.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+Done.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "a shared response body line is not proof that the response delta was applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_accepts_normalized_delta_with_bare_prompt() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #ipcd
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+while typing next prompt
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "the response hunk should be detected even when prompt-prefix normalization differs"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_not_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        // Plugin did NOT apply — only user edits present
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User typed something new.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should not detect when plugin hasn't applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_exchange() {
+        let base = "No components here.";
+        let content_ours = "No components here either.";
+        let content_current = "Still no components.";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should return false when no exchange components"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_changes() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+Same content.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, base, base),
+            "should return false when ours equals base"
+        );
+    }
+
+    #[test]
+    fn adopt_current_response_without_duplication_rejects_partial_line_overlap() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: timeout fallback — gpt-5
+Done.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+Done.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, content_current).unwrap();
+        let adopted = adopt_current_response_without_duplication(
+            &doc,
+            base,
+            content_ours,
+            content_current,
+            None,
+            "### Re: timeout fallback — gpt-5\nDone.\n",
+        )
+        .unwrap();
+
+        assert!(
+            adopted.is_none(),
+            "socket-timeout fallback must not adopt current content from a partial line overlap"
+        );
+    }
+
+    #[test]
+    fn adopt_current_response_without_duplication_repairs_bare_prompt_prefix() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #scpd. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+❯ do #scpd. spec-test-build-install-commit-push
+### Re: #scpd retry — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #scpd. spec-test-build-install-commit-push
+### Re: #scpd retry — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, content_current).unwrap();
+        let repaired = adopt_current_response_without_duplication(
+            &doc,
+            base,
+            content_ours,
+            content_current,
+            Some(snapshot),
+            "### Re: #scpd retry — gpt-5\n\nImplemented.\n",
+        )
+        .unwrap()
+        .expect("response should be adopted from current");
+
+        assert!(repaired.contains("❯ do #scpd. spec-test-build-install-commit-push"));
+        assert!(!repaired.contains("\ndo #scpd. spec-test-build-install-commit-push\n"));
+        assert_eq!(repaired.matches("### Re: #scpd retry — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_bare_prompt_prefix_after_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #dupfx. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #dupfx. spec-test-build-install-commit-push
+### Re: #dupfx — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, merged).unwrap();
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), None, merged, None)
+                .unwrap();
+
+        assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
+        assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
+        assert_eq!(repaired.matches("### Re: #dupfx — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leaked_marker() {
+        // CRDT merge corruption: first non-empty line of the response body
+        // got a leading `❯ `. The repair must strip it without touching real
+        // user prompts elsewhere in the exchange.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #respfx. spec-test-build-install-commit-push
+### Re: #respfx — opus-4-7
+
+❯ Landed Phase 1 only this cycle. Item stays open.
+
+#### Details
+
+`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked ❯ on response body first line must be stripped");
+        assert!(
+            repaired.contains("\nLanded Phase 1 only this cycle. Item stays open.\n"),
+            "stripped response body should start with the original prose, got:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("❯ Landed"),
+            "leaked ❯ must be removed, got:\n{repaired}"
+        );
+        // User prompt before the response heading is preserved.
+        assert!(repaired.contains("❯ do #respfx. spec-test-build-install-commit-push"));
+        // Heading and subsequent body lines are untouched.
+        assert!(repaired.contains("### Re: #respfx — opus-4-7"));
+        assert!(repaired.contains("#### Details"));
+        assert!(repaired.contains("`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`."));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leading_run() {
+        // Repair adoption can see every response paragraph prefixed when the
+        // stale snapshot already had the response heading but not the body.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #leading-run. spec-test-build-install-commit-push
+### Re: #leading-run — gpt-5
+
+❯ First response paragraph.
+
+❯ Second response paragraph.
+❯ - Proof line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leading response-body prompt markers must be stripped");
+
+        assert!(repaired.contains("\nFirst response paragraph.\n"));
+        assert!(repaired.contains("\nSecond response paragraph.\n- Proof line.\n"));
+        assert!(!repaired.contains("❯ First response paragraph."));
+        assert!(!repaired.contains("❯ Second response paragraph."));
+        assert!(!repaired.contains("❯ - Proof line."));
+        assert!(repaired.contains("❯ do #leading-run. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_skips_when_clean() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #clean. spec-test-build-install-commit-push
+### Re: #clean — opus-4-7
+
+Landed cleanly.
+<!-- /agent:exchange -->
+";
+        let result = strip_prompt_prefix_from_response_body_first_lines(content);
+        assert!(
+            result.is_none(),
+            "clean document must not trigger the strip path"
+        );
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_preserves_inner_prompt_like_lines() {
+        // A `❯ ` appearing AFTER the first body line — e.g. quoted user input
+        // inside the response prose — must be preserved. Only the leaked
+        // first-line marker is stripped.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #inner. spec-test-build-install-commit-push
+### Re: #inner — opus-4-7
+
+❯ first line gets stripped
+
+The user said:
+❯ this quoted line stays
+because it is not the first body line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked first-line ❯ must be stripped");
+        assert!(repaired.contains("\nfirst line gets stripped\n"));
+        assert!(!repaired.contains("❯ first line gets stripped"));
+        // Inner `❯ ` is preserved — it is part of the response body text.
+        assert!(repaired.contains("❯ this quoted line stays"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_handles_multiple_re_blocks() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #a
+### Re: #a — opus-4-7
+
+❯ first response
+
+❯ do #b
+### Re: #b — opus-4-7
+
+❯ second response
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("multiple leaks must be stripped");
+        assert!(repaired.contains("\nfirst response\n"));
+        assert!(repaired.contains("\nsecond response\n"));
+        assert!(!repaired.contains("❯ first response"));
+        assert!(!repaired.contains("❯ second response"));
+        // User prompts between blocks preserved.
+        assert!(repaired.contains("❯ do #a"));
+        assert!(repaired.contains("❯ do #b"));
+    }
+
+    #[test]
+    fn normalize_final_template_content_removes_adjacent_duplicate_response_blocks() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let duplicated = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test`
+### Re: #duppb — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test`
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_final_template_content(
+            &doc,
+            baseline,
+            Some(baseline),
+            None,
+            duplicated,
+            None,
+        )
+        .expect("duplicate response repair should succeed");
+
+        assert_eq!(
+            repaired.matches("### Re: #duppb — gpt-5").count(),
+            1,
+            "closeout normalization must remove adjacent duplicate response blocks: {repaired}"
+        );
+        assert!(repaired.contains("Verification:\n- `cargo test`"));
+    }
+
+    #[test]
+    fn normalize_final_template_content_scrubs_duplicate_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let merged = base
+            .replace(
+                "<!-- /agent:exchange -->",
+                "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+            )
+            .replace(
+                "<!-- agent:backlog -->",
+                "<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n-->\n\n<!-- agent:backlog -->",
+            );
+
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), None, &merged, None)
+                .unwrap();
+
+        assert!(
+            repaired.contains("❯ The duplicate content corrupting document"),
+            "live prompt should remain in exchange and be normalized:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains(
+                "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
+            ),
+            "duplicate post-exchange prompt text should be scrubbed from comments:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "duplicate prompt cleanup must preserve the ordinary HTML comment shell:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
+            "backlog scaffold should remain intact:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_final_template_content_preserves_baseline_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+        let base = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let merged = base.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: sqlitedb graph performance next steps — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+
+        let repaired =
+            normalize_final_template_content(&doc, &base, Some(&base), None, &merged, None)
+                .unwrap();
+
+        assert!(
+            repaired.contains(&format!("<!--\n{prompt}\n-->")),
+            "baseline-owned post-exchange scratch text must not be scrubbed:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_final_template_content_preserves_current_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "The html comment below this document's agent:exchange close tag had content that I put into it. This should not happen. #spec-test-build-install-commit-push";
+        let base = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let before_current = base.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->"));
+        let merged = before_current.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: scratch comment preservation — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+
+        let repaired = normalize_final_template_content(
+            &doc,
+            &base,
+            Some(&base),
+            Some(&before_current),
+            &merged,
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            repaired.contains(&format!("<!--\n{prompt}\n-->")),
+            "current visible post-exchange scratch text must not be scrubbed:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_template_structure_preserves_unique_post_exchange_html_comment_tail() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "do #visible. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "Keep this unrelated scratch note hidden.\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert!(
+            repaired.contains("Keep this unrelated scratch note hidden."),
+            "unique scratch comments must stay outside exchange:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_template_structure_scrubs_answered_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "❯ The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
+            "### Re: backlog update and duplicate prompt corruption — gpt-5\n",
+            "Implemented.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert!(
+            repaired.contains("### Re: backlog update and duplicate prompt corruption"),
+            "answered exchange turn should remain:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains(
+                "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
+            ),
+            "answered duplicate prompt text should be scrubbed from the HTML comment:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "answered duplicate prompt cleanup must preserve the ordinary HTML comment shell:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_duplicate_exchange_close_after_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+
+### Re: #xguard — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] keep me
+<!-- /agent:backlog -->
+";
+
+        std::fs::write(&doc, merged).unwrap();
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), None, merged, None)
+                .unwrap();
+
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let response = repaired.find("### Re: #xguard — gpt-5").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+
+        assert!(
+            response < exchange_close,
+            "response should be restored inside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_response_before_prompt_tail() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+Can you preserve the second paragraph too?
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+### Re: timeout fallback — gpt-5
+
+Done.
+<!-- agent:boundary:new -->
+Can you preserve the second paragraph too?
+<!-- /agent:exchange -->
+";
+        let response = "### Re: timeout fallback — gpt-5\n\nDone.\n";
+
+        let repaired = normalize_final_template_content(
+            &doc,
+            base,
+            Some(snapshot),
+            None,
+            merged,
+            Some(response),
+        )
+        .unwrap();
+
+        let prompt_tail = repaired
+            .find("Can you preserve the second paragraph too?")
+            .unwrap();
+        let response_heading = repaired.find("### Re: timeout fallback").unwrap();
+        let boundary = repaired.find("<!-- agent:boundary:").unwrap();
+        let close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        assert!(
+            prompt_tail < response_heading,
+            "prompt tail must move before response:\n{repaired}"
+        );
+        assert!(
+            response_heading < boundary && boundary < close,
+            "boundary must close the repaired response turn:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_template_structure_repairs_duplicate_scaffold_close() {
+        let dir = TempDir::new().unwrap();
+        let doc_path = dir.path().join("doc.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "❯ keep this prompt\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc_path)
+            .expect("pure duplicated scaffold should be repaired");
+
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
+        assert!(repaired.contains("❯ keep this prompt"));
+    }
+
+    #[test]
+    fn normalize_template_structure_rejects_duplicate_scaffold_with_user_text() {
+        let dir = TempDir::new().unwrap();
+        let doc_path = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "c The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "corky.md The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        fs::write(&doc_path, content).unwrap();
+
+        let err = normalize_template_structure_or_fail(content, &doc_path).unwrap_err();
+
+        assert!(
+            err.to_string().contains("mixed duplicate scaffold"),
+            "unexpected error: {err}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
+    }
+}

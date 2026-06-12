@@ -6101,21 +6101,3 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod post_commit_prefix_repair_tests;
-#[cfg(test)]
-mod ack_content_snapshot_tests;
-#[cfg(test)]
-mod submodule_patch_routing_tests;
-#[cfg(test)]
-mod queue_prompt_echo_summary_tests;
-#[cfg(test)]
-mod future_work_signal_tests;
-#[cfg(test)]
-mod verify_sidecar_normalization_tests;
-#[cfg(test)]
-mod precommit_pending_capture_tests;
-#[cfg(test)]
-mod pending_patch_normalization_tests;
-#[cfg(test)]
-mod late_fallback_patch_guard_tests;

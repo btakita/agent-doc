@@ -1092,3 +1092,410 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
 
     format!("{before_exchange}{normalized_user_region}{agent_region}{after_exchange}")
 }
+
+#[cfg(test)]
+mod future_work_signal_tests {
+    use super::*;
+
+    #[test]
+    fn detects_worth_revisiting() {
+        let result =
+            check_future_work_signals("This design is fine. Worth revisiting after v2.", false);
+        assert_eq!(result, Some("worth revisiting"));
+    }
+
+    #[test]
+    fn detects_future_work() {
+        let result = check_future_work_signals("This is future work for the next release.", false);
+        assert_eq!(result, Some("future work"));
+    }
+
+    #[test]
+    fn detects_follow_up_needed() {
+        let result = check_future_work_signals("Follow-up needed on the auth migration.", false);
+        assert_eq!(result, Some("follow-up needed"));
+    }
+
+    #[test]
+    fn no_warning_when_pending_add_provided() {
+        let result = check_future_work_signals("Worth revisiting later.", true);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn no_warning_without_signals() {
+        let result = check_future_work_signals("Everything is complete and working.", false);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn case_insensitive_detection() {
+        let result = check_future_work_signals("WORTH REVISITING this approach.", false);
+        assert_eq!(result, Some("worth revisiting"));
+    }
+
+    #[test]
+    fn imperative_contract_rejects_status_only_response() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #6zyp. run tests. build + install. commit + push\n";
+        let err = enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: task — gpt-5\nIn progress. Continuing now.",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("imperative document directive requires concrete execution evidence or a concrete blocker"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn imperative_contract_allows_concrete_blocker() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #6zyp. run tests. build + install. commit + push\n";
+        enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: blocked — gpt-5\nBlocked by missing `OPENROUTER_API_KEY`; build cannot proceed.",
+        )
+        .expect("blocker response should be accepted");
+    }
+
+    #[test]
+    fn imperative_contract_allows_execution_evidence() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+go\n";
+        enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: done — gpt-5\nVerification:\n- `cargo test --manifest-path src/agent-doc/Cargo.toml`\nCommit / push:\n- `abc1234`\n",
+        )
+        .expect("evidence response should be accepted");
+    }
+
+    #[test]
+    fn lift_pending_nested_inside_exchange() {
+        let doc = "\
+<!-- agent:exchange patch=append -->
+some exchange content
+<!-- agent:pending -->
+- [ ] [#abc1] task one
+<!-- /agent:pending -->
+<!-- /agent:exchange -->
+";
+        let result = lift_pending_from_exchange(doc).unwrap();
+        // pending should be after exchange close, not inside it
+        let ex_close = result.find("<!-- /agent:exchange -->").unwrap();
+        let pend_open = result.find("<!-- agent:pending").unwrap();
+        assert!(
+            pend_open > ex_close,
+            "pending (at {}) should be after exchange close (at {})",
+            pend_open,
+            ex_close
+        );
+        // exchange content preserved
+        assert!(result.contains("some exchange content"));
+        // pending content preserved
+        assert!(result.contains("- [ ] [#abc1] task one"));
+    }
+
+    #[test]
+    fn lift_pending_already_sibling_returns_none() {
+        let doc = "\
+<!-- agent:exchange patch=append -->
+exchange content
+<!-- /agent:exchange -->
+
+<!-- agent:pending -->
+- [ ] [#abc1] task
+<!-- /agent:pending -->
+";
+        assert!(lift_pending_from_exchange(doc).is_none());
+    }
+
+    #[test]
+    fn lift_pending_no_exchange_returns_none() {
+        let doc = "\
+<!-- agent:pending -->
+- [ ] [#abc1] task
+<!-- /agent:pending -->
+";
+        assert!(lift_pending_from_exchange(doc).is_none());
+    }
+
+    #[test]
+    fn lift_pending_no_pending_returns_none() {
+        let doc = "\
+<!-- agent:exchange patch=append -->
+exchange content
+<!-- /agent:exchange -->
+";
+        assert!(lift_pending_from_exchange(doc).is_none());
+    }
+
+    #[test]
+    fn lift_pending_preserves_surrounding_content() {
+        let doc = "\
+---
+title: test
+---
+
+<!-- agent:exchange patch=append -->
+response here
+<!-- agent:pending -->
+- [ ] [#x1] item
+<!-- /agent:pending -->
+<!-- /agent:exchange -->
+
+## Footer
+";
+        let result = lift_pending_from_exchange(doc).unwrap();
+        assert!(result.contains("---\ntitle: test\n---"));
+        assert!(result.contains("response here"));
+        assert!(result.contains("## Footer"));
+        // Verify ordering
+        let ex_close = result.find("<!-- /agent:exchange -->").unwrap();
+        let pend_open = result.find("<!-- agent:pending").unwrap();
+        let footer = result.find("## Footer").unwrap();
+        assert!(pend_open > ex_close, "pending after exchange close");
+        assert!(footer > pend_open, "footer after pending");
+    }
+}
+
+#[cfg(test)]
+mod post_commit_prefix_repair_tests {
+    use super::*;
+
+    #[test]
+    fn extract_post_commit_normalization_targets_finds_missing_working_tree_prefix() {
+        let committed = "\
+<!-- agent:exchange -->
+❯ do #spfxnorm. spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5
+Implemented.
+<!-- agent:boundary:clean123 -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange -->
+do #spfxnorm. spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5 (HEAD)
+Implemented.
+<!-- agent:boundary:dirty123 -->
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(
+            extract_post_commit_normalization_targets(committed, working),
+            vec!["do #spfxnorm. spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_only_updates_exchange_user_region() {
+        let working = "\
+<!-- agent:exchange -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- agent:boundary:dirty123 -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &["do #spfxnorm. spec-test-build-install-commit-push".to_string()],
+        );
+
+        assert!(repaired.contains("❯ do #spfxnorm. spec-test-build-install-commit-push"));
+        assert!(
+            repaired.contains("<!-- agent:boundary:dirty123 -->\ndo #spfxnorm. spec-test-build-install-commit-push"),
+            "agent region after the boundary must remain untouched: {repaired}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod verify_sidecar_normalization_tests {
+    use super::{enforce_orchestrate_template_patch_contract, verify_sidecar_normalization};
+
+    #[test]
+    fn empty_targets_always_passes() {
+        assert!(verify_sidecar_normalization("anything", &[]));
+    }
+
+    #[test]
+    fn all_targets_prefixed() {
+        let sidecar = "some line\n❯ do #task1\n❯ do #task2\nother line";
+        let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn missing_prefix_detected() {
+        let sidecar = "some line\n❯ do #task1\ndo #task2\nother line";
+        let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
+        assert!(!verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn trailing_whitespace_mismatch_tolerated() {
+        let sidecar = "❯ do #task1\n❯ do #task2  \n";
+        let targets = vec!["do #task1  ".to_string(), "do #task2".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn blank_targets_skipped() {
+        let sidecar = "❯ do #task1\nother";
+        let targets = vec!["do #task1".to_string(), "".to_string(), "   ".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn target_at_start_of_sidecar() {
+        let sidecar = "❯ first line\nrest";
+        let targets = vec!["first line".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn target_not_in_sidecar_at_all() {
+        let sidecar = "line one\nline two\n";
+        let targets = vec!["nonexistent line".to_string()];
+        assert!(!verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn sidecar_missing_prefix_when_target_has_trailing_whitespace() {
+        // Simulates the IntelliJ trailing-space bug: binary sent "do the thing "
+        // (trailing space), IntelliJ stripped to "do the thing" in the buffer,
+        // plugin's original exact-match failed silently, sidecar has no prefix.
+        // verify_sidecar_normalization must detect this.
+        let sidecar = "some other line\ndo the thing\nmore content";
+        let targets = vec!["do the thing ".to_string()];
+        assert!(
+            !verify_sidecar_normalization(sidecar, &targets),
+            "missing prefix must be detected even when target has trailing whitespace"
+        );
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_non_exchange_patch() {
+        let patches = vec![crate::template::PatchBlock::new("status", "updated")];
+        let err = enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .unwrap_err();
+        assert!(err.to_string().contains("patch:exchange"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_unmatched_transcript() {
+        let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &patches,
+            "### Re: raw transcript — gpt-5",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("raw unmatched content"));
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_exchange_only_patch() {
+        let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
+        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .expect("exchange-only orchestrate patch should be accepted");
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_clean_plain_response() {
+        enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: orchplainresp — gpt-5\n\nImplemented and verified.",
+        )
+        .expect("clean plain orchestrate response should synthesize exchange append");
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_explicit_multi_component_patch() {
+        let patches = vec![
+            crate::template::PatchBlock::new("exchange", "response"),
+            crate::template::PatchBlock::new("status", "updated"),
+        ];
+        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .expect("explicit multi-component patch should be accepted");
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_transcript_prompt_lines() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: topic — gpt-5\n\nDone.\n❯ do #next",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("transcript prompt lines"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_transcript_headings() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "## User\nrequest\n\n## Assistant\nresponse",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("transcript headings"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_full_document_dump() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "<!-- agent:exchange -->\n### Re: topic — gpt-5\n<!-- /agent:exchange -->",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("component markers"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_sanitized_full_document_dump() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "&lt;!-- agent:exchange --&gt;\n### Re: topic — gpt-5\n&lt;!-- /agent:exchange --&gt;",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("component markers"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_multiple_plain_responses() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: first — gpt-5\n\nOne.\n\n### Re: second — gpt-5\n\nTwo.",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("only one assistant response"));
+    }
+
+    #[test]
+    fn template_response_write_proof_accepts_nonempty_unmatched_body() {
+        let proof = super::template_response_write_proof(&[], "### Re: topic — gpt-5\nbody\n");
+        assert!(proof.has_real_body());
+        assert_eq!(proof.unmatched_len, "### Re: topic — gpt-5\nbody".len());
+    }
+
+    #[test]
+    fn template_response_write_proof_rejects_empty_response_shells() {
+        let patches = vec![
+            crate::template::PatchBlock::new("exchange", ""),
+            crate::template::PatchBlock::new("frontmatter", "agent: codex"),
+        ];
+        let err = super::ensure_template_response_write_proof(&patches, "").unwrap_err();
+        assert!(err.to_string().contains("no real response-body write"));
+    }
+}

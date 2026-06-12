@@ -43,12 +43,23 @@ full-content operator-mutation IPC delivery end to end:
    `transport=disk_fallback` with the existing risk marker.
 4. Emit proof: `compact_writeback transport=editor_ipc|disk_fallback`.
 
-## Decision needed (operator)
+## Decision (operator) — CONFIRMED 2026-06-12
 
-The full-content compact IPC path was disabled on purpose. Re-enabling it is a
-real feature with document-integrity risk and needs live JB verification — it is
-NOT safe to flip blind from inside a session. Confirm the direction (component-
-scoped `exchange` replace via editor IPC, mirroring `#q7jm`) before implementation.
+Operator direction received (queue: "JB `Compact Exchange` should be CRDT
+driven... File Cache Conflict" + the cross-editor-broadcast follow-up). Approved
+approach: **component-scoped `exchange` `op:replace` via editor IPC, mirroring
+`#q7jm`** — converge the `exchange` component through the listener so the
+operator's concurrent edits to other components/queue survive CRDT merge; keep
+the disk write as `transport=disk_fallback`.
+
+**Constraint that remains (NOT a decision gate — an execution constraint):** the
+implementation edits the very IPC-write/closeout path (`try_ipc_full_content_with_mode`,
+`compact.rs`, `ffi.rs`) that a live session uses to finalize its own responses.
+Rebuilding the cdylib mid-session hot-reloads that machinery under the open
+document → drift. So implementation must run in a **CLEAN session** (operator
+restarts the doc session so the live supervisor picks up the rebuilt binary), and
+the final live JB two-editor convergence is operator-drive. Tracked as actionable
+backlog `#jbcompactcrdt`.
 
 ## Repro to capture (operator-drive)
 

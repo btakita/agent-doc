@@ -21,6 +21,9 @@
 //! - `{"type": "reposition", "file": "...", "boundary_id": "..."}` — reposition
 //!   boundary marker; `boundary_id` is optional and lets the plugin reuse the
 //!   already-committed marker instead of generating a fresh boundary-only diff
+//! - `{"type": "refresh_content", "file": "...", "content": "...",
+//!   "expected_content_hash": "...", "expected_content_len": N}` — replace a
+//!   stale editor buffer with committed content after a HEAD-authoritative repair
 //! - `{"type": "vcs_refresh"}` — trigger VCS refresh
 //! - `{"type": "ack", "id": "..."}` — acknowledgment from plugin
 
@@ -393,6 +396,30 @@ pub fn send_reposition(
     if preserve_head {
         message["preserve_head"] = serde_json::Value::Bool(true);
     }
+
+    send_message(project_root, &message).map(|_| true)
+}
+
+/// Send committed content to the editor when the binary has just repaired a
+/// stale post-commit working tree back to HEAD.
+///
+/// The expected hash/length describe the stale editor content that is safe to
+/// replace. The plugin must reject the message if the live document changed
+/// before it applies the refresh.
+pub fn send_refresh_content(
+    project_root: &Path,
+    file: &str,
+    content: &str,
+    expected_content_hash: &str,
+    expected_content_len: usize,
+) -> Result<bool> {
+    let message = serde_json::json!({
+        "type": "refresh_content",
+        "file": file,
+        "content": content,
+        "expected_content_hash": expected_content_hash,
+        "expected_content_len": expected_content_len,
+    });
 
     send_message(project_root, &message).map(|_| true)
 }

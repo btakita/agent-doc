@@ -3381,6 +3381,85 @@ fn postcommit_worktree_lost_committed_content(head_norm: &str, tree_norm: &str) 
     !added_user_work
 }
 
+fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &str) {
+    let canonical = match file.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(e) => {
+            eprintln!(
+                "[commit] postcommit editor refresh skipped for {}: canonicalize failed: {e}",
+                file.display()
+            );
+            return;
+        }
+    };
+    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "postcommit_editor_refresh_skipped file={} reason=no_listener",
+                file.display()
+            ),
+        );
+        return;
+    }
+
+    let stale_hash = crate::ops_log::content_hash(stale_working);
+    let stale_len = stale_working.len();
+    match crate::ipc_socket::send_refresh_content(
+        &project_root,
+        &canonical.to_string_lossy(),
+        head_doc,
+        &stale_hash,
+        stale_len,
+    ) {
+        Ok(true) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_editor_refresh_sent file={} expected_len={} expected_hash={} target_len={} target_hash={}",
+                    file.display(),
+                    stale_len,
+                    &stale_hash[..stale_hash.len().min(12)],
+                    head_doc.len(),
+                    &crate::ops_log::content_hash(head_doc)[..12],
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit editor buffer refresh sent for {} (#pcwc)",
+                file.display()
+            );
+        }
+        Ok(false) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_editor_refresh_skipped file={} reason=no_ack",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit editor buffer refresh had no ack for {} (non-fatal)",
+                file.display()
+            );
+        }
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_editor_refresh_failed file={} err={}",
+                    file.display(),
+                    e
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit editor buffer refresh failed for {} (non-fatal): {e}",
+                file.display()
+            );
+        }
+    }
+}
+
 fn emit_postcommit_worktree_check(file: &Path) {
     let head_doc = match show_head(file) {
         Ok(Some(head)) => head,
@@ -3423,9 +3502,9 @@ fn emit_postcommit_worktree_check(file: &Path) {
         // edit carried forward UNCOMMITTED — the deliberate carry-forward invariant,
         // see `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`)
         // preserves every committed line, so the discriminator returns `false` and
-        // the tree is left untouched on the detect-and-warn path below. The
-        // editor-buffer push half (so the IDE buffer stops writing the stale content
-        // back) is still deferred — it overlaps `#rtwbcast`.
+        // the tree is left untouched on the detect-and-warn path below. After
+        // repairing disk, push the committed blob back through editor IPC with a
+        // stale-buffer hash guard so the IDE stops writing the stale content back.
         if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm) {
             match std::fs::write(file, &head_doc) {
                 Ok(()) => {
@@ -3442,6 +3521,7 @@ fn emit_postcommit_worktree_check(file: &Path) {
                         "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD (#pcwc)",
                         file.display()
                     );
+                    send_postcommit_editor_refresh(file, &head_doc, &working);
                 }
                 Err(e) => eprintln!(
                     "[commit] postcommit worktree auto-reconcile write failed (non-fatal): {e}"
@@ -6804,6 +6884,54 @@ Done.
     }
 
     #[test]
+    fn postcommit_worktree_auto_reconcile_refreshes_live_editor_buffer() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        let _listener = start_fake_listener(root);
+        wait_for_listener(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let corrupted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, corrupted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_worktree_auto_reconciled"),
+            "corruption must repair disk to HEAD before editor refresh:\n{log}"
+        );
+        assert!(
+            log.contains("postcommit_editor_refresh_sent"),
+            "auto-reconcile must push committed content back to the live editor buffer:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(".agent-doc/ack-content/unknown.md")).unwrap(),
+            head_doc,
+            "fake listener should observe the repaired HEAD content"
+        );
+    }
+
+    #[test]
     fn postcommit_worktree_preserves_carry_forward_superset() {
         // A concurrent user edit carried forward UNCOMMITTED makes the working tree a
         // superset of HEAD (every committed line present, plus a new line). HEAD
@@ -6831,7 +6959,10 @@ Done.
         emit_postcommit_worktree_check(&doc);
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("match=false"), "superset differs from HEAD:\n{log}");
+        assert!(
+            log.contains("match=false"),
+            "superset differs from HEAD:\n{log}"
+        );
         assert!(
             !log.contains("postcommit_worktree_auto_reconciled"),
             "a carry-forward superset must NOT be auto-reconciled:\n{log}"

@@ -641,7 +641,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
         // logs when it restored the working tree to HEAD because committed content
         // was dropped with no new user work (vs a preserved carry-forward superset).
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 5,
+        // +2 (`reason=no_listener`, `reason=no_ack`): #pcwc post-commit editor-buffer
+        // refresh logs when it skipped the IPC push back to the IDE because no
+        // listener was active or the plugin sent no ack after the HEAD-authoritative
+        // working-tree repair (so the IDE stops writing the stale buffer back).
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 7,
         ("src/orchestrate.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
         // skipped opening a `preflight_started` cycle (#preflight-probe-side-effect-free).

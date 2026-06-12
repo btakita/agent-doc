@@ -1,0 +1,1611 @@
+    use super::*;
+
+    #[test]
+    fn claude_defaults() {
+        let h = HarnessConfig::claude();
+        assert_eq!(h.binary, "claude");
+        assert!(h.supports_no_mcp);
+        assert!(h.supports_enable_tool_search);
+        assert_eq!(
+            h.restart_behavior,
+            RestartBehavior::Append(vec!["--continue".into()])
+        );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::PromptUser);
+        assert!(h.env_remove.contains(&"CLAUDECODE".to_string()));
+        assert_eq!(h.tmux_session_fallback, "claude");
+        assert!(h.process_names.contains(&"claude".to_string()));
+        assert!(h.process_names.contains(&"node".to_string()));
+    }
+
+    #[test]
+    fn codex_defaults() {
+        let h = HarnessConfig::codex();
+        assert_eq!(h.binary, "codex");
+        assert!(!h.supports_no_mcp);
+        assert!(!h.supports_enable_tool_search);
+        assert_eq!(
+            h.restart_behavior,
+            RestartBehavior::Prepend(vec!["resume".into(), "--last".into()])
+        );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::RestartContinue);
+        assert!(h.env_remove.contains(&"CODEX_CLI".to_string()));
+        assert!(h.env_remove.contains(&"CODEX".to_string()));
+        assert_eq!(h.tmux_session_fallback, "codex");
+        assert!(h.process_names.contains(&"codex".to_string()));
+    }
+
+    #[test]
+    fn opencode_defaults() {
+        let h = HarnessConfig::opencode();
+        assert_eq!(h.binary, "opencode");
+        assert!(!h.supports_no_mcp);
+        assert!(!h.supports_enable_tool_search);
+        assert_eq!(
+            h.restart_behavior,
+            RestartBehavior::Append(vec!["--continue".into()])
+        );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::RestartContinue);
+        assert!(h.env_remove.contains(&"OPENCODE_CLIENT".to_string()));
+        assert_eq!(h.tmux_session_fallback, "opencode");
+        assert!(h.process_names.contains(&"opencode".to_string()));
+    }
+
+    #[test]
+    fn is_tui_harness() {
+        assert!(!HarnessConfig::claude().is_tui_harness());
+        assert!(!HarnessConfig::codex().is_tui_harness());
+        assert!(HarnessConfig::opencode().is_tui_harness());
+    }
+
+    #[test]
+    fn from_agent_name_claude() {
+        let h = HarnessConfig::from_agent_name("claude");
+        assert_eq!(h.binary, "claude");
+    }
+
+    #[test]
+    fn from_agent_name_codex() {
+        let h = HarnessConfig::from_agent_name("codex");
+        assert_eq!(h.binary, "codex");
+    }
+
+    #[test]
+    fn from_agent_name_opencode() {
+        let h = HarnessConfig::from_agent_name("opencode");
+        assert_eq!(h.binary, "opencode");
+    }
+
+    #[test]
+    fn from_agent_name_unknown_defaults_to_claude() {
+        let h = HarnessConfig::from_agent_name("junie");
+        assert_eq!(h.binary, "claude");
+    }
+
+    #[test]
+    fn from_pane_command_unambiguous_binaries() {
+        assert_eq!(
+            HarnessConfig::from_pane_command("codex").unwrap().binary,
+            "codex"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("opencode").unwrap().binary,
+            "opencode"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("claude").unwrap().binary,
+            "claude"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("bun").unwrap().binary,
+            "opencode"
+        );
+    }
+
+    #[test]
+    fn from_pane_command_ambiguous_returns_none() {
+        assert!(HarnessConfig::from_pane_command("node").is_none());
+        assert!(HarnessConfig::from_pane_command("agent-doc").is_none());
+        assert!(HarnessConfig::from_pane_command("zsh").is_none());
+    }
+
+    #[test]
+    fn from_context_uses_frontmatter_agent() {
+        let fm = Frontmatter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let h = HarnessConfig::from_context(&fm, &config);
+        assert_eq!(h.binary, "codex");
+    }
+
+    #[test]
+    fn from_context_falls_back_to_config_default_agent() {
+        let fm = Frontmatter::default();
+        let config = Config {
+            default_agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let h = HarnessConfig::from_context(&fm, &config);
+        assert_eq!(h.binary, "codex");
+    }
+
+    #[test]
+    fn from_context_falls_back_to_claude() {
+        let fm = Frontmatter::default();
+        let config = Config::default();
+        let h = HarnessConfig::from_context(&fm, &config);
+        assert_eq!(h.binary, "claude");
+    }
+
+    #[test]
+    fn restart_args_append() {
+        let h = HarnessConfig::claude();
+        let base = vec!["--flag".to_string()];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(args, vec!["--flag", "--continue"]);
+    }
+
+    #[test]
+    fn restart_args_prepend() {
+        let h = HarnessConfig::codex();
+        let base = vec!["--some-flag".to_string()];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(args, vec!["resume", "--last", "--some-flag"]);
+    }
+
+    #[test]
+    fn codex_restart_translates_sandbox_for_resume() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--model".to_string(),
+            "gpt-5".to_string(),
+        ];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "resume",
+                "--last",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+                "--model",
+                "gpt-5",
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_restart_strips_add_dir_for_resume() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--add-dir".to_string(),
+            "/tmp/project/.git/modules/sub".to_string(),
+            "--add-dir=/tmp/project".to_string(),
+        ];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "resume",
+                "--last",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_restart_rejects_conflicting_sandbox_modes() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "-c".to_string(),
+            "sandbox_mode=\"workspace-write\"".to_string(),
+        ];
+        let err = h.restart_args(&base).unwrap_err().to_string();
+        assert!(
+            err.contains("conflicting sandbox modes"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn codex_restart_rejects_missing_sandbox_value() {
+        let h = HarnessConfig::codex();
+        let base = vec!["-s".to_string()];
+        let err = h.restart_args(&base).unwrap_err().to_string();
+        assert!(
+            err.contains("provided without a sandbox mode"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn trigger_command_substitution_claude() {
+        let h = HarnessConfig::claude();
+        assert_eq!(h.trigger_command("plan.md"), "/agent-doc plan.md");
+    }
+
+    #[test]
+    fn trigger_command_substitution_codex() {
+        let h = HarnessConfig::codex();
+        assert_eq!(h.trigger_command("plan.md"), "agent-doc plan.md");
+    }
+
+    // #jb-stale-busy-idle-footer — live captures from a real Claude Code session.
+
+    // Idle Claude pane: composer + status + permissions. No active-turn marker.
+    const CLAUDE_IDLE_PANE: &str = concat!(
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+    );
+
+    // Busy Claude pane (mid-turn): spinner with elapsed timer above the composer;
+    // the permissions line drops `(shift+tab to cycle)` for `· N shell`.
+    const CLAUDE_BUSY_PANE: &str = concat!(
+        "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)\n",
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 (1M context) ctx:23% ~/work/btakita/agent-loop/resume main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on · 1 shell\n",
+    );
+
+    #[test]
+    fn claude_busy_pane_spinner_is_a_busy_cue() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.has_busy_cue(CLAUDE_BUSY_PANE),
+            "mid-turn spinner with elapsed timer must read as busy"
+        );
+        assert_eq!(
+            h.dispatch_blocker_reason(CLAUDE_BUSY_PANE).as_deref(),
+            Some("active claude turn")
+        );
+    }
+
+    #[test]
+    fn claude_esc_to_interrupt_is_a_busy_cue() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "✶ Generating… (3s · esc to interrupt)\n",
+            "❯\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+            "  ⏵⏵ bypass permissions on · 1 shell\n",
+        );
+        assert!(h.has_busy_cue(pane), "esc to interrupt must read as busy");
+    }
+
+    #[test]
+    fn claude_idle_pane_has_no_busy_cue() {
+        let h = HarnessConfig::claude();
+        assert!(
+            !h.has_busy_cue(CLAUDE_IDLE_PANE),
+            "idle composer pane must not read as busy"
+        );
+    }
+
+    #[test]
+    fn busy_proof_line_returns_active_turn_line_not_footer() {
+        // #session-restart-refusal-shows-busy-proof: surface the interrupt/working
+        // line, not the ambiguous permission footer.
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "• Working (7m 47s · esc to interrupt)\n",
+            "› Summarize recent commits\n",
+            "  gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 60% used\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+        );
+        assert_eq!(
+            h.busy_proof_line(pane).as_deref(),
+            Some("• Working (7m 47s · esc to interrupt)")
+        );
+    }
+
+    #[test]
+    fn busy_proof_line_is_none_for_idle_pane() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.busy_proof_line(CLAUDE_IDLE_PANE).is_none(),
+            "idle composer/permission footer is not a busy-proof line"
+        );
+    }
+
+    #[test]
+    fn claude_status_chrome_line_is_ignorable_but_composer_is_not() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_ignorable_output_line(
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host"
+        ));
+        assert!(h.is_ignorable_output_line("Opus 4.8 (1M context) ctx:23% ~/x/resume main b@h"));
+        // The composer and permissions lines must NEVER be ignorable.
+        assert!(!h.is_ignorable_output_line("❯"));
+        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
+        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on · 1 shell"));
+        // The active-turn spinner must NEVER be ignorable.
+        assert!(!h.is_ignorable_output_line(
+            "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)"
+        ));
+    }
+
+    #[test]
+    fn last_prompt_candidate_skips_claude_status_line_to_composer() {
+        // The plan's question-1 state: the static status line is the last
+        // meaningful line. Skipping it must surface the `⏵⏵` composer below.
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "❯\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+        );
+        let candidate = h.last_prompt_candidate(pane).unwrap();
+        assert!(
+            h.is_dispatch_ready_prompt_line(&candidate),
+            "status line must be skipped so the composer is the candidate: {candidate:?}"
+        );
+    }
+
+    #[test]
+    fn claude_idle_pane_resolves_to_ready_composer() {
+        // End-to-end at the harness layer: idle pane is not busy and its last
+        // candidate is the dispatch-ready `⏵⏵ … (shift+tab to cycle)` composer.
+        let h = HarnessConfig::claude();
+        assert!(!h.has_busy_cue(CLAUDE_IDLE_PANE));
+        let candidate = h.last_prompt_candidate(CLAUDE_IDLE_PANE).unwrap();
+        assert!(h.is_dispatch_ready_prompt_line(&candidate), "{candidate:?}");
+    }
+
+    #[test]
+    fn trigger_command_substitution_opencode() {
+        let h = HarnessConfig::opencode();
+        assert_eq!(h.trigger_command("plan.md"), "/agent-doc plan.md");
+    }
+
+    #[test]
+    fn matches_prompt_exact() {
+        let h = HarnessConfig::claude();
+        assert!(h.matches_prompt("❯"));
+        assert!(h.matches_prompt("⏵"));
+    }
+
+    #[test]
+    fn matches_prompt_suffix() {
+        let h = HarnessConfig::claude();
+        assert!(h.matches_prompt("path/to/dir ❯"));
+    }
+
+    #[test]
+    fn matches_prompt_no_match() {
+        let h = HarnessConfig::claude();
+        assert!(!h.matches_prompt("some random text"));
+    }
+
+    #[test]
+    fn is_prompt_line_unicode() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_prompt_line("❯"));
+        assert!(h.is_prompt_line("❯ "));
+        assert!(h.is_prompt_line("  ❯  "));
+        assert!(h.is_prompt_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
+    }
+
+    #[test]
+    fn is_prompt_line_with_ansi() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_prompt_line("\x1b[32m❯\x1b[0m"));
+        assert!(h.is_prompt_line("\x1b[1m⏵\x1b[0m"));
+    }
+
+    #[test]
+    fn is_prompt_line_codex_patterns() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_prompt_line("❯"));
+        assert!(h.is_prompt_line(">"));
+        assert!(h.is_prompt_line("> "));
+        assert!(h.is_prompt_line("  >  "));
+        assert!(h.is_prompt_line("›"));
+        assert!(h.is_prompt_line("› "));
+    }
+
+    #[test]
+    fn is_prompt_line_opencode_patterns() {
+        let h = HarnessConfig::opencode();
+        assert!(h.is_prompt_line(">"));
+        assert!(h.is_prompt_line("> "));
+        assert!(h.is_prompt_line("  >  "));
+        assert!(h.is_prompt_line("›"));
+        assert!(h.is_prompt_line("› "));
+        assert!(!h.is_prompt_line("❯"));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_rejects_drafted_codex_text() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_dispatch_ready_prompt_line("›"));
+        assert!(h.is_dispatch_ready_prompt_line("> "));
+        assert!(!h.is_dispatch_ready_prompt_line("> agent-doc /tmp/session.md"));
+        assert!(!h.is_dispatch_ready_prompt_line("› investigate this issue"));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_accepts_idle_codex_placeholders() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
+        assert!(h.is_dispatch_ready_prompt_line("› Find and fix a bug in @filename"));
+        assert!(h.is_dispatch_ready_prompt_line("› Improve documentation in @filename"));
+        assert!(h.is_dispatch_ready_prompt_line("› Explain this module in @filename"));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_accepts_claude_composer_hint() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_dispatch_ready_prompt_line("❯"));
+        assert!(h.is_dispatch_ready_prompt_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
+        assert!(!h.is_dispatch_ready_prompt_line("❯ investigate this issue"));
+    }
+
+    #[test]
+    fn last_prompt_candidate_skips_codex_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.last_prompt_candidate(output).as_deref(), Some("›"));
+    }
+
+    #[test]
+    fn last_prompt_candidate_uses_latest_codex_prompt_after_shell_command() {
+        let h = HarnessConfig::codex();
+        let output = r#"
+$ exec /bin/sh -c 'printf "Starting codex...\n"; printf "› \n"'
+Starting codex...
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+"#;
+
+        assert_eq!(h.last_prompt_candidate(output).as_deref(), Some("›"));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_codex_status_footer_without_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_opencode_status_after_capability_proof() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+        assert!(h.last_prompt_candidate(output).is_none());
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+                                                                                                      ▄
+                                                                                                     ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+        assert!(h.last_prompt_candidate(output).is_none());
+    }
+
+    #[test]
+    fn idle_chrome_only_output_rejects_opencode_working_text() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert!(!h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_opencode_active_turn() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_post_turn_output_with_idle_bottom() {
+        // #opencode-post-turn-false-active: after a turn completes the pane
+        // keeps completed-turn output in scrollback (bash commands, "Thought:",
+        // "Click to expand") ABOVE the idle bottom chrome. None of that is an
+        // active turn, so dispatch must be allowed (None). The old all-lines
+        // scan flagged the scrollback as "opencode active turn".
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+    Finished test profile
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass.
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/work/btakita/agent-loop:main                                              esc interrupt                          26.6K (13%)  ctrl+p commands  OpenCode 1.15.13
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "completed-turn scrollback above idle bottom chrome must not read as an active turn"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_post_turn_with_active_working_bottom() {
+        // The complement: completed-turn scrollback but the BOTTOM shows the
+        // live `Working (Ns - esc to interrupt)` banner — still a real active
+        // turn, must block dispatch.
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test
+Thought: 3.1s
+Click to expand
+Working (30s - esc to interrupt)
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_allows_opencode_idle_build_chrome() {
+        // #opencode-build-chrome-stall: the post-turn OpenCode TUI keeps a
+        // `Build · MODEL` status line (and box/footer chrome) without redrawing
+        // the `>` prompt glyph. That static chrome must NOT be read as an active
+        // turn — only the live `Working (Ns - esc to interrupt)` cue blocks
+        // dispatch. Without this, route reported "opencode active turn" forever
+        // and the queued preset (#opencode-preset-not-dispatched) never injected.
+        let h = HarnessConfig::opencode();
+        let output = "\
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "idle Build chrome must not be classified as an active turn"
+        );
+    }
+
+    #[test]
+    fn idle_chrome_only_output_rejects_codex_status_with_busy_output() {
+        let h = HarnessConfig::codex();
+        let output = "\
+exploring repository
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(!h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_opencode_post_turn_with_scrollback() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+    Finished test profile
+     Running unittests src/lib.rs
+test result: ok. 2219 passed; 0 failed
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass. Here is a summary.
+src/harness.rs: added is_bottom_idle_chrome method (bottom-N idle detection)
+src/harness.rs: tests for is_bottom_idle_chrome (4 tests)
+src/start.rs: updated child_output_prompt_visible to use bottom-N for OpenCode
+src/start.rs: test for post-turn idle detection
+cargo test -p agent-doc-orchestration — 2219 passed, 0 failed
+cargo check --bin agent-doc — clean
+cargo install — installed agent-doc 0.34.0
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+                                                                                         ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "post-turn scrollback above idle bottom chrome must still pass bottom-N idle detection"
+        );
+        assert!(
+            !h.is_idle_chrome_only_output(output),
+            "same output must fail the all-lines scan (scrollback is non-ignorable)"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_opencode_active_turn_bottom() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test
+Thought: 3.1s
+Click to expand
+Working (30s - esc to interrupt)
+";
+
+        assert!(
+            !h.is_bottom_idle_chrome(output, 12),
+            "active working banner in bottom lines must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_non_opencode() {
+        let h = HarnessConfig::claude();
+        assert!(!h.is_bottom_idle_chrome("anything", 12));
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_codex_post_turn_with_scrollback() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Some turn output from Codex
+Completed running tests
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+›
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "post-turn Codex output with context status and idle prompt must pass bottom-N idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_accepts_codex_context_status_only() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Previous turn scrollback line
+Another scrollback line
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
+
+";
+
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "Codex context status line at bottom must pass idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_codex_active_turn() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Some output
+Working (45s - esc to interrupt)
+";
+
+        assert!(
+            !h.is_bottom_idle_chrome(output, 12),
+            "active Codex turn must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn is_bottom_idle_chrome_rejects_empty_output() {
+        let h = HarnessConfig::opencode();
+        assert!(!h.is_bottom_idle_chrome("", 12));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_stale_busy_with_idle_footer() {
+        // #jb-stale-busy-idle-footer: the `Working (Ns - esc to interrupt)`
+        // banner from a completed turn stays in scrollback within the bottom 12
+        // lines, but the actual pane bottom shows idle chrome (box art, Build
+        // status, ctrl+p footer, cwd/version line). The busy cue is stale —
+        // the turn has completed and the TUI has redrawn the idle footer below
+        // the old `Working` banner. The busy guard must NOT block.
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous turn output line 1
+previous turn output line 2
+Working (21s - esc to interrupt)
+                                                                                    ┃
+                                                                                    ┃  Ask anything... \"What is the tech stack?\"
+                                                                                    ┃
+                                                                                    ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+                                                                                         ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "stale Working banner above idle footer must not block dispatch (#jb-stale-busy-idle-footer)"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_active_turn_no_idle_footer() {
+        // Complement: when `Working (Ns - esc to interrupt)` is the actual
+        // bottom (no idle footer suffix below it), it IS a real active turn.
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous output
+Working (21s - esc to interrupt)
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn"),
+            "real active Working banner without idle footer must still block"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_opencode_stale_busy_with_context_footer() {
+        // #jb-stale-busy-idle-footer variant: stale `esc to interrupt` in
+        // scrollback, but the bottom lines are the full idle footer (box art,
+        // ctrl+p, cwd/version status, tip line).
+        let h = HarnessConfig::opencode();
+        let output = "\
+output from previous turn
+more previous turn output
+Working (15s - esc to interrupt)
+thought output
+                                                                                    ┃
+                                                                                    ┃  Ask anything...
+                                                                                    ┃
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                         ● Tip some tip text
+                                                                                                                    tab agents  ctrl+p commands
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "stale esc to interrupt with idle context footer must not block (#jb-stale-busy-idle-footer)"
+        );
+    }
+
+    #[test]
+    fn bottom_idle_chrome_suffix_present_opencode_with_stale_busy() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+                                                                                    ┃  Ask anything...
+                                                                                    ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                    ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                    tab agents  ctrl+p commands
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+        assert!(
+            h.bottom_idle_chrome_suffix_present(output, 12),
+            "idle footer below stale Working banner must be detected"
+        );
+    }
+
+    #[test]
+    fn bottom_idle_chrome_suffix_present_rejects_active_turn() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+previous output
+Working (21s - esc to interrupt)
+";
+        assert!(
+            !h.bottom_idle_chrome_suffix_present(output, 12),
+            "active Working banner with no idle footer must not match"
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_preserves_busy_codex_output_above_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+Working...
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("Working...")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_wrapped_codex_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Run /review on my current
+changes
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 20% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Run /review on my current changes")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_new_codex_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Improve documentation in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Improve documentation in @filename")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_codex_write_tests_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Write tests for @filename")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Write tests for @filename"));
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_future_codex_idle_placeholder_shape() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Explain this module in @filename")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_codex_codebase_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this codebase
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Explain this codebase")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Explain this codebase"));
+    }
+
+    #[test]
+    fn last_prompt_candidate_rejects_codex_drafted_filename_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› investigate this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› investigate this module in @filename")
+        );
+        assert!(!h.is_dispatch_ready_prompt_line("› investigate this module in @filename"));
+    }
+
+    #[test]
+    fn has_busy_cue_detects_codex_queue_message_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn has_busy_cue_detects_codex_working_status_with_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+• Working (1m 34s • esc to interrupt)
+
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active codex turn")
+        );
+        assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_hook_review_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Starting codex...
+⚠ 1 hook needs review before it can run. Open /hooks to review it.
+
+› [start] managed codex capability proof: codex_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:9806,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:9815
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("codex hook review prompt")
+        );
+        assert!(
+            !h.is_idle_chrome_only_output(output),
+            "hook review chrome requires operator action and must not count as idle"
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_drafted_codex_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› investigate this issue
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_agent_doc_session_control_commands() {
+        let h = HarnessConfig::codex();
+        for prompt in [
+            "❯ agent-doc session clear tasks/monsterrodholders.md",
+            "› agent-doc session interrupt-clear tasks/monsterrodholders.md",
+            "> /usr/local/bin/agent-doc session stop tasks/monsterrodholders.md",
+        ] {
+            let output =
+                format!("{prompt}\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n");
+            assert_eq!(
+                h.protected_prompt_input_reason(&output),
+                None,
+                "{prompt} should be treated as operator control input"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_keeps_agent_doc_non_control_text_protected() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› agent-doc should inspect this session clear bug
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_non_dim_codex_text_with_ansi() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m investigate this issue
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_does_not_treat_rgb_color_as_dim() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m \x1b[38;2;128;128;128minvestigate this issue\x1b[0m
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_dim_codex_placeholder_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_queue_state() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("queued draft in composer")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_active_codex_turn() {
+        let h = HarnessConfig::codex();
+        let output = "\
+• Working (1m 34s • esc to interrupt)
+
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active codex turn")
+        );
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_codebase_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this codebase
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_default_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Ask Codex to do anything
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Ask Codex to do anything")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Ask Codex to do anything"));
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_skips_non_codex_harnesses() {
+        let opencode_output = "\
+› investigate this issue
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 28% used
+";
+        assert_eq!(
+            HarnessConfig::opencode().protected_prompt_input_reason(opencode_output),
+            None,
+            "OpenCode harness must not trigger Codex-specific draft detection"
+        );
+        assert_eq!(
+            HarnessConfig::claude().protected_prompt_input_reason(opencode_output),
+            None,
+            "Claude harness must not trigger Codex-specific draft detection"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_reverse_history_search() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+reverse-i-search: bugs enter accept · esc cancel
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("interactive shell reverse-i-search")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_interactive_history_search() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+i-search: bug accept · cancel
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("interactive shell history search")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_clean_exit_restart_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Press Enter to restart, or 'q' to exit.
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("clean-exit restart prompt")
+        );
+    }
+
+    #[test]
+    fn has_busy_cue_detects_active_permission_prompt() {
+        let h = HarnessConfig::claude();
+        let output = r#"
+  ⎿  Running…
+
+────────────────────────────────────────────────────────
+ Bash command
+
+   tmux capture-pane -t %73 -p
+   Capture pane content
+
+ Do you want to proceed?
+   [1] Yes
+ ❯ [2] Yes, and don't ask again for: tmux capture-pane:*
+   [3] No
+
+ Esc to cancel · ctrl+e to explain
+"#;
+        assert!(h.has_busy_cue(output));
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_opencode_permission_prompt() {
+        let h = HarnessConfig::opencode();
+        let output = r#"
+   ⠙[[[Dd ~/work/btakita/corky/pyproject.toml
+┃                                                                                                                       ┃  △ Permission required
+┃    ← Access external directory ~/work/btakita/corky/.github/workflows                                                 ┃
+┃  Patterns                                                                                                             ┃
+┃  - /home/brian/work/btakita/corky/.github/workflows/*                                                                 ┃
+┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+┃
+"#;
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
+    }
+
+    #[test]
+    fn is_prompt_line_rejects_non_prompt() {
+        let h = HarnessConfig::claude();
+        assert!(!h.is_prompt_line("Starting claude..."));
+        assert!(!h.is_prompt_line(""));
+        assert!(!h.is_prompt_line("  "));
+        assert!(!h.is_prompt_line("## User"));
+    }
+
+    #[test]
+    fn is_agent_process_name_claude() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_agent_process_name("claude"));
+        assert!(h.is_agent_process_name("node"));
+        assert!(h.is_agent_process_name("agent-doc"));
+        assert!(h.is_agent_process_name(""));
+        assert!(!h.is_agent_process_name("vim"));
+        assert!(!h.is_agent_process_name("codex"));
+    }
+
+    #[test]
+    fn is_agent_process_name_codex() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_agent_process_name("codex"));
+        assert!(h.is_agent_process_name("node"));
+        assert!(h.is_agent_process_name("agent-doc"));
+        assert!(!h.is_agent_process_name("claude"));
+    }
+
+    #[test]
+    fn is_agent_process_name_opencode() {
+        let h = HarnessConfig::opencode();
+        assert!(h.is_agent_process_name("opencode"));
+        assert!(h.is_agent_process_name("bun"));
+        assert!(h.is_agent_process_name("node"));
+        assert!(h.is_agent_process_name("agent-doc"));
+        assert!(!h.is_agent_process_name("claude"));
+        assert!(!h.is_agent_process_name("codex"));
+    }
+
+    #[test]
+    fn cmdline_is_agent_claude() {
+        let h = HarnessConfig::claude();
+        assert!(h.cmdline_is_agent("claude -p --output-format stream-json"));
+        assert!(h.cmdline_is_agent("agent-doc start plan.md"));
+        assert!(!h.cmdline_is_agent("vim plan.md"));
+    }
+
+    #[test]
+    fn cmdline_is_agent_codex() {
+        let h = HarnessConfig::codex();
+        assert!(h.cmdline_is_agent("codex exec --json"));
+        assert!(h.cmdline_is_agent("agent-doc start plan.md"));
+        assert!(!h.cmdline_is_agent("claude -p"));
+    }
+
+    #[test]
+    fn cmdline_is_agent_opencode() {
+        let h = HarnessConfig::opencode();
+        assert!(h.cmdline_is_agent("opencode --model zai/glm-5"));
+        assert!(h.cmdline_is_agent("agent-doc start plan.md"));
+        assert!(!h.cmdline_is_agent("codex exec --json"));
+    }
+
+    // --- Multi-harness isolation tests ---
+
+    #[test]
+    fn harness_isolation_no_shared_binary() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        assert_ne!(claude.binary, codex.binary);
+        assert_ne!(claude.binary, opencode.binary);
+        assert_ne!(codex.binary, opencode.binary);
+    }
+
+    #[test]
+    fn harness_isolation_no_shared_tmux_session() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        assert_ne!(claude.tmux_session_fallback, codex.tmux_session_fallback);
+        assert_ne!(claude.tmux_session_fallback, opencode.tmux_session_fallback);
+        assert_ne!(codex.tmux_session_fallback, opencode.tmux_session_fallback);
+    }
+
+    #[test]
+    fn harness_isolation_env_remove_disjoint() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        for var in &claude.env_remove {
+            assert!(
+                !codex.env_remove.contains(var),
+                "env_remove overlap: {var} in both claude and codex"
+            );
+        }
+        for var in &codex.env_remove {
+            assert!(
+                !claude.env_remove.contains(var),
+                "env_remove overlap: {var} in both codex and claude"
+            );
+        }
+        for var in &opencode.env_remove {
+            assert!(
+                !claude.env_remove.contains(var) && !codex.env_remove.contains(var),
+                "env_remove overlap: {var} in opencode and another harness"
+            );
+        }
+    }
+
+    #[test]
+    fn harness_isolation_process_names_no_cross_claim() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        assert!(
+            claude.is_agent_process_name("claude"),
+            "claude harness should claim 'claude'"
+        );
+        assert!(
+            !claude.is_agent_process_name("codex"),
+            "claude harness must not claim 'codex'"
+        );
+        assert!(
+            codex.is_agent_process_name("codex"),
+            "codex harness should claim 'codex'"
+        );
+        assert!(
+            !codex.is_agent_process_name("claude"),
+            "codex harness must not claim 'claude'"
+        );
+        assert!(
+            opencode.is_agent_process_name("opencode"),
+            "opencode harness should claim 'opencode'"
+        );
+        assert!(
+            !opencode.is_agent_process_name("claude") && !opencode.is_agent_process_name("codex"),
+            "opencode harness must not claim claude/codex"
+        );
+    }
+
+    #[test]
+    fn harness_isolation_shared_agent_doc_process() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        assert!(claude.is_agent_process_name("agent-doc"));
+        assert!(codex.is_agent_process_name("agent-doc"));
+        assert!(opencode.is_agent_process_name("agent-doc"));
+    }
+
+    #[test]
+    fn harness_isolation_trigger_commands_both_route_file() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        let claude_cmd = claude.trigger_command("tasks/bugs.md");
+        let codex_cmd = codex.trigger_command("tasks/bugs.md");
+        let opencode_cmd = opencode.trigger_command("tasks/bugs.md");
+        assert_eq!(claude_cmd, "/agent-doc tasks/bugs.md");
+        assert_eq!(codex_cmd, "agent-doc tasks/bugs.md");
+        assert_eq!(opencode_cmd, "/agent-doc tasks/bugs.md");
+    }
+
+    #[test]
+    fn harness_isolation_restart_behavior_types_differ() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let base = vec!["--flag".to_string()];
+        let claude_args = claude.restart_args(&base).unwrap();
+        let codex_args = codex.restart_args(&base).unwrap();
+        assert!(
+            claude_args.contains(&"--flag".to_string()),
+            "claude appends to base"
+        );
+        assert!(
+            codex_args.contains(&"--flag".to_string()),
+            "codex preserves base args across resume"
+        );
+        assert_eq!(
+            codex_args[..2],
+            ["resume".to_string(), "--last".to_string()],
+            "codex restart still prefixes resume mode"
+        );
+        assert_eq!(claude.clean_exit_behavior, CleanExitBehavior::PromptUser);
+        assert_eq!(
+            codex.clean_exit_behavior,
+            CleanExitBehavior::RestartContinue
+        );
+    }
+
+    #[test]
+    fn harness_isolation_cmdline_cross_rejection() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        assert!(claude.cmdline_is_agent("claude -p --output-format stream-json"));
+        assert!(!claude.cmdline_is_agent("codex exec --json"));
+        assert!(codex.cmdline_is_agent("codex exec --json"));
+        assert!(!codex.cmdline_is_agent("claude -p --output-format stream-json"));
+    }
+
+    #[test]
+    fn multi_harness_from_context_independent_resolution() {
+        let fm_claude = Frontmatter {
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let fm_codex = Frontmatter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let fm_opencode = Frontmatter {
+            agent: Some("opencode".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let h1 = HarnessConfig::from_context(&fm_claude, &config);
+        let h2 = HarnessConfig::from_context(&fm_codex, &config);
+        let h3 = HarnessConfig::from_context(&fm_opencode, &config);
+        assert_eq!(h1.binary, "claude");
+        assert_eq!(h2.binary, "codex");
+        assert_eq!(h3.binary, "opencode");
+        assert_ne!(h1.tmux_session_fallback, h2.tmux_session_fallback);
+        assert_ne!(h2.tmux_session_fallback, h3.tmux_session_fallback);
+    }
+
+    #[test]
+    fn multi_harness_config_default_overridden_by_frontmatter() {
+        let fm_claude = Frontmatter {
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let config = Config {
+            default_agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let h = HarnessConfig::from_context(&fm_claude, &config);
+        assert_eq!(
+            h.binary, "claude",
+            "frontmatter agent overrides config default_agent"
+        );
+    }
+
+    #[test]
+    fn multi_harness_prompt_pattern_overlap_is_intentional() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
+        // Both share ❯ — that's fine, it just means both detect it
+        assert!(claude.matches_prompt("❯"));
+        assert!(codex.matches_prompt("❯"));
+        assert!(!opencode.matches_prompt("❯"));
+        // > is codex-only
+        assert!(!claude.matches_prompt(">"));
+        assert!(codex.matches_prompt(">"));
+        assert!(opencode.matches_prompt(">"));
+        // ⏵ is claude-only
+        assert!(claude.matches_prompt("⏵"));
+        assert!(!codex.matches_prompt("⏵"));
+        assert!(!opencode.matches_prompt("⏵"));
+    }
+
+    #[test]
+    fn multi_harness_feature_flags_exclusive() {
+        let claude = HarnessConfig::claude();
+        let codex = HarnessConfig::codex();
+        assert!(claude.supports_no_mcp);
+        assert!(claude.supports_enable_tool_search);
+        assert!(!codex.supports_no_mcp);
+        assert!(!codex.supports_enable_tool_search);
+    }
+
+    #[test]
+    fn context_clear_command_uses_new_for_opencode_only() {
+        assert_eq!(HarnessConfig::claude().context_clear_command(), "/clear");
+        assert_eq!(HarnessConfig::codex().context_clear_command(), "/clear");
+        assert_eq!(HarnessConfig::opencode().context_clear_command(), "/new");
+    }
+
+    #[test]
+    fn opencode_help_screen_detected() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+opencode [project]           start opencode tui                                          [default]
+opencode attach <url>        attach to a running opencode server
+opencode run [message..]     run opencode with a message
+opencode debug               debugging and troubleshooting tools
+opencode providers           manage AI providers and credentials                   [aliases: auth]
+";
+        assert!(h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_help_screen_with_ansi_detected() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+\x1b[1mopencode\x1b[0m [project]           start opencode tui
+\x1b[1mopencode\x1b[0m run [message..]     run opencode with a message
+\x1b[1mopencode\x1b[0m debug               debugging and troubleshooting tools
+";
+        assert!(h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_help_screen_rejects_normal_output() {
+        let h = HarnessConfig::opencode();
+        assert!(!h.is_help_screen_output("opencode is running\n>"));
+        assert!(!h.is_help_screen_output("some output\nmore output\n>"));
+        assert!(!h.is_help_screen_output(""));
+    }
+
+    #[test]
+    fn opencode_help_screen_dispatch_blocker() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+opencode [project]           start opencode tui
+opencode run [message..]     run opencode with a message
+opencode debug               debugging and troubleshooting tools
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(help_output),
+            Some("help/usage screen detected".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_help_screen_not_detected() {
+        let h = HarnessConfig::claude();
+        let help_output =
+            "opencode [project]           start opencode tui\nopencode run\nopencode debug\n";
+        assert!(!h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_context_bar_line_recognized() {
+        assert!(is_opencode_context_bar_line("⬝⬝⬝⬝⬝⬝⬝⬝"));
+        assert!(is_opencode_context_bar_line("  ⬝⬝⬝⬝  "));
+        assert!(!is_opencode_context_bar_line("⬝⬝⬝ some text"));
+        assert!(!is_opencode_context_bar_line(""));
+    }
+
+    #[test]
+    fn opencode_idle_keybinding_hint_line_recognized() {
+        assert!(is_opencode_idle_keybinding_hint_line(
+            "esc interrupt  ctrl+p commands  OpenCode 1.15.13"
+        ));
+        assert!(is_opencode_idle_keybinding_hint_line("esc interrupt"));
+        assert!(!is_opencode_idle_keybinding_hint_line("esc to interrupt"));
+        assert!(!is_opencode_idle_keybinding_hint_line(
+            "Working (14s - esc to interrupt)"
+        ));
+    }
+
+    #[test]
+    fn opencode_idle_chrome_line_with_context_bar() {
+        assert!(is_opencode_idle_chrome_line("⬝⬝⬝⬝⬝⬝⬝⬝"));
+        assert!(is_opencode_idle_chrome_line(
+            "esc interrupt  ctrl+p commands  OpenCode 1.15.13"
+        ));
+    }
+
+    #[test]
+    fn opencode_bottom_idle_chrome_with_context_bar_and_scrollback() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Thought: checking files
+Click to expand
+  ~/work/btakita/agent-loop:main                                        1.15.13
+⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13
+";
+        assert!(h.is_bottom_idle_chrome(output, 12));
+        assert!(!h.is_idle_chrome_only_output(output));
+    }

@@ -18,9 +18,6 @@ prompt_presets:
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 queue: stop
-agent_doc_pipeline:
-  run_id: cycle-1781199410858
-  step: write_applied
 ---
 
 ## Status
@@ -122,14 +119,14 @@ Pipeline card payloads now carry borrower and lead email addresses, and the Deal
 ### Re: Closeout recovery — gpt-5
 
 The pipeline-card email change was already implemented, verified, deployed, and recorded above. This note only closes the active agent-doc turn after the IPC recovery path committed the visible response.
-<!-- agent:boundary:74e0ff15 -->
+<!-- agent:boundary:c113b62a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

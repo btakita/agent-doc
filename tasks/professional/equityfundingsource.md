@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,8 +104,8 @@ Implemented and deployed.
 
 Changed paths for this queue item:
 ❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts` — pipeline card payload types now carry `borrower_email` for loan cards and `email` for lead cards.
-❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts` — the admin pipeline endpoint passes borrower/lead email into card builders.
-❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — dashboard attention detail card builders stay compatible with the email-carrying payloads.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts` — the admin pipeline endpoint passes borrower/lead email into card builders.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — dashboard attention detail card builders stay compatible with the email-carrying payloads.
 ❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx` — loan and lead pipeline cards now show the email line, and pipeline card search matches email.
 ❯ - `src/equityfundingsource-dev/tests/admin-pipeline.test.ts` — coverage now asserts the new email payload and UI wiring.
 
@@ -215,6 +215,14 @@ Verification:
 - `bun test tests/admin-dashboard.test.ts` — 25 passed.
 - `make check` — 561 tests passed, plus browser build and Worker build.
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+❯ - Live smoke: `/` returned `200`; `/portal-admin`, `/portal-admin/pipeline`, and `/portal-borrower/new-application` returned `303` protected-route redirects; `/api/admin/pipeline` returned `401` unauthenticated.
+❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` after deploy — no pending migrations.
+❯ - `make deploy` — built the Worker, applied remote D1 migrations, and deployed Worker version `57158a7d-760c-4ef1-bd67-4e8005d7dd7d`.
+❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy — no pending migrations.
+❯ - `make check` — 561 tests passed, plus browser build and Worker build.
+❯ - `git status --short` — dirty with intended session changes.
+❯ - `git branch --show-current` — `main`.
 
 No deploy was requested in this queue item. No EFS repo commit was made; the local repo instruction says not to commit unless explicitly asked, and the submodule already has prior intended dirty changes.
 
@@ -229,7 +237,34 @@ feat(admin): show incomplete applications in Deal Pipeline (#tg04)
 
 Deal Pipeline now has a read-only Incomplete Applications entry column that unifies draft/submitted/in-review full applications with open prequalification leads while deduping lead-linked full applications. Adds application card UI, full-application deep links, and dashboard/pipeline coverage.
 ```
-<!-- agent:boundary:cbca659f -->
+
+### Re: Deploy incomplete applications pipeline — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed.
+
+This deploy ships the current EFS submodule state, including the Deal Pipeline `Incomplete Applications` column from the prior queue item.
+
+Changed paths for this queue item: none; this was a deploy-only turn. The EFS submodule still has the intended uncommitted source changes from the session, per the local no-commit instruction.
+
+Verification and deploy:
+❯ - `git branch --show-current` — `main`.
+❯ - `git status --short` — dirty with intended session changes.
+❯ - `make check` — 561 tests passed, plus browser build and Worker build.
+❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy — no pending migrations.
+❯ - `make deploy` — built the Worker, applied remote D1 migrations, and deployed Worker version `57158a7d-760c-4ef1-bd67-4e8005d7dd7d`.
+❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` after deploy — no pending migrations.
+❯ - Live smoke: `/` returned `200`; `/portal-admin`, `/portal-admin/pipeline`, and `/portal-borrower/new-application` returned `303` protected-route redirects; `/api/admin/pipeline` returned `401` unauthenticated.
+❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+
+No actionable follow-up/backlog item is needed; the requested deploy is complete.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:13e9f667 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,7 +272,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

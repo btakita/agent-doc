@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,24 @@ Sent the Stripe account setup email from brian.takita@gmail.com via Corky to Jud
 Compacted content:
 - Archived 4 response topic(s): Stripe account email; Stripe account email sent; Remove payment processors; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a5b11552 -->
+
+### Re: Loan application admin editing — gpt-5
+
+> **Queue prompt:**
+>
+> The admin should be able to edit loan applications such as https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3. Ensure we have the change history saved in the database. Make the change history viewable for all forms.
+
+
+Implemented and shipped the admin loan-application editor/history work.
+
+Changed paths: `src/equityfundingsource-dev` at `a0d5dde` adds `PUT /api/admin/full-applications/:id/sections/:section`, migration `0062_full_application_admin_change_history.sql`, per-section admin editors for broker source, personal, addresses, employment, income, assets, liabilities, REO, subject property, and declarations, plus D1-backed `application_change_logs` history displayed in each form card. Subject-property `PATCH` remains available and now refreshes the new all-section history too. The parent repo records that submodule pointer in `1a93213b2`.
+
+Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`; `git commit`/`git push` in `src/equityfundingsource-dev`; parent `git commit`/`git push` for the submodule pointer.
+
+Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
+
+Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
+<!-- agent:boundary:c86084ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +62,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The admin should be able to edit loan applications such as https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3. Ensure we have the change history saved in the database. Make the change history viewable for all forms.
 <!-- /agent:queue -->
 
 ## Backlog

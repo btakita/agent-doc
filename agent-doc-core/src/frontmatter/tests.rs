@@ -1,5 +1,4 @@
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn parse_no_frontmatter() {

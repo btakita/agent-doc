@@ -103,12 +103,33 @@ That hot-reloads the plugin's cdylib by mtime (no plugin reinstall). Then trigge
 **Note (dogfooding):** this very response hit the recurring IPC CRDT-replay drift (`live_prompt_drift_after_preflight`, stale `patch_id=04f0d5f7`) — the supervisor spliced a fragment of it into an old block. Recovered by quiescing the stale CRDT/cycle sidecars + `reset --from-current`. That drift is `#ipcdrift`/`#stuckhandoff2`, separate from this item.
 
 `[#rtwbcast]` is still queued but it's a different item (multi-editor broadcast / two-live-IDE convergence, `#rtwatch` rung 4), not a stale-blocked one — I'm not draining into it from this live IPC session. Halting the auto-loop here.
-<!-- agent:boundary:d31fd1b8 -->
+
+### Re: Continue splitting up large modules — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Continue splitting up large modules. Functionality + tests.
+
+
+Split the largest clean target: **`session_check.rs` 11,974 → 5,225 lines** by extracting its `#[cfg(test)] mod tests` into `session_check/tests.rs` (6,627 lines, rustfmt-normalized), mirroring the established `route.rs → route/tests.rs` pattern. Behavior-preserving — `super::` still resolves to the `session_check` parent, so `use super::*;` is identical.
+
+The move surfaced two real test-infra issues, both fixed:
+
+- **`test_support.rs` flaky pair** — `env_lock_uses_harness_prompt_lock` and `scoped_current_dir_uses_harness_prompt_lock` asserted the shared `TEST_ENV_LOCK` was free via `try_lock().is_ok()` *after* dropping their guard. That races other parallel env-mutating tests in the same binary (the lock isn't necessarily free even though our guard released). Replaced with a deterministic re-obtain (blocking `lock()`) that proves release without the race. This was a pre-existing latent flake the split exposed under the full parallel suite.
+- **`tests/test_cli.rs` structural guards** — `process_global_test_mutations_share_session_check_lock` hard-coded `session_check.rs` as the file holding the test inspection helpers; repointed it to `session_check/tests.rs`. The FlowCore `flowcore_hot_path_guard_and_proof_tokens_are_budgeted` gate counted `guard_` tokens in `session_check.rs`; updated the budget 96 → 31 since the 65 removed were test-assertion literals, not production hot-path guards.
+
+`make check` green; full workspace 0 failed (74 integration + 2741 + 790 + 525 + … all pass). Committed agent-doc `637a58bb`, pushed; superproject pointer bumped to `637a58bb`. Functionality + tests preserved end-to-end.
+
+**Next targets queued** (`#splitmods2`): `preflight.rs` (14.7k), `sync.rs` (12.3k), `git.rs` (10k) each have the same clean single trailing `mod tests` shape — low-risk. `write.rs` (27.7k, the biggest) needs care: its test layout is irregular (module-scope `#[cfg(test)]` helpers + several non-contiguous test blocks), not a single clean `mod tests`.
+
+Note: this finalize used `--force-disk` to bypass the IPC CRDT-replay drift that has wedged this session's socket path (`#ipcdrift`/`#stuckhandoff2`).
+<!-- agent:boundary:da198cf8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Continue splitting up large modules. Functionality + tests.~~
 - re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.
 - ~~[#jbcompactcrdt]~~
 - [#rtwbcast]
@@ -141,6 +162,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#splitmods2] [recommended] Continue large-module splits (Functionality + tests). Extract the cfg(test) mod tests from preflight.rs (14.7k), sync.rs (12.3k), git.rs (10k) into <mod>/tests.rs mirroring route/session_check (clean single trailing mod tests; low risk). write.rs (27.7k) needs care: irregular multi-block test layout + module-scope cfg(test) helpers. Pattern: replace inline mod tests body with 'mod tests;' + create <mod>/tests.rs starting 'use super::*;', rustfmt the new file, then update FlowCore guard_ budgets + structural guards in tests/test_cli.rs.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 

@@ -225,7 +225,31 @@ Captured this as `#fintol` with a full plan (`tasks/agent-doc/plan-finalize-tole
 **Decomposed into three SimWorld-verified rungs** (per your test-with-SimWorld directive): `#fintol1` conflict-scope primitive → `#fintol2` forward-merge at the gate → `#fintol3` SimWorld coverage (type an unrelated prompt / compact during finalize → response commits, prompt survives, no exit-75; plus a collision case that still fails closed). Implementation is a CLEAN-session task (it changes the closeout path this controller races), so I planned it rather than ran it here.
 
 **Not auto-looping** — degraded session, and this handled a real queue prompt. `#fintol` is queued at the top of the backlog.
-<!-- agent:boundary:46bfd626 -->
+
+### Re: monsterrodholders post-commit IPC worktree corruption — confirmed + tracked (#pcwc) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: agent-doc monsterrodholders.md had an error:
+> ```
+>   Process note: the finalize hit IPC drift (the JetBrains editor buffer briefly overwrote the working-tree file after
+>   the commit). The commit itself was correct; I reconciled the working tree to HEAD and rebuilt the snapshot, and
+>   session-check is green.
+> ```
+
+
+Confirmed and tracked as `#pcwc`. This is the `#postcommit-ipc-worktree-corruption` class, and I can corroborate it first-hand: **this very session reproduced it last turn** on `agent-doc-bugs2.md` — finalize committed the correct response to HEAD, then logged `postcommit_worktree_check match=false`, and I recovered exactly as your monsterrodholders note describes (`git checkout HEAD -- <file>`, session-check green). Same binary, same failure shape — strong evidence it's systemic, not doc-specific.
+
+**What it is (verified in code):** after a correct commit, a late IPC reposition (`try_ipc_reposition_boundary`) or the editor's stale buffer writes pre-commit content back over the working tree. The commit to HEAD is correct; only the on-disk/working-tree copy drifts.
+
+**Where the gap is:** the binary already **detects** this — `emit_postcommit_worktree_check` (`git.rs:3336`) compares HEAD vs the working tree (modulo legitimate boundary/`(HEAD)`/queue churn) and logs `match=false` + a warning. But it's **detect-only**: it leaves the manual `git checkout HEAD -- <file>` to the operator (or, this session, to me). The existing plan `plan-claudescore-3-post-commit-head-boundary-drift.md` already has the open checkbox for this — *"fail closed or auto-repair instead of an endless rerun loop"* — the detection landed, the **auto-repair** did not.
+
+**The fix (`#pcwc`):** when `match=false` and HEAD is authoritative (HEAD holds the correct committed response), the binary should **auto-reconcile the worktree to HEAD** (it already has `show_head`; this just automates the `git checkout HEAD` we both ran) AND **push the committed content to the editor buffer** so the editor stops holding/writing stale content. That second half is the durable fix and overlaps `#rtwbcast` (broadcast committed content back to editor buffers); the worktree reconcile is shippable now. SimWorld-verified per your directive (worktree==HEAD guard + a post-commit stale-buffer-writeback case).
+
+I did **not** create a new plan — there are already ~30 IPC-drift plans, and this reuses the existing post-commit-drift plan rather than proliferating. `#pcwc` is queued at the backlog top.
+
+**Not auto-looping** — degraded session, real queue prompt handled.
+<!-- agent:boundary:bd3572a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -311,7 +335,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   Want me to run the make install rebuild now?
 ```
 ---
-- :pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?
+- ~~:pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?~~
 - :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
@@ -320,6 +344,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - ~~Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.~~
 - :round_pushpin: do [#snbc2]
+- :round_pushpin: do [#fintol]
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
@@ -351,6 +376,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#pcwc] [recommended] Post-commit IPC worktree corruption (#postcommit-ipc-worktree-corruption): after a CORRECT finalize commit, a late IPC reposition / stale editor-buffer write-back overwrites the working tree (postcommit_worktree_check match=false), forcing a manual git checkout HEAD -- FILE. Reported on monsterrodholders.md AND reproduced live on agent-doc-bugs2.md 2026-06-11. DETECTION already landed (emit_postcommit_worktree_check, git.rs:3336); the open gap is AUTO-REMEDIATION: when HEAD is authoritative (match=false but HEAD holds the correct committed response), reconcile the worktree to HEAD automatically AND push the committed content to the editor buffer (so it stops writing stale content back) instead of warning + leaving a manual git checkout. The editor-buffer push is the durable fix and overlaps #rtwbcast (broadcast committed content to editor buffers); the worktree reconcile is doable now via show_head. Verify with SimWorld (worktree==HEAD guard + a post-commit stale-buffer-writeback case). Reuses existing plan: tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md (open 'auto-repair' checkbox). Related: #fintol, #rtwbcast.
 - [ ] [#fintol] [recommended] Finalize should tolerate concurrent UNRELATED user edits (typing a new prompt, editing elsewhere, compaction) by forward-MERGING them with the agent response instead of rejecting with live_prompt_drift_after_preflight / exit-75. Verified in code: the gate already auto-absorbs the benign superset case (#exch-intermix, write.rs:7049/7119) but FAILS CLOSED when the live buffer carries a new exchange PromptTarget or queue do[#id] the response does not own — to avoid dropping user content. Gap: that fail-closed conflates (a) collision with the response's CRDT target span vs (b) independent edit. Fix: response_target_disjoint_from_user_edit primitive → disjoint => CRDT-merge response+edit, commit the union, carry the new prompt to next cycle; collision => keep fail-closed. Closeout-side complement to #rtwatch. Rungs #fintol1 (conflict-scope primitive) / #fintol2 (forward-merge at gate) / #fintol3 (SimWorld coverage). CLEAN session; SimWorld-verified. Plan: tasks/agent-doc/plan-finalize-tolerance.md.
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).

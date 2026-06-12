@@ -595,23 +595,12 @@ Done. Bumped both version pins to the latest published releases, refreshed lockf
 **Not done (deliberately, mid-queue):** did not push, did not advance the superproject submodule pointers (both submodule working trees still carry your in-flight stuck-handoff / AGENTS.md edits — pointer moves belong to those work cycles), and did not rebuild/reinstall the live `agent-doc` binary. To make the upgraded `tsift-memory` actually live in the running supervisor you'd want `cd src/agent-doc && cargo build --release && agent-doc lib-install` (or `make install`) on a clean cycle — say the word and I'll do it.
 
 (Closeout note: the first finalize hit the known IPC live-buffer drift — the editor buffer held a stale 13.5KB partial doc that the socket ACK wrote over disk. Recovered via `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk`.)
-<!-- agent:boundary:224c44e1 -->
+<!-- agent:boundary:520fde37 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#stuckhandoff2]~~
-~~~done
-:pushpin: After typing into the queue, it stopped. It should not stop but allow me to type while the queue continues. I then tried JB `Run Agent Doc` and got an error:
-```
-resync: pruned 11 stale session(s)
-[route] target tmux session: 13
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=flooding re-trigger loop: go-queue re-syncs answered+committed #stuckhandoff2 as head and re-submits agent-doc into the live session; #stuckhandoff2 root-cause answered (M1+M3 landed 08dfc27b), remaining M2/M4/M5 + clean install need a fresh session; halting drain pending operator restart (#qflood) receipt_id=3279
-```
-~~~
-- ~~:pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.~~
-- ~~:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:~~
 ```
 [route] target tmux session: 13
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
@@ -678,10 +667,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   Want me to run the make install rebuild now?
 ```
 ~~~
-- ~~:pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.~~
-- ~~:pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.~~
-- ~~:pushpin: Upgrade lazily-rs + tsift-* dependencies.~~
-- :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
+- :pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - :round_pushpin: do [#snbc2]
 - :round_pushpin: do [#fintol]

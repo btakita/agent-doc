@@ -49,6 +49,8 @@ Run in a fresh session NOT hosting a live agent-doc IPC document, decomposed as 
 2. **#rtwbcast-deliver** — replace PatchWatcher.kt single-consumer delete-on-first-ACK with a per-editor broadcast bus.
 3. **#rtwbcast-merge** — per-editor echo suppression (editor_id in claimed-patches, not suppress-ALL); reuse the existing CRDT merge primitive + SimWorld Slice 3.
 4. **#rtwbcast-verify** — two-live-IDE convergence (operator-drive).
+- `try_compact_editor_converge_converges_via_editor_ipc_with_listener` — end-to-end proof that a live JB listener converges compaction through `transport=editor_ipc` instead of the diverging disk write.
+- `compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits` — the convergence patch only `op:replace`s the changed `exchange`, so typing `queue` items *while* compaction runs is never clobbered. That component-scoping is exactly what kills the `File Cache Conflict`.
 
 Then build+install+push in that clean session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4).
 
@@ -73,6 +75,11 @@ Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read
 
 > **Queue prompt:**
 >
+> [#jbcompactcrdt]
+
+
+> **Queue prompt:**
+>
 > :pushpin: :round_pushpin: do [#jbcompactcrdt]
 
 
@@ -81,14 +88,14 @@ I did not execute #jbcompactcrdt in this live IPC-hosting session. The requested
 The item is not code-complete, so I kept it open and narrowed it to the clean-session implementation slice: component-scoped `exchange` `op:replace` through editor IPC, listener-active gate, disk fallback with explicit transport proof, and SimWorld concurrent-edit convergence coverage. The final live JB two-editor verification remains operator-driven.
 
 No repository implementation files were changed in this cycle; only this session document closeout is being persisted. Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange, `tsift status`, and `tasks/agent-doc/plan-jb-compact-crdt.md`. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run #jbcompactcrdt from a dedicated clean session, then perform the live JB verification.
-<!-- agent:boundary:4fc2db06 -->
+<!-- agent:boundary:e868ad59 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.
-- [#jbcompactcrdt]
+- ~~[#jbcompactcrdt]~~
 - [#rtwbcast]
 <!-- /agent:queue -->
 ###
@@ -119,7 +126,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#jbcompactcrdt] JB Compact Exchange CRDT-driven (resolves File Cache Conflict). STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. Implement component-scoped `exchange` `op:replace` via editor IPC by re-implementing/re-enabling `try_ipc_full_content_with_mode` for operator mutation behind the listener-active gate; replace `compact.rs` direct disk write (`compact_exchange_direct_write`) with `transport=editor_ipc` primary plus `transport=disk_fallback`; emit `compact_writeback transport=editor_ipc|disk_fallback`; add SimWorld coverage for concurrent-edit convergence. Then run build/install/commit/push from that clean session. Live JB two-editor verify remains operator-driven (`ops.log` transport=editor_ipc + no File Cache Conflict). Plan: tasks/agent-doc/plan-jb-compact-crdt.md
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 

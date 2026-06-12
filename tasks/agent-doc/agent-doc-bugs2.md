@@ -595,85 +595,41 @@ Done. Bumped both version pins to the latest published releases, refreshed lockf
 **Not done (deliberately, mid-queue):** did not push, did not advance the superproject submodule pointers (both submodule working trees still carry your in-flight stuck-handoff / AGENTS.md edits — pointer moves belong to those work cycles), and did not rebuild/reinstall the live `agent-doc` binary. To make the upgraded `tsift-memory` actually live in the running supervisor you'd want `cd src/agent-doc && cargo build --release && agent-doc lib-install` (or `make install`) on a clean cycle — say the word and I'll do it.
 
 (Closeout note: the first finalize hit the known IPC live-buffer drift — the editor buffer held a stale 13.5KB partial doc that the socket ACK wrote over disk. Recovered via `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk`.)
-<!-- agent:boundary:520fde37 -->
+
+### Re: JB Compact Exchange should be CRDT-driven (File Cache Conflict) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
+
+
+Direction received and recorded — this is now an actionable item, not a gate. Here's the grounded picture and the one honest constraint.
+
+**Root cause (confirmed in code).** `Compact Exchange` writes the compacted document straight to **disk** — `compact.rs:332` calls `atomic_write_if_current_pub(... "compact_exchange_direct_write")`, bypassing the editor IPC/CRDT path. When JB holds the buffer open with unsynced edits (you typing queue items), that direct disk write diverges from the IDE's in-memory buffer → **File Cache Conflict**. The editor-IPC path for compact *exists* (`try_ipc_full_content_with_mode`, write.rs:13326, source label literally `compact_exchange`) but is **hard-disabled** — it unconditionally logs `full_content_ipc_disabled reason=disabled_by_default` and returns `Ok(false)`. So the fix is *re-implement + re-enable*, not a one-line swap.
+
+**Approved approach** (matches your cross-editor follow-up): converge the `exchange` component via a **component-scoped `op:replace` over editor IPC**, mirroring `#q7jm` — so your concurrent edits to *other* components/queue survive the CRDT merge instead of being clobbered by a whole-document replace. Keep the disk write as `transport=disk_fallback`; emit `compact_writeback transport=editor_ipc|disk_fallback` proof so you can prove/disprove it from `ops.log`. Tracked as actionable backlog **`#jbcompactcrdt`** (plan: `tasks/agent-doc/plan-jb-compact-crdt.md`, decision section now marked CONFIRMED).
+
+**The one real constraint (not a stall — a correctness rule).** This edits the exact IPC-write/closeout machinery (`try_ipc_full_content_with_mode`, `compact.rs`, `ffi.rs`) that a live session uses to finalize its *own* responses. Rebuilding the cdylib mid-session hot-reloads that machinery **under the open document** — which is precisely how today's drift happened. So I should implement it in a **clean session**: restart this doc's session so the live supervisor picks up the rebuilt binary, then I land `#jbcompactcrdt` + SimWorld coverage in one pass and tell you exactly when to reinstall the JB plugin. The final two-editor convergence is your live verify (you test, I check `ops.log` for `transport=editor_ipc` + no File Cache Conflict). **Restart and re-invoke `/agent-doc` and I'll implement it first thing** — or say "do it here" and I'll proceed in-session accepting the closeout risk.
+
+---
+
+Answering the two related questions in your queue, since they're the same theme:
+
+**"Why snapshots and not the document model?"** Two different roles. The **document model / realtime current doc** is the *live* state (newest of disk + editor buffer). The **snapshot** is the *merge base* — the committed common ancestor finalize diffs against to tell "what the agent changed" apart from "what you changed concurrently," so it can **3-way/CRDT merge** instead of clobbering. Without a stable base you can't safely merge a response into a doc you're simultaneously editing. The drift you saw = the base/snapshot diverged from the live editor buffer (the IDE acked a stale 13.5KB buffer as authoritative). Your instinct is right, though, and it's already filed: **`#snbc`** proposes collapsing the snapshot+baseline files into *git HEAD (durable base) + the realtime document model (live current)*, eliminating the two drift-prone on-disk files. It's gated only because a Slice-1 audit showed a naive "HEAD-as-base" swap drops the uncommitted-new-prompt from the merge ancestor — so it needs the prompt-bearing-merge SimWorld coverage first, in a clean session.
+
+**"What is the wedge controller? Do we still need it?"** The *controller* is the per-project control-plane process (`agent-doc controller serve`) that owns the tmux pane + IPC socket after the 08b single-project-pane migration — yes, we need it; it's the thing that routes writes and hosts the supervisor in-process. **"Wedged"** is the *bug*: the pane handoff is two-phase (`prepare_handoff` → `promote_handoff`, client-driven). If the client dies or the RPC fails *between* the two phases, the controller stays in `handoff-state Preparing` forever and keeps writing its stale buffer back over your edits — and those orphaned procs survive an IDE restart. That's the IPC drift you keep hitting. We don't want to remove the controller; we want to kill the *wedge* — tracked as **`#stuckhandoff2`**: a self-watchdog/suicide-timer that auto-aborts a controller stuck in `Preparing`, plus gating worktree/IPC writes on the `Stable` state. Until that lands, recovery is: kill the `controller serve … --handoff-state preparing` PIDs (they respawn clean), and the durable fix is `make install` so they respawn on a non-buggy binary.
+<!-- agent:boundary:41cfe853 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-```
-[route] target tmux session: 13
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
-```
-~~~done
-:pushpin: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
-```
-❯ How do I recover from the IPC-drift? Restart Idea?
-● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
-  helped at all. Let me show you why with the live state.
-● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
-      echo "=== who holds the sockets right now ==="…)
-  ⎿  === who holds the sockets right now ===
-     --- .agent-doc/ipc.sock ---
-     COMMAND     PID  USER  FD   TYPE             DEVICE SIZE/OFF       NODE NAME
-     … +86 lines (ctrl+o to expand)
-● Now I have ground truth (my earlier ps | grep idea missed it — RTK/sandbox filtering). The picture is clearer and
-  more useful than "restart IDEA":
-  Two writers are fighting over your doc:
-  1. IDEA holds ipc.sock in LISTEN mode — PID 2144231, FD 325u. It acks its editor buffer as authoritative, which is
-  how content_ours keeps winning.
-  2. Two agent-doc controller serve procs are wedged in --handoff-state preparing — boost-client PID 3767411 and
-  superproject PID 3691684. That's a crashed/interrupted controller handoff; those stuck controllers are the active IPC
-  writers reverting your edits. (The /tmp/adrepro7 one is an unrelated test repo — ignore.)
-  So restarting IDEA is the blunt instrument, not the right first move — it releases ipc.sock, but the wedged
-  controllers are separate processes parented to init that survive an IDE restart, so a restart alone won't fix the
-  re-winning.
-  Let me clear the wedged controllers now (they're lazy-launched and respawn clean on the next agent-doc invoke):
-● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
-      kill 3767411 3691684 2>&1 && echo "killed wedged handoff controllers 3767411 (boost-client) + 3691684 (a…)
-  ⎿  killed wedged handoff controllers 3767411 (boost-client) + 3691684 (agent-loop)
-     === remaining controllers ===
-     brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
-     … +8 lines (ctrl+o to expand)
-     … +8 lines (ctrl+o to expand)
-● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
-  (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
-  open; it's no longer fighting a stuck handoff.
-  So here's the actual answer to your question:
-  No — don't restart IDEA (it's the blunt instrument)
-  The drift this session wasn't caused by IDEA per se — it was two agent-doc controller serve procs wedged mid-handoff
-  (--handoff-state preparing), which survive an IDE restart anyway. I just killed them; the problem is cleared.
-  What causes IPC drift
-  A multi-owner race on .agent-doc/ipc.sock:
-  - IDEA holds the socket (LISTEN) and acks its editor buffer (content_ours) as the source of truth.
-  - A crashed/interrupted controller handoff leaves controllers stuck in preparing; those keep writing the stale buffer
-  back over your edits → live_prompt_drift_after_preflight, postcommit_worktree_check match=false.
-  Recovery ladder — least → most invasive
-  1. Working tree only (the common case): finalize usually commits the correct thing to HEAD; only the on-disk copy
-  drifts. Verify with git show HEAD:<file> | grep -c '<Re: topic>' → if 1, just git checkout HEAD -- <file> then
-  agent-doc session-check. One command. (This is exactly what fixed today's cycle.)
-  2. Wedged controllers (what I did): kill the controller serve … --handoff-state preparing PIDs — they're lazy and
-  respawn clean on next invoke.
-  3. IDEA fighting the buffer: close or revert the doc tab in IDEA (File → Revert, or close the
-  tasks/monsterrodholders.md tab). This releases its claim on the buffer — don't kill the whole IDE.
-  4. Restart IDEA: only if 1–3 don't release ipc.sock. Overkill, and it won't clear wedged controllers.
-  The durable fix (recommended)
-  Preflight flagged a stale install: your ~/.cargo/bin agent-doc cdylib predates source commit e6f7538e. Wedged
-  preparing handoffs are exactly the bug class a stale binary produces — the controllers I just respawned are still on
-  the old binary. Rebuild and recycle them:
-  cd /home/brian/work/btakita/agent-loop/src/agent-doc && make install
-  # then recycle so they respawn on the fresh binary:
-  pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
-  Want me to run the make install rebuild now?
-```
-~~~
-- :pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
+- ~~:pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.~~
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - :round_pushpin: do [#snbc2]
 - :round_pushpin: do [#fintol]
 - :round_pushpin: do [#pcwc]
 - :round_pushpin: do [#rtwbcast]
-- ~~:round_pushpin: do [#efscodexsubmit]~~
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->

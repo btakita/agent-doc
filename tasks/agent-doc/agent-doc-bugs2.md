@@ -302,7 +302,6 @@ Tell me to proceed and I'll take `#fintol`/`#pcwc` in a fresh clean session with
 >      === remaining controllers ===
 >      brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
 >      … +8 lines (ctrl+o to expand)
->      … +8 lines (ctrl+o to expand)
 > ● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
 >   (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
 >   open; it's no longer fighting a stuck handoff.
@@ -363,26 +362,34 @@ That's why recovery required `pkill -f 'controller serve ... --handoff-state pre
 M1 + M2 are the durable core (self-clearing **and** harmless-while-wedged).
 
 **Why queued, not implemented this cycle:** this touches controller process lifecycle and needs SimWorld coverage in a **clean** session — the submodule currently carries uncommitted `#fintol` work (`write.rs`/`sim_world.rs`/`finalize_integration.rs`), and landing lifecycle changes on top of that dirty tree would entangle the two. Say "do #stuckhandoff2" in a clean session and I'll implement M1+M2 with coverage and recycle the controllers.
-<!-- agent:boundary:9bdb2c8e -->
+
+### Re: do #stuckhandoff2 (+ the queue re-flood) — opus-4-8
+
+
+**Where #stuckhandoff2 actually stands:** the two strongest rungs are already written and committed — **M1 (controller self-watchdog / suicide-timer on `Preparing`)** and **M3 (orphan proc-scan reaper)** — at submodule `08dfc27b` (`project_controller.rs` +397, `gc.rs` +18), and the superproject pointer is bumped (`908e2fffb`). So the code exists on `main`.
+
+**But it is not live yet, and that matters.** Your installed `~/.cargo/bin/agent-doc` predates `08dfc27b` (preflight flagged `stale_install`). The controllers running in your tmux/JB sessions right now are still the *old* binary — which is exactly why the wedged-`Preparing` drift kept happening even after the fix landed. The fix can't help until the binary + cdylib are rebuilt and the controllers are recycled.
+
+**Why I will not install it in *this* session:** `cargo install --path .` builds from the submodule working tree, and that tree currently carries **uncommitted `#fintol` changes in `write.rs`** (the finalize/closeout path) plus `sim_world.rs` / `finalize_integration.rs`. Building now would bake unproven finalize-tolerance behavior into your live binary. That's the cross-contamination the `#stuckhandoff2` item itself warns about ("CLEAN session required — submodule carries uncommitted `#fintol` work").
+
+**What still remains on #stuckhandoff2:** M2 (gate worktree/ipc writes on `Stable` — the symptom-killer that also shrinks the `#pcwc` window), M4 (client handoff drop-guard), M5 (cross-project gc sweep). M2 touches the same closeout path as the dirty `#fintol` tree, so it must land on a clean checkout with SimWorld coverage — not here.
+
+**On the queue re-flood:** the `queue_paused ... receipt_id=3263 ... operator-reported flooding` you pasted is the `#qflood` bug — the pause held, then the go-queue auto-started anyway as you typed. Combined with the session-drift this cycle (registered panes spanning 3 tmux sessions, a recovered stale cycle, 17890 no-op closeouts, 96% cached prompt), this session is too churned to safely drive lifecycle code.
+
+**Recommendation — restart into a clean session, then:**
+```
+cd src/agent-doc && cargo install --path . && cargo build --release && agent-doc lib-install
+pkill -f 'agent-doc controller serve'   # recycle controllers onto the fresh binary
+```
+That makes M1+M3 actually live (and recycles the wedged controllers). After that, land M2 on the clean tree. I'm **not** auto-looping this queue — a clean restart is the unblock, not another drain pass through a poisoned session.
+<!-- agent:boundary:3ba3ce84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: :round_pushpin: do [#kp5z]~~
-- ~~:pushpin: :round_pushpin: [#rtwbcast]~~
-- ~~:round_pushpin: do [#snbc]~~
-- ~~:round_pushpin: [#rtwverify]. Use simworld tests~~
-- ~~:pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.~~
-~~~done
-:pushpin: agent-doc monsterrodholders.md had an error:
-```
-  Process note: the finalize hit IPC drift (the JetBrains editor buffer briefly overwrote the working-tree file after
-  the commit). The commit itself was correct; I reconciled the working tree to HEAD and rebuilt the snapshot, and
-  session-check is green.
-```
-~~~
-:pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
+- :pushpin: [#stuckhandoff2]
+- :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
 [route] target tmux session: 13
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator-reported flooding: queue dispatch submitting agent-doc triggers into running Claude Code session during finalize/queue-run (cross-harness, repro'd on lazily-rs Codex); halting auto-drain pending fix receipt_id=3263
@@ -449,17 +456,15 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   Want me to run the make install rebuild now?
 ```
 ---
-- ~~:pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?~~
-- ~~:pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.~~
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
-- ~~Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.~~
 - :round_pushpin: do [#snbc2]
 - :round_pushpin: do [#fintol]
 - :round_pushpin: do [#pcwc]
+- :round_pushpin: do [#rtwbcast]
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->

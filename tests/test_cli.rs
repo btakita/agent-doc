@@ -642,7 +642,11 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
 
 fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
     match (source, token) {
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
+        // 19 -> 13: the `#[cfg(test)] mod tests` was extracted into
+        // `git/tests.rs` (large-module split, #splitmods2). The 6 removed
+        // `guard_` occurrences were test-assertion literals, not production
+        // hot-path guards.
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 13,
         // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
         // logs when it restored the working tree to HEAD because committed content
         // was dropped with no new user work (vs a preserved carry-forward superset).

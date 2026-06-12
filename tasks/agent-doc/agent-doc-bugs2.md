@@ -22,7 +22,7 @@ queue: stop
 
  <!-- agent:status patch=replace -->
 
-#fintol already complete; queue item consumed with no source changes.
+#pcwc done; code, tests, build, local binary/library install complete; JetBrains plugin artifact 0.2.161 built, manual IDE-profile install still needed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,6 +35,21 @@ queue: stop
 Compacted content:
 ❯ - Archived 25 response topic(s): do [#swint]; Root cause of "stuck-handoff" + how the binary mitigates it; Do we still need separate snapshot + baseline files?; 22 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+- The local JetBrains plugin install command could not complete because multiple IDE profiles were detected and the command has no non-interactive selector. Install the built plugin zip into the active IntelliJ IDEA profile: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.161.zip`.
+- Retried `make install` with escalation after the crates.io HTTP/2 failure; it failed the same way, so I used offline Cargo install from the already-verified local cache.
+- parent repo: `62c8687f agent-doc(#pcwc): update submodule pointer`
+- `src/agent-doc`: `b679a932 agent-doc(#pcwc): JB plugin refresh_content handler + stale-buffer guard`
+- `src/agent-doc`: `3cb4265a agent-doc(#pcwc): push committed content to editor after worktree repair`
+- `agent-doc lib-install` installed `libagent_doc-0.34.0.so`.
+- `cargo build --release --lib --offline` passed.
+- `cargo install --path . --offline` passed after online `make install` failed on crates.io HTTP/2 registry errors.
+- `./gradlew test buildPlugin` passed and built `agent-doc-jetbrains-0.2.161.zip`.
+- `make check` passed via `tsift digest-runner`.
+- `./gradlew test --tests com.github.btakita.agentdoc.RefreshContentPreconditionTest` passed.
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration postcommit_worktree -- --nocapture` passed.
+- In the submodule: `agent-doc-orchestration/src/git.rs`, `agent-doc-orchestration/src/ipc_socket.rs`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/RefreshContentPreconditionTest.kt`, `editors/jetbrains/gradle.properties`, `SPEC.md`, `VERSIONS.md`, and the hot-path budget in `tests/test_cli.rs`.
+- `src/agent-doc` submodule now points at `b679a932` on `origin/main`.
 
 ### Re: struck `do [#fintol]` — opus-4-8
 
@@ -43,16 +58,19 @@ Confirmed — `#fintol` is genuinely complete, so striking it is correct. The fi
 Queue state after this strike: the active head is now `#pcwc` (post-commit IPC worktree corruption — note `#pcwc` already has groundwork at `8aea7e3d agent-doc(#pcwc): auto-reconcile post-commit worktree corruption to HEAD`), followed by `#rtwbcast` and `#jbcompactcrdt`, then two free-text questions.
 
 One caution before draining further: this session is heavily bloated (largest turn ~477k tokens, ~97% cached resend, restart churn, ~18k no-op closeouts per next-context). Both `#pcwc` and `#rtwbcast` carry known blockers (carry-forward invariant; editor-plugin protocol decision + two-live-IDE verify) that won't close cleanly in one auto-loop cycle. Recommend `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` (or a fresh `agent-doc start`) before taking on the remaining implementation items.
-<!-- agent:boundary:1f9fca45 -->
+<!-- agent:boundary:65e6feba -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" **** -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~:pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.~~
 - ~~:pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.~~
 - ~~:round_pushpin: do [#snbc2]~~
 - ~~:round_pushpin: do [#fintol]~~
+- do [#pcwc]
+- do [#rtwbcast]
+- do [#jbcompactcrdt]
 <!-- /agent:queue -->
 ###
 <!--
@@ -83,7 +101,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jbcompactcrdt] JB Compact Exchange CRDT-driven (resolves File Cache Conflict). Direction CONFIRMED by operator. Re-implement+re-enable the disabled full-content editor-IPC path (try_ipc_full_content_with_mode, write.rs:13326, currently Ok(false) reason=disabled_by_default) as a component-scoped exchange op:replace via editor IPC (mirror #q7jm), replacing the direct disk write at compact.rs:332 (compact_exchange_direct_write). Keep disk write as transport=disk_fallback, gate behind listener-active, emit proof compact_writeback transport=editor_ipc|disk_fallback, add SimWorld coverage for the concurrent-edit convergence. MUST run in a CLEAN session (rebuilding the IPC-write cdylib mid-session hot-reloads the machinery finalizing the same response = drift). Live JB two-editor verify is operator-drive (ops.log transport=editor_ipc + no File Cache Conflict). Plan: tasks/agent-doc/plan-jb-compact-crdt.md
-- [ ] [#pcwc] [recommended] Post-commit IPC worktree corruption (#postcommit-ipc-worktree-corruption): after a CORRECT finalize commit, a late IPC reposition / stale editor-buffer write-back overwrites the working tree (postcommit_worktree_check match=false), forcing a manual git checkout HEAD -- FILE. Reported on monsterrodholders.md AND reproduced live on agent-doc-bugs2.md 2026-06-11. DETECTION already landed (emit_postcommit_worktree_check, git.rs:3336); the open gap is AUTO-REMEDIATION: when HEAD is authoritative (match=false but HEAD holds the correct committed response), reconcile the worktree to HEAD automatically AND push the committed content to the editor buffer (so it stops writing stale content back) instead of warning + leaving a manual git checkout. The editor-buffer push is the durable fix and overlaps #rtwbcast (broadcast committed content to editor buffers); the worktree reconcile is doable now via show_head. Verify with SimWorld (worktree==HEAD guard + a post-commit stale-buffer-writeback case). Reuses existing plan: tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md (open 'auto-repair' checkbox). Related: #fintol, #rtwbcast.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 

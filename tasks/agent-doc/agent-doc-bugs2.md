@@ -35,7 +35,25 @@ queue: start
 Compacted content:
 - Archived 2 response topic(s): struck `do [#fintol]`; queue maintenance after #pcwc
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:60f32312 -->
+### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
+
+I'm not executing #rtwbcast in this session, and the `#spec-test-build-install-commit-push` preset must not run here. #rtwbcast stays an OPEN actionable backlog item. Concrete blocker + unblock path:
+
+**Why not here**
+- This session is actively hosting `agent-doc-bugs2.md` over IPC — preflight ran a `jb_cache_conflict` auto-commit and reported `IPC listener active`. Completing #rtwbcast under the queued preset means `cargo build --release && agent-doc lib-install`, which hot-reloads the cdylib that THIS session uses to finalize this very response. That is the documented drift trigger — the same one #jbcompactcrdt's note names: "rebuilding the IPC-write cdylib mid-session hot-reloads the machinery finalizing the same response = drift".
+- #rtwbcast's own 2026-06-11 investigation marked it BLOCKED, not Rust-only: it needs (a) an editor-plugin protocol decision and (b) a two-live-IDE convergence verify. The two-IDE verify is operator-drive and cannot be agent-completed.
+
+**Recommended unblock path (dedicated CLEAN session)**
+Run in a fresh session NOT hosting a live agent-doc IPC document, decomposed as already planned (Option A — per-editor channel + editor_id ABI):
+1. **#rtwbcast-id** — add `editor_id` to the FFI buffer-report + patch JSON ABI; key `live_buffer_snapshot_path` per-editor (ffi.rs:238). Rust + SimWorld only, no live verify.
+2. **#rtwbcast-deliver** — replace PatchWatcher.kt single-consumer delete-on-first-ACK with a per-editor broadcast bus.
+3. **#rtwbcast-merge** — per-editor echo suppression (editor_id in claimed-patches, not suppress-ALL); reuse the existing CRDT merge primitive + SimWorld Slice 3.
+4. **#rtwbcast-verify** — two-live-IDE convergence (operator-drive).
+
+Then build+install+push in that clean session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4).
+
+**Auto-loop halted:** the next queued item #jbcompactcrdt carries the same `MUST run in a CLEAN session` constraint, so I am NOT draining into it. Start a dedicated clean session for both.
+<!-- agent:boundary:abb4ba6b -->
 <!-- /agent:exchange -->
 
 ## Queue

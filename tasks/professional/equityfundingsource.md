@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,157 +32,12 @@ Sent the Stripe account setup email from brian.takita@gmail.com via Corky to Jud
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260612-184510.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260612-225138.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Admin Needs Attention default-open + deploy; Pipeline card email + deploy; Needs Attention item emails + deploy; 5 more
+- Archived 4 response topic(s): Stripe account email; Stripe account email sent; Remove payment processors; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-Implemented and pushed EFS commit 3ffcc32 (`feat(admin): edit subject property fields`). The admin full-application detail now has an editable Step 4 - Subject property card backed by `PATCH /api/admin/full-applications/:id/subject-property`.
-
-Change history was not previously tracked for subject-property edits. It is now: migration `0061_application_subject_property_admin_history.sql` adds the extended subject-property columns plus `application_subject_property_change_logs`, and the admin endpoint records one history row per changed field with old value, new value, admin user, and timestamp. The Step 4 card also shows that history.
-
-Verification passed: targeted `bun test tests/admin-subject-property-edit.test.ts tests/apply4-full-application-p5.test.ts tests/admin-full-application-approve-ui.test.ts`, full `make check`, and a second clean committed-tree `make check` after stashing unrelated local EFS edits. GitHub CI lookup is still unavailable because this repo has no workflow named `CI`. Existing unrelated EFS local changes were restored and remain unstaged.
-Implemented and pushed EFS commit 3ffcc32. Admin full-application Step 4 subject-property fields are now editable, extended subject-property fields persist, and admin edits are tracked per field in application_subject_property_change_logs with old and new values. Verification passed: targeted tests, full make check, and clean committed-tree make check. GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
-
-### Re: Stripe account email — gpt-5
-
-Draft email:
-
-Subject: Stripe account setup for borrower payments
-
-Hi Robert and Judith,
-
-We are almost ready to launch the new Equity Funding Source website and portals. One of the last launch items is connecting Stripe so borrower payments can be tested safely first, then switched to live payments when you approve.
-
-Please create or prepare an EFS-owned Stripe account for borrower payments.
-
-Recommended Stripe setup path:
-
-1. Create the Stripe account under the Equity Funding Source business name: https://dashboard.stripe.com/register
-2. Complete Stripe's business verification and account checklist so the account can process live payments and receive payouts: https://docs.stripe.com/get-started/account/set-up
-3. Add the payout bank account that should receive borrower payment deposits.
-4. Enable the payment methods borrowers should be able to use. For the borrower portal, ACH Direct Debit is the most important option if you want bank-account payments; card payments can also be enabled if desired. Stripe's ACH setup reference is here: https://docs.stripe.com/payments/ach-direct-debit
-5. Use Stripe's sandbox/test mode first. Test mode uses separate API keys and simulated payments, so we can verify the borrower payment flow without moving real money. Stripe's API key guide is here: https://docs.stripe.com/keys
-6. After testing is approved, switch to live mode and use the live API keys/webhook signing secret for production. Please do not send live secret keys by email; either invite me/the implementation team as a Stripe team member or share credentials through a secure password manager.
-
-Items needed to finish the integration:
-
-- A Stripe team invite for the implementation work, or secure access to the account.
-- Confirmation on whether borrower payments should support ACH only, card only, or both ACH and card.
-- Confirmation of the payout bank account and the customer statement descriptor borrowers should see.
-- Approval before we turn on live borrower payments after the final test transaction passes.
-
-Once the account is ready, I can connect the test environment first, run through the borrower payment flow, and then prepare the live switch for your approval.
-
-Best,
-Brian
-
-### Re: Stripe account email sent — gpt-5
-
-> **Queue prompt:**
->
-> Use corky to send the draft email from brian.takita@gmail.com
-
-
-Sent the Stripe account setup email through Corky from `brian.takita@gmail.com`.
-
-Delivery:
-- To: Judith Krug `<judithkrug@gmail.com>`
-- CC: Robert Waldman `<rwaldman100@gmail.com>`
-- Subject: `Stripe account setup for borrower payments`
-- Corky result: `action=sent`, `transport=smtp`, `account=personal`, `status=approved -> sent`
-
-Changed paths:
-- `mail/drafts/2026-06-12-efs-stripe-account-setup.md`
-- `mail` submodule pointer
-
-Commits:
-- `mail` submodule: `1eca6da mail: record sent EFS Stripe setup email`
-- parent repo: `93e845b03 mail: update sent EFS Stripe setup draft`
-
-Verification:
-- `corky draft validate mail/drafts/2026-06-12-efs-stripe-account-setup.md` passed.
-- `corky draft push mail/drafts/2026-06-12-efs-stripe-account-setup.md --send --json` returned `action=sent` from `account_user=brian.takita@gmail.com`.
-- Scoped status for `mail` and `tasks/professional/equityfundingsource.md` was clean after the commits.
-- No full test suite or CI check was run because this turn did not change code, tests, build logic, or instruction surfaces.
-
-Confidence: high.
-Escalation: none.
-
-### Re: Remove payment processors — gpt-5
-
-> **Queue prompt:**
->
-> Remove Stripe and Paypal integration. We are not taking payments from borrowers.
-
-
-Removed the borrower online payment processor path. EFS no longer exposes Stripe settings, checkout, webhook ingestion, payment transaction persistence, or processor-specific borrower UI. I found no PayPal runtime integration; the only PayPal hits were bundled Font Awesome brand CSS, so there was no PayPal app code to remove.
-
-Changed paths:
-- `src/equityfundingsource-dev` submodule commit `39b54ae` (`Remove borrower payment processors`)
-- Parent repo commit `8347e967c` updates the EFS submodule pointer
-- Runtime/UI: `app/equityfundingsource/lib/payments/routes.ts`, `lib/ui--browser--efs/portal/borrower/make_payment.tsx`, `lib/ui--browser--efs/portal/admin/settings.tsx`, `app/equityfundingsource/lib/admin/repo.ts`, `app/equityfundingsource/lib/admin/settings/index.ts`
-- Removed: `app/equityfundingsource/lib/payments/stripe.ts`, `app/equityfundingsource/lib/payments/repo.ts`, `app/equityfundingsource/migrations/0035_loan_payment_transactions.sql`, `tests/borrower-payments-stripe.test.ts`
-- Added/updated no-processor coverage and PRD wording: `tests/borrower-payments-no-processor.test.ts`, `tests/admin-payment-settings.test.ts`, `tests/borrower-payments-ui.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`
-
-Verification:
-- `bun test tests/admin-payment-settings.test.ts tests/borrower-payments-ui.test.ts tests/borrower-payments-no-processor.test.ts` passed: 12 tests.
-- `make check` passed: 562 tests, browser build, and worker build.
-- Runtime scan `rg "stripe|Stripe|STRIPE|PayPal|Paypal|paypal|payment_intent|/api/borrower/payments/checkout|/api/stripe/webhook|checkout/sessions|loan_payment_transactions" app lib` returned no matches.
-- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Notes:
-- The borrower payment pages remain read-only/servicing-remittance oriented: they show TMO-synced schedule data and instructions, but do not collect borrower payments through EFS.
-- Pre-existing unrelated EFS worktree changes remain unstaged.
-- The exchange is large, but the queue is active, so I continued without compacting.
-
-Confidence: high.
-Escalation: none.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed the current EFS Worker build from `src/equityfundingsource-dev` commit `39b54ae` (`Remove borrower payment processors`) to Cloudflare.
-
-Deployment:
-- Pushed EFS submodule `main` to origin: `3ffcc32..39b54ae`.
-- Applied remote D1 migration `0061_application_subject_property_admin_history.sql`.
-- Deployed Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Cloudflare Worker Version ID: `f26cde51-5514-4d53-a648-afaecb117b3b`
-
-Changed paths:
-- No new source edits in this cycle. This deployed the already-committed EFS change set at `39b54ae`.
-- The pre-existing unstaged EFS local edits were stashed before deploy and restored after deploy; they remain unstaged.
-
-Commands:
-- `git push origin main`
-- `git stash push -m agent-doc-deploy-preserve-local-efs-edits`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
-- `make check`
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/funded-deals`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/api/borrower/payments/checkout`
-- `git stash pop`
-- `gh run list --workflow CI --limit 1`
-
-Verification:
-- `make check` passed: 559 tests, browser build, and worker build.
-- Post-deploy D1 migration list reports: no migrations to apply.
-- Live smoke tests passed: `/` returned `200`, `/funded-deals` returned `200`.
-- Removed checkout route smoke test passed: `/api/borrower/payments/checkout` returned `404`.
-- GitHub CI check is unavailable for this repo because there is no workflow named `CI`.
-- EFS submodule status after restore is back to `main...origin/main` with the same pre-existing unstaged local edits preserved.
-
-Note: preflight still reports the local `agent-doc` install is stale relative to source commit `a15ed055`; rebuild with `make install` in `src/agent-doc` when you want to clear that toolchain warning.
-
-Confidence: high.
-Escalation: none.
-<!-- agent:boundary:b5ca743e -->
+<!-- agent:boundary:a5b11552 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -190,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The admin should be able to edit loan applications such as https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3. Ensure we have the change history saved in the database. Make the change history viewable for all forms.
 <!-- /agent:queue -->
 
 ## Backlog

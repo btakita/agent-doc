@@ -58,7 +58,13 @@ Confirmed — `#fintol` is genuinely complete, so striking it is correct. The fi
 Queue state after this strike: the active head is now `#pcwc` (post-commit IPC worktree corruption — note `#pcwc` already has groundwork at `8aea7e3d agent-doc(#pcwc): auto-reconcile post-commit worktree corruption to HEAD`), followed by `#rtwbcast` and `#jbcompactcrdt`, then two free-text questions.
 
 One caution before draining further: this session is heavily bloated (largest turn ~477k tokens, ~97% cached resend, restart churn, ~18k no-op closeouts per next-context). Both `#pcwc` and `#rtwbcast` carry known blockers (carry-forward invariant; editor-plugin protocol decision + two-live-IDE verify) that won't close cleanly in one auto-loop cycle. Recommend `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` (or a fresh `agent-doc start`) before taking on the remaining implementation items.
-<!-- agent:boundary:65e6feba -->
+
+### Re: queue maintenance after #pcwc
+
+Committed the queue maintenance left after #pcwc closeout: #pcwc is reaped from backlog and struck in the inactive queue residue, while #rtwbcast and #jbcompactcrdt remain open and preserved. No source changes in this maintenance cycle.
+
+Verification: session-check was clean before this maintenance preflight, and this cycle only normalizes the queue state surfaced by preflight. The #pcwc implementation proof remains the prior closeout: submodule commits 3cb4265a and b679a932, parent pointer commit 62c8687f, make check green, JetBrains buildPlugin green, binary/native library installed.
+<!-- agent:boundary:11a047db -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -68,9 +74,7 @@ One caution before draining further: this session is heavily bloated (largest tu
 - ~~:pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.~~
 - ~~:round_pushpin: do [#snbc2]~~
 - ~~:round_pushpin: do [#fintol]~~
-- do [#pcwc]
-- do [#rtwbcast]
-- do [#jbcompactcrdt]
+- ~~do [#pcwc]~~
 <!-- /agent:queue -->
 ###
 <!--

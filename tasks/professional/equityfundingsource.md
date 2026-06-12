@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -43,7 +43,42 @@ Change history was not previously tracked for subject-property edits. It is now:
 
 Verification passed: targeted `bun test tests/admin-subject-property-edit.test.ts tests/apply4-full-application-p5.test.ts tests/admin-full-application-approve-ui.test.ts`, full `make check`, and a second clean committed-tree `make check` after stashing unrelated local EFS edits. GitHub CI lookup is still unavailable because this repo has no workflow named `CI`. Existing unrelated EFS local changes were restored and remain unstaged.
 Implemented and pushed EFS commit 3ffcc32. Admin full-application Step 4 subject-property fields are now editable, extended subject-property fields persist, and admin edits are tracked per field in application_subject_property_change_logs with old and new values. Verification passed: targeted tests, full make check, and clean committed-tree make check. GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
-<!-- agent:boundary:224ba0bb -->
+Draft email:
+
+> **Queue prompt:**
+>
+> Please draft an email for robert-waldman and judith-krug mentioning that we are almost ready to launch the website and portals. Please ask for a stripe account with instructions on how to set up a test account and a real account for borrower payments.
+
+
+Subject: Stripe account setup for borrower payments
+
+Hi Robert and Judith,
+
+We are almost ready to launch the new Equity Funding Source website and portals. One of the last launch items is connecting Stripe so borrower payments can be tested safely first, then switched to live payments when you approve.
+
+Could you please create or prepare an EFS-owned Stripe account for borrower payments?
+
+Here is the setup path I recommend:
+
+1. Create the Stripe account under the Equity Funding Source business name: https://dashboard.stripe.com/register
+2. Complete Stripe's business verification and account checklist so the account can process live payments and receive payouts: https://docs.stripe.com/get-started/account/set-up
+3. Add the payout bank account that should receive borrower payment deposits.
+4. In Stripe, enable the payment methods you want borrowers to use. For our borrower portal, ACH Direct Debit is the most important option if you want bank-account payments; card payments can also be enabled if desired. Stripe's ACH setup reference is here: https://docs.stripe.com/payments/ach-direct-debit
+5. For testing, use Stripe's sandbox/test mode first. Test mode uses separate API keys and simulated payments, so we can verify the borrower payment flow without moving real money. Stripe's API key guide is here: https://docs.stripe.com/keys
+6. When testing is approved, switch to live mode and use the live API keys/webhook signing secret for production. Please do not send live secret keys by email; either invite me/the implementation team as a Stripe team member or share credentials through a secure password manager.
+
+What I need from you to finish this cleanly:
+
+- A Stripe team invite for the implementation work, or secure access to the account.
+- Confirmation on whether borrower payments should support ACH only, card only, or both ACH and card.
+- Confirmation of the payout bank account and the customer statement descriptor you want borrowers to see.
+- Approval before we turn on live borrower payments after the final test transaction passes.
+
+Once the account is ready, I can connect the test environment first, run through the borrower payment flow, and then prepare the live switch for your approval.
+
+Best,
+Brian
+<!-- agent:boundary:96260398 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +86,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please draft an email for robert-waldman and judith-krug mentioning that we are almost ready to launch the website and portals. Please ask for a stripe account with instructions on how to set up a test account and a real account for borrower payments.
 <!-- /agent:queue -->
 
 ## Backlog

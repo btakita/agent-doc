@@ -3180,10 +3180,16 @@ fn consume_queue_prompts_with_outcome(
         return Ok(None);
     };
 
-    if !skip_visible_guard {
-        guard_visible_write_idle(file, "queue_consume")?;
+    // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
+    // listener is active (no `File Cache Conflict` dialog); fall back to the
+    // guarded disk write otherwise. The force-disk repair path keeps its raw
+    // bypass — it deliberately skips IPC/IDE and the visible-write guard.
+    if skip_visible_guard {
+        atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
+    } else {
+        converge_document_or_disk(file, &plan.new_document, &content, "queue_consume")
+            .context("queue consume: failed to write document")?;
     }
-    atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
     if plan.save_snapshot {
         snapshot::save(file, &plan.new_snapshot)?;
     }
@@ -3881,10 +3887,16 @@ fn mark_completed_queue_prompts_for_done_ids(
         None
     };
 
-    if !skip_visible_guard {
-        guard_visible_write_idle(file, "queue_done_id_mark")?;
+    // `#fcc0`: converge the done-id mark write through the editor IPC when a JB
+    // listener is active (no `File Cache Conflict` dialog); fall back to the
+    // guarded disk write otherwise. The force-disk repair path keeps its raw
+    // bypass — it deliberately skips IPC/IDE and the visible-write guard.
+    if skip_visible_guard {
+        atomic_write(file, &new_document).context("queue done-id mark: failed to write document")?;
+    } else {
+        converge_document_or_disk(file, &new_document, &content, "queue_done_id_mark")
+            .context("queue done-id mark: failed to write document")?;
     }
-    atomic_write(file, &new_document).context("queue done-id mark: failed to write document")?;
     if let Some(new_snapshot) = new_snapshot {
         snapshot::save(file, &new_snapshot)?;
     }
@@ -7560,10 +7572,24 @@ fn try_editor_converge_live_prompt_drift(
 /// the disk write), `Ok(false)` to fall back to the guarded disk write (no
 /// listener, no delta, no/mismatched ack, or send failure). The disk write
 /// remains the fail-safe so compaction never silently drops content.
-pub fn try_compact_editor_converge(
+/// `#fcc0`/`#w42v`: converge a full-document write through the editor IPC when a
+/// JB listener is active, returning `true` when the editor buffer has been
+/// converged to `target` (no disk write needed) and `false` when the caller must
+/// fall back to a guarded disk write (no listener, no component delta, or an
+/// unconfirmed ack).
+///
+/// When a listener is active this computes the component-scoped delta between
+/// `current_content` and `target` and applies it via `op:replace` patches through
+/// the Document API, so the open buffer never diverges from disk and no
+/// `File Cache Conflict` dialog fires. `source` labels the `ops.log` writeback
+/// transport lines (`<source>_writeback ... transport=editor_ipc|disk_fallback`)
+/// so each write site is attributable; see [`converge_document_or_disk`] for the
+/// shared converge-or-disk wrapper every document-mutating write routes through.
+pub fn try_editor_converge(
     file: &Path,
-    compacted: &str,
+    target: &str,
     current_content: &str,
+    source: &str,
 ) -> Result<bool> {
     let Some(project_root) = file
         .canonicalize()
@@ -7576,20 +7602,20 @@ pub fn try_compact_editor_converge(
         crate::ops_log::log_op(
             file,
             &format!(
-                "compact_writeback file={} transport=disk_fallback reason=no_listener",
+                "{source}_writeback file={} transport=disk_fallback reason=no_listener",
                 file.display()
             ),
         );
         return Ok(false);
     }
 
-    let patches = live_prompt_drift_convergence_patches(current_content, compacted)?;
-    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, compacted);
+    let patches = live_prompt_drift_convergence_patches(current_content, target)?;
+    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, target);
     if patches.is_empty() && frontmatter.is_none() {
         crate::ops_log::log_op(
             file,
             &format!(
-                "compact_writeback file={} transport=disk_fallback reason=no_component_delta",
+                "{source}_writeback file={} transport=disk_fallback reason=no_component_delta",
                 file.display()
             ),
         );
@@ -7615,7 +7641,7 @@ pub fn try_compact_editor_converge(
     crate::ops_log::log_op(
         file,
         &format!(
-            "compact_editor_convergence_attempt file={} patch_id={} patches={} frontmatter={}",
+            "{source}_editor_convergence_attempt file={} patch_id={} patches={} frontmatter={}",
             file.display(),
             patch_id,
             payload
@@ -7639,7 +7665,7 @@ pub fn try_compact_editor_converge(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "compact_writeback file={} patch_id={} transport=disk_fallback reason=no_ack_content",
+                        "{source}_writeback file={} patch_id={} transport=disk_fallback reason=no_ack_content",
                         file.display(),
                         patch_id
                     ),
@@ -7647,12 +7673,12 @@ pub fn try_compact_editor_converge(
                 return Ok(false);
             };
             if crate::git::normalize_transient_agent_doc_markers(&recovered)
-                == crate::git::normalize_transient_agent_doc_markers(compacted)
+                == crate::git::normalize_transient_agent_doc_markers(target)
             {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "compact_writeback file={} patch_id={} recovered_len={} transport=editor_ipc",
+                        "{source}_writeback file={} patch_id={} recovered_len={} transport=editor_ipc",
                         file.display(),
                         patch_id,
                         recovered.len()
@@ -7663,11 +7689,11 @@ pub fn try_compact_editor_converge(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "compact_writeback file={} patch_id={} transport=disk_fallback reason=ack_mismatch recovered_len={} target_len={}",
+                        "{source}_writeback file={} patch_id={} transport=disk_fallback reason=ack_mismatch recovered_len={} target_len={}",
                         file.display(),
                         patch_id,
                         recovered.len(),
-                        compacted.len()
+                        target.len()
                     ),
                 );
                 Ok(false)
@@ -7677,7 +7703,7 @@ pub fn try_compact_editor_converge(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "compact_writeback file={} transport=disk_fallback reason=no_ack",
+                    "{source}_writeback file={} transport=disk_fallback reason=no_ack",
                     file.display()
                 ),
             );
@@ -7687,7 +7713,7 @@ pub fn try_compact_editor_converge(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "compact_writeback file={} transport=disk_fallback reason=send_failed error={}",
+                    "{source}_writeback file={} transport=disk_fallback reason=send_failed error={}",
                     file.display(),
                     err
                 ),
@@ -7695,6 +7721,26 @@ pub fn try_compact_editor_converge(
             Ok(false)
         }
     }
+}
+
+/// `#fcc0`: the single converge-or-disk gate every document-mutating write site
+/// routes through. When a JB editor listener is active it converges `target`
+/// through the editor IPC (component `op:replace` — no `File Cache Conflict`
+/// dialog); otherwise (no listener / no delta / unconfirmed ack) it falls back to
+/// the guarded disk write keyed off the same visible-buffer proof used by
+/// response writes. `current` is the expected current document content (held
+/// under the caller's doc lock) and drives both the editor delta and the
+/// idle+current disk guard.
+pub fn converge_document_or_disk(
+    file: &Path,
+    target: &str,
+    current: &str,
+    source: &str,
+) -> Result<()> {
+    if try_editor_converge(file, target, current, source)? {
+        return Ok(());
+    }
+    atomic_write_if_current_pub(file, target, current, source)
 }
 
 fn live_prompt_drift_convergence_patches(
@@ -8945,7 +8991,14 @@ pub fn run_template(
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
     snapshot::save(file, snapshot_content)?;
 
-    atomic_write(file, &final_content)?;
+    // `#fcc0`: template (non-CRDT) mode writes the merged document straight to
+    // disk — the only response path with no prior IPC attempt. Converge through
+    // the editor when a JB listener is active (no `File Cache Conflict` dialog);
+    // the guard already ran above, so the no-listener fallback is the bare disk
+    // write rather than the double-guarded converger entry point.
+    if !try_editor_converge(file, &final_content, &content_current, "write_template")? {
+        atomic_write(file, &final_content)?;
+    }
 
     crate::ops_log::log_cycle(
         file,
@@ -18216,7 +18269,7 @@ scratch
         let compacted = drift_content_ours();
         std::fs::write(&doc, &current).unwrap();
 
-        let converged = try_compact_editor_converge(&doc, &compacted, &current).unwrap();
+        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
         assert!(
             !converged,
             "without a live JB IPC listener, compact must fall back to the disk write"
@@ -18315,7 +18368,7 @@ scratch
         let _listener = start_live_prompt_drift_ack_listener(dir.path(), compacted.clone());
         wait_for_live_prompt_drift_listener(dir.path());
 
-        let converged = try_compact_editor_converge(&doc, &compacted, &source).unwrap();
+        let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
         assert!(
             converged,
             "an active JB IPC listener that converges the buffer must report editor_ipc transport"
@@ -18333,6 +18386,110 @@ scratch
         assert!(
             !log.contains("transport=disk_fallback"),
             "a converged compaction must not also take the disk fallback:\n{log}"
+        );
+    }
+
+    /// Pre-consume document with a `go` queue head an operator could be concurrently
+    /// editing while the queue is struck.
+    fn queue_consume_convergence_source() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "### Re: do #fix — opus-4-8\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    /// Post-consume document: only the `queue` head is struck; every other
+    /// component is byte-identical (queue consume never touches the exchange).
+    fn queue_consume_convergence_target() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "### Re: do #fix — opus-4-8\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#fix]~~\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn queue_consume_writeback_converges_via_editor_ipc_with_listener() {
+        // `#fcc0`: the queue-consume write must route through the shared
+        // converger so an active JB listener converges the struck queue through
+        // the editor (`transport=editor_ipc`, `queue_consume`-labelled) instead of
+        // a direct disk write that raises a `File Cache Conflict`.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = queue_consume_convergence_source();
+        let target = queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        let _listener = start_live_prompt_drift_ack_listener(dir.path(), target.clone());
+        wait_for_live_prompt_drift_listener(dir.path());
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            converged,
+            "an active JB IPC listener that converges the buffer must report editor_ipc transport"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_editor_convergence_attempt"),
+            "queue-consume convergence attempt should be source-labelled in ops.log:\n{log}"
+        );
+        assert!(
+            log.contains("queue_consume_writeback") && log.contains("transport=editor_ipc"),
+            "a converged queue consume must record the editor_ipc writeback transport:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "a converged queue consume must not also take the disk fallback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn converge_document_or_disk_falls_back_to_guarded_disk_without_listener() {
+        // `#fcc0`: with no live JB listener the shared converger must land the
+        // target on disk via the guarded write and record the source-labelled
+        // disk fallback — never silently skip the write.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = queue_consume_convergence_source();
+        let target = queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "with no listener the converger must write the target to disk"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("transport=disk_fallback")
+                && log.contains("reason=no_listener"),
+            "a no-listener queue consume must record the source-labelled disk fallback:\n{log}"
         );
     }
 

@@ -818,7 +818,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (#queueeditloss) for the regression's direct call to the existing
         // live-prompt-drift IPC adoption guard. No new guard boundary; the fix
         // reconciles live `agent:queue` edits inside the existing guard.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 91,
+        // 91 -> 89 (#fcc0): the queue-consume and done-id-mark direct
+        // `guard_visible_write_idle(...)` calls were replaced by the shared
+        // `converge_document_or_disk` gate, which routes the no-listener disk
+        // fallback through the single `guard_visible_write_idle_and_current`
+        // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
+        // tokens, not more — the guard boundary is centralized, not added.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 89,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
@@ -846,10 +852,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // dropped-queue evidence path.
         // +6 (#w42v) for the audited `compact_writeback ... transport=disk_fallback
         // reason=<no_listener|no_component_delta|no_ack_content|ack_mismatch|no_ack|
-        // send_failed>` markers in `try_compact_editor_converge`. These are
-        // diagnostic disk-fallback reasons on the compact editor-IPC convergence
-        // path (not flow guards), each proving why compact fell back to the
-        // guarded disk write instead of converging through the editor.
+        // send_failed>` markers in `try_editor_converge` (the #fcc0-generalized
+        // former `try_compact_editor_converge`). These are diagnostic
+        // disk-fallback reasons on the editor-IPC convergence path (not flow
+        // guards), each proving why a write site fell back to the guarded disk
+        // write instead of converging through the editor.
         // +2 (#mps Rung 3) for the audited `mps_baseline_resolve source=md_fallback
         // reason=<no_model|model_error>` markers in `read_explicit_baseline`. These
         // are diagnostic baseline-fallback reasons on the model-projected-baseline
@@ -863,7 +870,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `exchange`, conflict-free 3-way union), the gate commits the union this
         // cycle instead of carrying it forward via `content_ours_snapshot_next_cycle`.
         // A diagnostic on the tolerance path, not a new flow guard.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 42,
+        // +1 (#fcc0) for the `reason=no_listener` assertion literal in the
+        // `converge_document_or_disk_falls_back_to_guarded_disk_without_listener`
+        // regression test. The 6 production disk-fallback reasons (now emitted by
+        // the generalized `try_editor_converge` for every write site, not just
+        // compact) are unchanged; this single increment is a test-assertion
+        // literal proving the queue-consume disk fallback is source-labelled.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 43,
         _ => 0,
     }
 }

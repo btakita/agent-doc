@@ -152,7 +152,20 @@ fix(admin): show emails in needs attention items
 
 Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
 ```
-<!-- agent:boundary:e3c100a9 -->
+
+### Re: Closeout correction — gpt-5
+
+The prior closeout sentence was stale: this turn did implement the `Needs attention` item email request, not merely the earlier pipeline-card email request.
+
+Corrected closeout record:
+- Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`, `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx`, and `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`.
+- Commands run: `bun test tests/admin-dashboard.test.ts`, `make check`, remote D1 migration list before and after deploy, `make deploy`, live smoke curls, `gh run list --workflow CI --limit 1`, and `gh workflow list`.
+- Verification: focused dashboard test passed 25 tests; `make check` passed 559 tests plus browser and Worker builds; D1 had no pending migrations; `/` returned `200`; `/portal-admin` returned `303`.
+- Deploy: Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
+- Commit: agent-doc document response commit `f82aad149`; no EFS repo code commit was made because the local repo instruction says not to commit unless explicitly asked.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:d31570b7 -->
 <!-- /agent:exchange -->
 ###
 <!--

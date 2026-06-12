@@ -567,7 +567,35 @@ Fix status:
 So the actionable fix path is already queued: run `do [#fintol]`, `do [#pcwc]`, and `do [#rtwbcast]` from a clean `src/agent-doc` session, with SimWorld coverage and live editor proof. This prompt is consumed as the race-condition diagnosis; it does not add a new backlog item because the concrete fixes are already represented by those IDs.
 
 Changed paths this cycle: session document only. Commands/context: `agent-doc preflight`; `agent_doc_plan`; `agent_doc_read` queue; `rg` for drift tracks; `git -C src/agent-doc status --short`; `git -C src/agent-doc diff --stat`; inspected dirty `project_controller.rs` / `gc.rs`; read `plan-ipc-crdt-response-drift.md`. Verification: no source tests run because no source files changed. Confidence: high for diagnosis, medium for total closure until the clean-session implementation items run. Escalation: none.
-<!-- agent:boundary:793355fb -->
+
+### Re: Upgrade lazily-rs + tsift-* dependencies — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Upgrade lazily-rs + tsift-* dependencies.
+
+
+Done. Bumped both version pins to the latest published releases, refreshed lockfiles, verified, and committed each selectively.
+
+**What changed**
+- `src/agent-doc/agent-doc-orchestration/Cargo.toml`: `tsift-memory = "0.1.64"` → `"0.1.69"` (latest on crates.io; matches the `src/tsift` submodule's own `0.1.69`).
+- `src/tagpath/Cargo.toml`: `lazily = "0.10.2"` → `"0.10.3"` (latest; matches the `src/lazily-rs` submodule's `0.10.3`).
+- Both `Cargo.lock` files updated via `cargo update -p <crate> --precise` (the agent-doc lock also pulled the matching `tsift-core 0.1.69`).
+- `lazily` in `agent-doc-orchestration` is a **path dep** (`{ path = "../../lazily-rs" }`), so it already tracks the submodule at 0.10.3 — no version pin to bump there. No other `tsift-*` / `lazily` registry pins exist in the agent-loop tree (only `tsift-memory` and `tagpath`'s `lazily` are version-pinned consumers).
+
+**Verification**
+- `cargo check -p agent-doc-orchestration` ok (lazily 0.10.3, tsift-core 0.1.69, tsift-memory 0.1.69 all build).
+- `cargo check --features project-session` on tagpath ok (exercises the `lazily`-gated path).
+- `make check` (agent-doc full suite): 4333 tests pass, exit 0, no failures. Pre-existing unused-import / unused-variable warnings unchanged.
+
+**Committed selectively** (only the Cargo files; left each submodule's other in-flight work dirty and untouched):
+- `src/agent-doc` `16acdc97` — deps: bump tsift-memory 0.1.64 → 0.1.69 (gc.rs / project_controller.rs WIP untouched).
+- `src/tagpath` `9a5286a` — deps: bump lazily 0.10.2 → 0.10.3 (AGENTS.md WIP untouched).
+
+**Not done (deliberately, mid-queue):** did not push, did not advance the superproject submodule pointers (both submodule working trees still carry your in-flight stuck-handoff / AGENTS.md edits — pointer moves belong to those work cycles), and did not rebuild/reinstall the live `agent-doc` binary. To make the upgraded `tsift-memory` actually live in the running supervisor you'd want `cd src/agent-doc && cargo build --release && agent-doc lib-install` (or `make install`) on a clean cycle — say the word and I'll do it.
+
+(Closeout note: the first finalize hit the known IPC live-buffer drift — the editor buffer held a stale 13.5KB partial doc that the socket ACK wrote over disk. Recovered via `git checkout HEAD` → `reset --from-current --preserve-session` → `finalize --force-disk`.)
+<!-- agent:boundary:224c44e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -652,7 +680,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ~~~
 - ~~:pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.~~
 - ~~:pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.~~
-- :pushpin: Upgrade lazily-rs + tsift-* dependencies.
+- ~~:pushpin: Upgrade lazily-rs + tsift-* dependencies.~~
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - :round_pushpin: do [#snbc2]

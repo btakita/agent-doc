@@ -1,0 +1,398 @@
+//! Pure, side-effect-free supervisor decision policy used by the `start` idle-queue
+//! watch and the `#ctlrecycle` R3 self-recycle. Extracted from `start.rs` so the
+//! decision state machines (and their deterministic tests) live in one focused module
+//! instead of being interleaved with the supervisor's I/O-bearing run loop. Nothing
+//! here touches `SupervisorShared`, the filesystem, or a live pane — every function is
+//! a total function over its inputs.
+
+/// Decision for the supervisor idle-queue watch
+/// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
+///
+/// When a busy-pane `Run Agent Doc` route enqueues a prompt into `agent:queue
+/// auto` and returns `Ok`, the drain is harness-delegated. A Claude session not
+/// actively running `/loop` has no guaranteed idle-drain trigger, so the queued
+/// head can sit forever (the operator-perceived "deadlock"). The supervisor
+/// already watches the owned pane for an idle harness prompt for the one-shot
+/// restart auto-trigger; this watch reuses that idle signal to drain a live
+/// active-queue head on the busy→idle transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdleQueueDrainDecision {
+    /// Inject the harness-specific drain payload so the next cycle drains the
+    /// active queue head.
+    Dispatch,
+    /// A recent explicit session clear suppresses passive queue dispatch until
+    /// the cooldown expires or an explicit route invocation clears the marker.
+    SkipClearCooldown,
+    /// The pane is still busy on an active turn — never inject (no-inject-into-active-turn).
+    SkipNotIdle,
+    /// The harness Stop/idle hook has not ended the owning pane's turn yet.
+    SkipTurnActive,
+    /// No active `queue_active: true` head remains to drain.
+    SkipNoActiveHead,
+    /// This exact head was already dispatched and has not advanced/drained yet —
+    /// suppress re-firing so a stuck head cannot spin the watch into a hot loop.
+    SkipAlreadyDispatched,
+    /// A self-driving harness loop (Claude Code `/loop`) holds a fresh
+    /// drain-owner lease and owns this drain. The supervisor defers so the two
+    /// owners do not both inject `agent-doc <FILE>` into the live input queue
+    /// (#kp5z / #qflood).
+    SkipSelfDrivingLoopOwner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdleQueueContextResetDecision {
+    Reset,
+    SkipNoActiveHead,
+    SkipNotIdle,
+    SkipTurnActive,
+    SkipAlreadyResetHead,
+    SkipNoResetNeeded,
+}
+
+pub(crate) fn idle_queue_context_reset_decision(
+    prompt_visible: bool,
+    turn_active: bool,
+    active_head: Option<&str>,
+    last_context_reset_head: Option<&str>,
+    reset_required: bool,
+) -> IdleQueueContextResetDecision {
+    let Some(head) = active_head else {
+        return IdleQueueContextResetDecision::SkipNoActiveHead;
+    };
+    if !prompt_visible {
+        return IdleQueueContextResetDecision::SkipNotIdle;
+    }
+    if turn_active {
+        return IdleQueueContextResetDecision::SkipTurnActive;
+    }
+    if last_context_reset_head == Some(head) {
+        return IdleQueueContextResetDecision::SkipAlreadyResetHead;
+    }
+    if reset_required {
+        IdleQueueContextResetDecision::Reset
+    } else {
+        IdleQueueContextResetDecision::SkipNoResetNeeded
+    }
+}
+
+/// Pure idle-queue drain decision. Kept side-effect free so the busy→idle drain
+/// state machine is deterministically testable without a live pane.
+///
+/// `prompt_visible` is the supervisor's idle signal (a dispatch-ready harness
+/// prompt is on screen). `active_head` is the live `queue_active: true` ready
+/// head (`queue_continuation::live_continuation_head`), and `last_dispatched`
+/// is the head this watch last injected a trigger for.
+pub(crate) fn idle_queue_drain_decision(
+    clear_cooldown_active: bool,
+    prompt_visible: bool,
+    turn_active: bool,
+    self_driving_loop_active: bool,
+    active_head: Option<&str>,
+    last_dispatched: Option<&str>,
+) -> IdleQueueDrainDecision {
+    if clear_cooldown_active {
+        return IdleQueueDrainDecision::SkipClearCooldown;
+    }
+    match active_head {
+        // No active head: nothing to drain. The caller clears `last_dispatched`
+        // so a future re-enqueue of the same prompt text fires again.
+        None => IdleQueueDrainDecision::SkipNoActiveHead,
+        // Never inject while the pane is mid-turn — that is the
+        // no-inject-into-active-turn invariant the route busy path enforces.
+        Some(_) if !prompt_visible => IdleQueueDrainDecision::SkipNotIdle,
+        // The renderer can briefly show an idle-looking prompt before the
+        // harness Stop/idle hook has completed the whole turn.
+        Some(_) if turn_active => IdleQueueDrainDecision::SkipTurnActive,
+        // A self-driving harness loop owns this drain (fresh drain-owner lease):
+        // defer so the supervisor and `/loop` do not both inject the next
+        // `agent-doc <FILE>` trigger and flood the live input queue.
+        Some(_) if self_driving_loop_active => IdleQueueDrainDecision::SkipSelfDrivingLoopOwner,
+        // Dedup against the head we already fired for. A head that is still
+        // present after we dispatched (dispatch failed, or the cycle has not
+        // consumed it yet) must not be re-fired every idle tick.
+        Some(head) if last_dispatched == Some(head) => {
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        }
+        Some(_) => IdleQueueDrainDecision::Dispatch,
+    }
+}
+
+/// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
+/// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SupervisorStaleAction {
+    /// Not stale, or not idle — do nothing.
+    None,
+    /// Stale + idle but auto-recycle is off: surface it so the operator restarts.
+    Detect,
+    /// Stale + idle + opt-in flag: recycle this supervisor onto the fresh binary.
+    Recycle,
+}
+
+/// `#ctlrecycle` R3 — pure recycle policy for the `start` supervisor. Recycling ends
+/// the operator's live agent child, so `Recycle` requires the opt-in flag; without it
+/// a stale idle supervisor only surfaces (`Detect`). The debounce that gates the
+/// actual `Recycle` is applied separately by the caller via `recycle_debounce_decision`.
+pub(crate) fn supervisor_stale_action(
+    stale: bool,
+    idle: bool,
+    auto_recycle: bool,
+) -> SupervisorStaleAction {
+    match (stale && idle, auto_recycle) {
+        (false, _) => SupervisorStaleAction::None,
+        (true, true) => SupervisorStaleAction::Recycle,
+        (true, false) => SupervisorStaleAction::Detect,
+    }
+}
+
+pub(crate) const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
+pub(crate) const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
+
+/// `#ctlrecycle` R3 — state handed from a stale supervisor to its freshly-`execve`'d
+/// self so the new image re-adopts the live harness child instead of spawning a new
+/// one. Marshaled through the environment (preserved across `execve`); the document
+/// argv is preserved by re-exec'ing with the same args, so only the child PID and the
+/// inherited pty master fd need carrying.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReexecState {
+    pub(crate) child_pid: u32,
+    pub(crate) master_fd: i32,
+}
+
+impl ReexecState {
+    /// Pure parse of the two handoff values; `None` if either is missing/invalid or
+    /// would not name a live child + inherited fd.
+    fn parse(pid: &str, fd: &str) -> Option<Self> {
+        let child_pid = pid.trim().parse::<u32>().ok()?;
+        let master_fd = fd.trim().parse::<i32>().ok()?;
+        if child_pid == 0 || master_fd < 0 {
+            return None;
+        }
+        Some(Self {
+            child_pid,
+            master_fd,
+        })
+    }
+
+    /// Read the re-entry state from the environment, if this process was launched by
+    /// a supervisor self-`execve`. `None` for a normal start.
+    pub(crate) fn from_env() -> Option<Self> {
+        Self::parse(
+            &std::env::var(REEXEC_CHILD_PID_ENV).ok()?,
+            &std::env::var(REEXEC_MASTER_FD_ENV).ok()?,
+        )
+    }
+
+    /// `(key, value)` env pairs to set before `execve` so the new image re-adopts.
+    pub(crate) fn to_env(self) -> [(String, String); 2] {
+        [
+            (REEXEC_CHILD_PID_ENV.to_string(), self.child_pid.to_string()),
+            (REEXEC_MASTER_FD_ENV.to_string(), self.master_fd.to_string()),
+        ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supervisor_stale_action_policy() {
+        use SupervisorStaleAction::*;
+        // `#ctlrecycle` R3 policy truth table.
+        // Fresh binary → never act.
+        assert_eq!(supervisor_stale_action(false, true, true), None);
+        assert_eq!(supervisor_stale_action(false, true, false), None);
+        // Stale but busy (not idle) → never act mid-turn, even with the flag on.
+        assert_eq!(supervisor_stale_action(true, false, true), None);
+        // Stale + idle, auto-recycle OFF → surface only (operator restarts).
+        assert_eq!(supervisor_stale_action(true, true, false), Detect);
+        // Stale + idle, opt-in ON → recycle.
+        assert_eq!(supervisor_stale_action(true, true, true), Recycle);
+    }
+
+    #[test]
+    fn reexec_state_parses_valid_handoff() {
+        assert_eq!(
+            ReexecState::parse("4242", "7"),
+            Some(ReexecState {
+                child_pid: 4242,
+                master_fd: 7,
+            })
+        );
+        // Whitespace tolerated.
+        assert_eq!(
+            ReexecState::parse(" 9 ", " 12 "),
+            Some(ReexecState {
+                child_pid: 9,
+                master_fd: 12,
+            })
+        );
+    }
+
+    #[test]
+    fn reexec_state_rejects_invalid_handoff() {
+        // pid 0 is not a live child; fd < 0 is not an inherited fd.
+        assert_eq!(ReexecState::parse("0", "7"), None);
+        assert_eq!(ReexecState::parse("4242", "-1"), None);
+        // Non-numeric never re-adopts.
+        assert_eq!(ReexecState::parse("x", "7"), None);
+        assert_eq!(ReexecState::parse("4242", "fd"), None);
+    }
+
+    #[test]
+    fn reexec_state_env_round_trips() {
+        let state = ReexecState {
+            child_pid: 4242,
+            master_fd: 7,
+        };
+        let env = state.to_env();
+        assert_eq!(env[0].0, REEXEC_CHILD_PID_ENV);
+        assert_eq!(env[0].1, "4242");
+        assert_eq!(env[1].0, REEXEC_MASTER_FD_ENV);
+        assert_eq!(env[1].1, "7");
+        // Marshaled values parse back to the same state.
+        assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
+    }
+
+    // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue
+    // watch must drain a live active-queue head on the busy→idle transition,
+    // never inject mid-turn, and never hot-loop on a stuck head.
+    #[test]
+    fn idle_queue_drain_dispatches_when_idle_with_fresh_active_head() {
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), None),
+            IdleQueueDrainDecision::Dispatch
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_when_pane_busy_even_with_active_head() {
+        // No-inject-into-active-turn: a busy pane (no dispatch-ready prompt)
+        // never receives an injected trigger, mirroring the route busy path.
+        assert_eq!(
+            idle_queue_drain_decision(false, false, false, false, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipNotIdle
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_waits_for_turn_status_idle_even_with_visible_prompt() {
+        assert_eq!(
+            idle_queue_drain_decision(false, true, true, false, Some("/clear"), None),
+            IdleQueueDrainDecision::SkipTurnActive
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_during_clear_cooldown() {
+        assert_eq!(
+            idle_queue_drain_decision(true, true, true, false, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipClearCooldown
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_dispatches_clear_once_per_head() {
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::Reset
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), Some("do [#a]"), true),
+            IdleQueueContextResetDecision::SkipAlreadyResetHead
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, Some("do [#b]"), Some("do [#a]"), true),
+            IdleQueueContextResetDecision::Reset
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_waits_for_idle_and_active_head() {
+        assert_eq!(
+            idle_queue_context_reset_decision(false, false, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::SkipNotIdle
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, None, None, true),
+            IdleQueueContextResetDecision::SkipNoActiveHead
+        );
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, false),
+            IdleQueueContextResetDecision::SkipNoResetNeeded
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_waits_for_turn_status_idle() {
+        assert_eq!(
+            idle_queue_context_reset_decision(true, true, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::SkipTurnActive
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_when_no_active_head() {
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, None, None),
+            IdleQueueDrainDecision::SkipNoActiveHead
+        );
+        assert_eq!(
+            idle_queue_drain_decision(false, false, true, false, None, Some("do [#a]")),
+            IdleQueueDrainDecision::SkipNoActiveHead
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_dedups_already_dispatched_head() {
+        // The head we already fired for is still present (cycle has not consumed
+        // it yet, or the dispatch failed to drain) — suppress re-firing so a
+        // stuck head cannot spin the watch every idle tick.
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), Some("do [#a]")),
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_fires_again_when_head_advances() {
+        // A different head than the last dispatched one re-fires — the queue
+        // advanced to a new prompt that still needs an idle drain.
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, Some("do [#b]"), Some("do [#a]")),
+            IdleQueueDrainDecision::Dispatch
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_defers_to_self_driving_loop_owner() {
+        // A fresh drain-owner lease (Claude Code `/loop`) owns the drain: the
+        // supervisor defers even on an idle pane with a fresh, un-dispatched head
+        // so the two owners do not flood the live input queue (#kp5z / #qflood).
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, true, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
+        );
+        // The loop-owner gate also wins over the already-dispatched dedup arm.
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, true, Some("do [#a]"), Some("do [#a]")),
+            IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
+        );
+        // No/stale lease (`self_driving_loop_active=false`) ⇒ supervisor drains.
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), None),
+            IdleQueueDrainDecision::Dispatch
+        );
+        // A busy pane still short-circuits before the loop-owner check.
+        assert_eq!(
+            idle_queue_drain_decision(false, false, false, true, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipNotIdle
+        );
+        // No active head still wins (nothing to defer about).
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, true, None, None),
+            IdleQueueDrainDecision::SkipNoActiveHead
+        );
+    }
+}

@@ -97,15 +97,48 @@ So the consolidation is: **base = git HEAD; current = realtime model; merge = CR
 **The honest caveat (why it is a migration, not a delete):** the snapshot/baseline also back paths git HEAD does **not** cover — HEAD is committed state only, but these hold *uncommitted in-flight cycle* state: recovery sidecars (`content_ours_snapshot_next_cycle`), `reset --from-current` rebuild, and hash-keyed cycle/capture state. Every read site has to be re-homed to either git HEAD (committed base) or the CRDT/realtime model (uncommitted current) before the files can be removed. I captured the audit + 5 slices in `tasks/agent-doc/plan-snapshot-baseline-consolidation.md` (committed this cycle); it must land in a clean session, not here.
 
 (The stuck-handoff question above was already answered and committed last cycle — not repeating it.)
-<!-- agent:boundary:48380261 -->
+
+### Re: do [#kp5z] — queue-dispatch-flood drain-owner gate — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#kp5z]
+
+
+**Already implemented and committed — code-complete, tested green this turn.** `#kp5z`/`#qflood` landed in `src/agent-doc` commit `23a3ce5b` ("fix(stuckhandoff,kp5z): reap wedged Preparing controllers + drain-owner gate"). Marking it **done**; the only remainder is the operator's own live test, which you've taken ownership of ("I will test, file bugs, you check logs").
+
+**What the fix is (matches the refined root-cause in the backlog item — dual drain owners):**
+
+- **Supervisor-side gate** (`start.rs:415` `idle_queue_drain_decision`): now takes `self_driving_loop_active`, sourced at the call site (`start.rs:2350`) from `drain_owner::fresh_drain_owner_lease(file, now)`. When a fresh lease exists it returns the new `SkipSelfDrivingLoopOwner` variant, so the supervisor idle-queue watch **defers** instead of also injecting `agent-doc <FILE>`.
+- **`/loop`-side lease** (`drain_owner.rs`): the Claude Code `/loop` claims a short-TTL self-expiring lease (`DRAIN_OWNER_CLAUDE_LOOP`) via the new `agent-doc drain-claim <FILE>` subcommand (`main.rs:572`/`2211`) just before invoking `/loop`. If the loop crashes, the lease expires and the supervisor resumes draining on its own — no manual release.
+- **Installed SKILL instruction** (`skill.rs:145`): the auto-loop section now tells the agent to run `agent-doc drain-claim <FILE>` *before* the `Skill: loop` call, closing the dual-owner race at the instruction layer.
+- **Proof logging (your test signal):** on each deferral the supervisor logs `idle_queue_drain_decision decision=SkipSelfDrivingLoopOwner owner=claude_loop lease_age=<n>` to `.agent-doc/logs/ops.log`; a real drain still logs `idle_queue_watch_drain …`. So your repro is provable: with `/loop` active you should see `SkipSelfDrivingLoopOwner` and **zero** duplicate `agent-doc <FILE>` triggers stacking in the harness composer.
+
+**Tests (run this turn, all green — debug only, no install):**
+- `drain_owner` unit tests: 1 (bin) + 4 (orchestration) passed — lease freshness/TTL, refresh→read roundtrip.
+- `idle_queue_drain` decision tests: 13 passed — including the `SkipSelfDrivingLoopOwner` branch and dedup/busy ordering.
+- SimWorld `integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back`: 1 passed — the deterministic form of the multi-process flood repro (drain-owner gate + reaper under emulated multi-owner contention).
+
+**Operator pre-test step (required — install is stale):** preflight flagged the live `~/.cargo/bin` binary + cdylib predate source commit `1f220d1d`, and the installed `.claude/skills/agent-doc/SKILL.md` has **zero** `drain-claim` references — both stale relative to `23a3ce5b`. The drain-claim gate cannot engage live until the binary, cdylib, and skill are refreshed. That refresh is operator-drive and must **not** run from this affected session (it would swap the binary mid-cycle):
+
+```
+cd src/agent-doc && make install && agent-doc skill install --harness claude --reload restart
+# then recycle controllers so they respawn on the fresh binary:
+pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
+```
+
+After that, drive a `go` queue with `/loop` active and grep `ops.log` for `SkipSelfDrivingLoopOwner` + absence of stacked triggers. If you instead see real `idle_queue_watch_drain` lines firing *while* `/loop` is also dispatching, the lease isn't being claimed — file that and I'll check the logs.
+
+**Not auto-looping.** This session is degraded (preflight: session drift across 3 tmux sessions, stale install, recovered a wedged `preflight_started` cycle). The remaining queue items (`#rtwbcast`, `#snbc`) are explicitly clean-session / live-verify work that this controller races. I'm stopping here rather than draining further from inside the affected session.
+<!-- agent:boundary:cc299046 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#rtwverify]. Use simworld tests
+- ~~:pushpin: :round_pushpin: do [#kp5z]~~
 - :pushpin: :round_pushpin: [#rtwbcast]
-- :round_pushpin: do [#kp5z]
+- :round_pushpin: do [#snbc]
 - :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
 ---
 :pushpin: agent-doc monsterrodholders.md had an error:
@@ -189,6 +222,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
+- [#rtwverify]. Use simworld tests
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
@@ -222,7 +256,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#snbc] [recommended] Consolidate the separate snapshot + baseline files into git HEAD (durable committed merge base) + the realtime document model (uncommitted current via realtime_model::current_doc), eliminating the two drift-prone on-disk files that cause File Cache Conflicts / churn on realtime docs. Root cause: the merge base is read from disk and lags the authoritative editor buffer (same defect as #rtwwire/#rtwfeed). NEEDS a read-site audit first (recovery sidecars, reset --from-current, hash-keyed cycle state hold uncommitted state git HEAD does not cover) — migration, not a one-line delete. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md.
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
-- [ ] [#kp5z] #qflood [TOP] Queue dispatch floods the running harness session with repeated agent-doc trigger submissions during queue-drain / finalize-while-typing. NEW FINDING (this turn, fresh-binary session): the new in-process binary IS now running (ops.log: supervisor_host_gate hosting=in-process, generation 300) — prior cycles blamed a stale old-binary controller; that is no longer the blocker. The actual trigger-injection path is the SUPERVISOR idle_queue_watch_drain in start.rs (ops.log: idle_queue_watch_drain payload_kind=trigger submit_mode=tmux_literal_cr target=%123 reason=auto_trigger_inject), NOT project_controller::authorize_dispatch — that is why zero real queue_dispatch_invoked markers ever logged: the 7b6f022e observability was added to the wrong path. The real path ALREADY has the busy gate (idle_queue_drain_decision::SkipNotIdle / no-inject-into-active-turn), the dedup (SkipAlreadyDispatched), and real observability (log_idle_queue_drain_submit). REFINED ROOT-CAUSE HYPOTHESIS: dual drain owners — Claude /loop AND the supervisor idle_queue_watch_drain both inject agent-doc <FILE>, so triggers pile up in the live CC input queue. FIX TARGET: a self-driving-harness gate in idle_queue_drain_decision (skip supervisor inject when /loop is the active drain owner) — pure logic, unit-testable in start.rs. NEEDS a dedicated stable turn + live multi-process verify (cannot be confirmed from inside this affected session; supervisor races writes here). Plan: tasks/agent-doc/plan-queue-dispatch-flood.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 <!-- /agent:backlog -->
 

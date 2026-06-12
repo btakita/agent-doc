@@ -42,19 +42,52 @@ the fallback.
 
 ## Phases (each clean-session; live verify is operator-drive)
 
-- **#fcc0a** Inventory + classify every `atomic_write(file, …)` document-write
-  site in `write.rs` by path (queue consume, done-id mark, finalize, stream,
-  repair, reset, post-commit). Mark which already have an editor-IPC sibling.
-- **#fcc0b** Extract the `#w42v` converge-or-disk-fallback helper into a single
-  shared `converge_document_or_disk(file, target, source)` used by every site.
-  SimWorld + write-path unit coverage: listener-active → `transport=editor_ipc`
-  + concurrent-edit scoping (no clobber); no-listener → `transport=disk_fallback`.
-- **#fcc0c** Migrate queue consume + done-id mark (the highest-frequency operator
-  paths) onto the shared converger.
-- **#fcc0d** Migrate finalize / stream / repair / reset disk writes.
-- **#fcc0e** Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops failing
-  (stale `patch_id` replay, wedged `--handoff-state preparing` controllers) — the
-  fallback should be rare-by-construction, not the steady state.
+- **#fcc0a** ✅ DONE — Inventoried + classified every `atomic_write(file, …)`
+  document-write site in `write.rs`. Finding (sharper than the original framing):
+  - **Genuine direct-disk-no-IPC component writes** (the dialog sources that never
+    even tried the editor): queue consume, queue done-id mark, and `run_template`
+    (non-CRDT template mode). These are the ones the converger fixes.
+  - **Already-post-IPC fallbacks** (CRDT `run_stream` finalize/stream/IPC-timeout,
+    `live_prompt_drift` commit auto-recovery, repair materialization): these reach
+    `atomic_write` only AFTER `try_ipc` / editor convergence already failed, so
+    routing them through the converger just re-hits the same dead listener. Their
+    dialogs are the `#ipcdrift`/`#stuckhandoff2` wedge → tracked as **#fcc0e**.
+  - **Inline mode** (`run`, `## User`/`## Assistant` blocks): no `agent:` components,
+    so component `op:replace` convergence is N/A (would need the disabled
+    `try_ipc_full_content`); left as a guarded disk write.
+  - Sidecar/patch/marker writes (`.agent-doc/…`) are not document writes — excluded.
+- **#fcc0b** ✅ DONE (`612a8dae`) — Generalized the `#w42v`
+  `try_compact_editor_converge` into `try_editor_converge(file, target, current,
+  source)` with a `source`-labelled log line (`<source>_writeback …
+  transport=editor_ipc|disk_fallback`), and added the shared
+  `converge_document_or_disk(file, target, current, source)` gate. Unit coverage:
+  listener-active → `transport=editor_ipc` (source-labelled, exchange/queue scoped,
+  no clobber); no-listener → `transport=disk_fallback` writes the target.
+- **#fcc0c** ✅ DONE (`612a8dae`) — Migrated queue consume + done-id mark (the
+  highest-frequency operator paths) onto `converge_document_or_disk`. The
+  force-disk repair path keeps its raw `atomic_write` bypass (intentionally skips
+  IPC/IDE + the visible-write guard).
+- **#fcc0d** ◑ PARTIAL (`612a8dae`) — `run_template` (non-CRDT, the one remaining
+  genuine direct-disk-no-IPC component write) now converges first / bare-disk
+  fallback. The CRDT `run_stream` finalize/stream disk writes are NOT migrated:
+  they are post-`try_ipc`-failure fallbacks (see #fcc0a) — re-attempting IPC there
+  re-hits the failed listener. Their fix is #fcc0e, not the converger.
+- **#fcc0e** TODO — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops
+  failing (stale `patch_id` replay, wedged `--handoff-state preparing` controllers)
+  — once the listener is reliable, the `run_stream` fallbacks rarely fire and the
+  remaining dialogs disappear. This is the load-bearing remainder of "0 dialogs."
+
+## Status (2026-06-12)
+
+`#fcc0a`/`#fcc0b`/`#fcc0c` + the `#fcc0d` template slice are committed and pushed
+(agent-doc `612a8dae`). `make check` green (4364 passed), clippy clean. Binaries
+rebuilt (`cargo install` + `cargo build --release`) and cdylib refreshed
+(`agent-doc lib-install`) — running controllers still serve the prior build until
+`agent-doc admin recycle --all-projects` / session restart. Remaining: **#fcc0e**
+(the IPC wedge — the real fix for the CRDT finalize fallbacks) and the operator-drive
+live JB "0 `File Cache Conflict` dialogs" proof (drive a queue drain with a live IDE,
+confirm `ops.log` shows `queue_consume_writeback … transport=editor_ipc` and zero
+disk-write dialogs).
 
 ## Immediate operator action
 

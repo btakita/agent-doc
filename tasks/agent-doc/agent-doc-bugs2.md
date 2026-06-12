@@ -143,14 +143,35 @@ Each `#[cfg(test)] mod tests` body moves verbatim into `<mod>/tests.rs` (rustfmt
 Cumulative this session: `route` (prior) + `session_check` + `git` + `preflight` + `sync` test modules now live in `<mod>/tests.rs`. The remaining large module is `write.rs` (27.7k) — its irregular multi-block test layout needs a bespoke pass, queued as `#splitmodswrite`.
 
 `[#rtwbcast]` stays deferred (multi-editor / two-live-IDE, operator-drive). Finalized via `--force-disk` (session IPC still wedged, `#ipcdrift`).
-<!-- agent:boundary:8b94046a -->
+
+### Re: 0 File Cache Conflict dialogs — opus-4-8
+
+> **Queue prompt:**
+>
+> I'm getting JB `File Cache Conflict` dialogs. Please fix. We should have 0 `File Cache Conflict` dialogs.
+
+
+I traced the root cause in code and queued a phased fix (`#fcc0`, plan: `tasks/agent-doc/plan-zero-file-cache-conflict.md`). Honest scope: this is the live IPC write path that is wedging this very session, so it's a dedicated clean-session effort, not a one-turn patch — but here's exactly what's wrong and what to do now.
+
+**Root cause.** A `File Cache Conflict` fires whenever agent-doc writes the document *to disk* while IntelliJ holds a dirty buffer. `#w42v` converged exactly **one** path — `compact` — through the editor (`op:replace` IPC, disk only as fallback). **Every other document write still hits disk directly** via `atomic_write(file, …)`: queue consume (`write.rs:3186`), done-id mark (`3887`), and the finalize/stream/repair/reset paths (`8683`, `9488`, `9836`, `10240`, …). Any of those under a dirty buffer = a dialog. It's the *same* IPC-buffer-divergence class as the `live_prompt_drift_after_preflight` / exit-75 wedge (`#ipcdrift`/`#stuckhandoff2`) that has corrupted this session's finalizes all day — that wedge forces disk fallbacks, which are exactly the dialogs you're seeing.
+
+**Immediate action (removes the compact dialogs today):** the `#w42v` fix is committed but not deployed to your running cdylib. Run:
+
+    cd src/agent-doc && agent-doc lib-install
+
+That hot-reloads the plugin's `.so` by mtime — `Compact Exchange` then converges through the editor (`ops.log: compact_writeback … transport=editor_ipc`) instead of disk.
+
+**The systematic fix (`#fcc0`, phased):** extract the `#w42v` converge-or-disk-fallback into one shared `converge_document_or_disk()` and route **all** the disk-write sites through it (queue consume + done-id mark first — highest frequency — then finalize/stream/repair/reset), plus resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops failing into the fallback. This is FlowCore Phase 3 ("IPC, stream, direct write, finalize, and repair all use the same terminal-state guard; converge editor/disk/snapshot"). Must run from a clean session — editing it from a live IPC session is what keeps corrupting these very closeouts; the "0 dialogs" proof is a live JB check (operator-drive).
+
+This response itself finalized via `--force-disk` because that wedge is active right now (it's why the prior finalize CRDT-merged a stray queue line and aborted on a head mismatch). Halting the auto-loop — `#fcc0` and `[#rtwbcast]` are both clean-session/operator-drive.
+<!-- agent:boundary:ea3afbbd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Continue splitting up large modules. Functionality + tests.~~
-- re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.
+- ~~re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.~~
 - I'm getting JB `File Cache Conflict` dialogs. Please fix. We should have 0 `File Cache Conflict` dialogs.
 - ~~[#jbcompactcrdt]~~
 - [#rtwbcast]
@@ -184,6 +205,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#fcc0] [TOP] Zero JB File Cache Conflict dialogs. Root cause: all document-mutating disk writes (queue consume write.rs:3186, done-id mark 3887, finalize/stream/repair/reset 8683/9488/9836/10240/...) bypass editor IPC; #w42v converged only compact. Fix: extract a shared converge_document_or_disk() (mirror #w42v) and route ALL write sites through it (queue consume + done-id mark first, then finalize/stream/repair/reset), behind the listener-active gate with transport=editor_ipc primary + disk_fallback; plus resolve the #ipcdrift/#stuckhandoff2 wedge that forces fallbacks. Phases #fcc0a-e. CLEAN session required (live write path); 0-dialogs proof is operator-drive live JB. Immediate operator action: agent-doc lib-install to deploy #w42v for compact. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#splitmodswrite] [recommended] Split write.rs (27.7k lines, largest module) test layout. Unlike the clean single-trailing-mod-tests pattern used for route/session_check/git/preflight/sync, write.rs has an irregular layout: module-scope cfg(test) helper fns (around line 12109) PLUS several non-contiguous top-level cfg(test) blocks (mod tests at 15201 closes at 21827, then more cfg(test) blocks to EOF). Needs a bespoke extraction that moves each test block into write/tests.rs (or several files) and updates the FlowCore guard_ budget (currently 91) + any structural guards in tests/test_cli.rs. Verify make check + full workspace 0 failed.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->

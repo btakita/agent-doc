@@ -205,7 +205,27 @@ This is exactly the rung-3b acceptance ("type an unsaved queue/exchange edit, co
 The `#rtwatch` realtime-editor-watcher line (rungs 1/2/3a/3b) is now fully landed **and** SimWorld-verified; the only open relative is `#rtwbcast` (rung 4 broadcast), which still needs the Option-A protocol decision per my earlier turn.
 
 **Not auto-looping** — degraded session; this handled a real queue prompt. Review list is now down to 3 (`#w42v`, `#qt32`, `#2v7b`).
-<!-- agent:boundary:08f525a1 -->
+
+### Re: Finalize should tolerate concurrent user edits — planned (#fintol) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
+
+
+Captured this as `#fintol` with a full plan (`tasks/agent-doc/plan-finalize-tolerance.md`, commit `304024b76`). This is the **closeout-side complement** to the `#rtwatch` read-side fix, and it's the root resolution of the `live_prompt_drift_after_preflight` / exit-75 churn that's recurred every finalize this session.
+
+**What I verified in code (so the plan is accurate, not a guess):**
+- The closeout already has **two-tier** tolerance, but it's recover-or-reject, not forward-merge:
+  1. **Benign absorb (works today):** when only non-`exchange` components drift, or every prompt-bearing change is owned by the response, `try_auto_recover_live_prompt_drift` writes the superset snapshot to disk and the commit proceeds (`write.rs:513`/`7049`/`7119`, `#exch-intermix`). This is why most finalizes — including the ones this session — silently recover.
+  2. **Fail closed (the gap):** the instant the visible buffer carries a *new* exchange `PromptTarget` or queue `do [#id]` the response doesn't own, finalize refuses — deliberately, to avoid dropping your concurrent typing. That's the rejection you want gone.
+
+**The fix (forward CRDT merge, conflict-scoped):** the fail-closed case conflates two things — **(a)** your edit touches the same region the response patch targets (the "CRDT plan") → genuinely ambiguous, must still defer; vs **(b)** your edit is independent (a new prompt below, an edit in another component, compaction of an already-answered tail) → the merge commutes and is conflict-free. Today both are rejected; `#fintol` makes case (b) **merge and commit** (response lands, your new prompt is preserved uncommitted for the next cycle), keeping fail-closed only for a real (a) collision. "As long as the CRDT plan is not affected" maps exactly to "disjoint from the response target span."
+
+**Decomposed into three SimWorld-verified rungs** (per your test-with-SimWorld directive): `#fintol1` conflict-scope primitive → `#fintol2` forward-merge at the gate → `#fintol3` SimWorld coverage (type an unrelated prompt / compact during finalize → response commits, prompt survives, no exit-75; plus a collision case that still fails closed). Implementation is a CLEAN-session task (it changes the closeout path this controller races), so I planned it rather than ran it here.
+
+**Not auto-looping** — degraded session, and this handled a real queue prompt. `#fintol` is queued at the top of the backlog.
+<!-- agent:boundary:46bfd626 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -215,7 +235,7 @@ The `#rtwatch` realtime-editor-watcher line (rungs 1/2/3a/3b) is now fully lande
 - ~~:pushpin: :round_pushpin: [#rtwbcast]~~
 - ~~:round_pushpin: do [#snbc]~~
 - ~~:round_pushpin: [#rtwverify]. Use simworld tests~~
-- :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
+- ~~:pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.~~
 ---
 :pushpin: agent-doc monsterrodholders.md had an error:
 ```
@@ -331,6 +351,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#fintol] [recommended] Finalize should tolerate concurrent UNRELATED user edits (typing a new prompt, editing elsewhere, compaction) by forward-MERGING them with the agent response instead of rejecting with live_prompt_drift_after_preflight / exit-75. Verified in code: the gate already auto-absorbs the benign superset case (#exch-intermix, write.rs:7049/7119) but FAILS CLOSED when the live buffer carries a new exchange PromptTarget or queue do[#id] the response does not own — to avoid dropping user content. Gap: that fail-closed conflates (a) collision with the response's CRDT target span vs (b) independent edit. Fix: response_target_disjoint_from_user_edit primitive → disjoint => CRDT-merge response+edit, commit the union, carry the new prompt to next cycle; collision => keep fail-closed. Closeout-side complement to #rtwatch. Rungs #fintol1 (conflict-scope primitive) / #fintol2 (forward-merge at gate) / #fintol3 (SimWorld coverage). CLEAN session; SimWorld-verified. Plan: tasks/agent-doc/plan-finalize-tolerance.md.
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->

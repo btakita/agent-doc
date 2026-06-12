@@ -249,7 +249,26 @@ Confirmed and tracked as `#pcwc`. This is the `#postcommit-ipc-worktree-corrupti
 I did **not** create a new plan — there are already ~30 IPC-drift plans, and this reuses the existing post-commit-drift plan rather than proliferating. `#pcwc` is queued at the backlog top.
 
 **Not auto-looping** — degraded session, real queue prompt handled.
-<!-- agent:boundary:bd3572a6 -->
+
+### Re: monsterrodholders.md IPC-drift recovery note — opus-4-8
+
+Noted, and that recovery was the correct call. What you describe is exactly the `#pcwc` / `#postcommit-ipc-worktree-corruption` failure class, not a new bug:
+
+- The commit reached HEAD correctly (content was right).
+- A late IPC reposition / stale editor-buffer write-back overwrote only the **working tree** after the commit (`postcommit_worktree_check match=false`).
+- Reconciling the worktree to HEAD + rebuilding the snapshot is the documented recovery ladder rung 1 — `git checkout HEAD -- FILE` → `session-check`. Green session-check confirms HEAD was authoritative.
+
+So nothing was lost; the on-disk copy drifted and you reconciled it. No action needed on monsterrodholders.md itself.
+
+**Why it still happens / what closes it durably** — both fixes are already queued, deliberately *not* started mid-drain of this 13-item queue:
+
+- `#pcwc` — auto-remediation: when `match=false` but HEAD holds the correct response, reconcile the worktree to HEAD automatically **and** push the committed content to the editor buffer so it stops writing stale bytes back. The editor-buffer push overlaps `#rtwbcast`.
+- `#rtwbcast` — broadcast committed content to editor buffers (the root cause of the stale write-back).
+
+**Honest queue status before I drain further:** `#pcwc` and `#fintol` both fight the carry-forward invariant (a post-commit worktree legitimately differs from HEAD via carried-forward uncommitted edits) — a prior audit proved naive forward-merge wiring breaks 7 shipped tests. Per that finding they need a **clean session + operator go + a live Phase-0 re-baseline**, not a re-wire inside this churny multi-prompt queue (preflight also flagged session drift across 3 tmux sessions this cycle). `#snbc2` is flagged by semantic-completion as likely already resolved by the shipped `#snbc` audit. The three gated review items (`#w42v` operator-direction, `#qt32`/`#2v7b` operator-live-verify) are correctly gated — they can't be agent-completed.
+
+Tell me to proceed and I'll take `#fintol`/`#pcwc` in a fresh clean session with the Phase-0 re-baseline, or I can answer the standing design questions in the queue (snapshots-vs-document-model, wedge controller) without touching the closeout path. Which do you want first?
+<!-- agent:boundary:b9a44230 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -260,14 +279,14 @@ I did **not** create a new plan — there are already ~30 IPC-drift plans, and t
 - ~~:round_pushpin: do [#snbc]~~
 - ~~:round_pushpin: [#rtwverify]. Use simworld tests~~
 - ~~:pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.~~
----
+~~~done
 :pushpin: agent-doc monsterrodholders.md had an error:
 ```
   Process note: the finalize hit IPC drift (the JetBrains editor buffer briefly overwrote the working-tree file after
   the commit). The commit itself was correct; I reconciled the working tree to HEAD and rebuilt the snapshot, and
   session-check is green.
 ```
----
+~~~
 :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
 [route] target tmux session: 13
@@ -345,6 +364,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.~~
 - :round_pushpin: do [#snbc2]
 - :round_pushpin: do [#fintol]
+- :round_pushpin: do [#pcwc]
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->

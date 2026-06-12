@@ -17,14 +17,14 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-EFS commit 3ffcc32 pushed on 2026-06-12: admin full-application Step 4 subject-property fields are editable, extended subject-property fields persist, and admin edits are tracked in application_subject_property_change_logs with field-level old/new values. Verification passed: targeted tests, full make check, and clean committed-tree make check; GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
+Sent the Stripe account setup email from brian.takita@gmail.com via Corky to Judith Krug with Robert Waldman on CC. Sent-draft artifact committed in mail (1eca6da) and parent submodule pointer committed (93e845b03).
 <!-- /agent:status -->
 
 ## Exchange
@@ -76,7 +76,39 @@ Once the account is ready, I can connect the test environment first, run through
 
 Best,
 Brian
-<!-- agent:boundary:7249d9fa -->
+
+### Re: Stripe account email sent — gpt-5
+
+> **Queue prompt:**
+>
+> Use corky to send the draft email from brian.takita@gmail.com
+
+
+Sent the Stripe account setup email through Corky from `brian.takita@gmail.com`.
+
+Delivery:
+- To: Judith Krug `<judithkrug@gmail.com>`
+- CC: Robert Waldman `<rwaldman100@gmail.com>`
+- Subject: `Stripe account setup for borrower payments`
+- Corky result: `action=sent`, `transport=smtp`, `account=personal`, `status=approved -> sent`
+
+Changed paths:
+- `mail/drafts/2026-06-12-efs-stripe-account-setup.md`
+- `mail` submodule pointer
+
+Commits:
+- `mail` submodule: `1eca6da mail: record sent EFS Stripe setup email`
+- parent repo: `93e845b03 mail: update sent EFS Stripe setup draft`
+
+Verification:
+- `corky draft validate mail/drafts/2026-06-12-efs-stripe-account-setup.md` passed.
+- `corky draft push mail/drafts/2026-06-12-efs-stripe-account-setup.md --send --json` returned `action=sent` from `account_user=brian.takita@gmail.com`.
+- Scoped status for `mail` and `tasks/professional/equityfundingsource.md` was clean after the commits.
+- No full test suite or CI check was run because this turn did not change code, tests, build logic, or instruction surfaces.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:622ae31b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +116,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Use corky to send the draft email from brian.takita@gmail.com
 <!-- /agent:queue -->
 
 ## Backlog

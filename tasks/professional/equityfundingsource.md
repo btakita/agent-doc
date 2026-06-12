@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -77,14 +77,15 @@ Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `g
 Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
 
 Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
-<!-- agent:boundary:c70de10b -->
+<!-- agent:boundary:6152bcc4 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- I plan to use Claude Code & Codex to use the api. How should I answer "9. Do you plan to use your Google Ads API token with a tool developed by someone else? *". If yes, "Please provide the URL of the tool. *".
 <!-- /agent:queue -->
 
 ## Backlog

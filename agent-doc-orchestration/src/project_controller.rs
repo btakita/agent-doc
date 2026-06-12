@@ -71,9 +71,13 @@ const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CON
 const DEFAULT_RECYCLE_IDLE_GRACE_SECS: u64 = 5;
 const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
 /// `#ctlrecycle` R3 — opt-in flag for the `start --route-owned` supervisor to
-/// auto-recycle (re-exec) onto a fresh binary when idle. Default OFF: recycling the
-/// supervisor ends the operator's live agent child, so it stays a deliberate opt-in
-/// until validated; when off the supervisor only logs `supervisor_binary_stale_detected`.
+/// hot-reload onto a fresh binary when idle via an in-place `execve` that PRESERVES
+/// the live harness child + tmux pane (`start.rs::supervisor_perform_reexec` +
+/// `PtySession::adopt`). Default OFF: the in-place image swap of a live interactive
+/// supervisor is high blast-radius and the two-process round-trip can only be proven
+/// with a live editor + harness, so it stays a deliberate opt-in until that live
+/// validation lands; when off the supervisor only logs `supervisor_binary_stale_detected`
+/// and the operator restarts the session to pick up the new build.
 const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
 
 #[derive(Clone, Debug)]
@@ -3169,9 +3173,10 @@ pub(crate) fn recycle_idle_grace() -> Duration {
 }
 
 /// `#ctlrecycle` R3 — is the opt-in `start --route-owned` supervisor auto-recycle
-/// enabled? Default OFF: recycling the supervisor ends the operator's live agent
-/// child, so a stale supervisor only logs `supervisor_binary_stale_detected` unless
-/// the operator opts in. Truthy: `1`/`true`/`yes`/`on` (case-insensitive).
+/// enabled? Default OFF: the in-place `execve` hot-reload (which preserves the live
+/// agent child) is high blast-radius and needs a live two-process validation, so a
+/// stale supervisor only logs `supervisor_binary_stale_detected` unless the operator
+/// opts in. Truthy: `1`/`true`/`yes`/`on` (case-insensitive).
 pub(crate) fn supervisor_auto_recycle_enabled() -> bool {
     matches!(
         std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV)

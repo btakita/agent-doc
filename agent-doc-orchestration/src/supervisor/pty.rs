@@ -52,7 +52,7 @@ use std::thread::{self, JoinHandle};
 
 use anyhow::{Context, Result};
 use portable_pty::{
-    Child, CommandBuilder, ExitStatus, MasterPty, NativePtySystem, PtySize, PtySystem,
+    Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, NativePtySystem, PtySize, PtySystem,
 };
 
 /// A thread-safe handle for resizing a pty session from another thread.
@@ -405,6 +405,249 @@ impl PtySession {
     /// Get the child's process ID, if available.
     pub fn process_id(&self) -> Option<u32> {
         self.child.as_ref().and_then(|c| c.process_id())
+    }
+
+    /// `#ctlrecycle` R3 — reconstruct a session from a pty master fd and child PID
+    /// inherited across an in-place `execve` (supervisor binary hot-reload).
+    ///
+    /// The original `portable_pty` master/child objects do not survive the image
+    /// swap, but the OS pty master fd (CLOEXEC cleared before exec) and the child
+    /// process (PID preserved — `execve` never reparents children) do. [`AdoptedMaster`]
+    /// re-wraps the raw fd and [`RawPidChild`] drives `waitpid`/`kill` over the bare
+    /// PID, so the rest of the supervisor (reader/writer/resize/in-process adapter)
+    /// operates on the same `dyn MasterPty`/`dyn Child` trait objects unchanged.
+    #[cfg(unix)]
+    pub fn adopt(master_fd: std::os::unix::io::RawFd, child_pid: u32) -> Result<Self> {
+        if master_fd < 0 {
+            anyhow::bail!("PtySession::adopt: invalid master fd {master_fd}");
+        }
+        if child_pid == 0 {
+            anyhow::bail!("PtySession::adopt: invalid child pid 0");
+        }
+        // SAFETY: `master_fd` is an open pty master fd inherited across `execve`; this
+        // session takes sole ownership of it (closed when the session drops).
+        let master = unsafe { AdoptedMaster::from_raw_fd(master_fd) };
+        Ok(Self {
+            master: Box::new(master),
+            child: Some(Box::new(RawPidChild::new(child_pid))),
+            io_threads: Vec::new(),
+        })
+    }
+}
+
+/// `#ctlrecycle` R3 — a pty master reconstructed from a raw fd inherited across an
+/// in-place `execve`. The supervisor's reader/writer/resize plumbing only needs the
+/// raw fd (it already dups it for the resize handle and direct writes), so after the
+/// image swap we re-wrap the surviving OS fd here instead of the lost
+/// `portable_pty` master object.
+#[cfg(unix)]
+#[derive(Debug)]
+struct AdoptedMaster {
+    fd: std::os::unix::io::OwnedFd,
+}
+
+#[cfg(unix)]
+impl AdoptedMaster {
+    /// SAFETY: `fd` must be an open, owned pty master fd. Takes ownership.
+    unsafe fn from_raw_fd(fd: std::os::unix::io::RawFd) -> Self {
+        use std::os::unix::io::FromRawFd;
+        Self {
+            // SAFETY: caller guarantees `fd` is an open, owned fd transferred here.
+            fd: unsafe { std::os::unix::io::OwnedFd::from_raw_fd(fd) },
+        }
+    }
+
+    fn raw(&self) -> std::os::unix::io::RawFd {
+        use std::os::unix::io::AsRawFd;
+        self.fd.as_raw_fd()
+    }
+
+    /// Dup the master fd into an owned `File` for an independent reader/writer.
+    /// Dropping the returned `File` closes only the dup, never the master, so a
+    /// dropped writer does not EOF the slave out from under the live child.
+    fn dup_file(&self) -> Result<std::fs::File> {
+        use std::os::unix::io::FromRawFd;
+        let duped = unsafe { libc::dup(self.raw()) };
+        if duped < 0 {
+            anyhow::bail!(
+                "dup(adopted master fd) failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(unsafe { std::fs::File::from_raw_fd(duped) })
+    }
+}
+
+#[cfg(unix)]
+impl MasterPty for AdoptedMaster {
+    fn resize(&self, size: PtySize) -> Result<()> {
+        let ws = libc::winsize {
+            ws_row: size.rows,
+            ws_col: size.cols,
+            ws_xpixel: size.pixel_width,
+            ws_ypixel: size.pixel_height,
+        };
+        let ret = unsafe { libc::ioctl(self.raw(), libc::TIOCSWINSZ, &ws) };
+        if ret != 0 {
+            anyhow::bail!(
+                "TIOCSWINSZ ioctl failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(())
+    }
+
+    fn get_size(&self) -> Result<PtySize> {
+        let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+        let ret = unsafe { libc::ioctl(self.raw(), libc::TIOCGWINSZ, &mut ws) };
+        if ret != 0 {
+            anyhow::bail!(
+                "TIOCGWINSZ ioctl failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(PtySize {
+            rows: ws.ws_row,
+            cols: ws.ws_col,
+            pixel_width: ws.ws_xpixel,
+            pixel_height: ws.ws_ypixel,
+        })
+    }
+
+    fn try_clone_reader(&self) -> Result<Box<dyn Read + Send>> {
+        Ok(Box::new(self.dup_file()?))
+    }
+
+    fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
+        Ok(Box::new(self.dup_file()?))
+    }
+
+    fn process_group_leader(&self) -> Option<libc::pid_t> {
+        let pg = unsafe { libc::tcgetpgrp(self.raw()) };
+        if pg < 0 {
+            None
+        } else {
+            Some(pg)
+        }
+    }
+
+    fn as_raw_fd(&self) -> Option<std::os::unix::io::RawFd> {
+        Some(self.raw())
+    }
+}
+
+/// `#ctlrecycle` R3 — a child handle backed by a bare PID inherited across an
+/// in-place `execve`. `waitpid`/`kill` operate directly on the PID; the supervisor's
+/// in-process adapter drives `try_wait`/`kill` exactly as it does for a
+/// `portable_pty` child.
+#[cfg(unix)]
+#[derive(Debug)]
+struct RawPidChild {
+    pid: u32,
+    /// Cached terminal status so repeated `try_wait`/`wait` after reaping are stable
+    /// (a second `waitpid` on a reaped PID returns `ECHILD`).
+    exited: Option<ExitStatus>,
+}
+
+#[cfg(unix)]
+impl RawPidChild {
+    fn new(pid: u32) -> Self {
+        Self { pid, exited: None }
+    }
+
+    fn waitpid(&mut self, block: bool) -> std::io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.exited.clone() {
+            return Ok(Some(status));
+        }
+        let mut wstatus: libc::c_int = 0;
+        let flags = if block { 0 } else { libc::WNOHANG };
+        let ret = unsafe { libc::waitpid(self.pid as libc::pid_t, &mut wstatus, flags) };
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if ret == 0 {
+            // WNOHANG and the child is still running.
+            return Ok(None);
+        }
+        let status = exit_status_from_wstatus(wstatus);
+        self.exited = Some(status.clone());
+        Ok(Some(status))
+    }
+}
+
+/// Map a raw `waitpid` status word to a `portable_pty::ExitStatus`. Signal deaths
+/// encode as the shell `128 + signal` convention so a killed child reads as non-zero.
+#[cfg(unix)]
+fn exit_status_from_wstatus(wstatus: libc::c_int) -> ExitStatus {
+    if libc::WIFEXITED(wstatus) {
+        ExitStatus::with_exit_code(libc::WEXITSTATUS(wstatus) as u32)
+    } else if libc::WIFSIGNALED(wstatus) {
+        ExitStatus::with_exit_code(128u32 + libc::WTERMSIG(wstatus) as u32)
+    } else {
+        ExitStatus::with_exit_code(0)
+    }
+}
+
+/// Send `SIGHUP` to a bare PID, treating `ESRCH` (already gone) as success — the
+/// same convention the supervisor's IPC `stop` path uses for PID-based kills.
+#[cfg(unix)]
+fn raw_pid_kill(pid: u32) -> std::io::Result<()> {
+    let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGHUP) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+impl ChildKiller for RawPidChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        raw_pid_kill(self.pid)
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(RawPidKiller { pid: self.pid })
+    }
+}
+
+#[cfg(unix)]
+impl Child for RawPidChild {
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        self.waitpid(false)
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        match self.waitpid(true)? {
+            Some(status) => Ok(status),
+            None => Ok(ExitStatus::with_exit_code(0)),
+        }
+    }
+
+    fn process_id(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+}
+
+/// Detachable killer for [`RawPidChild`] so a thread can signal the child while
+/// another thread blocks in `wait` (the `ChildKiller::clone_killer` contract).
+#[cfg(unix)]
+#[derive(Debug)]
+struct RawPidKiller {
+    pid: u32,
+}
+
+#[cfg(unix)]
+impl ChildKiller for RawPidKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        raw_pid_kill(self.pid)
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(RawPidKiller { pid: self.pid })
     }
 }
 
@@ -1229,5 +1472,131 @@ mod tests {
             out, b"\x1b[32mgreen\x1b[0m",
             "SGR preserved across boundary"
         );
+    }
+
+    // ---- #ctlrecycle R3: execve-adopt primitives (raw-fd master + bare-PID child) ----
+
+    #[test]
+    fn raw_pid_child_try_wait_kill_wait_lifecycle() {
+        // A real long-running child whose reaping is handed entirely to RawPidChild
+        // (forget the std handle so nothing else calls waitpid on the same PID).
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        std::mem::forget(child);
+
+        let mut adopted = RawPidChild::new(pid);
+        assert_eq!(adopted.process_id(), Some(pid));
+        assert!(
+            adopted.try_wait().expect("try_wait while running").is_none(),
+            "running child should not report an exit status yet"
+        );
+
+        adopted.kill().expect("kill adopted child");
+        let status = adopted.wait().expect("wait reaps the killed child");
+        assert!(
+            !status.success(),
+            "SIGHUP-killed child should be non-success, got {status:?}"
+        );
+        // Cached terminal status is stable across repeated polls after reaping.
+        assert!(
+            adopted.try_wait().expect("try_wait after exit").is_some(),
+            "terminal status should be cached, not re-waitpid'd into ECHILD"
+        );
+    }
+
+    #[test]
+    fn raw_pid_kill_of_dead_process_is_ok() {
+        // ESRCH (no such process) is treated as success, matching the PID-kill path.
+        let child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        let pid = child.id();
+        std::mem::forget(child);
+        let mut reaper = RawPidChild::new(pid);
+        // Reap it so the PID is gone, then a kill must still be Ok (ESRCH).
+        let _ = reaper.wait().expect("wait true");
+        assert!(raw_pid_kill(pid).is_ok(), "kill of a reaped pid should be Ok");
+    }
+
+    #[test]
+    fn adopted_master_resize_and_size_round_trip() {
+        let pair = NativePtySystem::default()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let raw = pair.master.as_raw_fd().expect("master raw fd");
+        let duped = unsafe { libc::dup(raw) };
+        assert!(duped >= 0, "dup master fd");
+
+        let master = unsafe { AdoptedMaster::from_raw_fd(duped) };
+        master
+            .resize(PtySize {
+                rows: 30,
+                cols: 100,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize adopted master");
+        let size = master.get_size().expect("get_size");
+        assert_eq!(size.rows, 30);
+        assert_eq!(size.cols, 100);
+        assert_eq!(master.as_raw_fd(), Some(duped));
+        // Reader/writer handles dup the fd independently, so both succeed.
+        let _reader = master.try_clone_reader().expect("clone reader");
+        let _writer = master.take_writer().expect("take writer");
+        drop(pair); // keep the original pty pair alive through the assertions
+    }
+
+    #[test]
+    fn pty_session_adopt_drives_pid_and_master_plumbing() {
+        let pair = NativePtySystem::default()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let raw = pair.master.as_raw_fd().expect("master raw fd");
+        let duped = unsafe { libc::dup(raw) };
+
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        std::mem::forget(child);
+
+        let mut session = PtySession::adopt(duped, pid).expect("adopt session");
+        assert_eq!(session.process_id(), Some(pid));
+        // The master plumbing the supervisor relies on works through the adopted fd.
+        let _reader = session.clone_reader().expect("clone_reader");
+        let handle = session.resize_handle().expect("resize_handle");
+        handle
+            .resize(PtySize {
+                rows: 40,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize via handle");
+
+        session.kill().expect("kill adopted child");
+        let status = session.wait().expect("wait adopted child");
+        assert!(!status.success(), "killed child should be non-success");
+        drop(pair);
+    }
+
+    #[test]
+    fn pty_session_adopt_rejects_invalid_inputs() {
+        assert!(PtySession::adopt(-1, 123).is_err(), "negative fd rejected");
+        assert!(PtySession::adopt(3, 0).is_err(), "zero pid rejected");
     }
 }

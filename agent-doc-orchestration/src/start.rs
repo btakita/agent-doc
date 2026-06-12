@@ -116,7 +116,7 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
@@ -2065,6 +2065,111 @@ fn supervisor_stale_action(stale: bool, idle: bool, auto_recycle: bool) -> Super
     }
 }
 
+const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
+const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
+
+/// `#ctlrecycle` R3 — state handed from a stale supervisor to its freshly-`execve`'d
+/// self so the new image re-adopts the live harness child instead of spawning a new
+/// one. Marshaled through the environment (preserved across `execve`); the document
+/// argv is preserved by re-exec'ing with the same args, so only the child PID and the
+/// inherited pty master fd need carrying.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ReexecState {
+    child_pid: u32,
+    master_fd: i32,
+}
+
+impl ReexecState {
+    /// Pure parse of the two handoff values; `None` if either is missing/invalid or
+    /// would not name a live child + inherited fd.
+    fn parse(pid: &str, fd: &str) -> Option<Self> {
+        let child_pid = pid.trim().parse::<u32>().ok()?;
+        let master_fd = fd.trim().parse::<i32>().ok()?;
+        if child_pid == 0 || master_fd < 0 {
+            return None;
+        }
+        Some(Self {
+            child_pid,
+            master_fd,
+        })
+    }
+
+    /// Read the re-entry state from the environment, if this process was launched by
+    /// a supervisor self-`execve`. `None` for a normal start.
+    fn from_env() -> Option<Self> {
+        Self::parse(
+            &std::env::var(REEXEC_CHILD_PID_ENV).ok()?,
+            &std::env::var(REEXEC_MASTER_FD_ENV).ok()?,
+        )
+    }
+
+    /// `(key, value)` env pairs to set before `execve` so the new image re-adopts.
+    fn to_env(self) -> [(String, String); 2] {
+        [
+            (REEXEC_CHILD_PID_ENV.to_string(), self.child_pid.to_string()),
+            (REEXEC_MASTER_FD_ENV.to_string(), self.master_fd.to_string()),
+        ]
+    }
+}
+
+/// `#ctlrecycle` R3 — replace this stale supervisor's process image with the
+/// freshly-installed binary IN PLACE (`execve`), preserving the live harness child
+/// and the tmux pane (`#ctlrecycle` R3, opt-in via `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).
+///
+/// The child (a separate PID) survives the image swap untouched; we dup the live pty
+/// master fd, clear its CLOEXEC so it survives `exec`, and hand the new image the
+/// child PID + inherited fd through the environment. The new image re-enters
+/// `run_with_reap_policy`, re-runs all supervisor setup (IPC, sessions, controller,
+/// watchers) for free, and calls [`PtySession::adopt`] instead of spawning.
+///
+/// Returns `Err` if it could not even begin the exec (no live child/master fd, or
+/// `exec` itself failed). On success it never returns. The caller falls back to a
+/// clean `process::exit(0)` so a recycle still happens (the child restarts) rather
+/// than wedging on the stale binary.
+#[cfg(unix)]
+fn supervisor_perform_reexec(
+    shared: &SupervisorShared,
+) -> std::io::Result<std::convert::Infallible> {
+    use std::os::unix::process::CommandExt;
+    let child_pid = shared.child_pid.load(Ordering::Relaxed);
+    let master_fd = shared.master_fd.load(Ordering::Relaxed);
+    if child_pid == 0 || master_fd < 0 {
+        return Err(std::io::Error::other(
+            "reexec: no live child/master fd to preserve",
+        ));
+    }
+    // Dup the master fd and clear CLOEXEC on the dup so it survives the execve and the
+    // new image can adopt it. The original fd (CLOEXEC) closes on exec as usual.
+    let inherited = unsafe { libc::dup(master_fd) };
+    if inherited < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let flags = unsafe { libc::fcntl(inherited, libc::F_GETFD) };
+    if flags < 0 {
+        let err = std::io::Error::last_os_error();
+        unsafe { libc::close(inherited) };
+        return Err(err);
+    }
+    if unsafe { libc::fcntl(inherited, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
+        let err = std::io::Error::last_os_error();
+        unsafe { libc::close(inherited) };
+        return Err(err);
+    }
+    let exe = std::env::current_exe()?;
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let state = ReexecState {
+        child_pid,
+        master_fd: inherited,
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(argv);
+    for (key, value) in state.to_env() {
+        cmd.env(key, value);
+    }
+    // `exec()` replaces the current process image; it only returns on failure.
+    Err(cmd.exec())
+}
+
 fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -2202,17 +2307,54 @@ fn spawn_idle_queue_watch_thread(
                         );
                     }
                     SupervisorStaleAction::Recycle if recycle_debounced => {
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "supervisor_binary_stale_self_recycled via=process_exit pane={}",
-                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                            ),
-                        );
-                        eprintln!(
-                            "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary (idle); the next launch uses the new build"
-                        );
-                        std::process::exit(0);
+                        // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE
+                        // via `execve`, preserving the live harness child + tmux pane.
+                        // Falls back to a clean exit (child restarts) if the in-place
+                        // swap cannot start.
+                        #[cfg(unix)]
+                        {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "supervisor_binary_stale_self_recycled via=execve_preserve_child pane={} child_pid={} master_fd={}",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    shared.child_pid.load(Ordering::Relaxed),
+                                    shared.master_fd.load(Ordering::Relaxed),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve"
+                            );
+                            match supervisor_perform_reexec(&shared) {
+                                Ok(never) => match never {},
+                                Err(err) => {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "supervisor_reexec_failed fallback=process_exit error={err}"
+                                        ),
+                                    );
+                                    eprintln!(
+                                        "[agent-doc] supervisor execve hot-reload failed ({err}); falling back to clean exit so the next launch uses the new build"
+                                    );
+                                    std::process::exit(0);
+                                }
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "supervisor_binary_stale_self_recycled via=process_exit pane={}",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary (idle); the next launch uses the new build"
+                            );
+                            std::process::exit(0);
+                        }
                     }
                     _ => {}
                 }
@@ -2976,6 +3118,11 @@ struct SupervisorShared {
     terminal_screen: Mutex<crate::supervisor::screen::OwnedPtyScreen>,
     /// Child PID for IPC `pid` queries and `kill` on restart/stop.
     child_pid: AtomicU32,
+    /// `#ctlrecycle` R3 — a dup of the live pty master fd for the current child, so
+    /// the idle-watch thread can hand it (CLOEXEC cleared) to a self-`execve` that
+    /// preserves the child. `-1` when no child is running. Owned: replaced (old fd
+    /// closed) on each spawn/adopt.
+    master_fd: AtomicI32,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
     /// Flag: IPC requested a stop.
@@ -3034,6 +3181,7 @@ impl SupervisorShared {
             recent_output: Mutex::new(Vec::new()),
             terminal_screen: Mutex::new(crate::supervisor::screen::OwnedPtyScreen::default()),
             child_pid: AtomicU32::new(0),
+            master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
@@ -4152,6 +4300,18 @@ pub fn run_with_reap_policy(
     }
 
     // --- Supervisor restart loop ---
+    // `#ctlrecycle` R3 — if this process was launched by a stale supervisor's
+    // self-`execve`, adopt the preserved harness child on the first iteration instead
+    // of spawning a new one. Consume the handoff env immediately so a later in-process
+    // (continue) restart never re-adopts a now-dead fd.
+    let mut pending_adopt = ReexecState::from_env();
+    if pending_adopt.is_some() {
+        unsafe {
+            std::env::remove_var(REEXEC_CHILD_PID_ENV);
+            std::env::remove_var(REEXEC_MASTER_FD_ENV);
+        }
+        log_event(&mut session_log, "supervisor_reexec_reentry detected");
+    }
     let mut first_run = true;
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
@@ -4215,8 +4375,25 @@ pub fn run_with_reap_policy(
             size: initial_size,
         };
         child_launch_count += 1;
-        let mut session = crate::supervisor::pty::PtySession::spawn(cfg)
-            .with_context(|| format!("failed to spawn {}", harness.binary))?;
+        let mut session = match pending_adopt.take() {
+            // `#ctlrecycle` R3 re-entry: adopt the harness child preserved across the
+            // supervisor's self-`execve` rather than spawning a fresh one. `first_run`
+            // is still true here, so `auto_trigger` is false — the adopted child is
+            // mid-session and must not be re-triggered.
+            Some(state) => {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "supervisor_reexec_adopted_child pid={} master_fd={}",
+                        state.child_pid, state.master_fd
+                    ),
+                );
+                crate::supervisor::pty::PtySession::adopt(state.master_fd, state.child_pid)
+                    .with_context(|| "failed to adopt harness child across supervisor reexec")?
+            }
+            None => crate::supervisor::pty::PtySession::spawn(cfg)
+                .with_context(|| format!("failed to spawn {}", harness.binary))?,
+        };
 
         // Extract writer and reader for shared I/O
         #[cfg(unix)]
@@ -4236,6 +4413,17 @@ pub fn run_with_reap_policy(
         shared
             .child_pid
             .store(session.process_id().unwrap_or(0), Ordering::Relaxed);
+        // `#ctlrecycle` R3 — publish a dedicated dup of the live master fd so the
+        // idle-watch thread can hand it to a self-`execve`. Close the previous
+        // generation's dup so restarts do not leak fds.
+        #[cfg(unix)]
+        {
+            let master_dup = session.dup_write_fd().unwrap_or(-1);
+            let prev = shared.master_fd.swap(master_dup, Ordering::Relaxed);
+            if prev >= 0 {
+                unsafe { libc::close(prev) };
+            }
+        }
         shared.running.store(true, Ordering::Relaxed);
         shared.restart_count.store(restart_count, Ordering::Relaxed);
         shared.restart_requested.store(false, Ordering::Relaxed);
@@ -6001,6 +6189,50 @@ Done.
         assert_eq!(supervisor_stale_action(true, true, false), Detect);
         // Stale + idle, opt-in ON → recycle.
         assert_eq!(supervisor_stale_action(true, true, true), Recycle);
+    }
+
+    #[test]
+    fn reexec_state_parses_valid_handoff() {
+        assert_eq!(
+            ReexecState::parse("4242", "7"),
+            Some(ReexecState {
+                child_pid: 4242,
+                master_fd: 7,
+            })
+        );
+        // Whitespace tolerated.
+        assert_eq!(
+            ReexecState::parse(" 9 ", " 12 "),
+            Some(ReexecState {
+                child_pid: 9,
+                master_fd: 12,
+            })
+        );
+    }
+
+    #[test]
+    fn reexec_state_rejects_invalid_handoff() {
+        // pid 0 is not a live child; fd < 0 is not an inherited fd.
+        assert_eq!(ReexecState::parse("0", "7"), None);
+        assert_eq!(ReexecState::parse("4242", "-1"), None);
+        // Non-numeric never re-adopts.
+        assert_eq!(ReexecState::parse("x", "7"), None);
+        assert_eq!(ReexecState::parse("4242", "fd"), None);
+    }
+
+    #[test]
+    fn reexec_state_env_round_trips() {
+        let state = ReexecState {
+            child_pid: 4242,
+            master_fd: 7,
+        };
+        let env = state.to_env();
+        assert_eq!(env[0].0, REEXEC_CHILD_PID_ENV);
+        assert_eq!(env[0].1, "4242");
+        assert_eq!(env[1].0, REEXEC_MASTER_FD_ENV);
+        assert_eq!(env[1].1, "7");
+        // Marshaled values parse back to the same state.
+        assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
     }
 
     #[test]

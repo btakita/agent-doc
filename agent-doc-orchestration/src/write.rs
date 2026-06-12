@@ -10417,7 +10417,14 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     )?;
 
     guard_visible_write_idle_and_current(file, "apply_template_from_string", &content_current)?;
-    atomic_write(file, &final_content)?;
+    // `#fcc0`: this repair recovery applies template (component) patches straight
+    // to disk with no prior IPC attempt — the same direct-disk-no-IPC class as
+    // queue consume. Converge through the editor when a JB listener is active (no
+    // `File Cache Conflict` dialog); the guard already ran above, so the
+    // no-listener fallback is the bare disk write.
+    if !try_editor_converge(file, &final_content, &content_current, "apply_template")? {
+        atomic_write(file, &final_content)?;
+    }
     // Save snapshot as the repaired/merged final content.
     snapshot::save(file, &final_content)?;
     drop(doc_lock);

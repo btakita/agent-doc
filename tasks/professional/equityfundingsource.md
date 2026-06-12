@@ -118,7 +118,11 @@ fix(admin): show emails on pipeline cards
 
 Pipeline card payloads now carry borrower and lead email addresses, and the Deal Pipeline cards render that email line while card search also matches it. Verified with focused admin pipeline tests, make check, and production deploy 3106fb97-7023-4def-8722-bc1c18499a06.
 ```
-<!-- agent:boundary:d892d88f -->
+
+### Re: Closeout recovery — gpt-5
+
+The pipeline-card email change was already implemented, verified, deployed, and recorded above. This note only closes the active agent-doc turn after the IPC recovery path committed the visible response.
+<!-- agent:boundary:74e0ff15 -->
 <!-- /agent:exchange -->
 ###
 <!--

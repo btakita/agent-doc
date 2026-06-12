@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -81,12 +81,15 @@ I did not execute #jbcompactcrdt in this live IPC-hosting session. The requested
 The item is not code-complete, so I kept it open and narrowed it to the clean-session implementation slice: component-scoped `exchange` `op:replace` through editor IPC, listener-active gate, disk fallback with explicit transport proof, and SimWorld concurrent-edit convergence coverage. The final live JB two-editor verification remains operator-driven.
 
 No repository implementation files were changed in this cycle; only this session document closeout is being persisted. Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange, `tsift status`, and `tasks/agent-doc/plan-jb-compact-crdt.md`. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run #jbcompactcrdt from a dedicated clean session, then perform the live JB verification.
-<!-- agent:boundary:fe8d9622 -->
+<!-- agent:boundary:4fc2db06 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.
+- [#jbcompactcrdt]
+- [#rtwbcast]
 <!-- /agent:queue -->
 ###
 <!--

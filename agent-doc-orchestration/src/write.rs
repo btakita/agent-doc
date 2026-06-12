@@ -7598,6 +7598,33 @@ pub fn try_editor_converge(
     else {
         return Ok(false);
     };
+    // `#fcc0e`: integrate the converger with the `#ipcdrift` degraded-latch
+    // circuit breaker. A session whose socket listener latched degraded (repeated
+    // ack timeouts) must short-circuit straight to the guarded disk fallback
+    // instead of hammering the wedged socket on every queue/template converge —
+    // the same skip the reposition/finalize socket paths already take. The latch
+    // self-heals (`#ipc-degrade-self-heal`): `ipc_direct_disk_degraded` re-probes
+    // listener liveness and clears the marker the moment the socket recovers.
+    cleanup_legacy_ipc_degraded(&project_root);
+    match ipc_direct_disk_degraded(&project_root, file) {
+        Ok(true) => {
+            log_ipc_dewedge_direct_disk_skip(file, source);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_writeback file={} transport=disk_fallback reason=listener_degraded",
+                    file.display()
+                ),
+            );
+            return Ok(false);
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: {source} converge degradation check failed (non-fatal): {e}"
+            );
+        }
+    }
     if !crate::ipc_socket::is_listener_active(&project_root) {
         crate::ops_log::log_op(
             file,
@@ -7684,6 +7711,14 @@ pub fn try_editor_converge(
                         recovered.len()
                     ),
                 );
+                // `#fcc0e`: a confirmed editor convergence proves the socket
+                // listener is live; clear any accrued ack-timeout votes (the
+                // degraded latch itself only clears on the liveness re-probe).
+                if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                    eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                    );
+                }
                 Ok(true)
             } else {
                 crate::ops_log::log_op(
@@ -7718,6 +7753,21 @@ pub fn try_editor_converge(
                     err
                 ),
             );
+            // `#fcc0e`: feed the de-wedge circuit breaker — a socket ack timeout
+            // here counts toward the latch so a repeatedly-wedged listener trips
+            // degraded and subsequent converges skip the doomed socket up front.
+            if is_socket_ack_timeout_error(&err) {
+                match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
+                    Ok(true) => eprintln!(
+                        "[write] IPC listener degraded for {} after repeated {source} ack timeouts",
+                        file.display()
+                    ),
+                    Ok(false) => {}
+                    Err(e) => eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout record failed (non-fatal): {e}"
+                    ),
+                }
+            }
             Ok(false)
         }
     }
@@ -18497,6 +18547,46 @@ scratch
                 && log.contains("transport=disk_fallback")
                 && log.contains("reason=no_listener"),
             "a no-listener queue consume must record the source-labelled disk fallback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_editor_converge_skips_wedged_socket_when_latched_degraded() {
+        // `#fcc0e`: once the de-wedge latch trips degraded (repeated socket ack
+        // timeouts) and no live listener can be re-probed, the converger must
+        // short-circuit to the disk fallback (`reason=listener_degraded`) instead
+        // of hammering the wedged socket on every queue/template converge — the
+        // same skip the reposition/finalize socket paths already take.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = queue_consume_convergence_source();
+        let target = queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        // Trip the degraded latch (threshold = 2 distinct ack timeouts), mirroring
+        // the existing dewedge tests. No live listener exists, so the self-heal
+        // re-probe in `ipc_direct_disk_degraded` cannot clear it.
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "queue_consume").unwrap();
+        let degraded =
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "queue_consume").unwrap();
+        assert!(degraded, "two distinct ack timeouts must trip the degraded latch");
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            !converged,
+            "a latched-degraded session must skip the socket and disk-fall-back"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback") && log.contains("reason=listener_degraded"),
+            "the degraded skip must be source-labelled in ops.log:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=no_listener"),
+            "the degraded check must short-circuit before the no_listener check:\n{log}"
         );
     }
 

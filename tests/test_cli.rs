@@ -876,7 +876,16 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the generalized `try_editor_converge` for every write site, not just
         // compact) are unchanged; this single increment is a test-assertion
         // literal proving the queue-consume disk fallback is source-labelled.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 43,
+        // +4 (#fcc0e) for the de-wedge circuit-breaker integration of
+        // `try_editor_converge`: +1 PRODUCTION `reason=listener_degraded` (the
+        // converger now short-circuits to the guarded disk fallback when the
+        // `#ipcdrift` latch is degraded, mirroring the reposition/finalize socket
+        // paths) and +3 test literals (the comment + the `reason=listener_degraded`
+        // / `reason=no_listener` assertions in
+        // `try_editor_converge_skips_wedged_socket_when_latched_degraded`). The
+        // socket failure path also now feeds `record_ipc_socket_ack_timeout` /
+        // clears via `clear_ipc_socket_ack_timeouts` — no new `reason=` token.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 47,
         _ => 0,
     }
 }

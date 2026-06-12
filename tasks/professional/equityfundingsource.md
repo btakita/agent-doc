@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -54,7 +54,7 @@ Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `g
 Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
 
 Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
-<!-- agent:boundary:c86084ee -->
+<!-- agent:boundary:fc37d745 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,6 +62,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- What is "Requested loan number" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3? Why is it blank?
 <!-- /agent:queue -->
 
 ## Backlog

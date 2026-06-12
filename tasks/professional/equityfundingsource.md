@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -76,7 +76,7 @@ Once the account is ready, I can connect the test environment first, run through
 
 Best,
 Brian
-<!-- agent:boundary:7f55ac96 -->
+<!-- agent:boundary:7249d9fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,6 +84,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Use corky to send the draft email from brian.takita@gmail.com
 <!-- /agent:queue -->
 
 ## Backlog

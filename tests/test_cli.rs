@@ -611,6 +611,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-orchestration/src/write/normalize.rs",
     ];
     let tokens = [
         "guard_",

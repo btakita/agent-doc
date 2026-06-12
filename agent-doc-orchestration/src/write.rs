@@ -575,7 +575,7 @@ fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
 /// matcher in `git.rs` and the gate's own prompt detection, kept deliberately
 /// broad — carry-forward is the safe default, so a false positive only defers an
 /// edit to the next cycle, never commits a directive prematurely.
-fn line_is_carry_forward_signal(line: &str) -> bool {
+pub(crate) fn line_is_carry_forward_signal(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return false;

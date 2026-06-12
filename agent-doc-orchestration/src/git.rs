@@ -3333,6 +3333,54 @@ fn repair_clean_head_if_only_transient_worktree_drift(
 ///
 /// Best-effort and non-fatal: a missing HEAD blob (untracked doc) or an unreadable
 /// working tree skips the check rather than failing the commit.
+/// `#pcwc` — discriminate post-commit worktree drift (already proven `match=false`
+/// against a correct HEAD) on the replay-normalized content:
+///
+/// - **corruption** — the working tree LOST committed content (a non-blank line
+///   HEAD committed is absent from the tree: a dropped `### Re:` heading, a stale
+///   reposition that deleted a response block) AND the tree added no new
+///   carry-forward signal (prompt / question / `do #` / `dispatch` / `#tag`). HEAD
+///   is authoritative and the tree is safe to reconcile back to it → `true`.
+/// - **legitimate carry-forward / ambiguous** — the tree preserves every committed
+///   line (a superset: all of HEAD plus new uncommitted user edits), OR it added a
+///   carry-forward signal (real next-cycle user work). Either way the tree must be
+///   preserved, never clobbered → `false`.
+///
+/// Conservative by construction: a false `false` only defers to the existing
+/// detect-and-warn path; a false `true` would clobber a user edit, so every
+/// uncertain shape (any added directive, or no proven content loss) returns
+/// `false`. Shares [`crate::write::line_is_carry_forward_signal`] with the
+/// `#fintol` finalize-tolerance gate so both paths classify user work the same way.
+fn postcommit_worktree_lost_committed_content(head_norm: &str, tree_norm: &str) -> bool {
+    use std::collections::HashSet;
+    let tree_lines: HashSet<&str> = tree_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let lost_committed = head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .any(|l| !tree_lines.contains(l));
+    if !lost_committed {
+        // Worktree preserves all committed content → carry-forward superset → preserve.
+        return false;
+    }
+    let head_lines: HashSet<&str> = head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let added_user_work = tree_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !head_lines.contains(l))
+        .any(crate::write::line_is_carry_forward_signal);
+    // Committed content was lost AND no new user work was added → corruption.
+    !added_user_work
+}
+
 fn emit_postcommit_worktree_check(file: &Path) {
     let head_doc = match show_head(file) {
         Ok(Some(head)) => head,
@@ -3367,18 +3415,40 @@ fn emit_postcommit_worktree_check(file: &Path) {
         ),
     );
     if !matches {
-        // #pcwc — auto-remediation of this drift class is OPERATOR-GATED and NOT
-        // wired here. A post-commit working tree legitimately differs from HEAD
-        // whenever a concurrent user edit was carried forward UNCOMMITTED (the
-        // deliberate carry-forward invariant — see
-        // `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`),
-        // so `match=false` does NOT by itself prove corruption. Reconciling the
-        // worktree to HEAD here would clobber that carried-forward edit. Safely
-        // separating genuine reorder/duplicate corruption (HEAD content lost from
-        // the worktree) from a legitimate carry-forward superset needs a
-        // lost-committed-content discriminator and a live Phase-0 re-baseline, so
-        // this stays a detection + warn signal until the operator confirms the
-        // auto-repair behavior. The editor-buffer push half overlaps `#rtwbcast`.
+        // #pcwc — auto-reconcile ONLY the corruption class: the working tree LOST
+        // committed content (HEAD content dropped from the tree) with no new user
+        // work. HEAD is authoritative, so restore the tree to the committed blob,
+        // turning the old manual `git checkout HEAD -- FILE` recovery into an
+        // automatic repair. A legitimate carry-forward superset (a concurrent user
+        // edit carried forward UNCOMMITTED — the deliberate carry-forward invariant,
+        // see `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`)
+        // preserves every committed line, so the discriminator returns `false` and
+        // the tree is left untouched on the detect-and-warn path below. The
+        // editor-buffer push half (so the IDE buffer stops writing the stale content
+        // back) is still deferred — it overlaps `#rtwbcast`.
+        if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm) {
+            match std::fs::write(file, &head_doc) {
+                Ok(()) => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost",
+                            file.display(),
+                            &head_sha[..head_sha.len().min(12)],
+                            &tree_sha[..tree_sha.len().min(12)],
+                        ),
+                    );
+                    eprintln!(
+                        "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD (#pcwc)",
+                        file.display()
+                    );
+                }
+                Err(e) => eprintln!(
+                    "[commit] postcommit worktree auto-reconcile write failed (non-fatal): {e}"
+                ),
+            }
+            return;
+        }
         eprintln!(
             "[commit] WARNING postcommit_worktree_check match=false for {} — working tree drifted from HEAD (#postcommit-ipc-worktree-corruption)",
             file.display()
@@ -6718,6 +6788,105 @@ Done.
         assert!(
             log.contains("postcommit_worktree_check file=") && log.contains("match=false"),
             "spliced/deleted-response working-tree corruption must log match=false:\n{log}"
+        );
+        // #pcwc: HEAD is authoritative and committed content (`### Re: second`) was
+        // dropped with no new user work ⇒ the tree is auto-reconciled to HEAD,
+        // replacing the old manual `git checkout HEAD -- FILE` recovery.
+        assert!(
+            log.contains("postcommit_worktree_auto_reconciled"),
+            "lost-committed-content corruption must auto-reconcile:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            head_doc,
+            "auto-reconcile must restore the working tree to the committed HEAD blob"
+        );
+    }
+
+    #[test]
+    fn postcommit_worktree_preserves_carry_forward_superset() {
+        // A concurrent user edit carried forward UNCOMMITTED makes the working tree a
+        // superset of HEAD (every committed line present, plus a new line). HEAD
+        // content is NOT lost, so #pcwc must preserve the tree, never clobber the
+        // carried-forward edit.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        // Superset: all of HEAD plus a new uncommitted user note after the boundary.
+        let superset = format!("{head_doc}\na new uncommitted user note line\n");
+        fs::write(&doc, &superset).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("match=false"), "superset differs from HEAD:\n{log}");
+        assert!(
+            !log.contains("postcommit_worktree_auto_reconciled"),
+            "a carry-forward superset must NOT be auto-reconciled:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            superset,
+            "the carried-forward user edit must be preserved untouched"
+        );
+    }
+
+    #[test]
+    fn postcommit_worktree_preserves_when_content_lost_but_user_work_added() {
+        // The tree dropped a committed line BUT also added a carry-forward signal (a
+        // `#tag` directive = real next-cycle user work). The ambiguous case fails
+        // safe toward PRESERVING the user edit rather than clobbering it to HEAD.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        // `### Re: second` dropped (content loss) AND a new `#tag` directive added.
+        let drifted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n\
+            follow up on #newtask\n";
+        fs::write(&doc, drifted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("postcommit_worktree_auto_reconciled"),
+            "content loss WITH new user work must not be auto-reconciled:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            drifted,
+            "ambiguous drift with new user work must be preserved"
         );
     }
 

@@ -638,7 +638,10 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
 fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
     match (source, token) {
         ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 4,
+        // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
+        // logs when it restored the working tree to HEAD because committed content
+        // was dropped with no new user work (vs a preserved carry-forward superset).
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 5,
         ("src/orchestrate.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
         // skipped opening a `preflight_started` cycle (#preflight-probe-side-effect-free).

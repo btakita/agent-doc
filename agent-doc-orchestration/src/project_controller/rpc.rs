@@ -3111,3 +3111,932 @@ pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
     println!("{}", request(&project_root, "shutdown")?);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+    // `rusqlite` is a dev-dependency: these tests open the controller state DB
+    // directly to assert the schema/rows the seam writes. `Connection` is the
+    // `state_store` re-export already in scope via `super::*`.
+    use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+    use rusqlite::params;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn duplicate_scan_only_matches_same_project_controller_args() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = vec![
+            "/home/user/.cargo/bin/agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(args_match_same_project_controller(&args, dir.path()));
+
+        let other_dir = tempfile::TempDir::new().unwrap();
+        assert!(!args_match_same_project_controller(&args, other_dir.path()));
+
+        let non_controller = vec![
+            "agent-doc".to_string(),
+            "preflight".to_string(),
+            dir.path().join("task.md").display().to_string(),
+        ];
+        assert!(!args_match_same_project_controller(
+            &non_controller,
+            dir.path()
+        ));
+    }
+    #[test]
+    fn controller_status_reports_startup_binary_identity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({ "command": "status" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        assert!(status.active);
+        assert_eq!(status.controller_binary, bootstrap.controller_binary);
+        assert!(controller_status_matches_current_binary(&status).unwrap());
+    }
+    #[test]
+    fn controller_client_response_read_times_out() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let handle = std::thread::spawn(move || {
+            let _stream = listener.accept().unwrap();
+            std::thread::sleep(CONTROLLER_RPC_TIMEOUT * 2);
+        });
+
+        let started = Instant::now();
+        let err = request(dir.path(), "status").unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "controller request should fail within the bounded timeout"
+        );
+        assert!(
+            err.to_string().contains("timed out") || format!("{err:#}").contains("timed out"),
+            "{err:#}"
+        );
+        handle.join().unwrap();
+    }
+    #[test]
+    fn idle_controller_client_does_not_block_later_status_request() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let idle_stream = connect(&project_root).unwrap();
+        let response = request(&project_root, "status").unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert!(status.active);
+        assert_eq!(status.project_root, project_root);
+
+        drop(idle_stream);
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+    #[test]
+    fn run_status_ensure_does_not_hold_idle_controller_stream() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let idle_stream = connect(&project_root).unwrap();
+        let started = Instant::now();
+        run_status(Some(&project_root), true).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "controller status --ensure should complete without holding an idle stream"
+        );
+
+        drop(idle_stream);
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+    #[test]
+    fn controller_session_operator_status_reports_history_and_command_stages() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/operator.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-operator\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-operator", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-operator",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let operator_command = ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_clear".to_string()),
+            diagnostic_payload: Some("test operator command".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&operator_command).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let authorization = envelope.data.unwrap();
+        assert_eq!(authorization.accepted_stage, "operator_ready");
+        assert!(authorization.receipt.receipt_id > 0);
+        assert_eq!(
+            authorization.receipt.status,
+            ControllerDispatchResultStatus::Accepted
+        );
+        assert_eq!(
+            authorization.receipt.proof_scope,
+            ControllerDispatchProofScope::AcceptedOnly
+        );
+
+        let status = ControllerRequest {
+            command: "session_status".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<SessionOperatorStatus> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let status = envelope.data.unwrap();
+        assert_eq!(
+            status.record.unwrap().state,
+            crate::session_actor::ActorState::Ready
+        );
+        assert_eq!(status.transitions.len(), 2);
+        let attempt = status.dispatch_attempts.last().unwrap();
+        assert_eq!(attempt.receipt_id, authorization.receipt.receipt_id);
+        assert_eq!(attempt.accepted_stage.as_deref(), Some("operator_ready"));
+        assert_eq!(attempt.result_status.as_deref(), Some("accepted"));
+        assert_eq!(attempt.proof_scope.as_deref(), Some("accepted_only"));
+        assert!(!attempt.dispatch_start_proven);
+    }
+    #[test]
+    fn controller_status_reports_single_process_control_plane_runtime() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/control-plane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-control-plane\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: Some("@7".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let register = ControllerRequest {
+            command: "register_supervisor".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("starting".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(4242),
+            supervisor_socket: Some("supervisor.sock".to_string()),
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&register).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-control-plane".to_string()),
+            pane_id: Some("%77".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("control-plane status test".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let doc_id = doc.to_string_lossy().to_string();
+        record_projection_diagnostic(
+            dir.path(),
+            "session-actors.json",
+            &doc_id,
+            "test projection lag",
+        );
+        let conn = open_state_db(dir.path()).unwrap();
+        state_store::upsert_queue_head_in_db(
+            &conn,
+            &doc_id,
+            "agent:queue",
+            Some("ctrlplane-storeactor"),
+            "do [#ctrlplane-storeactor]",
+            "selected",
+        )
+        .unwrap();
+        state_store::upsert_document_cycle_state_in_db(
+            &conn,
+            &doc_id,
+            "cycle-control-plane",
+            "preflight_started",
+            Some("ctrlplane-storeactor"),
+            None,
+        )
+        .unwrap();
+        drop(conn);
+        let mut conn = open_state_db(dir.path()).unwrap();
+        state_store::commit_session_actor_closeout_in_db(
+            &mut conn,
+            &state_store::SessionActorCloseoutCommit {
+                document_id: &doc_id,
+                cycle_id: "cycle-control-plane",
+                cycle_state: "committed",
+                queue_name: "agent:queue",
+                queue_head_id: Some("ctrlplane-storeactor"),
+                queue_head_prompt: Some("do [#ctrlplane-storeactor]"),
+                queue_head_state: "consumed",
+                response_commit: Some("commit-control-plane"),
+                mutations: vec![state_store::SessionActorCloseoutMutation {
+                    item_id: "ctrlplane-storeactor",
+                    mutation_kind: "backlog_completion",
+                    status: "done",
+                }],
+            },
+        )
+        .unwrap();
+        state_store::insert_admin_operation_in_db(
+            &conn,
+            "projection_repair",
+            Some(&doc_id),
+            "accepted",
+            Some("control-plane status test"),
+        )
+        .unwrap();
+        state_store::insert_crash_recovery_marker_in_db(
+            &conn,
+            "startup_reconcile",
+            Some(&doc_id),
+            Some(1),
+            "pending",
+            Some("control-plane status test"),
+        )
+        .unwrap();
+        state_store::store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, &["@7".to_string()])
+            .unwrap();
+
+        let status = ControllerRequest {
+            command: "status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        assert!(status.active);
+        assert_eq!(
+            status.control_plane.process_model,
+            "project_scoped_single_process"
+        );
+        assert_eq!(status.control_plane.external_boundary, "controller_ipc");
+        assert_eq!(status.control_plane.state_authority, ".agent-doc/state.db");
+        assert_eq!(
+            status.control_plane.projection_authority,
+            "compatibility_output"
+        );
+        assert_eq!(status.control_plane.dispatch_actor.owned_items, 1);
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("queue_heads"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("document_cycles"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("pending_mutations"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("admin_operations"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("crash_recovery_markers"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .store_actor
+                .categories
+                .get("layout_states"),
+            Some(&1)
+        );
+        assert_eq!(status.control_plane.session_actors.owned_items, 4);
+        assert_eq!(status.control_plane.supervisor_adapters.owned_items, 1);
+        assert!(status.control_plane.projection_workers.owned_items >= 1);
+        assert!(status.control_plane.store_actor.owned_items >= 11);
+    }
+    #[test]
+    fn controller_runtime_refreshes_memory_after_write_through_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/memory-auth.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-memory-auth\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let mut should_stop = false;
+        let doc_id = doc.to_string_lossy().to_string();
+
+        assert!(runtime.actor_record(&doc_id).unwrap().is_none());
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-memory-auth".to_string()),
+            pane_id: Some("%88".to_string()),
+            window_id: Some("@8".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let memory_record = runtime.actor_record(&doc_id).unwrap().unwrap();
+        assert_eq!(memory_record.session_id, "session-memory-auth");
+        assert_eq!(memory_record.pane_id, "%88");
+
+        let status = ControllerRequest {
+            command: "status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("actor_records"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("write_through_sqlite"),
+            Some(&1)
+        );
+        assert_eq!(
+            status
+                .control_plane
+                .session_actors
+                .categories
+                .get("map_backend_std_btree_map"),
+            Some(&1)
+        );
+    }
+    #[test]
+    fn typed_controller_decode_reports_missing_data_with_command_and_raw_envelope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/missing-data.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let request = ControllerRequest {
+            command: "session_status".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+
+        let err = decode_controller_response::<SessionOperatorStatus>(
+            dir.path(),
+            &request,
+            r#"{"ok":true}"#,
+        )
+        .expect_err("typed controller response without data must fail");
+
+        let message = err.to_string();
+        assert!(message.contains("command `session_status`"));
+        assert!(message.contains(r#"{"ok":true}"#));
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("controller_response_missing_data command=session_status"));
+    }
+    #[test]
+    fn reaper_terminates_wedged_same_project_controller_and_marks_failed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(
+            is_same_project_controller_pid(dir.path(), pid),
+            "sentinel must present a matching `controller serve --project-root` cmdline"
+        );
+        let old = timestamp_secs() - 600;
+        write_preparing_bootstrap(dir.path(), pid, Some(old));
+
+        let (reaped, kept) = terminate_stale_preparing_controllers(
+            dir.path(),
+            Duration::from_secs(45),
+            false,
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+
+        // The live wedged process must be dead (the critical difference from the
+        // projection reaper). The sentinel is a child of this test, so a killed
+        // process lingers as a zombie (with `/proc/<pid>` still present) until we
+        // `wait()` it — poll `try_wait` instead of `process_is_alive`.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("wedged sentinel pid must be reaped");
+        assert!(
+            !status.success(),
+            "sentinel must be signal-terminated, not exit cleanly: {status:?}"
+        );
+
+        // The record must be superseded with `Failed` so the next bind promotes fresh.
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_reaped pid="));
+        assert!(ops_log.contains("caller=gc"));
+    }
+    #[test]
+    fn orphan_reaper_reaps_aged_preparing_sentinel() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        // Let the process age past a zero threshold (start age is /proc dir mtime).
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false)
+                .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+
+        // The live orphan must actually be terminated (the whole point vs. the
+        // record-scoped reaper). The sentinel is our child, so a killed process
+        // lingers as a zombie until `wait()` — poll `try_wait`.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("aged preparing orphan must be reaped");
+        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+    }
+    #[test]
+    fn qflood_coalesces_only_auto_in_flight_redispatch() {
+        // The flood: an AUTO re-dispatch while the same cycle's dispatch is still in
+        // flight (unconsumed) — suppress it so the trigger does not pile into the
+        // busy pane.
+        assert!(dispatch_should_coalesce_in_flight(true, false));
+        // Operator dispatch always passes, even mid-flight (explicit intent must not
+        // be blocked by auto-drain backpressure).
+        assert!(!dispatch_should_coalesce_in_flight(true, true));
+        // Nothing in flight (prior consumed / new cycle) → always admit.
+        assert!(!dispatch_should_coalesce_in_flight(false, false));
+        assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+    #[test]
+    fn qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/qflood.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-qf\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-qf", "%41", "@1", 1)
+            .unwrap();
+        // Actor actively running a turn (mid-turn / pane busy).
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-qf",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Busy,
+            "supervisor",
+            "turn_started",
+        )
+        .unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let bootstrap = test_bootstrap(&dir);
+        let dispatch = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-qf".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("qflood test".to_string()),
+        };
+
+        // First dispatch while Busy: nothing in flight yet ⇒ admitted (queued),
+        // recording the in-flight marker. The first dispatch of a turn is never lost.
+        handle_dispatch(&bootstrap, None, dispatch()).expect("first busy dispatch must queue");
+        let conn = open_state_db(dir.path()).unwrap();
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "the first busy dispatch must be in flight"
+        );
+
+        // Re-fire while still Busy and in flight ⇒ coalesced (bail), not piled into
+        // the pane as another trigger.
+        let err = handle_dispatch(&bootstrap, None, dispatch()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("coalesced"),
+            "a redundant in-flight re-dispatch must coalesce: {err:#}"
+        );
+        let coalesced: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'coalesced_in_flight'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(coalesced, 1, "the coalesced re-dispatch must be recorded");
+
+        // Actor returns to Ready (turn finished): the in-flight marker is released so
+        // the next turn dispatches cleanly.
+        let mark_ready = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-qf".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("prompt_ready".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        handle_mark_lifecycle(&bootstrap, None, mark_ready).expect("mark ready");
+        assert!(
+            !state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "the Ready transition must release the in-flight marker"
+        );
+    }
+    #[test]
+    fn process_binary_is_stale_matches_and_differs() {
+        // `#ctlrecycle` foundation. No recorded identity → never stale (fail-open).
+        assert!(!process_binary_is_stale(None));
+        // The freshly-installed identity matches itself → not stale.
+        let current = current_binary_identity().unwrap();
+        assert!(!process_binary_is_stale(Some(&current)));
+        // A different recorded identity (an old build) → stale.
+        let stale = ControllerBinaryIdentity {
+            path: current.path.clone(),
+            version: "0.0.0-stale".to_string(),
+            len: current.len.wrapping_add(1),
+            modified_secs: current.modified_secs.wrapping_add(1),
+            modified_nanos: 0,
+        };
+        assert!(process_binary_is_stale(Some(&stale)));
+    }
+    #[test]
+    fn recycle_debounce_decision_requires_continuous_idle_grace() {
+        // `#ctlrecycle` foundation: a recycle fires only after "wants-recycle AND
+        // idle" holds continuously for the grace window, and any busy blip resets it.
+        let grace = Duration::from_secs(5);
+        let t0 = Instant::now();
+        // Not idle-and-stale → no recycle, timer cleared.
+        assert_eq!(
+            recycle_debounce_decision(false, Some(t0), t0, grace),
+            (false, None)
+        );
+        // First observation arms the timer but does not recycle yet.
+        let (do_recycle, since) = recycle_debounce_decision(true, None, t0, grace);
+        assert!(!do_recycle);
+        assert_eq!(since, Some(t0));
+        // Before the grace elapses → still no recycle, timer preserved.
+        let t_mid = t0 + Duration::from_secs(2);
+        assert_eq!(
+            recycle_debounce_decision(true, since, t_mid, grace),
+            (false, Some(t0))
+        );
+        // After the grace elapses while continuously idle-and-stale → recycle.
+        let t_late = t0 + Duration::from_secs(6);
+        assert_eq!(
+            recycle_debounce_decision(true, since, t_late, grace),
+            (true, Some(t0))
+        );
+        // A busy blip between samples resets the timer (no recycle, cleared).
+        assert_eq!(
+            recycle_debounce_decision(false, since, t_late, grace),
+            (false, None)
+        );
+    }
+    #[test]
+    fn handoff_drop_guard_aborted_handoff_sends_shutdown_and_logs() {
+        // An aborted handoff (guard dropped before `complete`) must tell the
+        // half-launched replacement on the temp socket to shut down, and record it.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+
+        // Stand up a one-shot listener standing in for the Preparing replacement so
+        // we can prove the exact `shutdown` command crosses the socket. Binding on
+        // this thread before spawning means the guard's connect always succeeds.
+        let name = temp_sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut reader = BufReader::new(reader_half);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            // Respond so the guard's bounded `request_path` read returns promptly.
+            writer_half.write_all(b"{\"ok\":true}\n").unwrap();
+            writer_half.flush().unwrap();
+            tx.send(line).unwrap();
+        });
+
+        {
+            let _guard = HandoffDropGuard::new(dir.path(), &temp_sock);
+            // Dropped here without `complete()` ⇒ abort path fires.
+        }
+
+        let received = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("aborted drop-guard must send a request to the replacement");
+        assert!(
+            received.contains("\"command\":\"shutdown\""),
+            "aborted handoff must send shutdown, got: {received}"
+        );
+        server.join().unwrap();
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"));
+        assert!(ops_log.contains(&format!("temp_sock={}", temp_sock.display())));
+    }
+    #[test]
+    fn handoff_drop_guard_completed_handoff_does_not_shut_down() {
+        // The success path calls `complete()`: a promoted, now-authoritative
+        // controller must never be shut down or logged as an aborted handoff.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+        {
+            let mut guard = HandoffDropGuard::new(dir.path(), &temp_sock);
+            guard.complete();
+            // Dropped here after `complete()` ⇒ shutdown branch must be skipped.
+        }
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"),
+            "a completed handoff must not log an aborted shutdown"
+        );
+    }
+    #[test]
+    fn controller_serve_project_root_from_args_rejects_non_controllers() {
+        // `controller serve` window present but no `--project-root`.
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "controller".to_string(),
+                "serve".to_string(),
+            ]),
+            None
+        );
+        // An agent-doc invocation that is not `controller serve`.
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "status".to_string(),
+                "--project-root".to_string(),
+                "/x".to_string(),
+            ]),
+            None
+        );
+        // Not an agent-doc process at all (no arg ends with `agent-doc`).
+        assert_eq!(
+            controller_serve_project_root_from_args(&[
+                "sleep".to_string(),
+                "controller".to_string(),
+                "serve".to_string(),
+                "--project-root".to_string(),
+                "/x".to_string(),
+            ]),
+            None
+        );
+    }
+}

@@ -85,10 +85,27 @@ the fallback.
     `redeliver_*_to_editor` and fall to disk only when redelivery didn't land.
   - `repair_partial_response_materialization_before_fallback` (5026): IPC-degraded
     pre-fallback cleanup of a mid-IPC partial write; not a clean current→target delta.
-- **#fcc0e** TODO — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops
-  failing (stale `patch_id` replay, wedged `--handoff-state preparing` controllers)
-  — once the listener is reliable, the `run_stream` fallbacks rarely fire and the
-  remaining dialogs disappear. This is the load-bearing remainder of "0 dialogs."
+- **#fcc0e** ◑ MOSTLY DONE — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC
+  stops failing. Three sub-surfaces; the agent-completable ones have landed:
+  - **Wedged `--handoff-state preparing` controllers (#stuckhandoff2)** ✅ — M1-M5
+    all landed (`08dfc27b`/`2b643683`/`3e0503ec`): controller self-watchdog suicide
+    timer, orphan + cross-project `/proc`-scan reapers, client handoff drop-guard,
+    and gate-dispatch-admission-on-`Stable`. See `plan-stuck-handoff-hardening.md`.
+  - **Stale `patch_id` replay (#ipcdrift)** ✅ — claimed-patches sentinel (binary
+    writes on disk fallback; JB + VS Code plugins consume before applying),
+    generation fence, patch_id dedup, and the 08b read-only WatchService demotion
+    (`#dsqa`) so the plugin's autonomous watcher no longer applies stale file-IPC
+    patches — controller-owned watcher + socket IPC are the sole writers.
+  - **Converger ↔ de-wedge integration** ✅ (`c7054e00`) — the `#fcc0` converger
+    now respects the degraded latch (skips a wedged socket → `reason=listener_degraded`),
+    feeds `record_ipc_socket_ack_timeout` on ack-timeout, and clears on success, so
+    queue/template/compact converges are coherent with the circuit breaker.
+  - **REMAINING (operator-gated):** M2's full finalize/commit **worktree-write**
+    gate on `Stable` — overlaps the contested `#pcwc` carry-forward invariant
+    (memory: don't re-wire without operator go + live Phase-0 re-baseline). M1
+    already bounds the Preparing window, so the wedge can't persist long enough to
+    corrupt much before self-reap. This is the only remaining code lever, and it is
+    the user's call.
 
 ## Status (2026-06-12)
 
@@ -102,11 +119,17 @@ clean. Binaries rebuilt (`cargo install` + `cargo build --release`) and cdylib
 refreshed (`agent-doc lib-install`) — running controllers still serve the prior
 build until `agent-doc admin recycle --all-projects` / session restart.
 
-Remaining for "0 dialogs": **#fcc0e** (the `#ipcdrift`/`#stuckhandoff2` IPC wedge —
-the real fix for the CRDT `run_stream` finalize/timeout fallbacks, the only writes
-that still hit disk under a live buffer) and the operator-drive live JB proof (drive
-a queue drain with a live IDE, confirm `ops.log` shows `queue_consume_writeback …
-transport=editor_ipc` and zero disk-write dialogs).
+**#fcc0e** is now mostly landed (`c7054e00` + the prior `#stuckhandoff2` M1-M5 and
+`#ipcdrift` claimed-patches/generation-fence/read-only-demotion machinery). The
+only remaining code lever is **operator-gated**: M2's full finalize/commit
+worktree-write gate on `Stable`, which overlaps the contested `#pcwc` carry-forward
+invariant and must not be re-wired without operator go + a live Phase-0 re-baseline.
+
+Remaining for "0 dialogs": the operator decision on the M2 worktree-write gate, and
+the operator-drive live JB proof (drive a queue drain with a live IDE; confirm
+`ops.log` shows `queue_consume_writeback … transport=editor_ipc` and zero disk-write
+dialogs). Binaries + cdylib are rebuilt; recycle controllers / restart sessions to
+promote build `c7054e00`.
 
 ## Immediate operator action
 

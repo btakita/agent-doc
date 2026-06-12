@@ -99,14 +99,27 @@ from the #fintol files, so no entanglement).
   SimWorld, so the sentinel/unit pattern is the right deterministic surface here). Full
   suite green (4330 passed). Both binaries rebuilt + installed.
 
-**DEFERRED: M2 / M4 / M5** —
+## Status — 2026-06-12 (UPDATE: M2 dispatch-slice / M4 / M5 all landed)
 
-- **M2 (gate worktree/ipc writes on `Stable`)** needs operator direction. Investigation
-  found the controller's IPC request handlers do NOT write the session-document worktree
-  — they write the state DB / bootstrap-state file. M2's real worktree-write surface is
-  the finalize/commit/reposition path, which overlaps the contested **#pcwc** carry-forward
-  invariant (memory: "don't re-wire #fintol/#pcwc without operator go + live Phase-0
-  re-baseline"). M1 already bounds the Preparing window, so the wedge can't persist long
-  enough to corrupt much before self-reap — partially achieving M2's goal.
-- **M4 (client handoff drop-guard)** and **M5 (cross-project gc sweep)** remain as
-  incremental hardening; not blocked, just unstarted.
+**LANDED: M4 + M5** (`2b643683`) and **M2 dispatch-admission slice** (`3e0503ec`).
+
+- **M4 — HandoffDropGuard**: an RAII guard in `handoff_stale_controller` best-effort
+  shuts down the half-launched Preparing replacement if the client aborts
+  (early-return/panic) before `promote_handoff`; `complete()` on the success path
+  spares the now-authoritative controller.
+- **M5 — `reap_orphaned_preparing_controllers_all_projects`**: walks `/proc` for any
+  `controller serve --handoff-state preparing` across all project roots and reaps each
+  keyed to its own `--project-root` (cross-project equivalent of the operator `pkill`),
+  called from `gc::run`.
+- **M2 — gate dispatch admission on `Stable`** (the safe slice): `handle_dispatch`
+  refuses any dispatch when `handoff_state != Stable`, recording a
+  `controller_not_authoritative` receipt + `dispatch_refused_non_stable_controller`
+  ops-log line. Read-only status/inspect and operator/handoff/admin RPCs stay available.
+
+**REMAINING (operator-gated): M2 full worktree-write gate** — gating the
+finalize/commit **worktree** write (not just dispatch admission) on `Stable` overlaps
+the contested **#pcwc** carry-forward invariant (memory: "don't re-wire #fintol/#pcwc
+without operator go + live Phase-0 re-baseline"). M1 already bounds the Preparing
+window so the wedge self-reaps before it can corrupt much; the full worktree gate is
+the user's call. All other rungs (M1, M2-dispatch, M3, M4, M5) are landed with
+deterministic coverage.

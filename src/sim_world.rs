@@ -135,6 +135,10 @@ enum SimCommand {
     SupervisorBlocked,
     SupervisorClosed,
     DispatchRoutePrompt,
+    /// `#qflood`: an explicit operator dispatch (JB `Run Agent Doc`), never
+    /// coalesced. Driven only by targeted tests, not the random generator, so the
+    /// seed corpus traces are unchanged.
+    DispatchOperatorPrompt,
     ProveDispatchAccepted,
     StaleSupervisorUpdate,
     ObserveStalePane,
@@ -436,6 +440,7 @@ struct Coverage {
     supervisor_lifecycle_updates: usize,
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
+    route_dispatch_coalesced: usize,
     session_clears: usize,
     session_restart_busy_refusals: usize,
     session_restart_force_used: usize,
@@ -559,6 +564,7 @@ impl Coverage {
         self.supervisor_lifecycle_updates += other.supervisor_lifecycle_updates;
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
+        self.route_dispatch_coalesced += other.route_dispatch_coalesced;
         self.session_clears += other.session_clears;
         self.session_restart_busy_refusals += other.session_restart_busy_refusals;
         self.session_restart_force_used += other.session_restart_force_used;
@@ -888,6 +894,11 @@ impl SimWorld {
             }
             SimCommand::DispatchRoutePrompt => {
                 if let Err(err) = self.dispatch_route_prompt() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::DispatchOperatorPrompt => {
+                if let Err(err) = self.dispatch_route_prompt_with(true) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -1451,6 +1462,13 @@ impl SimWorld {
     }
 
     fn dispatch_route_prompt(&mut self) -> Result<()> {
+        self.dispatch_route_prompt_with(false)
+    }
+
+    /// `#qflood`: drive a controller dispatch. `operator_driven` marks an explicit
+    /// operator dispatch (JB `Run Agent Doc`); it is never coalesced, so the
+    /// operator can dispatch while auto-drain backpressure holds.
+    fn dispatch_route_prompt_with(&mut self, operator_driven: bool) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
         if let Some(stage) = self
             .route
@@ -1481,6 +1499,25 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        // `#qflood`: coalesce a redundant AUTO re-dispatch while the same cycle's
+        // prior dispatch is still in flight (accepted, not yet proven/consumed), so
+        // the routed trigger does not pile into the busy pane on each file-change /
+        // idle / `/loop` tick. An operator dispatch, or a dispatch once the prior is
+        // proven or at a new generation, is not in flight and passes through. Shares
+        // the live controller's `dispatch_should_coalesce_in_flight` decision.
+        let in_flight_same_cycle = self.route.pending_dispatch.as_ref().is_some_and(|receipt| {
+            !receipt.proved
+                && receipt.generation == self.route.durable.generation
+                && receipt.session_id == self.route.durable.session_id
+                && receipt.pane_id == pane_id
+        });
+        if agent_doc_orchestration::project_controller::dispatch_should_coalesce_in_flight(
+            in_flight_same_cycle,
+            operator_driven,
+        ) {
+            self.coverage.route_dispatch_coalesced += 1;
+            return Ok(());
         }
         self.route.pending_dispatch = Some(DispatchReceipt {
             generation: self.route.durable.generation,
@@ -3189,6 +3226,63 @@ fn route_sim_coalesces_repeated_starting_timeouts_for_same_generation() {
 
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn qflood_coalesces_in_flight_auto_redispatch_and_releases_after_proof() {
+    // #qflood: while a cycle's first dispatch is in flight (accepted, unproven), an
+    // AUTO re-dispatch (route auto-start on a file-change save, idle continuation,
+    // `/loop` tick) must be COALESCED — not piled into the busy pane — and the
+    // queue must keep running (no pause). This is the deterministic repro of the
+    // operator's "triggers accumulate in the harness composer mid-turn" flood.
+    let mut world = SimWorld::new(2_205);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+
+    // Re-fire twice while the first dispatch is still in flight ⇒ both coalesced.
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "redundant in-flight re-dispatches must not pile up in the pane"
+    );
+    assert_eq!(world.coverage.route_dispatch_coalesced, 2);
+    assert_eq!(
+        world.coverage.queue_pauses, 0,
+        "coalescing is backpressure, never a queue stop"
+    );
+
+    // Once the in-flight dispatch is proven (consumed), coalescing RELEASES: the
+    // next dispatch is admitted normally — no stall.
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 2,
+        "a dispatch after the prior is consumed must be admitted, not coalesced"
+    );
+    assert_eq!(world.coverage.route_dispatch_coalesced, 2);
+}
+
+#[test]
+fn qflood_operator_dispatch_is_not_coalesced_in_flight() {
+    // #qflood: an explicit operator dispatch (JB `Run Agent Doc`) must pass even
+    // while an auto dispatch for the same cycle is in flight — operator intent is
+    // never blocked by auto-drain backpressure ("type while the queue continues").
+    let mut world = SimWorld::new(2_206);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+
+    // An AUTO re-fire here would coalesce; the operator dispatch must NOT.
+    world.apply(SimCommand::DispatchOperatorPrompt).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 2,
+        "operator dispatch must pass through in-flight backpressure"
+    );
+    assert_eq!(world.coverage.route_dispatch_coalesced, 0);
 }
 
 #[test]

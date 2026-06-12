@@ -2524,6 +2524,30 @@ pub fn authoritative_actor_binding(
     }
 }
 
+/// `#qflood` — decide whether an incoming controller `dispatch` should be
+/// COALESCED (suppressed as a redundant re-fire) rather than admitted again.
+///
+/// The flood the operator hit is an AUTO dispatch path (route auto-start on a
+/// file-change save, idle-queue continuation, `/loop`) re-firing the SAME head
+/// into a pane whose previous dispatch for this cycle is still in flight — not yet
+/// consumed/proven — so the routed trigger piles up in the harness composer while
+/// the agent is mid-turn. Coalesce exactly that case: an in-flight same-cycle
+/// dispatch that is NOT operator-driven.
+///
+/// An OPERATOR dispatch (explicit JB `Run Agent Doc`) always passes — honoring
+/// explicit intent over auto-drain backpressure, per the operator directive "type
+/// while the queue continues — it should not stop, and it should not flood." And a
+/// dispatch once the prior one is consumed (no longer in flight), or for a new
+/// cycle, is not "in flight" so it passes too. This is backpressure, never a queue
+/// stop: it suppresses only the redundant auto re-fire and leaves the queue
+/// draining.
+///
+/// Pure decision so the deterministic SimWorld flood repro and the live dispatch
+/// path classify the coalesce condition identically.
+pub fn dispatch_should_coalesce_in_flight(in_flight_same_cycle: bool, operator_driven: bool) -> bool {
+    in_flight_same_cycle && !operator_driven
+}
+
 pub fn authorize_dispatch(
     project_root: &Path,
     request: DispatchRequest,
@@ -7783,6 +7807,22 @@ agent:queue\n\
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+    }
+
+    // ---- #qflood: in-flight dispatch coalescing decision ----
+
+    #[test]
+    fn qflood_coalesces_only_auto_in_flight_redispatch() {
+        // The flood: an AUTO re-dispatch while the same cycle's dispatch is still in
+        // flight (unconsumed) — suppress it so the trigger does not pile into the
+        // busy pane.
+        assert!(dispatch_should_coalesce_in_flight(true, false));
+        // Operator dispatch always passes, even mid-flight (explicit intent must not
+        // be blocked by auto-drain backpressure).
+        assert!(!dispatch_should_coalesce_in_flight(true, true));
+        // Nothing in flight (prior consumed / new cycle) → always admit.
+        assert!(!dispatch_should_coalesce_in_flight(false, false));
+        assert!(!dispatch_should_coalesce_in_flight(false, true));
     }
 
     // ---- M2 (#stuckhandoff2): non-Stable controller refuses dispatch ----

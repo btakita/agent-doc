@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -119,7 +119,40 @@ Pipeline card payloads now carry borrower and lead email addresses, and the Deal
 ### Re: Closeout recovery — gpt-5
 
 The pipeline-card email change was already implemented, verified, deployed, and recorded above. This note only closes the active agent-doc turn after the IPC recovery path committed the visible response.
-<!-- agent:boundary:b517beec -->
+
+### Re: Needs Attention item emails + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The needs attention items should have the email address. deploy
+
+Implemented and deployed.
+
+Changed paths for this queue item:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — attention detail items now carry an optional `email`, populated from loan `borrower_email` or lead `email`.
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx` — expanded `Needs attention` detail rows now render the email line with wrapping.
+- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts` — coverage now asserts loan/lead attention detail emails and the UI source wiring.
+
+Verification and deploy:
+- `bun test tests/admin-dashboard.test.ts` — 25 passed.
+- `make check` — 559 passed, plus browser build and Worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
+- `make deploy` — deployed Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
+- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+No repo commit was made; the EFS submodule remains dirty with this change plus prior intended session changes.
+
+Confidence: high. Escalation: none.
+
+Suggested git commit message:
+
+```txt
+fix(admin): show emails in needs attention items
+
+Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
+```
+<!-- agent:boundary:e3c100a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,7 +160,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The needs attention items should have the email address. deploy
 <!-- /agent:queue -->
 
 ## Backlog

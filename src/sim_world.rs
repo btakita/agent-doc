@@ -3285,6 +3285,7 @@ fn ipc_snapshot_adoption_sim_blocks_live_prompt_drift_after_preflight() {
     );
 }
 
+
 // #mrhpcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
 // drift must always be RECOVERED, never silently lost. When the socket reports
 // `already_applied` but the live buffer diverged with the assistant response
@@ -4698,14 +4699,17 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
     editor_b.type_unsaved(&buffer_b).unwrap();
 
     // The realtime model merges the two divergent buffers against the shared
-    // on-disk baseline (the CRDT merge base) — conflict-free by construction.
-    let base_state = crate::crdt::CrdtDoc::from_text(&disk).encode_state();
-    let (merged, _state) = agent_doc_orchestration::merge::merge_contents_crdt(
-        Some(&base_state),
-        &buffer_a,
-        &buffer_b,
+    // on-disk baseline through the production `#rtwbcast` Option C seam
+    // (`compute_broadcast`) — conflict-free by construction.
+    let broadcast = agent_doc_orchestration::realtime_model::compute_broadcast(
+        &disk, &buffer_a, &buffer_b,
     )
     .unwrap();
+    let merged = broadcast.merged;
+    assert!(
+        !broadcast.originator_echo_suppressed,
+        "editor B contributed a genuine edit, so the merge differs from editor A → no echo suppression"
+    );
 
     assert!(
         merged.contains("#edit-A") && merged.contains("#edit-B"),

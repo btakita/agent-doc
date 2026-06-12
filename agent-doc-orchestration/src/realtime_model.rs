@@ -248,9 +248,91 @@ pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation
     reconciliation
 }
 
+/// The conflict-free CRDT union two open editors should converge on after one of
+/// them edits a shared document, plus an echo-suppress signal for the originator.
+#[derive(Debug, Clone)]
+pub struct BroadcastMerge {
+    /// The CRDT union of both editor buffers over the shared on-disk base.
+    pub merged: String,
+    /// `true` when the originating editor's buffer already equals `merged` (the
+    /// peer contributed nothing new), so re-delivering the merge back to the
+    /// originator would be a redundant self-echo and must be suppressed.
+    pub originator_echo_suppressed: bool,
+}
+
+/// `#rtwbcast` Option C — the MERGE-ONLY multi-editor broadcast seam.
+///
+/// Given the shared on-disk `base` and two open editor buffers (`originator`
+/// typed the change that triggered this broadcast; `peer` is another editor's
+/// buffer), produce the conflict-free CRDT union both editors should converge on,
+/// plus the originator echo-suppress flag. This is a pure function: no I/O, no
+/// clock, and — deliberately — **no delivery**. It is the convergence math only.
+///
+/// Wiring the per-editor delivery channel (an `editor_id` on the FFI buffer-report
+/// and patch JSON, per-editor live-buffer sidecars, per-peer patch files, and the
+/// originator skip) is the separate, operator-gated `#rtwbcast-id`/`-deliver`
+/// rungs in `plan-realtime-editor-watcher.md`: those touch the FFI ABI and both
+/// editor plugins and require a two-live-IDE verify, so they are NOT landed here.
+/// This seam only names and unit-tests the merge so the SimWorld two-editor
+/// coverage exercises the same production convergence path the delivery rungs
+/// will reuse.
+pub fn compute_broadcast(
+    base: &str,
+    originator: &str,
+    peer: &str,
+) -> anyhow::Result<BroadcastMerge> {
+    let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+    let (merged, _state) =
+        crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
+    let originator_echo_suppressed = merged == originator;
+    Ok(BroadcastMerge {
+        merged,
+        originator_echo_suppressed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compute_broadcast_unions_two_editor_buffers_conflict_free() {
+        // #rtwbcast Option C: two editors edit a shared base; the seam produces the
+        // conflict-free union, and the originator is not echo-suppressed because the
+        // peer contributed a genuine new edit.
+        let base = "shared line one\nshared line two\n";
+        let originator = "shared line one\noriginator edit\nshared line two\n";
+        let peer = "shared line one\nshared line two\npeer edit\n";
+        let result = compute_broadcast(base, originator, peer).unwrap();
+        assert!(result.merged.contains("originator edit"));
+        assert!(result.merged.contains("peer edit"));
+        for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
+            assert!(
+                !result.merged.contains(marker),
+                "broadcast merge must be conflict-free; found `{marker}`"
+            );
+        }
+        assert!(
+            !result.originator_echo_suppressed,
+            "a peer edit means the merge differs from the originator → no echo suppression"
+        );
+    }
+
+    #[test]
+    fn compute_broadcast_suppresses_echo_when_peer_unchanged() {
+        // When the peer buffer equals the base (it made no edit), the merge equals
+        // the originator's buffer, so re-delivering to the originator is a redundant
+        // self-echo and is suppressed.
+        let base = "shared line\n";
+        let originator = "shared line\noriginator edit\n";
+        let peer = base;
+        let result = compute_broadcast(base, originator, peer).unwrap();
+        assert_eq!(result.merged, originator);
+        assert!(
+            result.originator_echo_suppressed,
+            "an unchanged peer must suppress the redundant echo back to the originator"
+        );
+    }
 
     #[test]
     fn editor_absent_uses_disk() {

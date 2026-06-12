@@ -534,6 +534,112 @@ pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
         .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
 }
 
+/// Non-blank, trimmed lines present in `candidate` but not in `baseline` — the
+/// content a side added relative to the common ancestor. Set-based (order- and
+/// count-insensitive) so it stays a conservative coverage check: a line that
+/// appears in both is never counted as "added", which can only make
+/// [`response_target_disjoint_from_user_edit`] return `false` (fail closed),
+/// never a false `true`.
+fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
+    let base: std::collections::HashSet<&str> = baseline
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    candidate
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !base.contains(l))
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// `#fintol1` — conflict-scope primitive (seam-isolated; NOT yet wired into the
+/// commit path). True when the concurrent user edit carried by `candidate` (the
+/// live buffer / ack content at finalize) is DISJOINT from the response target
+/// span that `content_ours` (baseline + the agent's response) wrote — i.e. the
+/// user edit and the response occupy independent regions and *could* be
+/// forward-merged into a conflict-free union instead of the binary
+/// absorb-or-reject at the `live_prompt_drift_after_preflight` gate.
+///
+/// WIRING IS OPERATOR-GATED. Today's gate already preserves a disjoint
+/// outside-`exchange` edit by carrying it forward UNCOMMITTED (the finalize
+/// succeeds, the edit stays in the working tree for the next cycle) — a
+/// deliberate, shipped invariant asserted by
+/// `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`.
+/// Forward-merging the edit into THIS cycle's commit instead would flip that
+/// invariant (commit-now vs carry-forward), so the wiring must not land until the
+/// operator confirms the behavior change against a live Phase-0 re-baseline. This
+/// primitive lands the proven classification logic behind the seam first (the
+/// repo's rung-1 pattern), exercised by the unit tests below.
+///
+/// Disjointness is PROVEN, not guessed: a 3-way merge (base = `baseline`,
+/// ours = the response in `content_ours`, theirs = the user edit in `candidate`)
+/// must (a) produce no git conflict markers and (b) preserve every non-blank line
+/// the response added AND every non-blank line the user added. `git merge-file
+/// --diff3` only emits conflict markers when both sides changed the same region,
+/// so a new prompt below, a queue / backlog edit, or a compaction of an
+/// already-answered exchange tail merges cleanly, while a user rewrite of the
+/// response body the agent just wrote collides and returns `false` (the caller
+/// then keeps today's fail-closed `content_ours_snapshot_next_cycle` behavior).
+/// A merge error, a dropped line, or no user-added content also returns `false`
+/// — the gate stays conservative, so a false `true` (which would commit a bad
+/// merge) is not reachable from any ambiguous input.
+pub fn response_target_disjoint_from_user_edit(
+    baseline: &str,
+    content_ours: &str,
+    candidate: &str,
+) -> bool {
+    // No concurrent user edit relative to the response → nothing to forward-merge.
+    if strip_boundary_for_dedup(candidate) == strip_boundary_for_dedup(content_ours) {
+        return false;
+    }
+    let user_added = added_nonblank_lines(baseline, candidate);
+    // A pure deletion (no added lines) is not forward-merged — fail closed.
+    if user_added.is_empty() {
+        return false;
+    }
+    // The agent response always targets the `exchange` component. Confine the
+    // forward-merge to user edits OUTSIDE `exchange` so a new prompt, a
+    // response-body rewrite, or a re-typed answer (all inside `exchange`) is
+    // never spliced — those stay on the established carry-forward / fail-closed
+    // path. The candidate's exchange normally also carries the agent's own
+    // response (the IPC write landed in the live buffer); subtract those
+    // response lines so only genuine user exchange edits disqualify the merge.
+    // This also defeats the `git merge-file --diff3` append-resolution that would
+    // otherwise fold a user rewrite of the response body into a duplicated union.
+    let baseline_ex = exchange_component_text(baseline);
+    let candidate_ex = exchange_component_text(candidate);
+    let ours_ex = exchange_component_text(content_ours);
+    let response_ex_added: std::collections::HashSet<String> =
+        added_nonblank_lines(&baseline_ex, &ours_ex).into_iter().collect();
+    let user_ex_added = added_nonblank_lines(&baseline_ex, &candidate_ex)
+        .into_iter()
+        .any(|line| !response_ex_added.contains(&line));
+    if user_ex_added {
+        return false;
+    }
+    // Region independence outside `exchange` is then PROVEN by a clean 3-way
+    // merge that preserves both the response and the user edit. A conflict marker
+    // (both sides changed the same region) or a dropped line returns false.
+    let Ok(merged) = crate::merge::merge_contents(baseline, content_ours, candidate) else {
+        return false;
+    };
+    if merged.contains("<<<<<<<") || merged.contains(">>>>>>>") {
+        return false;
+    }
+    let merged_lines: std::collections::HashSet<&str> = merged
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let response_added = added_nonblank_lines(baseline, content_ours);
+    response_added
+        .iter()
+        .all(|l| merged_lines.contains(l.as_str()))
+        && user_added.iter().all(|l| merged_lines.contains(l.as_str()))
+}
+
 /// The raw text of the `agent:exchange` component, or empty if absent. Used to
 /// scope dropped-prompt detection to user-authored exchange content only —
 /// queue / backlog / scratch-comment drift is legitimately preserved in the
@@ -18058,6 +18164,72 @@ scratch
         assert!(
             !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
             "a disk-only queue item must block auto-recovery"
+        );
+    }
+
+    // -------- #fintol1: response_target_disjoint_from_user_edit primitive --------
+
+    #[test]
+    fn fintol_disjoint_queue_edit_is_forward_mergeable() {
+        // A user adds a queue item (outside `exchange`) while the agent finalizes:
+        // the edit is disjoint from the response target, so a clean union exists.
+        let baseline = drift_baseline();
+        let ours = drift_content_ours();
+        let candidate = ours.replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-outside-exchange]\n<!-- /agent:queue -->",
+        );
+        assert!(
+            response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a user queue edit outside the response component must be forward-mergeable"
+        );
+    }
+
+    #[test]
+    fn fintol_response_body_rewrite_collides_fails_closed() {
+        // The user rewrites the response body the agent just wrote — a genuine
+        // collision in the response target span. `git merge-file` would
+        // append-resolve it into a duplicated response, so the exchange-confinement
+        // guard must reject it instead.
+        let baseline = drift_baseline();
+        let ours = drift_content_ours();
+        let candidate = ours.replace(
+            "Implemented the fix and verified it end to end. The response body is long",
+            "User rewrote the committed response body inside the live buffer.",
+        );
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a user rewrite of the response body must collide and fail closed"
+        );
+    }
+
+    #[test]
+    fn fintol_new_exchange_prompt_below_is_not_forward_merged() {
+        // A new prompt typed below the response is disjoint but lives in
+        // `exchange`; it is carried forward uncommitted, never folded into the
+        // commit, so the primitive excludes it.
+        let baseline = drift_baseline();
+        let ours = drift_content_ours();
+        let candidate = ours.replace(
+            "<!-- /agent:exchange -->",
+            "❯ a brand new prompt typed during closeout\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a new exchange prompt must stay on the carry-forward path"
+        );
+    }
+
+    #[test]
+    fn fintol_no_user_edit_is_not_forward_merged() {
+        // No concurrent user edit (candidate == content_ours): there is nothing to
+        // forward-merge, so the primitive returns false (the caller commits
+        // content_ours directly).
+        let baseline = drift_baseline();
+        let ours = drift_content_ours();
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &ours),
+            "an unchanged candidate has no user edit to forward-merge"
         );
     }
 

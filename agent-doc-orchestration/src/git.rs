@@ -3367,6 +3367,18 @@ fn emit_postcommit_worktree_check(file: &Path) {
         ),
     );
     if !matches {
+        // #pcwc — auto-remediation of this drift class is OPERATOR-GATED and NOT
+        // wired here. A post-commit working tree legitimately differs from HEAD
+        // whenever a concurrent user edit was carried forward UNCOMMITTED (the
+        // deliberate carry-forward invariant — see
+        // `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`),
+        // so `match=false` does NOT by itself prove corruption. Reconciling the
+        // worktree to HEAD here would clobber that carried-forward edit. Safely
+        // separating genuine reorder/duplicate corruption (HEAD content lost from
+        // the worktree) from a legitimate carry-forward superset needs a
+        // lost-committed-content discriminator and a live Phase-0 re-baseline, so
+        // this stays a detection + warn signal until the operator confirms the
+        // auto-repair behavior. The editor-buffer push half overlaps `#rtwbcast`.
         eprintln!(
             "[commit] WARNING postcommit_worktree_check match=false for {} — working tree drifted from HEAD (#postcommit-ipc-worktree-corruption)",
             file.display()

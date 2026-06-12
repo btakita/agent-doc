@@ -268,7 +268,102 @@ So nothing was lost; the on-disk copy drifted and you reconciled it. No action n
 **Honest queue status before I drain further:** `#pcwc` and `#fintol` both fight the carry-forward invariant (a post-commit worktree legitimately differs from HEAD via carried-forward uncommitted edits) — a prior audit proved naive forward-merge wiring breaks 7 shipped tests. Per that finding they need a **clean session + operator go + a live Phase-0 re-baseline**, not a re-wire inside this churny multi-prompt queue (preflight also flagged session drift across 3 tmux sessions this cycle). `#snbc2` is flagged by semantic-completion as likely already resolved by the shipped `#snbc` audit. The three gated review items (`#w42v` operator-direction, `#qt32`/`#2v7b` operator-live-verify) are correctly gated — they can't be agent-completed.
 
 Tell me to proceed and I'll take `#fintol`/`#pcwc` in a fresh clean session with the Phase-0 re-baseline, or I can answer the standing design questions in the queue (snapshots-vs-document-model, wedge controller) without touching the closeout path. Which do you want first?
-<!-- agent:boundary:1e4fa6d2 -->
+
+### Re: stuck-handoff root cause + binary mitigation — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: What is the root cause of the "stuck-handoff"? In addition to fixing the root cause, how can the agent-doc binary system mitigate against "stuck-handoff" issues?
+> ```
+> ❯ How do I recover from the IPC-drift? Restart Idea?
+> ● Good question — and the short answer is: restarting IDEA is usually not the fix, and in this session it wouldn't have
+>   helped at all. Let me show you why with the live state.
+> ● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+>       echo "=== who holds the sockets right now ==="…)
+>   ⎿  === who holds the sockets right now ===
+>      --- .agent-doc/ipc.sock ---
+>      COMMAND     PID  USER  FD   TYPE             DEVICE SIZE/OFF       NODE NAME
+>      … +86 lines (ctrl+o to expand)
+> ● Now I have ground truth (my earlier ps | grep idea missed it — RTK/sandbox filtering). The picture is clearer and
+>   more useful than "restart IDEA":
+>   Two writers are fighting over your doc:
+>   1. IDEA holds ipc.sock in LISTEN mode — PID 2144231, FD 325u. It acks its editor buffer as authoritative, which is
+>   how content_ours keeps winning.
+>   2. Two agent-doc controller serve procs are wedged in --handoff-state preparing — boost-client PID 3767411 and
+>   superproject PID 3691684. That's a crashed/interrupted controller handoff; those stuck controllers are the active IPC
+>   writers reverting your edits. (The /tmp/adrepro7 one is an unrelated test repo — ignore.)
+>   So restarting IDEA is the blunt instrument, not the right first move — it releases ipc.sock, but the wedged
+>   controllers are separate processes parented to init that survive an IDE restart, so a restart alone won't fix the
+>   re-winning.
+>   Let me clear the wedged controllers now (they're lazy-launched and respawn clean on the next agent-doc invoke):
+> ● Bash(cd /home/brian/work/btakita/agent-loop/src/boost-client
+>       kill 3767411 3691684 2>&1 && echo "killed wedged handoff controllers 3767411 (boost-client) + 3691684 (a…)
+>   ⎿  killed wedged handoff controllers 3767411 (boost-client) + 3691684 (agent-loop)
+>      === remaining controllers ===
+>      brian    3207031  0.0  0.0 162280 11812 ?        S<l  Jun06   1:54 /home/brian/.cargo/bin/agent-doc controlle
+>      … +8 lines (ctrl+o to expand)
+>      … +8 lines (ctrl+o to expand)
+> ● Cleared. The two wedged controllers are gone and clean ones respawned without the --handoff-state preparing flag
+>   (3845157 agent-loop, 3845251 boost-client). IDEA still holds ipc.sock — that's normal and expected while the doc is
+>   open; it's no longer fighting a stuck handoff.
+>   So here's the actual answer to your question:
+>   No — don't restart IDEA (it's the blunt instrument)
+>   The drift this session wasn't caused by IDEA per se — it was two agent-doc controller serve procs wedged mid-handoff
+>   (--handoff-state preparing), which survive an IDE restart anyway. I just killed them; the problem is cleared.
+>   What causes IPC drift
+>   A multi-owner race on .agent-doc/ipc.sock:
+>   - IDEA holds the socket (LISTEN) and acks its editor buffer (content_ours) as the source of truth.
+>   - A crashed/interrupted controller handoff leaves controllers stuck in preparing; those keep writing the stale buffer
+>   back over your edits → live_prompt_drift_after_preflight, postcommit_worktree_check match=false.
+>   Recovery ladder — least → most invasive
+>   1. Working tree only (the common case): finalize usually commits the correct thing to HEAD; only the on-disk copy
+>   drifts. Verify with git show HEAD:<file> | grep -c '<Re: topic>' → if 1, just git checkout HEAD -- <file> then
+>   agent-doc session-check. One command. (This is exactly what fixed today's cycle.)
+>   2. Wedged controllers (what I did): kill the controller serve … --handoff-state preparing PIDs — they're lazy and
+>   respawn clean on next invoke.
+>   3. IDEA fighting the buffer: close or revert the doc tab in IDEA (File → Revert, or close the
+>   tasks/monsterrodholders.md tab). This releases its claim on the buffer — don't kill the whole IDE.
+>   4. Restart IDEA: only if 1–3 don't release ipc.sock. Overkill, and it won't clear wedged controllers.
+>   The durable fix (recommended)
+>   Preflight flagged a stale install: your ~/.cargo/bin agent-doc cdylib predates source commit e6f7538e. Wedged
+>   preparing handoffs are exactly the bug class a stale binary produces — the controllers I just respawned are still on
+>   the old binary. Rebuild and recycle them:
+>   cd /home/brian/work/btakita/agent-loop/src/agent-doc && make install
+>   # then recycle so they respawn on the fresh binary:
+>   pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/agent-loop'
+>   Want me to run the make install rebuild now?
+> ```
+
+
+Investigated the controller lifecycle in `project_controller.rs`. Here's the actual root cause and what the binary can do about it. Filed as actionable `#stuckhandoff2` (plan: `tasks/agent-doc/plan-stuck-handoff-hardening.md`).
+
+**Root cause — an interrupted two-phase handoff with no controller-side deadline.** The handoff is a client-driven RPC pair:
+
+- `prepare_handoff` → controller writes `handoff_state = Preparing`, `handoff_started_at = now` (`:3307`).
+- `promote_handoff` → writes `Stable`, clears the timer (`:3318`).
+
+If the **client driving the handoff dies, is interrupted, or the RPC fails between those two calls** (exactly what an interrupted `agent-doc` invoke does), the controller process stays `Preparing` *forever* and keeps serving/writing `ipc.sock`. Nothing inside the controller ever times it out.
+
+**Why the existing reaper didn't catch yours.** There *is* a stuck-handoff reaper (`#kqr6`/`#sjwm`/`#stuckhandoff`, 45s threshold, wired into `connect_or_launch` + gc). But it has three scope gaps that your session hit:
+
+1. **Record-scoped** — it reads a single `read_bootstrap(project_root)` and only kills `bootstrap.pid`. An **orphaned** wedged controller (a newer clean controller overwrote the bootstrap record; the old process keeps running) is invisible to it.
+2. **Same-project only** — it runs for the *current invoke's* `project_root`. Your wedged `boost-client` controller is never touched by an `agent-loop` invoke.
+3. **No timer** — it only fires on a new bind/gc, so a wedge with no subsequent invoke in that project survives indefinitely.
+
+That's why recovery required `pkill -f 'controller serve ... --handoff-state preparing'` — a **process scan**, which is precisely the capability the reaper lacks.
+
+**Mitigations (defense-in-depth, `#stuckhandoff2`):**
+
+- **M1 — controller self-watchdog (suicide timer)** *[strongest]*: on entering `Preparing`, arm an internal deadline; if not promoted/retired within the threshold, self-SIGTERM + mark `Failed`. Removes all dependency on an external reaper tick — the wedged process cleans **itself** up, even with no further invokes and across project roots.
+- **M2 — gate worktree/ipc writes on `Stable`** *[symptom-killer, overlaps `#pcwc`]*: a non-`Stable` controller is non-authoritative for worktree writes, so even a still-wedged `Preparing` controller cannot corrupt the tree between wedge and reap. This directly shrinks the `#pcwc` post-commit-drift window too.
+- **M3 — proc-scan reaper**: enumerate `/proc` for orphaned `controller serve --project-root <root> --handoff-state preparing` procs, not just `bootstrap.pid`.
+- **M4 — client handoff drop-guard**: RAII guard that sends `retire`/`shutdown` if the handoff is dropped before `promote_handoff` — prevents the wedge at the source.
+- **M5 — cross-project gc sweep**: gc reaps wedged controllers across all known project roots, not just the triggering one.
+
+M1 + M2 are the durable core (self-clearing **and** harmless-while-wedged).
+
+**Why queued, not implemented this cycle:** this touches controller process lifecycle and needs SimWorld coverage in a **clean** session — the submodule currently carries uncommitted `#fintol` work (`write.rs`/`sim_world.rs`/`finalize_integration.rs`), and landing lifecycle changes on top of that dirty tree would entangle the two. Say "do #stuckhandoff2" in a clean session and I'll implement M1+M2 with coverage and recycle the controllers.
+<!-- agent:boundary:9bdb2c8e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -355,7 +450,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~:pushpin: JB `Run Agent Doc` on tsift.md (Codex) still has the unsubmitted prompt in the Codex input. Do we have adequete logging to track this behavior? Can we fix the root cause?~~
-- :pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.
+- ~~:pushpin: I typed into the exchange, ran JB `Compact Exchange`. There was no `File Cache Conflict`...but parts of the compacted exchange are uncommitted...which may be picked up in the next turn as a diff.~~
 - :pushpin: The lazily-rs.md session running Codex reproduced not submitting the prompt into Codex.
 - :pushpin: The IPC drift has continued occurring since we moved into the single Project Pane Process. Please identify race conditions and fix the IPC drift.
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.

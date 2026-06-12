@@ -123,7 +123,27 @@ The move surfaced two real test-infra issues, both fixed:
 **Next targets queued** (`#splitmods2`): `preflight.rs` (14.7k), `sync.rs` (12.3k), `git.rs` (10k) each have the same clean single trailing `mod tests` shape — low-risk. `write.rs` (27.7k, the biggest) needs care: its test layout is irregular (module-scope `#[cfg(test)]` helpers + several non-contiguous test blocks), not a single clean `mod tests`.
 
 Note: this finalize used `--force-disk` to bypass the IPC CRDT-replay drift that has wedged this session's socket path (`#ipcdrift`/`#stuckhandoff2`).
-<!-- agent:boundary:da198cf8 -->
+
+### Re: do [#splitmods2] — continue large-module splits — opus-4-8
+
+Done — all three #splitmods2 targets split, same behavior-preserving pattern as `session_check`:
+
+| module | before | after | new file |
+|--------|-------:|------:|----------|
+| `git.rs` | 9,994 | 3,961 | `git/tests.rs` |
+| `preflight.rs` | 14,659 | 6,609 | `preflight/tests.rs` |
+| `sync.rs` | 12,257 | 6,265 | `sync/tests.rs` |
+
+Each `#[cfg(test)] mod tests` body moves verbatim into `<mod>/tests.rs` (rustfmt-normalized); the module-scope `#[cfg(test)]` helpers stay in the parent. `super::` resolves to the parent either way, so `use super::*;` is identical — zero behavior change.
+
+**Guard/budget updates:** `tests/test_cli.rs` FlowCore `guard_` budget for `git.rs` 19 → 13 (the 6 removed were test-assertion literals, not production guards). `git.rs reason=` (7) and `preflight.rs reason=` (4) unchanged — all production. `sync.rs` isn't a budgeted hot path. The `debounce_gaps_test_plan` structural checks pass (they assert on production frontmatter-reading code that stayed put).
+
+`make check` green; full workspace **0 failed** (2,741 + 74 integration + 525 + … incl. the FlowCore budget gate, `process_global_test_mutations` guard, and preflight structural tests). Committed agent-doc `6b890775`, pushed; superproject pointer bumped to `6b890775`.
+
+Cumulative this session: `route` (prior) + `session_check` + `git` + `preflight` + `sync` test modules now live in `<mod>/tests.rs`. The remaining large module is `write.rs` (27.7k) — its irregular multi-block test layout needs a bespoke pass, queued as `#splitmodswrite`.
+
+`[#rtwbcast]` stays deferred (multi-editor / two-live-IDE, operator-drive). Finalized via `--force-disk` (session IPC still wedged, `#ipcdrift`).
+<!-- agent:boundary:8b94046a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -131,8 +151,10 @@ Note: this finalize used `--force-disk` to bypass the IPC CRDT-replay drift that
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Continue splitting up large modules. Functionality + tests.~~
 - re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.
+- I'm getting JB `File Cache Conflict` dialogs. Please fix. We should have 0 `File Cache Conflict` dialogs.
 - ~~[#jbcompactcrdt]~~
 - [#rtwbcast]
+- ~~:pushpin: do [#splitmods2]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -162,7 +184,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#splitmods2] [recommended] Continue large-module splits (Functionality + tests). Extract the cfg(test) mod tests from preflight.rs (14.7k), sync.rs (12.3k), git.rs (10k) into <mod>/tests.rs mirroring route/session_check (clean single trailing mod tests; low risk). write.rs (27.7k) needs care: irregular multi-block test layout + module-scope cfg(test) helpers. Pattern: replace inline mod tests body with 'mod tests;' + create <mod>/tests.rs starting 'use super::*;', rustfmt the new file, then update FlowCore guard_ budgets + structural guards in tests/test_cli.rs.
+- [ ] [#splitmodswrite] [recommended] Split write.rs (27.7k lines, largest module) test layout. Unlike the clean single-trailing-mod-tests pattern used for route/session_check/git/preflight/sync, write.rs has an irregular layout: module-scope cfg(test) helper fns (around line 12109) PLUS several non-contiguous top-level cfg(test) blocks (mod tests at 15201 closes at 21827, then more cfg(test) blocks to EOF). Needs a bespoke extraction that moves each test block into write/tests.rs (or several files) and updates the FlowCore guard_ budget (currently 91) + any structural guards in tests/test_cli.rs. Verify make check + full workspace 0 failed.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 

@@ -426,7 +426,31 @@ Status:
 Unblock condition for the gated review item: clean `src/agent-doc` session, rebuild/install current `agent-doc` + lib, recycle controllers, then land M2/M4/M5 with SimWorld coverage against `tasks/agent-doc/plan-stuck-handoff-hardening.md`.
 
 No code changes this turn. Verification/context: `agent_doc_preflight` ok with queue head `#stuckhandoff2`; `agent_doc_plan` had no execution blocker; backlog/exchange confirm the prior M1/M3 status; `rg` and `git -C src/agent-doc log --oneline -8` confirmed the source refs; `git -C src/agent-doc status --short` confirmed dirty closeout-path files. Confidence: high. Escalation: none.
-<!-- agent:boundary:ce8785f8 -->
+
+### Re: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests. — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.
+
+
+> Queue prompt:
+>
+> :pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.
+
+I am not adding new SimWorld code in this dirty queue-drain pane. The concrete EFS repro is already tracked as `#efscodexsubmit`, and I am gating that item rather than marking it done.
+
+Current source status:
+
+- The Codex one-shot Enter re-submit fix already exists in committed `src/agent-doc` history: `d14dd12f` (`fix(jbcodexsubmit): one-shot Enter re-submit for Codex direct-pane route`) plus `449a87e9` rustfmt cleanup.
+- Current `route.rs` includes `direct_pane_needs_codex_resubmit(...)`, the Codex-only bare `Enter` retry, and `route_submit_resubmit ... result=accepted|still_visible` proof logging.
+- Current `route/tests.rs` has deterministic route coverage for the retry predicate around the `#jbcodexsubmit` case.
+- The exact requested SimWorld-specific coverage is not something I should add here: `src/sim_world.rs` is already dirty with unrelated `#fintol` work, and the backlog item itself says clean session required. Adding EFS/Codex submit coverage into that file now would mix two independent closeout/route work streams.
+
+Unblock condition for the gated item: use a clean `src/agent-doc` worktree, decide whether the existing route-level deterministic test satisfies the coverage requirement or add a SimWorld fixture in `src/sim_world.rs`, then run the route/SimWorld tests and live-verify the operator path by checking `ops.log` for `route_submit_resubmit action=enter_key result=accepted`.
+
+Changed paths this cycle: session document only. Commands/context: read `tasks/agent-doc/plan-jb-codex-submit.md`; inspected `route.rs`, `route/tests.rs`, `src/sim_world.rs`; checked `git -C src/agent-doc show --stat d14dd12f`, `git -C src/agent-doc show --stat 449a87e9`, and `git -C src/agent-doc diff -- src/sim_world.rs`. Verification: no code tests run because no source edits were made. Confidence: high. Escalation: none.
+<!-- agent:boundary:a4d830fb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -441,7 +465,7 @@ resync: pruned 11 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=flooding re-trigger loop: go-queue re-syncs answered+committed #stuckhandoff2 as head and re-submits agent-doc into the live session; #stuckhandoff2 root-cause answered (M1+M3 landed 08dfc27b), remaining M2/M4/M5 + clean install need a fresh session; halting drain pending operator restart (#qflood) receipt_id=3279
 ```
 ~~~
-- :pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.
+- ~~:pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.~~
 - :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
 [route] target tmux session: 13
@@ -518,7 +542,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :round_pushpin: do [#fintol]
 - :round_pushpin: do [#pcwc]
 - :round_pushpin: do [#rtwbcast]
-- :round_pushpin: do [#efscodexsubmit]
+- ~~:round_pushpin: do [#efscodexsubmit]~~
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->

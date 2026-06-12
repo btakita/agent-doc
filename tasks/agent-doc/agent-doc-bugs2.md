@@ -382,13 +382,37 @@ cd src/agent-doc && cargo install --path . && cargo build --release && agent-doc
 pkill -f 'agent-doc controller serve'   # recycle controllers onto the fresh binary
 ```
 That makes M1+M3 actually live (and recycles the wedged controllers). After that, land M2 on the clean tree. I'm **not** auto-looping this queue — a clean restart is the unblock, not another drain pass through a poisoned session.
-<!-- agent:boundary:3ba3ce84 -->
+
+### Re: "it stopped — it should not stop while I type" + EFS Codex submit — opus-4-8
+
+You're right, and I've **resumed the queue** (`receipt_id=13`). My pause to stop the re-submission flood was too blunt — it blocked your legitimate `JB Run Agent Doc` dispatch too (that's the `queue_paused … receipt_id=3279` error you hit). It's unpaused now.
+
+**But resuming alone won't give you what you actually want** ("type while the queue keeps running, no stop, no flood"), and here's the honest why:
+
+- The queue **head is `#stuckhandoff2`**, which **cannot be completed in this session** — the submodule tree is dirty with uncommitted `#fintol` work in the closeout path, so landing lifecycle/closeout code here would entangle them. So every drain pass re-answers the same item and the go-queue re-appends it as the head → the loop you're seeing.
+- "Type while the queue continues, without it stopping or flooding the Claude session" **is itself the open code work** — `#qflood` (controller dispatch flooding the live harness) + `#fintol` (finalize tolerating concurrent edits instead of stop/exit-75). Neither is wired yet, and both need the clean session + the M1+M3 install.
+
+**Two ways forward right now:**
+1. **Restart clean** (my standing recommendation) — then `#stuckhandoff2`, `#qflood`, and `#fintol` are all unblocked, and the M1+M3 stuck-handoff fix goes live.
+2. **Stay here but strike `#stuckhandoff2`** from the queue head (it can't finish here) so the go-queue advances to items that *can* be answered without the dirty-tree conflict.
+
+**EFS Codex-submit bug — captured.** `JB Run Agent Doc` in `equityfundingsource.md` entering but not submitting the prompt to Codex is the same class as `#2v7b`/`#jbcodexsubmit`: Codex direct-pane dispatch (`route.rs::send_command_unchecked`) detects `prompt_not_submitted` (the merged `text+\r` isn't treated as submit by the Codex TUI) but has no Enter re-submit fallback. I'm adding an actionable backlog item with the SimWorld coverage you asked for — to implement in the clean session (it touches `route.rs`, same dirty-tree constraint).
+<!-- agent:boundary:0bb5c941 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :pushpin: [#stuckhandoff2]
+---
+:pushpin: After typing into the queue, it stopped. It should not stop but allow me to type while the queue continues. I then tried JB `Run Agent Doc` and got an error:
+```
+resync: pruned 11 stale session(s)
+[route] target tmux session: 13
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=flooding re-trigger loop: go-queue re-syncs answered+committed #stuckhandoff2 as head and re-submits agent-doc into the live session; #stuckhandoff2 root-cause answered (M1+M3 landed 08dfc27b), remaining M2/M4/M5 + clean install need a fresh session; halting drain pending operator restart (#qflood) receipt_id=3279
+```
+---
+- :pushpin: JB `Run Agent Doc` in equityfundingsource.md does not submit the prompt to Codex. Add Simworld tests.
 - :pushpin: After running JB `Run Agent Doc` to restart the queue, an error occurred. The queue did auto-start as I was typing in this prompt:
 ```
 [route] target tmux session: 13

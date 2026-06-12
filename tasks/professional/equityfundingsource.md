@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -138,7 +138,51 @@ Notes:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:a3e4516d -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the current EFS Worker build from `src/equityfundingsource-dev` commit `39b54ae` (`Remove borrower payment processors`) to Cloudflare.
+
+Deployment:
+- Pushed EFS submodule `main` to origin: `3ffcc32..39b54ae`.
+- Applied remote D1 migration `0061_application_subject_property_admin_history.sql`.
+- Deployed Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Cloudflare Worker Version ID: `f26cde51-5514-4d53-a648-afaecb117b3b`
+
+Changed paths:
+- No new source edits in this cycle. This deployed the already-committed EFS change set at `39b54ae`.
+- The pre-existing unstaged EFS local edits were stashed before deploy and restored after deploy; they remain unstaged.
+
+Commands:
+- `git push origin main`
+- `git stash push -m agent-doc-deploy-preserve-local-efs-edits`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `make check`
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/funded-deals`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/api/borrower/payments/checkout`
+- `git stash pop`
+- `gh run list --workflow CI --limit 1`
+
+Verification:
+- `make check` passed: 559 tests, browser build, and worker build.
+- Post-deploy D1 migration list reports: no migrations to apply.
+- Live smoke tests passed: `/` returned `200`, `/funded-deals` returned `200`.
+- Removed checkout route smoke test passed: `/api/borrower/payments/checkout` returned `404`.
+- GitHub CI check is unavailable for this repo because there is no workflow named `CI`.
+- EFS submodule status after restore is back to `main...origin/main` with the same pre-existing unstaged local edits preserved.
+
+Note: preflight still reports the local `agent-doc` install is stale relative to source commit `a15ed055`; rebuild with `make install` in `src/agent-doc` when you want to clear that toolchain warning.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:b5ca743e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,7 +190,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

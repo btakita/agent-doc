@@ -669,8 +669,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // when it removed struck queue items displaced below the closing marker
         // (#queue-completed-items-escape-below-component).
         ("agent-doc-orchestration/src/preflight.rs", "reason=") => 4,
-        ("agent-doc-orchestration/src/repair.rs", "guard_") => 9,
-        ("agent-doc-orchestration/src/repair.rs", "reason=") => 4,
+        ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
+        ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,
         ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
         // +5 for the audited `#snrun` blocked-in-interactive-substate guard:

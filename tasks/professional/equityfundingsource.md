@@ -270,7 +270,13 @@ Confidence: high. Escalation: none.
 Closeout repair only. The deploy result is already recorded above: Worker version `57158a7d-760c-4ef1-bd67-4e8005d7dd7d`; `make check` passed; remote D1 had no pending migrations before or after deploy; smoke checks returned expected statuses. No additional repo work was performed in this repair step.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:b81112e2 -->
+
+### Re: Deploy final closeout — gpt-5
+
+Final binary-owned closeout for the deploy turn. The deployment remains complete: Worker version `57158a7d-760c-4ef1-bd67-4e8005d7dd7d`; `make check` passed; remote D1 had no pending migrations before or after deploy; live smoke checks returned the expected public/protected statuses. No document follow-up or backlog item is needed.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:b6e4da4e -->
 <!-- /agent:exchange -->
 ###
 <!--

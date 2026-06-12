@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -43,7 +43,7 @@ Change history was not previously tracked for subject-property edits. It is now:
 
 Verification passed: targeted `bun test tests/admin-subject-property-edit.test.ts tests/apply4-full-application-p5.test.ts tests/admin-full-application-approve-ui.test.ts`, full `make check`, and a second clean committed-tree `make check` after stashing unrelated local EFS edits. GitHub CI lookup is still unavailable because this repo has no workflow named `CI`. Existing unrelated EFS local changes were restored and remain unstaged.
 Implemented and pushed EFS commit 3ffcc32. Admin full-application Step 4 subject-property fields are now editable, extended subject-property fields persist, and admin edits are tracked per field in application_subject_property_change_logs with old and new values. Verification passed: targeted tests, full make check, and clean committed-tree make check. GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
-<!-- agent:boundary:e4325ef4 -->
+<!-- agent:boundary:224ba0bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +51,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please draft an email for robert-waldman and judith-krug mentioning that we are almost ready to launch the website and portals. Please ask for a stripe account with instructions on how to set up a test account and a real account for borrower payments.
 <!-- /agent:queue -->
 
 ## Backlog

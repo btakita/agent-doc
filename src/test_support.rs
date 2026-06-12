@@ -77,6 +77,20 @@ impl Drop for ScopedCurrentDir {
 
 #[cfg(test)]
 mod tests {
+    /// Prove the shared lock is obtainable again after a guard drops, without
+    /// racing other parallel env-mutating tests. `try_lock().is_ok()` is flaky
+    /// here: between our drop and the observation, another test in this binary
+    /// can grab the shared lock, so a free observation is not guaranteed even
+    /// though our guard released. Re-obtaining via the blocking `lock()` proves
+    /// release deterministically (it would only hang if a guard leaked the lock
+    /// forever) and yields immediately once no one holds it.
+    fn assert_shared_lock_reobtainable() {
+        let reobtained = crate::test_support::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        drop(reobtained);
+    }
+
     #[test]
     fn env_lock_uses_harness_prompt_lock() {
         let guard = super::env_lock();
@@ -85,10 +99,7 @@ mod tests {
             "test_support::env_lock must serialize with harness/session-check env guards"
         );
         drop(guard);
-        assert!(
-            crate::test_support::TEST_ENV_LOCK.try_lock().is_ok(),
-            "shared env lock should be available after test_support guard drops"
-        );
+        assert_shared_lock_reobtainable();
     }
 
     #[test]
@@ -100,9 +111,6 @@ mod tests {
             "ScopedCurrentDir must hold the shared process-global test lock"
         );
         drop(scoped);
-        assert!(
-            crate::test_support::TEST_ENV_LOCK.try_lock().is_ok(),
-            "shared lock should be available after cwd guard drops"
-        );
+        assert_shared_lock_reobtainable();
     }
 }

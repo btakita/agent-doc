@@ -572,13 +572,18 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
-            .unwrap();
+    // session_check's `#[cfg(test)] mod tests` was extracted into
+    // `session_check/tests.rs` (large-module split); the inspection helpers and
+    // their process-global lock usage live there now.
+    let session_check_tests = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/tests.rs"),
+    )
+    .unwrap();
     assert!(
-        session_check.contains("fn inspect(file: &std::path::Path)")
-            && session_check.contains("fn inspect_with_warnings(file: &std::path::Path)")
-            && session_check.contains("let _process_global_lock = crate::test_support::env_lock()"),
+        session_check_tests.contains("fn inspect(file: &std::path::Path)")
+            && session_check_tests.contains("fn inspect_with_warnings(file: &std::path::Path)")
+            && session_check_tests
+                .contains("let _process_global_lock = crate::test_support::env_lock()"),
         "session_check test inspection helpers must use the crate-wide process-global lock"
     );
 
@@ -764,7 +769,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test-fn name plus direct guard/log assertions. It proves a
         // drained queue/backlog recovery carrying queue-turn evidence remains
         // terminal when the commit event is `commit_already_current`.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 96,
+        // 96 -> 31: the `#[cfg(test)] mod tests` was extracted into
+        // `session_check/tests.rs` (large-module split). The 65 removed `guard_`
+        // occurrences were test-assertion literals, not production hot-path
+        // guards; only production `guard_` tokens are budgeted here now.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 31,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

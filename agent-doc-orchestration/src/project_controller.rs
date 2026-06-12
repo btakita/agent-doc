@@ -8386,6 +8386,80 @@ agent:queue\n\
     }
 
     #[test]
+    fn autonomous_idle_queue_continuation_refused_when_controller_not_stable() {
+        // M2 worktree-write gate (#stuckhandoff2 / #fcc0e): the supervisor's
+        // self-driving queue drain is the autonomous worktree-write driver a wedged
+        // `Preparing` controller would otherwise use to corrupt the tree between
+        // wedge and M1 self-reap — it issues a `dispatch` with
+        // `command_kind=idle_queue_continuation` (no external client), so it is the
+        // exact path the dispatch-admission gate must refuse on a non-Stable
+        // controller. This proves that gate covers the AUTONOMOUS driver, not just
+        // operator/route dispatches — the worktree-write protection M2 promises.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/m2-idle.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-idle\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-idle", "%61", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-idle",
+            "%61",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let idle_continuation = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-idle".to_string()),
+            pane_id: Some("%61".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("idle_queue_continuation".to_string()),
+            diagnostic_payload: Some("autonomous queue drain".to_string()),
+        };
+
+        let preparing = ControllerBootstrap {
+            handoff_state: ControllerHandoffState::Preparing,
+            handoff_started_at: Some(timestamp_secs()),
+            ..test_bootstrap(&dir)
+        };
+        let err = handle_dispatch(&preparing, None, idle_continuation()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("controller not authoritative"),
+            "a Preparing controller must refuse the autonomous idle-queue worktree-write driver: {err:#}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("dispatch_refused_non_stable_controller"),
+            "the autonomous-driver refusal must be logged for forensics:\n{ops_log}"
+        );
+
+        // A Stable controller is never refused for authority on the same driver.
+        let stable = test_bootstrap(&dir);
+        if let Err(err) = handle_dispatch(&stable, None, idle_continuation()) {
+            assert!(
+                !format!("{err:#}").contains("controller not authoritative"),
+                "a Stable controller must not be refused for authority: {err:#}"
+            );
+        }
+    }
+
+    #[test]
     fn dispatch_refused_when_controller_binary_stale() {
         // `#ctlstalebin` (#stuckhandoff2 follow-up): a Stable controller whose own
         // recorded binary no longer matches the installed agent-doc must refuse

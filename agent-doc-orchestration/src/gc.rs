@@ -211,6 +211,24 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += preparing_reaped;
     total_skipped += preparing_kept;
 
+    // M3 (#stuckhandoff2): process-scan for orphaned `--handoff-state preparing`
+    // controllers whose pid is no longer the bootstrap record (the record-scoped
+    // reaper above misses them; the operator previously had to `pkill` them by hand).
+    let (orphan_reaped, orphan_kept) =
+        crate::project_controller::reap_orphaned_preparing_controllers(
+            &project_root,
+            crate::project_controller::stale_preparing_controller_threshold(),
+            dry_run,
+        )?;
+    if orphan_reaped > 0 {
+        eprintln!(
+            "[gc] controllers: {} orphaned preparing reaped, {} kept",
+            orphan_reaped, orphan_kept
+        );
+    }
+    total_deleted += orphan_reaped;
+    total_skipped += orphan_kept;
+
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
     if sock_deleted > 0 {

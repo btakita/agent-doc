@@ -1584,6 +1584,115 @@ pub fn terminate_stale_preparing_controllers(
     terminate_stale_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
+/// Process start age (seconds) for a live pid, derived from the `/proc/<pid>`
+/// directory mtime (the kernel stamps it at process start). Returns `None` when the
+/// process is gone or `/proc` is unavailable.
+fn process_start_age_secs(pid: u32) -> Option<u64> {
+    let modified = std::fs::metadata(format!("/proc/{pid}"))
+        .ok()?
+        .modified()
+        .ok()?;
+    SystemTime::now()
+        .duration_since(modified)
+        .ok()
+        .map(|elapsed| elapsed.as_secs())
+}
+
+/// True when `/proc/<pid>/cmdline` carries `--handoff-state preparing` — i.e. the
+/// controller process was *launched* as a replacement mid-handoff. The wedged
+/// replacement (client died before `promote_handoff`) keeps this arg for its whole
+/// life, which is exactly what makes it reapable by cmdline scan even after a newer
+/// controller overwrote the single per-project bootstrap record.
+fn cmdline_has_preparing_handoff(pid: u32) -> bool {
+    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let args: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).to_string())
+        .collect();
+    args.windows(2)
+        .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
+}
+
+/// M3 (#stuckhandoff2) — process-scan reaper for *orphaned* preparing controllers.
+///
+/// The record-scoped [`terminate_stale_preparing_controllers_for_caller`] only knows
+/// the single `bootstrap.pid`; once a newer clean controller overwrites that record,
+/// an old replacement still wedged in `--handoff-state preparing` becomes invisible to
+/// it (the operator's `pkill -f 'controller serve ... --handoff-state preparing'`
+/// case). This walks `/proc` for same-project `controller serve` processes that still
+/// carry `--handoff-state preparing` and whose start age exceeds `stale_after`, then
+/// reaps each via the verified-pid path (cmdline + not-self gated). Returns
+/// `(reaped, kept)`.
+pub fn reap_orphaned_preparing_controllers_for_caller(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    let self_pid = std::process::id();
+    let generation = read_bootstrap(project_root)?
+        .map(|bootstrap| bootstrap.controller_generation)
+        .unwrap_or(0);
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Ok((0, 0));
+    };
+    let mut reaped = 0;
+    let mut kept = 0;
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        if !is_same_project_controller_pid(project_root, pid) {
+            continue;
+        }
+        if !cmdline_has_preparing_handoff(pid) {
+            continue;
+        }
+        let age = process_start_age_secs(pid).unwrap_or(0);
+        if age <= stale_after.as_secs() {
+            // Freshly-launched replacement still inside a healthy handoff window.
+            kept += 1;
+            continue;
+        }
+        if dry_run {
+            eprintln!(
+                "[{caller}] would reap orphaned preparing controller: pid={pid} age_secs={age}"
+            );
+            reaped += 1;
+            continue;
+        }
+        reap_verified_controller_pid(project_root, pid, generation);
+        crate::ops_log::log_op(
+            project_root,
+            &format!(
+                "orphaned_preparing_controller_reaped pid={pid} age_secs={age} threshold_secs={} caller={caller}",
+                stale_after.as_secs()
+            ),
+        );
+        reaped += 1;
+    }
+    Ok((reaped, kept))
+}
+
+/// gc/self-heal entry point for the orphaned-preparing process-scan reaper. See
+/// [`reap_orphaned_preparing_controllers_for_caller`].
+pub fn reap_orphaned_preparing_controllers(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    reap_orphaned_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
+}
+
 /// #monsterrod-pane-cross-doc-contamination / "1 pane = 1 document": repair-only
 /// cleanup for stale actor aliases. Normal actor binding paths must refuse a
 /// non-closed cross-document pane alias before storing the new owner; they must
@@ -3042,6 +3151,14 @@ pub fn connect_or_launch(
         false,
         "connect_or_launch",
     );
+    // M3 (#stuckhandoff2): also process-scan for *orphaned* preparing controllers the
+    // record-scoped reaper above cannot see (their pid is no longer the bootstrap pid).
+    let _ = reap_orphaned_preparing_controllers_for_caller(
+        project_root,
+        stale_preparing_controller_threshold(),
+        false,
+        "connect_or_launch",
+    );
     if let Ok(active_status) = status(project_root)
         && active_status.active
         && controller_status_matches_current_binary(&active_status).unwrap_or(false)
@@ -3201,6 +3318,7 @@ fn serve_with_options(
 
     let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let should_stop = Arc::new(AtomicBool::new(false));
+    let watchdog_threshold = stale_preparing_controller_threshold();
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -3214,6 +3332,19 @@ fn serve_with_options(
                 });
             }
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                // M1 (#stuckhandoff2) — self-watchdog / suicide timer. A controller
+                // wedged in `Preparing`/`Promoted` past the staleness threshold (the
+                // client driving the two-phase handoff died between `prepare_handoff`
+                // and `promote_handoff`) self-terminates here, with no dependency on
+                // an external reaper tick, the bootstrap PID record, or a later invoke
+                // in *any* project. The live in-memory bootstrap reflects the latest
+                // `prepare_handoff`/`promote_handoff` transition, so a healthy handoff
+                // (which completes well under the threshold) never trips this.
+                if controller_self_watchdog_should_suicide(&runtime, watchdog_threshold) {
+                    controller_self_watchdog_suicide(&runtime, watchdog_threshold);
+                    should_stop.store(true, Ordering::SeqCst);
+                    break;
+                }
                 std::thread::sleep(CONNECT_POLL);
             }
             Err(err) => return Err(err).context("failed to accept project controller client"),
@@ -3221,6 +3352,60 @@ fn serve_with_options(
     }
     let _ = std::fs::remove_file(&sock);
     Ok(())
+}
+
+/// M1 (#stuckhandoff2) — pure predicate: should the serving controller self-terminate?
+/// Reads the controller's own live bootstrap snapshot and applies the same staleness
+/// rule the external reaper uses. Side-effect free for deterministic unit tests; a
+/// poisoned bootstrap lock is treated as "do not suicide" (the next external reaper
+/// pass still covers it).
+fn controller_self_watchdog_should_suicide(
+    runtime: &ControllerRuntime,
+    threshold: Duration,
+) -> bool {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return false;
+    };
+    preparing_controller_is_stale(
+        bootstrap.handoff_state,
+        bootstrap.handoff_started_at,
+        timestamp_secs(),
+        threshold,
+    )
+}
+
+/// M1 (#stuckhandoff2) — supersede the wedged in-memory + on-disk bootstrap with
+/// `Failed` (so the next bind promotes a clean controller instead of re-adopting the
+/// stuck generation) and log the self-reap. The caller flips `should_stop`, drops the
+/// listener, and removes the socket; this process exits without ever needing `pkill`.
+fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, threshold: Duration) {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return;
+    };
+    let project_root = bootstrap.project_root.clone();
+    let pid = bootstrap.pid;
+    let generation = bootstrap.controller_generation;
+    let age = timestamp_secs().saturating_sub(bootstrap.handoff_started_at.unwrap_or_else(timestamp_secs));
+    if let Ok(mut state) = runtime.bootstrap.lock() {
+        state.handoff_state = ControllerHandoffState::Failed;
+        state.handoff_started_at = None;
+        if let Err(err) = write_bootstrap_state(&state) {
+            eprintln!(
+                "[controller] warning: self-watchdog failed to mark bootstrap failed pid={pid} generation={generation}: {err}"
+            );
+        }
+    }
+    crate::ops_log::log_op(
+        &project_root,
+        &format!(
+            "stale_preparing_controller_self_reaped pid={pid} generation={generation} age_secs={age} threshold_secs={} caller=self_watchdog",
+            threshold.as_secs()
+        ),
+    );
+    eprintln!(
+        "[controller] self-watchdog: terminating controller wedged in preparing past {}s pid={pid} generation={generation} age_secs={age}",
+        threshold.as_secs()
+    );
 }
 
 fn serve_client(
@@ -7217,6 +7402,187 @@ agent:queue\n\
         assert!(ops_log.contains("caller=gc"));
     }
 
+    // ---- M1 (#stuckhandoff2): controller self-watchdog ----
+
+    fn runtime_for_bootstrap(bootstrap: ControllerBootstrap) -> ControllerRuntime {
+        // Construct directly (bypassing `ControllerRuntime::new`'s restart-recovery /
+        // state-DB load) so the self-watchdog predicate is exercised in isolation.
+        ControllerRuntime {
+            bootstrap: Mutex::new(bootstrap),
+            memory: Mutex::new(ControllerMemoryState {
+                actor_store: BTreeMap::new(),
+                map_backend: "std_btree_map",
+            }),
+        }
+    }
+
+    fn preparing_runtime_bootstrap(
+        project_root: &Path,
+        handoff_state: ControllerHandoffState,
+        handoff_started_at: Option<u64>,
+    ) -> ControllerBootstrap {
+        ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: None,
+            controller_generation: 7,
+            handoff_state,
+            handoff_started_at,
+            previous_controller_pid: None,
+        }
+    }
+
+    #[test]
+    fn self_watchdog_keeps_fresh_preparing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Preparing,
+            Some(timestamp_secs()),
+        ));
+        assert!(
+            !controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(45)),
+            "a controller mid-handoff (fresh handoff_started_at) must not self-terminate"
+        );
+    }
+
+    #[test]
+    fn self_watchdog_keeps_stable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Stable,
+            None,
+        ));
+        assert!(
+            !controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(0)),
+            "a Stable controller must never self-terminate, even at a zero threshold"
+        );
+    }
+
+    #[test]
+    fn self_watchdog_suicides_and_marks_failed_on_stale_preparing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let stale = timestamp_secs().saturating_sub(600);
+        let bootstrap = preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Preparing,
+            Some(stale),
+        );
+        write_bootstrap_state(&bootstrap).unwrap();
+        let runtime = runtime_for_bootstrap(bootstrap);
+
+        assert!(
+            controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(45)),
+            "a controller wedged in Preparing past the threshold must self-terminate"
+        );
+        controller_self_watchdog_suicide(&runtime, Duration::from_secs(45));
+
+        // On-disk bootstrap superseded with Failed so the next bind promotes fresh.
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        assert_eq!(after.handoff_started_at, None);
+        // In-memory bootstrap mirrors the transition.
+        assert_eq!(
+            runtime.bootstrap_snapshot().unwrap().handoff_state,
+            ControllerHandoffState::Failed
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_self_reaped pid="));
+        assert!(ops_log.contains("caller=self_watchdog"));
+    }
+
+    // ---- M3 (#stuckhandoff2): orphaned-preparing process-scan reaper ----
+
+    #[test]
+    fn process_start_age_secs_reports_for_self() {
+        assert!(
+            process_start_age_secs(std::process::id()).is_some(),
+            "process start age must resolve from /proc for a live pid"
+        );
+    }
+
+    #[test]
+    fn orphan_reaper_keeps_fresh_preparing_sentinel() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(cmdline_has_preparing_handoff(pid));
+
+        // Just-launched (age ~0s) ⇒ inside a healthy handoff window ⇒ keep.
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(45), false)
+                .unwrap();
+        assert_eq!((reaped, kept), (0, 1));
+        assert!(process_is_alive(pid), "a fresh preparing sentinel must be kept");
+
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+    }
+
+    #[test]
+    fn orphan_reaper_ignores_non_preparing_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(!cmdline_has_preparing_handoff(pid));
+
+        // No `--handoff-state preparing` ⇒ not an orphaned handoff ⇒ never scanned.
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false)
+                .unwrap();
+        assert_eq!((reaped, kept), (0, 0));
+        assert!(process_is_alive(pid), "a plain controller must never be reaped here");
+
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+    }
+
+    #[test]
+    fn orphan_reaper_reaps_aged_preparing_sentinel() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        // Let the process age past a zero threshold (start age is /proc dir mtime).
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false)
+                .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+
+        // The live orphan must actually be terminated (the whole point vs. the
+        // record-scoped reaper). The sentinel is our child, so a killed process
+        // lingers as a zombie until `wait()` — poll `try_wait`.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("aged preparing orphan must be reaped");
+        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+    }
+
     /// Spawn a long-sleep sentinel whose `/proc/<pid>/cmdline` matches the
     /// `agent-doc controller serve --project-root <root>` shape
     /// `is_same_project_controller_pid` checks, without exec-collapsing the
@@ -7244,6 +7610,37 @@ agent:queue\n\
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(2)
             && !is_same_project_controller_pid(project_root, pid)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    /// Like [`spawn_controller_sentinel`] but the cmdline also carries
+    /// `--handoff-state preparing`, mirroring a replacement controller launched
+    /// mid-handoff that wedged because the client never sent `promote_handoff`.
+    fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::process::Child {
+        let argv0 = project_root.join("agent-doc");
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30; :")
+            .arg(argv0.to_string_lossy().to_string())
+            .arg("controller")
+            .arg("serve")
+            .arg("--project-root")
+            .arg(project_root.to_string_lossy().to_string())
+            .arg("--handoff-state")
+            .arg("preparing")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn preparing controller sentinel");
+        let pid = child.id();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2)
+            && !(is_same_project_controller_pid(project_root, pid)
+                && cmdline_has_preparing_handoff(pid))
         {
             std::thread::sleep(Duration::from_millis(10));
         }

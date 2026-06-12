@@ -414,6 +414,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                 repositionBoundaryViaDocument(file, boundaryId, preserveHead)
                 APPLY_APPLIED
             }
+            "refresh_content" -> {
+                val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                val content = extractStringField(json, "content") ?: return APPLY_FAILED
+                val expectedHash = extractStringField(json, "expected_content_hash")
+                val expectedLen = extractIntField(json, "expected_content_len")
+                if (refreshContentViaDocument(file, content, expectedHash, expectedLen)) {
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
+            }
             "vcs_refresh" -> {
                 refreshVcs()
                 APPLY_APPLIED
@@ -423,6 +434,85 @@ class PatchWatcher(private val project: Project) : Disposable {
                 APPLY_FAILED
             }
         }
+    }
+
+    /**
+     * Replace a stale post-commit editor buffer with the committed HEAD content.
+     *
+     * This is intentionally narrower than generic full-content IPC: it is only
+     * used after the binary has restored disk to HEAD for #pcwc, and it carries
+     * the stale buffer hash/length that must match before setText runs.
+     */
+    private fun refreshContentViaDocument(
+        filePath: String,
+        content: String,
+        expectedHash: String?,
+        expectedLen: Int?,
+    ): Boolean {
+        if (!awaitIdleBeforeDocumentMutation(filePath, "postcommit editor refresh")) {
+            return false
+        }
+
+        var applied = false
+        ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            targetFile.refresh(false, false)
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
+            val current = document.text
+            if (current == content) {
+                LOG.info("[socket] refresh_content no-op: editor already matches committed content for $filePath")
+                applied = true
+                return@invokeAndWait
+            }
+
+            val currentHash = contentHash(current)
+            if (!refreshContentPreconditionUtil(current, content, expectedHash, expectedLen)) {
+                if (expectedLen != null && current.length != expectedLen) {
+                    LOG.warn(
+                        "[socket] refresh_content rejected for $filePath: live length ${current.length} != expected stale length $expectedLen",
+                    )
+                } else if (expectedHash != null && currentHash != expectedHash) {
+                    LOG.warn(
+                        "[socket] refresh_content rejected for $filePath: live hash ${currentHash.take(12)} != expected stale hash ${expectedHash.take(12)}",
+                    )
+                } else {
+                    LOG.warn("[socket] refresh_content rejected for $filePath: stale-buffer proof failed")
+                }
+                return@invokeAndWait
+            }
+
+            val proof = EditorApplyProof(current, document.modificationStamp)
+            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Refresh Content", null, {
+                if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                    LOG.warn("[socket] stale editor generation during refresh_content for $filePath; rejecting")
+                    return@runWriteCommandAction
+                }
+                LOG.info(
+                    documentMutationDiagnosticUtil(
+                        "refreshContent.postcommit",
+                        filePath,
+                        expectedHash?.take(12),
+                        "socket_refresh_content",
+                        current,
+                        content,
+                        document.modificationStamp,
+                        true,
+                    ),
+                )
+                if (LOG.isDebugEnabled) {
+                    LOG.debug(
+                        "[patch-watcher] setText payload (refresh_content) for $filePath (${content.length} chars):\n$content",
+                    )
+                }
+                document.setText(content)
+                applied = true
+            })
+            if (applied) {
+                fdm.saveDocument(document)
+            }
+        }
+        return applied
     }
 
     /**
@@ -1716,6 +1806,24 @@ internal fun editorApplyProofStillCurrentUtil(
 ): Boolean =
     proof.modificationStamp == currentModificationStamp && proof.content == currentContent
 
+internal fun refreshContentPreconditionUtil(
+    currentContent: String,
+    targetContent: String,
+    expectedHash: String?,
+    expectedLen: Int?,
+): Boolean {
+    if (currentContent == targetContent) {
+        return true
+    }
+    if (expectedLen != null && currentContent.length != expectedLen) {
+        return false
+    }
+    if (expectedHash != null && PatchWatcher.contentHash(currentContent) != expectedHash) {
+        return false
+    }
+    return true
+}
+
 /**
  * VFS-path analog of [editorApplyProofStillCurrentUtil] (#ipcfullprompt-recur2).
  *
@@ -2256,6 +2364,14 @@ fun parsePatchJson(json: String): IpcPatch? {
 private fun extractStringField(json: String, field: String): String? {
     return try {
         com.google.gson.JsonParser.parseString(json).asJsonObject.get(field)?.asString
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun extractIntField(json: String, field: String): Int? {
+    return try {
+        com.google.gson.JsonParser.parseString(json).asJsonObject.get(field)?.asInt
     } catch (e: Exception) {
         null
     }

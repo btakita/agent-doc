@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781199410858
   step: write_applied
@@ -71,7 +71,7 @@ fix(admin): open needs attention by default
 
 Admin dashboard now expands the Needs attention panel on first render and the dashboard test covers that default-open state. Verified with focused admin tests, make check, and production deploy d13af486-6d31-4f1b-a1ed-8caf25f8628c.
 ```
-<!-- agent:boundary:7ac6791f -->
+<!-- agent:boundary:bab91e75 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,6 +79,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In the pipeline cards, include the email address. deploy
 <!-- /agent:queue -->
 
 ## Backlog

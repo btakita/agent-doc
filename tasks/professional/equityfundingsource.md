@@ -58,16 +58,29 @@ Verification and deploy:
 - `make deploy` — deployed Worker version `d13af486-6d31-4f1b-a1ed-8caf25f8628c`.
 - Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-❯ - Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
-❯ - `make deploy` — deployed Worker version `3106fb97-7023-4def-8722-bc1c18499a06`.
-❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
-❯ - `make check` — 559 passed, plus browser build and Worker build.
-❯ - `bun test tests/admin-pipeline.test.ts` — 37 passed.
+- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
+- `make deploy` — deployed Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
+- `make check` — 559 passed, plus browser build and Worker build.
+- `bun test tests/admin-dashboard.test.ts` — 25 passed.
+- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts` — coverage now asserts loan/lead attention detail emails and the UI source wiring.
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx` — expanded `Needs attention` detail rows now render the email line with wrapping.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — attention detail items now carry an optional `email`, populated from loan `borrower_email` or lead `email`.
+- Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`, `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx`, and `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`.
+- Commands run: `bun test tests/admin-dashboard.test.ts`, `make check`, remote D1 migration list before and after deploy, `make deploy`, live smoke curls, `gh run list --workflow CI --limit 1`, and `gh workflow list`.
+- Verification: focused dashboard test passed 25 tests; `make check` passed 559 tests plus browser and Worker builds; D1 had no pending migrations; `/` returned `200`; `/portal-admin` returned `303`.
+- Deploy: Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
+- Commit: agent-doc document response commit `f82aad149`; no EFS repo code commit was made because the local repo instruction says not to commit unless explicitly asked.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
+- `make deploy` — deployed Worker version `3106fb97-7023-4def-8722-bc1c18499a06`.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
+- `make check` — 559 passed, plus browser build and Worker build.
+- `bun test tests/admin-pipeline.test.ts` — 37 passed.
 ❯ - `src/equityfundingsource-dev/tests/admin-pipeline.test.ts` — coverage now asserts the new email payload and UI wiring.
 ❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx` — loan and lead pipeline cards now show the email line, and pipeline card search matches email.
-❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — dashboard attention detail card builders stay compatible with the email-carrying payloads.
-❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts` — the admin pipeline endpoint passes borrower/lead email into card builders.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — dashboard attention detail card builders stay compatible with the email-carrying payloads.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts` — the admin pipeline endpoint passes borrower/lead email into card builders.
 ❯ - `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts` — pipeline card payload types now carry `borrower_email` for loan cards and `email` for lead cards.
 
 Confidence: high. Escalation: none.
@@ -97,12 +110,12 @@ Changed paths for this queue item:
 ❯ - `src/equityfundingsource-dev/tests/admin-pipeline.test.ts` — coverage now asserts the new email payload and UI wiring.
 
 Verification and deploy:
-❯ - `bun test tests/admin-pipeline.test.ts` — 37 passed.
-❯ - `make check` — 559 passed, plus browser build and Worker build.
-❯ - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
-❯ - `make deploy` — deployed Worker version `3106fb97-7023-4def-8722-bc1c18499a06`.
-❯ - Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
-❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+- `bun test tests/admin-pipeline.test.ts` — 37 passed.
+- `make check` — 559 passed, plus browser build and Worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
+- `make deploy` — deployed Worker version `3106fb97-7023-4def-8722-bc1c18499a06`.
+- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
 
 No actionable follow-up/backlog item is needed; the requested change is complete and deployed.
 
@@ -115,112 +128,6 @@ fix(admin): show emails on pipeline cards
 
 Pipeline card payloads now carry borrower and lead email addresses, and the Deal Pipeline cards render that email line while card search also matches it. Verified with focused admin pipeline tests, make check, and production deploy 3106fb97-7023-4def-8722-bc1c18499a06.
 ```
-
-### Re: Closeout recovery — gpt-5
-
-The pipeline-card email change was already implemented, verified, deployed, and recorded above. This note only closes the active agent-doc turn after the IPC recovery path committed the visible response.
-
-### Re: Needs Attention item emails + deploy — gpt-5
-
-> **Queue prompt:**
->
-> The needs attention items should have the email address. deploy
-
-Implemented and deployed.
-
-Changed paths for this queue item:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — attention detail items now carry an optional `email`, populated from loan `borrower_email` or lead `email`.
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx` — expanded `Needs attention` detail rows now render the email line with wrapping.
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts` — coverage now asserts loan/lead attention detail emails and the UI source wiring.
-
-Verification and deploy:
-- `bun test tests/admin-dashboard.test.ts` — 25 passed.
-- `make check` — 559 passed, plus browser build and Worker build.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
-- `make deploy` — deployed Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
-- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303`, consistent with Cloudflare Access redirect.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-
-No repo commit was made; the EFS submodule remains dirty with this change plus prior intended session changes.
-
-Confidence: high. Escalation: none.
-
-Suggested git commit message:
-
-```txt
-fix(admin): show emails in needs attention items
-
-Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
-```
-
-### Re: Closeout correction — gpt-5
-
-The prior closeout sentence was stale: this turn did implement the `Needs attention` item email request, not merely the earlier pipeline-card email request.
-
-Corrected closeout record:
-- Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`, `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx`, and `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`.
-- Commands run: `bun test tests/admin-dashboard.test.ts`, `make check`, remote D1 migration list before and after deploy, `make deploy`, live smoke curls, `gh run list --workflow CI --limit 1`, and `gh workflow list`.
-- Verification: focused dashboard test passed 25 tests; `make check` passed 559 tests plus browser and Worker builds; D1 had no pending migrations; `/` returned `200`; `/portal-admin` returned `303`.
-- Deploy: Worker version `5b15492f-ed7a-492d-ac77-17cb19c396a2`.
-- Commit: agent-doc document response commit `f82aad149`; no EFS repo code commit was made because the local repo instruction says not to commit unless explicitly asked.
-
-Confidence: high. Escalation: none.
-### Session Summary
-
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260611-174449.md`*
-
-Compacted content:
-- Archived 2 response topic(s): validation toasts and deploy; field-level validation boxes and deploy
-- Prior summary/context: compacted EFS admin/dashboard validation and deployment work.
-
-### Re: Admin Needs Attention default-open + deploy — gpt-5
-
-> **Queue prompt:**
->
-> The admin portal "Needs attention" section should default to open. deploy
-
-Implemented and deployed.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/dashboard.tsx` — the admin `Needs attention` panel initializes open with `useState(true)`.
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts` — admin dashboard coverage asserts the default-open state.
-
-Verification and deploy:
-- `bun test tests/admin-dashboard.test.ts` — 25 passed.
-- `make check` — 559 passed, plus browser build and Worker build.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
-- `make deploy` — deployed Worker version `d13af486-6d31-4f1b-a1ed-8caf25f8628c`.
-- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303` behind Cloudflare Access.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-
-Confidence: high. Escalation: none.
-
-### Re: Pipeline card email + deploy — gpt-5
-
-> **Queue prompt:**
->
-> In the pipeline cards, include the email address. deploy
-
-Implemented and deployed.
-
-Changed paths for this queue item:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts` — pipeline card payload types carry `borrower_email` for loan cards and `email` for lead cards.
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts` — the admin pipeline endpoint passes borrower/lead email into card builders.
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts` — dashboard attention detail card builders stay compatible with the email-carrying payloads.
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx` — loan and lead pipeline cards show the email line, and pipeline card search matches email.
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts` — coverage asserts the email payload and UI wiring.
-
-Verification and deploy:
-- `bun test tests/admin-pipeline.test.ts` — 37 passed.
-- `make check` — 559 passed, plus browser build and Worker build.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — no pending migrations before and after deploy.
-- `make deploy` — deployed Worker version `3106fb97-7023-4def-8722-bc1c18499a06`.
-- Live smoke checks: public `/` returned `200`; `/portal-admin` returned `303` behind Cloudflare Access.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-
-No actionable follow-up/backlog item is needed; the requested change is complete and deployed.
-
-Confidence: high. Escalation: none.
 
 ### Re: Needs Attention item emails + deploy — gpt-5
 
@@ -254,14 +161,14 @@ fix(admin): show emails in needs attention items
 
 Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
 ```
-<!-- agent:boundary:72d8fe6b -->
+<!-- agent:boundary:3c163ef9 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

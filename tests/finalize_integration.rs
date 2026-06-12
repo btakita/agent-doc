@@ -1866,7 +1866,7 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
 }
 
 #[test]
-fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
+fn finalize_forward_merges_late_comment_tail_edit_outside_exchange() {
     let (tmp, doc) = setup_session_stream_doc();
     let shaped = fs::read_to_string(&doc).unwrap().replace(
         "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
@@ -1908,15 +1908,18 @@ fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
         "late comment-tail edit must remain visible after closeout"
     );
 
+    // #fintol2: a plain, disjoint comment-tail edit (no prompt/directive) is now
+    // FORWARD-MERGED into the response commit instead of carried forward — the
+    // response lands AND the user's edit is preserved in the same commit.
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: Please reply — gpt-5"));
     assert!(
-        !head.contains("edited parked note"),
-        "late non-component edit must remain outside the assistant closeout commit"
+        head.contains("edited parked note"),
+        "the plain comment-tail edit must be forward-merged into the closeout commit"
     );
     assert!(
-        head.contains("old parked note"),
-        "committed closeout snapshot should keep the pre-response comment tail"
+        !head.contains("old parked note"),
+        "the forward-merge replaces the pre-edit comment tail with the user's edit"
     );
 
     agent_doc()

@@ -394,7 +394,7 @@ fn snapshot_persist_mode_with_current(
     if baseline.is_some()
         && strip_boundary_for_dedup(base) != strip_boundary_for_dedup(content_current)
         && (has_prompt_bearing_user_drift(base, content_current)
-            || has_non_exchange_user_drift(base, content_current))
+            || non_exchange_drift_carries_directive(base, content_current))
     {
         return SnapshotPersistMode::ContentOurs;
     }
@@ -402,14 +402,28 @@ fn snapshot_persist_mode_with_current(
     snapshot_persist_mode(baseline, content_ours, final_content)
 }
 
-fn has_non_exchange_user_drift(base: &str, current: &str) -> bool {
+/// `#fintol2` — whether the non-`exchange` user drift between `base` and `current`
+/// carries a next-cycle directive that must be CARRIED FORWARD rather than
+/// forward-merged. Returns true only when an outside-`exchange` change adds a
+/// carry-forward signal line (a prompt / question / `dispatch` / `do #` directive
+/// / `#tag`). A PLAIN outside-`exchange` content edit (e.g. editing a parked
+/// comment-note's prose) returns false, so `snapshot_persist_mode_with_current`
+/// falls through to `FinalContent` and the edit is forward-merged into the
+/// commit. Unlike `has_prompt_bearing_user_drift` this does NOT strip comments,
+/// so a `dispatch #…` directive typed inside a `<!-- … -->` scratch block is still
+/// recognized as carry-forward (the scratch-directive integration tests).
+fn non_exchange_drift_carries_directive(base: &str, current: &str) -> bool {
     let base_norm = strip_boundary_for_dedup(base);
     let current_norm = strip_boundary_for_dedup(current);
     if base_norm == current_norm {
         return false;
     }
-
-    outside_component_content_changed(&base_norm, &current_norm, "exchange")
+    if !outside_component_content_changed(&base_norm, &current_norm, "exchange") {
+        return false;
+    }
+    added_nonblank_lines(&base_norm, &current_norm)
+        .iter()
+        .any(|line| line_is_carry_forward_signal(line))
 }
 
 fn outside_component_content_changed(left: &str, right: &str, component_name: &str) -> bool {
@@ -554,37 +568,64 @@ fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
         .collect()
 }
 
-/// `#fintol1` — conflict-scope primitive (seam-isolated; NOT yet wired into the
-/// commit path). True when the concurrent user edit carried by `candidate` (the
-/// live buffer / ack content at finalize) is DISJOINT from the response target
-/// span that `content_ours` (baseline + the agent's response) wrote — i.e. the
-/// user edit and the response occupy independent regions and *could* be
-/// forward-merged into a conflict-free union instead of the binary
-/// absorb-or-reject at the `live_prompt_drift_after_preflight` gate.
+/// True when a user-added line is a next-cycle instruction that `#fintol2` must
+/// carry forward rather than fold into the commit: a prompt target (`❯ …`,
+/// `do #…`), a question, a `dispatch`/`fix #` directive, a `spec-test` build
+/// directive, or an inline / leading `#tag`. Mirrors the post-commit directive
+/// matcher in `git.rs` and the gate's own prompt detection, kept deliberately
+/// broad — carry-forward is the safe default, so a false positive only defers an
+/// edit to the next cycle, never commits a directive prematurely.
+fn line_is_carry_forward_signal(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if crate::diff::text_line_looks_like_prompt_target(trimmed) {
+        return true;
+    }
+    let lower = trimmed
+        .trim_start_matches('❯')
+        .trim_start()
+        .to_ascii_lowercase();
+    trimmed.starts_with('❯')
+        || trimmed.ends_with('?')
+        || trimmed.starts_with('#')
+        || trimmed.contains(" #")
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("dispatch")
+        || lower.starts_with("fix #")
+        || lower.contains("spec-test")
+        || lower.contains("spec test")
+}
+
+/// `#fintol1` — conflict-scope primitive driving the `#fintol2` finalize
+/// tolerance. True when the concurrent user edit carried by `candidate` (the live
+/// buffer / ack content at finalize) is a DISJOINT, plain content edit that can
+/// be forward-merged into THIS cycle's commit (the operator-confirmed behavior:
+/// "allow the user to type unrelated changes / compaction without being
+/// rejected — agent response lands, user edit preserved") instead of being
+/// carried forward to the next cycle.
 ///
-/// WIRING IS OPERATOR-GATED. Today's gate already preserves a disjoint
-/// outside-`exchange` edit by carrying it forward UNCOMMITTED (the finalize
-/// succeeds, the edit stays in the working tree for the next cycle) — a
-/// deliberate, shipped invariant asserted by
-/// `finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`.
-/// Forward-merging the edit into THIS cycle's commit instead would flip that
-/// invariant (commit-now vs carry-forward), so the wiring must not land until the
-/// operator confirms the behavior change against a live Phase-0 re-baseline. This
-/// primitive lands the proven classification logic behind the seam first (the
-/// repo's rung-1 pattern), exercised by the unit tests below.
+/// Returns `true` only for the narrow, provably-safe case and stays conservative
+/// everywhere else (a false `true` would commit a bad merge), requiring ALL of:
+/// 1. the user edit is confined OUTSIDE the `exchange` component (the response's
+///    own target), so a new prompt, a response-body rewrite, or a re-typed answer
+///    can never be spliced — those stay on the carry-forward / fail-closed path;
+/// 2. none of the user's added lines (the candidate-added lines the response did
+///    not write) is a carry-forward signal — a prompt, question, `dispatch` /
+///    `do #` directive, or `#tag`. Those are next-cycle instructions and are
+///    preserved as a next-cycle diff, never folded into the commit (this keeps
+///    the `EFS_LIVE_PROMPT` / scratch-directive / `#next-steps` integration tests
+///    carrying their content forward);
+/// 3. a 3-way merge (base = `baseline`, ours = `content_ours`, theirs =
+///    `candidate`) produces no git conflict markers and preserves every non-blank
+///    line the response added AND every non-blank line the user added — `git
+///    merge-file --diff3` conflicts only when both sides changed the same region.
 ///
-/// Disjointness is PROVEN, not guessed: a 3-way merge (base = `baseline`,
-/// ours = the response in `content_ours`, theirs = the user edit in `candidate`)
-/// must (a) produce no git conflict markers and (b) preserve every non-blank line
-/// the response added AND every non-blank line the user added. `git merge-file
-/// --diff3` only emits conflict markers when both sides changed the same region,
-/// so a new prompt below, a queue / backlog edit, or a compaction of an
-/// already-answered exchange tail merges cleanly, while a user rewrite of the
-/// response body the agent just wrote collides and returns `false` (the caller
-/// then keeps today's fail-closed `content_ours_snapshot_next_cycle` behavior).
-/// A merge error, a dropped line, or no user-added content also returns `false`
-/// — the gate stays conservative, so a false `true` (which would commit a bad
-/// merge) is not reachable from any ambiguous input.
+/// A merge error, a dropped line, a pure deletion, or no user edit also returns
+/// `false`. A plain content edit outside `exchange` (e.g. editing a parked
+/// comment-note's prose) is the case that forward-merges.
 pub fn response_target_disjoint_from_user_edit(
     baseline: &str,
     content_ours: &str,
@@ -617,6 +658,19 @@ pub fn response_target_disjoint_from_user_edit(
         .into_iter()
         .any(|line| !response_ex_added.contains(&line));
     if user_ex_added {
+        return false;
+    }
+    // The lines the USER added (candidate-added minus the response's own added
+    // lines). A prompt / question / `dispatch` / `do #` directive / `#tag` among
+    // them is a next-cycle instruction that must be carried forward, not folded
+    // into the commit, so it disqualifies the forward-merge.
+    let response_added_set: std::collections::HashSet<String> =
+        added_nonblank_lines(baseline, content_ours).into_iter().collect();
+    let user_carries_directive = user_added
+        .iter()
+        .filter(|line| !response_added_set.contains(*line))
+        .any(|line| line_is_carry_forward_signal(line));
+    if user_carries_directive {
         return false;
     }
     // Region independence outside `exchange` is then PROVEN by a clean 3-way
@@ -10947,12 +11001,59 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         ),
     );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+
+    let candidate = decision.snapshot_content.clone();
+    // #queue-user-edit-overwrite: a live queue deletion is authoritative — fold it
+    // into content_ours first so both the fail-closed path and the #fintol2
+    // forward-merge below reason about the user's reconciled queue.
+    let queue_reconciled_ours = apply_live_queue_deletions_to_content_ours(base, &candidate, ours);
+    if queue_reconciled_ours != ours {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_content_ours_reconciled file={} source={} patch_id={} reason=live_queue_deletion_authoritative",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-")
+            ),
+        );
+    }
+
+    // #fintol2 — forward-merge tolerance for an independent concurrent edit. When
+    // the user's concurrent edit is a DISJOINT, plain content edit outside
+    // `exchange` (proven by `response_target_disjoint_from_user_edit`: confined
+    // outside the response component, carrying no prompt/directive, and yielding a
+    // conflict-free union that preserves both sides), commit that union so the
+    // response lands AND the user's edit is preserved this cycle. Anything
+    // prompt-/directive-bearing, in-`exchange`, or colliding returns false and
+    // falls through to today's `content_ours_snapshot_next_cycle` carry-forward.
+    if response_target_disjoint_from_user_edit(base, &queue_reconciled_ours, &candidate)
+        && let Ok(union) = crate::merge::merge_contents(base, &queue_reconciled_ours, &candidate)
+        && !union.contains("<<<<<<<")
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} reason=independent_concurrent_edit",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                candidate.len(),
+                crate::ops_log::content_hash(&candidate),
+                union.len(),
+                crate::ops_log::content_hash(&union),
+            ),
+        );
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&union);
+        return true;
+    }
+
     // #exchange-prompt-dropped-on-merge: persist the dropped user prompt lines
     // now, while the divergent candidate still carries them. The post-commit
     // session-check disk diff cannot win the race against an editor that
     // overwrites disk with the converged content_ours buffer, so the dropped
     // prompt guard reads this persisted evidence to fail closed instead.
-    let dropped = dropped_prompt_lines_after_content_ours(base, &decision.snapshot_content, ours);
+    let dropped = dropped_prompt_lines_after_content_ours(base, &candidate, ours);
     if !dropped.is_empty() {
         if let Err(e) = crate::cycle_state::record_dropped_exchange_prompts(file, &dropped) {
             eprintln!(
@@ -10976,22 +11077,9 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // edits. Record the dropped `do [#id]` queue lines now; session-check
     // filters them against committed HEAD (preserved or consumed → cleared,
     // silently deleted → fail closed).
-    let queue_reconciled_ours =
-        apply_live_queue_deletions_to_content_ours(base, &decision.snapshot_content, ours);
-    if queue_reconciled_ours != ours {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_content_ours_reconciled file={} source={} patch_id={} reason=live_queue_deletion_authoritative",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-")
-            ),
-        );
-    }
     let dropped_queue = dropped_queue_prompt_lines_after_content_ours(
         base,
-        &decision.snapshot_content,
+        &candidate,
         &queue_reconciled_ours,
     );
     if !dropped_queue.is_empty() {
@@ -17191,7 +17279,16 @@ scratch
     }
 
     #[test]
-    fn explicit_baseline_preserves_concurrent_comment_tail_for_next_cycle() {
+    fn explicit_baseline_forward_merges_concurrent_comment_tail_into_this_cycle() {
+        // `#fintol2`: a PLAIN concurrent edit to a parked comment-note outside
+        // `exchange` (`old note` -> `edited note`) carries NO next-cycle directive,
+        // so `non_exchange_drift_carries_directive` is false and
+        // `snapshot_persist_mode_with_current` falls through to `FinalContent`. The
+        // edit is forward-merged into THIS cycle's commit (the response lands AND
+        // the user's edit is preserved together) instead of being carried forward
+        // uncommitted. A directive-bearing outside edit (a new prompt, `do #id`,
+        // `#tag`, question) still routes to `ContentOurs` via the sibling
+        // `explicit_baseline_preserves_concurrent_user_edits_for_next_cycle`.
         let baseline = Some("baseline");
         let base = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
         let content_current = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
@@ -17206,7 +17303,7 @@ scratch
                 content_ours,
                 final_content
             ),
-            SnapshotPersistMode::ContentOurs
+            SnapshotPersistMode::FinalContent
         );
         assert_eq!(
             snapshot_content_to_persist(
@@ -17220,7 +17317,7 @@ scratch
                 content_ours,
                 final_content
             ),
-            content_ours
+            final_content
         );
     }
 
@@ -18170,18 +18267,41 @@ scratch
     // -------- #fintol1: response_target_disjoint_from_user_edit primitive --------
 
     #[test]
-    fn fintol_disjoint_queue_edit_is_forward_mergeable() {
-        // A user adds a queue item (outside `exchange`) while the agent finalizes:
-        // the edit is disjoint from the response target, so a clean union exists.
+    fn fintol_queue_directive_carries_forward() {
+        // A user adds a `do [#id]` queue directive — a next-cycle instruction, not
+        // a plain content edit — so it is carried forward, never forward-merged.
         let baseline = drift_baseline();
         let ours = drift_content_ours();
         let candidate = ours.replace(
             "- do [#fix]\n<!-- /agent:queue -->",
-            "- do [#fix]\n- do [#user-added-outside-exchange]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-directive]\n<!-- /agent:queue -->",
         );
         assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a queue do-directive is a next-cycle instruction and must carry forward"
+        );
+    }
+
+    #[test]
+    fn fintol_plain_outside_edit_is_forward_mergeable() {
+        // A plain prose edit OUTSIDE `exchange` (no prompt/directive) is the case
+        // that forward-merges: the response and the edit occupy independent regions.
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace("old parked note body", "edited parked note body");
+        assert!(
             response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
-            "a user queue edit outside the response component must be forward-mergeable"
+            "a plain comment-note edit outside the response must be forward-mergeable"
         );
     }
 

@@ -835,7 +835,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // are diagnostic baseline-fallback reasons on the model-projected-baseline
         // cutover path (not flow guards), logging why finalize fell back to the
         // legacy `.md` baseline instead of the projected model overlay.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 41,
+        // +1 (#fintol2) for the audited `live_prompt_drift_forward_merged ...
+        // reason=independent_concurrent_edit` ops-log marker in
+        // `guard_ipc_snapshot_adoption_against_live_prompt_drift`. It proves the
+        // finalize-tolerance forward-merge path: when a concurrent user edit is
+        // disjoint from the response target (no prompt/directive, outside
+        // `exchange`, conflict-free 3-way union), the gate commits the union this
+        // cycle instead of carrying it forward via `content_ours_snapshot_next_cycle`.
+        // A diagnostic on the tolerance path, not a new flow guard.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 42,
         _ => 0,
     }
 }

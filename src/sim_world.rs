@@ -450,6 +450,7 @@ struct Coverage {
     sidecar_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
     ipc_snapshot_live_prompt_blocks: usize,
+    live_prompt_forward_merges: usize,
     already_applied_response_recoveries: usize,
     ack_sidecar_only_repairs: usize,
     visible_duplicate_repairs: usize,
@@ -1303,6 +1304,53 @@ impl SimWorld {
             self.coverage.ipc_snapshot_live_prompt_blocks += 1;
         } else {
             self.snapshot = snapshot_candidate.to_string();
+        }
+    }
+
+    /// Model the `#fintol2` finalize-tolerance decision over the same public gate
+    /// primitives the binary's `guard_ipc_snapshot_adoption_against_live_prompt_drift`
+    /// uses. When the live buffer drifted after preflight:
+    /// - a DISJOINT plain content edit (proven by `response_target_disjoint_from_user_edit`)
+    ///   is forward-merged: the committed snapshot is the conflict-free union of the
+    ///   response and the user edit, so the response lands AND the edit is preserved;
+    /// - a prompt/directive or collision drift keeps today's fail-closed behavior
+    ///   (commit `content_ours`, carry the live edit forward in `self.doc`).
+    fn finalize_ipc_candidate_with_tolerance(
+        &mut self,
+        baseline: &str,
+        content_ours: &str,
+        snapshot_candidate: &str,
+    ) {
+        self.doc = snapshot_candidate.to_string();
+        if !agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            baseline,
+            snapshot_candidate,
+            content_ours,
+        ) {
+            self.snapshot = snapshot_candidate.to_string();
+            return;
+        }
+        if agent_doc_orchestration::write::response_target_disjoint_from_user_edit(
+            baseline,
+            content_ours,
+            snapshot_candidate,
+        ) {
+            let union = agent_doc_orchestration::merge::merge_contents(
+                baseline,
+                content_ours,
+                snapshot_candidate,
+            )
+            .expect("disjoint forward-merge must succeed");
+            assert!(
+                !union.contains("<<<<<<<"),
+                "a disjoint forward-merge must be conflict-free:\n{union}"
+            );
+            self.snapshot = union.clone();
+            self.doc = union;
+            self.coverage.live_prompt_forward_merges += 1;
+        } else {
+            self.snapshot = content_ours.to_string();
+            self.coverage.ipc_snapshot_live_prompt_blocks += 1;
         }
     }
 
@@ -3285,6 +3333,97 @@ fn ipc_snapshot_adoption_sim_blocks_live_prompt_drift_after_preflight() {
     );
 }
 
+// -------- #fintol3: finalize tolerance for independent concurrent edits --------
+
+#[test]
+fn finalize_forward_merges_plain_concurrent_edit_outside_response() {
+    // #fintol3: the operator edits a plain parked comment-note OUTSIDE the
+    // response target while the agent finalizes. The edit carries no
+    // prompt/directive, so finalize forward-merges instead of rejecting — the
+    // response commits AND the user's edit is preserved in the same commit.
+    let mut world = SimWorld::new(2_044);
+    let baseline = concat!(
+        "---\nsession: test\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "old parked note\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!--\nold parked note body\n-->\n",
+    );
+    let content_ours = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: reply — gpt-5\n\nAnswered with a sufficiently long response body.\n<!-- /agent:exchange -->",
+    );
+    // The user edits the parked note prose (outside exchange) mid-finalize.
+    let candidate = content_ours.replace("old parked note body", "edited parked note body");
+
+    world.finalize_ipc_candidate_with_tolerance(baseline, &content_ours, &candidate);
+
+    assert_eq!(
+        world.coverage.live_prompt_forward_merges, 1,
+        "a disjoint plain edit outside the response must forward-merge"
+    );
+    assert_eq!(
+        world.coverage.ipc_snapshot_live_prompt_blocks, 0,
+        "a disjoint plain edit must NOT be rejected"
+    );
+    assert!(
+        world.snapshot.contains("### Re: reply — gpt-5"),
+        "the agent response must be committed:\n{}",
+        world.snapshot
+    );
+    assert!(
+        world.snapshot.contains("edited parked note body"),
+        "the user's concurrent plain edit must survive in the commit:\n{}",
+        world.snapshot
+    );
+    assert!(
+        !world.snapshot.contains("<<<<<<<"),
+        "the committed union must be conflict-free:\n{}",
+        world.snapshot
+    );
+}
+
+#[test]
+fn finalize_carries_directive_edit_forward_instead_of_merging() {
+    // #fintol3 (complement): a concurrent edit that adds a prompt/directive (a
+    // `dispatch #…` scratch directive here) is NOT forward-merged — it stays on
+    // today's fail-closed path so the directive is a next-cycle diff, not a
+    // premature commit. The safety property the forward-merge must never weaken.
+    let mut world = SimWorld::new(2_045);
+    let baseline = concat!(
+        "---\nsession: test\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Please reply\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!--\n-->\n",
+    );
+    let content_ours = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: Please reply — gpt-5\n\nThe agent's answer body, long enough to matter.\n<!-- /agent:exchange -->",
+    );
+    // The user typed a scratch dispatch directive into the comment block.
+    let candidate = content_ours.replace("<!--\n-->", "<!--\ndispatch #spec-test-build-install\n-->");
+
+    world.finalize_ipc_candidate_with_tolerance(baseline, &content_ours, &candidate);
+
+    assert_eq!(
+        world.coverage.live_prompt_forward_merges, 0,
+        "a directive-bearing edit must not forward-merge"
+    );
+    assert_eq!(
+        world.coverage.ipc_snapshot_live_prompt_blocks, 1,
+        "a directive-bearing edit keeps today's fail-closed carry-forward behavior"
+    );
+    assert_eq!(
+        world.snapshot, content_ours,
+        "the committed snapshot stays the agent response (the directive is not absorbed)"
+    );
+    assert!(
+        world.doc.contains("dispatch #spec-test-build-install"),
+        "the directive is carried forward in the live buffer for the next cycle:\n{}",
+        world.doc
+    );
+}
 
 // #mrhpcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
 // drift must always be RECOVERED, never silently lost. When the socket reports

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -108,7 +108,37 @@ Verification:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:9518a2a2 -->
+
+### Re: Remove payment processors — gpt-5
+
+> **Queue prompt:**
+>
+> Remove Stripe and Paypal integration. We are not taking payments from borrowers.
+
+
+Removed the borrower online payment processor path. EFS no longer exposes Stripe settings, checkout, webhook ingestion, payment transaction persistence, or processor-specific borrower UI. I found no PayPal runtime integration; the only PayPal hits were bundled Font Awesome brand CSS, so there was no PayPal app code to remove.
+
+Changed paths:
+- `src/equityfundingsource-dev` submodule commit `39b54ae` (`Remove borrower payment processors`)
+- Parent repo commit `8347e967c` updates the EFS submodule pointer
+- Runtime/UI: `app/equityfundingsource/lib/payments/routes.ts`, `lib/ui--browser--efs/portal/borrower/make_payment.tsx`, `lib/ui--browser--efs/portal/admin/settings.tsx`, `app/equityfundingsource/lib/admin/repo.ts`, `app/equityfundingsource/lib/admin/settings/index.ts`
+- Removed: `app/equityfundingsource/lib/payments/stripe.ts`, `app/equityfundingsource/lib/payments/repo.ts`, `app/equityfundingsource/migrations/0035_loan_payment_transactions.sql`, `tests/borrower-payments-stripe.test.ts`
+- Added/updated no-processor coverage and PRD wording: `tests/borrower-payments-no-processor.test.ts`, `tests/admin-payment-settings.test.ts`, `tests/borrower-payments-ui.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`
+
+Verification:
+- `bun test tests/admin-payment-settings.test.ts tests/borrower-payments-ui.test.ts tests/borrower-payments-no-processor.test.ts` passed: 12 tests.
+- `make check` passed: 562 tests, browser build, and worker build.
+- Runtime scan `rg "stripe|Stripe|STRIPE|PayPal|Paypal|paypal|payment_intent|/api/borrower/payments/checkout|/api/stripe/webhook|checkout/sessions|loan_payment_transactions" app lib` returned no matches.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Notes:
+- The borrower payment pages remain read-only/servicing-remittance oriented: they show TMO-synced schedule data and instructions, but do not collect borrower payments through EFS.
+- Pre-existing unrelated EFS worktree changes remain unstaged.
+- The exchange is large, but the queue is active, so I continued without compacting.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:ec9f94de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +146,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Remove Stripe and Paypal integration. We are not taking payments from borrowers.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -158,7 +187,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [/] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
-- [/] [#cm3e] [recommended] Borrower online payment collection (Stripe) + TMO sync: add ACH/card payment in the borrower portal make-payment section; on Stripe payment_intent.succeeded webhook, verify signature, record the receipt in a new EFS D1 loan_payment_transactions table, reconcile the matching loan_payments schedule row, and push the payment to TMO. GATE: confirm ABS/TMO exposes a borrower-payment/receipt WRITE endpoint (current docs/TMO cover loan/application writes, investor AddLoanFunding, and schedule/funding reads only) — ties into the TMO-writeback gate (dzmm/k2xg). Deferred non-MVP collection path from e245; handle KYC, partial payments, NSF reversals, fees.
 - [/] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
 - [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications

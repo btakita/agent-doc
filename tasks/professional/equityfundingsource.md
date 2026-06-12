@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -77,7 +77,31 @@ Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `g
 Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
 
 Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
-<!-- agent:boundary:6152bcc4 -->
+
+### Re: Google Ads API token third-party tool question — gpt-5
+
+> **Queue prompt:**
+>
+> I plan to use Claude Code & Codex to use the api. How should I answer "9. Do you plan to use your Google Ads API token with a tool developed by someone else? *". If yes, "Please provide the URL of the tool. *".
+
+
+For the way you described it, I would answer **No** if Claude Code and Codex are being used as coding assistants to help build/debug **your own EFS integration**, with the Google Ads API token kept in your own local environment/secret store and the final API client being code you own.
+
+Reasoning: Google describes the developer token as the credential that lets **your app** connect to the Google Ads API and says that when a company uses a third-party app/service, the developer of that third-party app needs to get the token for that app: https://developers.google.com/google-ads/api/docs/api-policy/developer-token. Google also documents that every Google Ads API call must include the developer token header: https://developers.google.com/google-ads/api/rest/auth.
+
+So the practical split is:
+
+- **Answer No** when Claude Code/Codex are helping write or run your code during development, but the tool/application is your own EFS integration.
+- **Answer Yes** if you plan to give the token to a third-party hosted product, connector, SaaS app, or MCP/tool package that directly uses the token as its own Google Ads API client.
+
+If you truly intend Claude Code/Codex themselves, or an MCP server, to directly operate the token as the API client, then answer **Yes** and provide the relevant tool URL(s), for example:
+
+- Claude Code: https://code.claude.com/docs/en/overview
+- OpenAI Codex: https://developers.openai.com/codex/cloud
+- Google Ads MCP server, if used: https://developers.google.com/google-ads/api/docs/developer-toolkit/mcp-server
+
+My recommended compliant path: use Claude Code/Codex to generate and review the EFS code, keep the Google Ads token out of prompts and hosted agent settings, store it only in EFS-controlled secrets, and answer **No** because the API token is for EFS's own integration rather than a third-party tool.
+<!-- agent:boundary:efeae3cc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +109,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- I plan to use Claude Code & Codex to use the api. How should I answer "9. Do you plan to use your Google Ads API token with a tool developed by someone else? *". If yes, "Please provide the URL of the tool. *".
 <!-- /agent:queue -->
 
 ## Backlog

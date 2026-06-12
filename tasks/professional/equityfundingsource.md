@@ -264,7 +264,13 @@ Verification and deploy:
 No actionable follow-up/backlog item is needed; the requested deploy is complete.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:13e9f667 -->
+
+### Re: Deploy closeout repair — gpt-5
+
+Closeout repair only. The deploy result is already recorded above: Worker version `57158a7d-760c-4ef1-bd67-4e8005d7dd7d`; `make check` passed; remote D1 had no pending migrations before or after deploy; smoke checks returned expected statuses. No additional repo work was performed in this repair step.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:b81112e2 -->
 <!-- /agent:exchange -->
 ###
 <!--

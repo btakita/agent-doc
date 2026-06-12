@@ -116,10 +116,16 @@ from the #fintol files, so no entanglement).
   `controller_not_authoritative` receipt + `dispatch_refused_non_stable_controller`
   ops-log line. Read-only status/inspect and operator/handoff/admin RPCs stay available.
 
-**REMAINING (operator-gated): M2 full worktree-write gate** — gating the
-finalize/commit **worktree** write (not just dispatch admission) on `Stable` overlaps
-the contested **#pcwc** carry-forward invariant (memory: "don't re-wire #fintol/#pcwc
-without operator go + live Phase-0 re-baseline"). M1 already bounds the Preparing
-window so the wedge self-reaps before it can corrupt much; the full worktree gate is
-the user's call. All other rungs (M1, M2-dispatch, M3, M4, M5) are landed with
-deterministic coverage.
+**RESOLVED: M2 worktree-write gate** (operator `go` + live Phase-0 re-baseline,
+2026-06-12). The controller has no direct autonomous worktree-write path — every
+controller-originated worktree mutation (external/operator dispatch AND the
+supervisor's self-driving queue drain, `command_kind=idle_queue_continuation`) routes
+through `handle_dispatch`, which the M2 dispatch-admission gate already refuses on a
+non-Stable controller. Proven by
+`autonomous_idle_queue_continuation_refused_when_controller_not_stable`. The remaining
+`atomic_write` worktree writes run in the **agent CLI finalize** process; gating those
+on the *controller's* `handoff_state` would wrongly block a legitimate finalize and is
+the contested **#pcwc** surface, so no separate write_queue gate is added. With M1's
+self-watchdog bounding the Preparing window, the wedge cannot corrupt the worktree.
+All rungs (M1, M2, M3, M4, M5) are landed with deterministic coverage; **#stuckhandoff2
+is complete.**

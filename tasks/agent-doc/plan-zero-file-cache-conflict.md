@@ -85,8 +85,8 @@ the fallback.
     `redeliver_*_to_editor` and fall to disk only when redelivery didn't land.
   - `repair_partial_response_materialization_before_fallback` (5026): IPC-degraded
     pre-fallback cleanup of a mid-IPC partial write; not a clean current→target delta.
-- **#fcc0e** ◑ MOSTLY DONE — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC
-  stops failing. Three sub-surfaces; the agent-completable ones have landed:
+- **#fcc0e** ✅ DONE (code) — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC
+  stops failing. All sub-surfaces landed; only the live JB proof remains:
   - **Wedged `--handoff-state preparing` controllers (#stuckhandoff2)** ✅ — M1-M5
     all landed (`08dfc27b`/`2b643683`/`3e0503ec`): controller self-watchdog suicide
     timer, orphan + cross-project `/proc`-scan reapers, client handoff drop-guard,
@@ -100,12 +100,26 @@ the fallback.
     now respects the degraded latch (skips a wedged socket → `reason=listener_degraded`),
     feeds `record_ipc_socket_ack_timeout` on ack-timeout, and clears on success, so
     queue/template/compact converges are coherent with the circuit breaker.
-  - **REMAINING (operator-gated):** M2's full finalize/commit **worktree-write**
-    gate on `Stable` — overlaps the contested `#pcwc` carry-forward invariant
-    (memory: don't re-wire without operator go + live Phase-0 re-baseline). M1
-    already bounds the Preparing window, so the wedge can't persist long enough to
-    corrupt much before self-reap. This is the only remaining code lever, and it is
-    the user's call.
+  - **M2 worktree-write gate** ✅ — resolved after the live Phase-0 re-baseline
+    (operator `go`, 2026-06-12). Investigation proved the controller has **no
+    direct autonomous worktree-write path**: every controller-originated worktree
+    mutation — external/operator dispatch AND the supervisor's self-driving queue
+    drain (`command_kind=idle_queue_continuation`) — routes through `handle_dispatch`,
+    which the M2 dispatch-admission gate (`3e0503ec`) already refuses on a non-Stable
+    controller. The remaining `atomic_write` worktree writes run in the **agent CLI
+    finalize** process, where gating on the *controller's* `handoff_state` would be
+    both wrong (a legitimate finalize must not be blocked by a controller mid-handoff)
+    and the contested `#pcwc` surface — so no separate write_queue gate is added.
+    Proven with `autonomous_idle_queue_continuation_refused_when_controller_not_stable`
+    (`c7054e00`-follow-up): the autonomous driver is refused + logged on a Preparing
+    controller, admitted on a Stable one. Combined with M1's self-watchdog bounding
+    the Preparing window, the wedge cannot corrupt the worktree.
+  - **#pcwc Phase-2 post-commit worktree auto-reconcile** ✅ — `emit_postcommit_worktree_check`
+    (`git.rs`) auto-reconciles the worktree to HEAD on the corruption class
+    (`postcommit_worktree_lost_committed_content` — HEAD content dropped, no new user
+    work) and pushes the committed blob back through editor IPC, while the carry-forward
+    discriminator leaves a legitimate carried-forward superset untouched (the deliberate
+    invariant). The old manual `git checkout HEAD -- FILE` recovery is now automatic.
 
 ## Status (2026-06-12)
 
@@ -119,17 +133,23 @@ clean. Binaries rebuilt (`cargo install` + `cargo build --release`) and cdylib
 refreshed (`agent-doc lib-install`) — running controllers still serve the prior
 build until `agent-doc admin recycle --all-projects` / session restart.
 
-**#fcc0e** is now mostly landed (`c7054e00` + the prior `#stuckhandoff2` M1-M5 and
-`#ipcdrift` claimed-patches/generation-fence/read-only-demotion machinery). The
-only remaining code lever is **operator-gated**: M2's full finalize/commit
-worktree-write gate on `Stable`, which overlaps the contested `#pcwc` carry-forward
-invariant and must not be re-wired without operator go + a live Phase-0 re-baseline.
+**All `#fcc0` code phases (`#fcc0a`–`#fcc0e`) are complete.** `#fcc0e` landed in full
+after the operator `go` + live Phase-0 re-baseline (2026-06-12): `#stuckhandoff2`
+M1–M5, the `#ipcdrift` claimed-patches/generation-fence/read-only-demotion machinery,
+the `#fcc0` converger ↔ de-wedge integration (`c7054e00`), the M2 worktree-write gate
+(dispatch-admission gate covers every controller-originated worktree write incl. the
+autonomous idle-queue drain — now proven by
+`autonomous_idle_queue_continuation_refused_when_controller_not_stable`), and the
+`#pcwc` Phase-2 post-commit auto-reconcile. The M2 agent-finalize-path gate is
+intentionally NOT added (redundant with the dispatch gate + M1, and gating a
+legitimate finalize on the controller's state is the wrong/`#pcwc`-unsafe semantics).
 
-Remaining for "0 dialogs": the operator decision on the M2 worktree-write gate, and
-the operator-drive live JB proof (drive a queue drain with a live IDE; confirm
+**The only thing left for "0 dialogs" is the operator-drive live JB proof** (cannot be
+agent-done — needs a live editor): drive a queue drain with a live IDE; confirm
 `ops.log` shows `queue_consume_writeback … transport=editor_ipc` and zero disk-write
-dialogs). Binaries + cdylib are rebuilt; recycle controllers / restart sessions to
-promote build `c7054e00`.
+`File Cache Conflict` dialogs. Binaries + cdylib are on build `c7054e00`; the
+superproject controller was recycled onto it — restart the JB/tmux session to promote
+it everywhere before the proof.
 
 ## Immediate operator action
 

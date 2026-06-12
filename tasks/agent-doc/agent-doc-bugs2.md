@@ -22,7 +22,7 @@ queue: start
 
  <!-- agent:status patch=replace -->
 
-#pcwc closed; queue maintenance committed; remaining inactive queue residue preserved for #rtwbcast and #jbcompactcrdt.
+#jbcompactcrdt CODE-COMPLETE (concurrent-edit convergence coverage landed agent-doc 3083b821; #w42v compact editor-IPC path shipped). Operator-drive remainder: lib-install + live Compact Exchange verify. #rtwbcast remains queued (separate multi-editor item).
 <!-- /agent:status -->
 
 ## Exchange
@@ -49,8 +49,6 @@ Run in a fresh session NOT hosting a live agent-doc IPC document, decomposed as 
 2. **#rtwbcast-deliver** — replace PatchWatcher.kt single-consumer delete-on-first-ACK with a per-editor broadcast bus.
 3. **#rtwbcast-merge** — per-editor echo suppression (editor_id in claimed-patches, not suppress-ALL); reuse the existing CRDT merge primitive + SimWorld Slice 3.
 4. **#rtwbcast-verify** — two-live-IDE convergence (operator-drive).
-- `try_compact_editor_converge_converges_via_editor_ipc_with_listener` — end-to-end proof that a live JB listener converges compaction through `transport=editor_ipc` instead of the diverging disk write.
-- `compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits` — the convergence patch only `op:replace`s the changed `exchange`, so typing `queue` items *while* compaction runs is never clobbered. That component-scoping is exactly what kills the `File Cache Conflict`.
 
 Then build+install+push in that clean session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4).
 
@@ -75,11 +73,6 @@ Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read
 
 > **Queue prompt:**
 >
-> [#jbcompactcrdt]
-
-
-> **Queue prompt:**
->
 > :pushpin: :round_pushpin: do [#jbcompactcrdt]
 
 
@@ -88,7 +81,29 @@ I did not execute #jbcompactcrdt in this live IPC-hosting session. The requested
 The item is not code-complete, so I kept it open and narrowed it to the clean-session implementation slice: component-scoped `exchange` `op:replace` through editor IPC, listener-active gate, disk fallback with explicit transport proof, and SimWorld concurrent-edit convergence coverage. The final live JB two-editor verification remains operator-driven.
 
 No repository implementation files were changed in this cycle; only this session document closeout is being persisted. Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange, `tsift status`, and `tasks/agent-doc/plan-jb-compact-crdt.md`. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run #jbcompactcrdt from a dedicated clean session, then perform the live JB verification.
-<!-- agent:boundary:e868ad59 -->
+### Re: make it possible for agent-doc to dog food [#jbcompactcrdt] — opus-4-8
+
+It's done — and the reason it kept getting declined was a **stale blocker**, not the code.
+
+**The CRDT compact path already shipped.** `#jbcompactcrdt` was code-complete as `#w42v` (agent-doc `7b6f022e`, in HEAD): `compact::apply_compacted_document` converges the compacted document through the editor via a component-scoped `exchange` `op:replace` (`write::try_compact_editor_converge`, `transport=editor_ipc`), keeping the guarded disk write only as `transport=disk_fallback` with `compact_writeback transport=…` proof in `ops.log`. Both prior declines cited a "dirty #fintol submodule" — that tree is now **clean** (`4cb040a6`), so that reason was stale.
+
+**Closed the last deliverable + made it dogfoodable.** The only open box was deterministic concurrent-edit convergence coverage. Landed in agent-doc `3083b821` (pushed to origin/main):
+
+- `compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits` — the convergence patch only `op:replace`s the changed `exchange`, so typing `queue` items *while* compaction runs is never clobbered. That component-scoping is exactly what kills the `File Cache Conflict`.
+- `try_compact_editor_converge_converges_via_editor_ipc_with_listener` — end-to-end proof that a live JB listener converges compaction through `transport=editor_ipc` instead of the diverging disk write.
+
+`make check` green (workspace lib tests: 0 failed), release build clean, spec updated (`specs/12-deterministic-simulation.md`), superproject pointer bumped to `3083b821`, plan marked CODE-COMPLETE.
+
+**Your one remaining step to dogfood it live.** The running IDE still loads the OLD cdylib, so it keeps hitting `File Cache Conflict` until the new `.so` is deployed:
+
+    cd src/agent-doc && agent-doc lib-install
+
+That hot-reloads the plugin's cdylib by mtime (no plugin reinstall). Then trigger `Compact Exchange` with the buffer dirty and confirm `ops.log` shows `compact_writeback … transport=editor_ipc` and **no** `File Cache Conflict`. I deferred running `lib-install` from this pane because it's finalizing through that same cdylib — hot-reloading it mid-finalize is the documented drift trigger (your explicit "defer lib-install" choice).
+
+**Note (dogfooding):** this very response hit the recurring IPC CRDT-replay drift (`live_prompt_drift_after_preflight`, stale `patch_id=04f0d5f7`) — the supervisor spliced a fragment of it into an old block. Recovered by quiescing the stale CRDT/cycle sidecars + `reset --from-current`. That drift is `#ipcdrift`/`#stuckhandoff2`, separate from this item.
+
+`[#rtwbcast]` is still queued but it's a different item (multi-editor broadcast / two-live-IDE convergence, `#rtwatch` rung 4), not a stale-blocked one — I'm not draining into it from this live IPC session. Halting the auto-loop here.
+<!-- agent:boundary:d31fd1b8 -->
 <!-- /agent:exchange -->
 
 ## Queue

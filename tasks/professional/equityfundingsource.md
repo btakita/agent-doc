@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -188,14 +188,15 @@ Commands/context checked:
 Verification: no tests run because this was an analysis/backlog update, not a code change.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:15ba9029 -->
+<!-- agent:boundary:0e597d09 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- We need a way to have incomplete applications be seen in the Deal Pipeline. Can we unify application leads as an incomplete application? And show all incomplete applications in the Deal Pipeline?
 <!-- /agent:queue -->
 
 ## Backlog

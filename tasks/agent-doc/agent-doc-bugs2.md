@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -68,14 +68,25 @@ The immediate blocker is session safety. This pane is finalizing `tasks/agent-do
 I narrowed `#rtwbcast` to the next executable clean-session path: start with `#rtwbcast-id`, then `#rtwbcast-deliver`, `#rtwbcast-merge`, and finally operator-run `#rtwbcast-verify`. No repository implementation files were changed in this cycle; only this session document closeout is being persisted.
 
 Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange/review, and the pending-ops runbook. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run the implementation from a dedicated clean session, then perform the two-live-IDE verification.
-<!-- agent:boundary:6b1f9472 -->
+
+### Re: do [#jbcompactcrdt] — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#jbcompactcrdt]
+
+
+I did not execute #jbcompactcrdt in this live IPC-hosting session. The requested implementation touches the same IPC/write/compact path this pane is using to persist `tasks/agent-doc/agent-doc-bugs2.md`, and its expected completion path includes rebuilding/installing the agent-doc library. Running that here would risk hot-reloading the closeout machinery under the active document, which is the drift condition called out in the backlog and in `tasks/agent-doc/plan-jb-compact-crdt.md`.
+
+The item is not code-complete, so I kept it open and narrowed it to the clean-session implementation slice: component-scoped `exchange` `op:replace` through editor IPC, listener-active gate, disk fallback with explicit transport proof, and SimWorld concurrent-edit convergence coverage. The final live JB two-editor verification remains operator-driven.
+
+No repository implementation files were changed in this cycle; only this session document closeout is being persisted. Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange, `tsift status`, and `tasks/agent-doc/plan-jb-compact-crdt.md`. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run #jbcompactcrdt from a dedicated clean session, then perform the live JB verification.
+<!-- agent:boundary:fe8d9622 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: :round_pushpin: do [#rtwbcast]~~
-- :pushpin: :round_pushpin: do [#jbcompactcrdt]
 <!-- /agent:queue -->
 ###
 <!--
@@ -105,7 +116,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#jbcompactcrdt] JB Compact Exchange CRDT-driven (resolves File Cache Conflict). Direction CONFIRMED by operator. Re-implement+re-enable the disabled full-content editor-IPC path (try_ipc_full_content_with_mode, write.rs:13326, currently Ok(false) reason=disabled_by_default) as a component-scoped exchange op:replace via editor IPC (mirror #q7jm), replacing the direct disk write at compact.rs:332 (compact_exchange_direct_write). Keep disk write as transport=disk_fallback, gate behind listener-active, emit proof compact_writeback transport=editor_ipc|disk_fallback, add SimWorld coverage for the concurrent-edit convergence. MUST run in a CLEAN session (rebuilding the IPC-write cdylib mid-session hot-reloads the machinery finalizing the same response = drift). Live JB two-editor verify is operator-drive (ops.log transport=editor_ipc + no File Cache Conflict). Plan: tasks/agent-doc/plan-jb-compact-crdt.md
+- [ ] [#jbcompactcrdt] JB Compact Exchange CRDT-driven (resolves File Cache Conflict). STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. Implement component-scoped `exchange` `op:replace` via editor IPC by re-implementing/re-enabling `try_ipc_full_content_with_mode` for operator mutation behind the listener-active gate; replace `compact.rs` direct disk write (`compact_exchange_direct_write`) with `transport=editor_ipc` primary plus `transport=disk_fallback`; emit `compact_writeback transport=editor_ipc|disk_fallback`; add SimWorld coverage for concurrent-edit convergence. Then run build/install/commit/push from that clean session. Live JB two-editor verify remains operator-driven (`ops.log` transport=editor_ipc + no File Cache Conflict). Plan: tasks/agent-doc/plan-jb-compact-crdt.md
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 

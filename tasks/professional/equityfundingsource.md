@@ -37,20 +37,31 @@ Answered: `Requested loan number` is the optional subject-property `loan_number`
 Compacted content:
 - Archived 4 response topic(s): Stripe account email; Stripe account email sent; Remove payment processors; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-- no `application_subject_property_change_logs` rows for this application
-- subject-property data otherwise exists, including `loan_amount = 100000`, `loan_purpose = 'purchase'`, and the Thompson, CT property address
-- `application_subject_property.loan_number = ''`
-- `full_applications.writeback_status = 'not_started'`
-- `full_applications.tmo_loan_number = null`
-- `full_applications.tmo_application_number = null`
-- `full_applications.status = 'draft'`
 
-### Re: Loan application admin editing — gpt-5
+### Re: Requested loan number — gpt-5
 
 > **Queue prompt:**
 >
 > What is "Requested loan number" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3? Why is it blank? 
 
+
+`Requested loan number` is not the canonical TMO loan number. It is the subject-property form field stored as `application_subject_property.loan_number`, labeled in the admin/detail UI as `Requested loan number`. Migration `0050_full_application_tmo_loan_number.sql` explicitly separates it from `full_applications.tmo_loan_number`, which is the real/canonical TMO loan number after admin/TMO writeback.
+
+For the specific production application `a8cf595e-06d0-4f73-b41d-f68e1422e8e3`, remote D1 currently has:
+
+- `full_applications.status = 'draft'`
+- `full_applications.tmo_application_number = null`
+- `full_applications.tmo_loan_number = null`
+- `full_applications.writeback_status = 'not_started'`
+- `application_subject_property.loan_number = ''`
+- subject-property data otherwise exists, including `loan_amount = 100000`, `loan_purpose = 'purchase'`, and the Thompson, CT property address
+- no `application_subject_property_change_logs` rows for this application
+
+So it is blank because nobody has supplied that optional requested loan number on this application, and the save path persists an omitted `loan_number` / `requested_loan_number` as an empty string. This is not a missing join or rendering bug. If EFS expected that row to show the TMO loan identifier, that is the separate `tmo_loan_number` field, and this draft application has not been submitted or written back to TMO yet.
+
+Related production note: the remote D1 migration list currently stops at `0061_public_content_home.sql` / `0061_application_subject_property_admin_history.sql`; `0062_full_application_admin_change_history.sql` is not applied yet, so the newer all-form `application_change_logs` table is not present in production. That does not cause this blank `Requested loan number`, but it does mean the prior all-form history change is not fully reflected in remote D1 yet.
+
+### Re: Loan application admin editing — gpt-5
 
 > **Queue prompt:**
 >
@@ -66,14 +77,14 @@ Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `g
 Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
 
 Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
-<!-- agent:boundary:43e0dca3 -->
+<!-- agent:boundary:c70de10b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

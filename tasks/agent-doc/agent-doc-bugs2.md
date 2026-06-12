@@ -641,7 +641,46 @@ Why:
 Implementing it from this managed session would directly violate that and risk the exact closeout machinery finalizing this response — and we just hit IPC drift twice this session, which proves the point. So #snbc2 is now **gated `[/]` on a clean session**.
 
 **Your call — two clean ways to clear it:** (a) I'll **icebox it** as optional future-work (it gates nothing and fixes nothing), or (b) **restart this doc's session** and I'll land it properly in `src/agent-doc` with the SimWorld merge coverage first. The same clean-session constraint applies to `#fintol`, `#pcwc`, and `#rtwbcast` — they all edit this same racy closeout/IPC path, so a restart unblocks the whole batch at once. That's my recommendation: **restart, then re-invoke `/agent-doc` and I'll drive the four implementations in order.**
-<!-- agent:boundary:1316fc65 -->
+### Re: do [#fintol] / #pcwc / #rtwbcast / #jbcompactcrdt — these can't run via /agent-doc on this doc (closeout self-race) — opus-4-8
+
+All four queued `do` items modify the exact closeout/IPC machinery this session uses to commit its own response, so running them here reproduces the drift you keep hitting. They stay open, deferred to a clean session — not completed this cycle. The `#fintol` plan says so in bold: "Run in a CLEAN session (cwd `src/agent-doc`), NOT via `/agent-doc` on this doc — it changes the closeout/merge path this doc's controller races." Concretely:
+
+- **#fintol** (forward-merge at the `live_prompt_drift_after_preflight` gate) and **#pcwc** (post-commit worktree auto-repair) both rewrite the finalize/commit path. The `#fintol1` primitive (`response_target_disjoint_from_user_edit`) is already landed and wired into the gate (`write.rs:629` + `:11030`); the remaining `#fintol2/#fintol3` work deliberately lets the post-commit worktree differ from HEAD (the carried-forward uncommitted prompt), which trips ~7 shipped tests that assert worktree==HEAD. Those tests must be re-based as part of the change, under SimWorld — not live.
+- **#jbcompactcrdt** explicitly rebuilds the IPC-write cdylib; hot-reloading it mid-session re-arms the machinery finalizing this same response = drift.
+- **#rtwbcast** needs an editor-plugin protocol decision + two live IDEs to verify; not agent-completable from one session.
+- The queue preset is `#spec-test-build-install-commit-push`. Its `install` step swaps `~/.cargo/bin/agent-doc` — the very binary this session shells out to for `finalize` — underneath the running cycle.
+
+So I am not draining these here (doing so is the churn anti-pattern). Run them from a dedicated clean shell, one rung per session:
+```
+cd src/agent-doc
+# implement the rung, then:
+make check                                       # SimWorld is the acceptance bar (no live editor)
+cargo build --release && agent-doc lib-install   # cdylib for JB
+cargo install --path .                           # ~/.cargo/bin
+# commit in submodule, bump superproject pointer, push
+```
+They remain actionable, clean-session-tagged backlog items — no new gates. The agent-doc submodule tree is currently clean on `main` (`9d1235cd`) and no controller is bound to this doc, so a clean session is available whenever you want to drive one.
+
+### Re: Why snapshots, not the document model? What is the wedge controller, and do we still need it? — opus-4-8
+
+**Snapshots vs the document model — both exist, different jobs.**
+- The **realtime document model** (`realtime_model.rs`) is the *current* state: newest-of(disk, editor-buffer). `#rtwatch` made preflight/write read "current" from it, so the live IDEA buffer wins over stale disk. That is the read side.
+- The **snapshot** (`snapshot.rs`, `.agent-doc/snapshots/<hash>.md`) is the durable *merge base* for the 3-way CRDT merge — the common ancestor captured at a stable post-commit point. It must survive process restarts and stay byte-stable, which a live in-memory model cannot. `#snbc` already audited collapsing it into git HEAD and proved that regresses merge correctness (HEAD drops the uncommitted new prompt from the common ancestor), so the on-disk snapshot stays; `#snbc2` is only the cosmetic two-files→one-file cleanup, not removal.
+- "The repair used an old snapshot" here was correct: preflight's recovery picked snapshot `483039e7…`, which matched your compacted working tree, and produced a clean baseline + the single `do [#fintol]` diff. The wedge was not the snapshot — it was a cycle stuck at `preflight_started` for ~9h because the controller that owned it died.
+
+**The wedge / "wedge controller".** The controller is the single-writer supervisor (the 08b in-process control plane) that serializes every write so the IDEA listener and the agent do not race. A *wedged* controller is one stuck in `ControllerHandoffState::Preparing` (`project_controller.rs:675`): handoff is two-phase (prepare→promote) and client-driven, so if the client dies between the phases the controller sits in Preparing forever and keeps writing the stale buffer over `ipc.sock` — surviving even an IDE restart (hence your `pkill -f 'controller serve … --handoff-state preparing'`). That is the IPC-drift.
+
+**Do we still need it?** Yes — we need the *controller* (single-writer serialization is what prevents multi-owner corruption). We do not want the *wedged Preparing state*. That is `#stuckhandoff2`: M1 = controller self-watchdog/suicide-timer that exits Preparing after a timeout (durable fix), M2 = gate ipc/worktree writes on `Stable` (symptom-killer, overlaps #pcwc). Right now there are **no** live controllers and **no** wedged Preparing procs for this doc — I checked; the 9h-old one is dead, so this turn is safe.
+
+### Re: Multi-editor live sync (JB + VSCode) without a File Cache Conflict — opus-4-8
+
+Yes — that is the intended end state, tracked as `#rtwbcast` (rung 4, multi-editor CRDT broadcast) + `#jbcompactcrdt`. It does not work yet because the buffer/patch transport is single-editor by construction. Three concrete gaps (verified in code):
+1. **Buffer ingest is last-writer-wins, no editor id** — `ffi.rs` debounces `live_buffer_snapshot_path` keyed on the file path only, so a second editor's buffer overwrites the first's instead of being a distinct CRDT source.
+2. **Patch delivery is single-consumer** — `PatchWatcher.kt` deletes `<hash>.json` on the first ACK, so it is a hand-off to one editor, not a broadcast bus to N editors.
+3. **No per-editor echo suppression** — claimed-patches suppresses *all* echoes; without an `editor_id` in the FFI buffer-report and patch JSON you cannot tell "my own echo" from "the other editor's edit."
+
+The fix is `#rtwbcast` Option A: a per-editor channel + an `editor_id` in the FFI ABI, decomposed into `#rtwbcast-id` / `-deliver` / `-merge` / `-verify`. The CRDT merge primitive and SimWorld Slice 3 already exist; the blockers are the protocol decision and a two-live-IDE verify, which is why it is a clean-session + operator-drive item. `#jbcompactcrdt` is the same machinery applied to Compact Exchange (route the compaction through the editor-IPC `op:replace` instead of a direct disk write) so a compaction stops triggering File Cache Conflict.
+<!-- agent:boundary:ece4555f -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -154,7 +154,32 @@ I drove a clean-context investigation (separate agent, `src/agent-doc` cwd, no i
 **Your call to unblock:** confirm Option A (or pick B), then a clean session lands `#rtwbcast-id`/`-deliver`/`-merge` (each `make check` + SimWorld-tested) and you drive the two-IDE `#rtwbcast-verify`. I recommend Option A.
 
 **Not auto-looping** — degraded session (preflight: drift across 3 tmux sessions, stale install) and the next item genuinely needs your protocol decision before any clean-session implementation can start.
-<!-- agent:boundary:f5ee10a0 -->
+
+### Re: do [#snbc] — snapshot/baseline consolidation: audit-resolved, no migration to run — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#snbc]
+
+
+`#snbc`'s real deliverable — the Slice-1 read-site audit — is **already committed** (`68dc89652`), and I re-verified its load-bearing claims in code this turn rather than trust the plan. The audit's conclusion is decisive and I'm marking `#snbc` **done** on it: **there is no correctness migration to perform — doing the consolidation as originally framed would regress merge correctness.**
+
+**Verified in code (not just the plan text):**
+- `preflight.rs:3196` saves the cycle baseline from `diff_result_with_current.current`, and that `current` is `realtime_model::resolve_current_doc(file, &disk).content` (`preflight.rs:2675`) — i.e. **newest-of(disk, editor buffer)**, not bare disk and not git HEAD.
+- The same `resolve_current_doc` seam feeds the merge base in `write.rs:8471`/`9754`.
+- `git::show_head` (`git.rs:3559`) is the committed-base accessor, used only for the narrow stale-baseline rebase fallback.
+
+**Why the files can't collapse into git HEAD (the three audit findings, confirmed):**
+1. **The merge base is "current-at-preflight", not git HEAD.** Preflight commits the *previous* cycle but keeps the *new* user prompt uncommitted (the "selective commit is conservative" rule). The saved baseline is therefore **HEAD + the uncommitted prompt the agent is answering**. Substituting git HEAD would drop that prompt from the common ancestor and mis-attribute it as a concurrent `theirs` insertion — corrupting exactly the merges this work protects.
+2. **The drift you reported is already fixed** — the base is already `newest-of(disk, buffer)` via the landed `#rtwatch`/`#rtwfeed`/`#rtwwire` rungs. There is no remaining stale-base defect to migrate away from.
+3. **The snapshot file can't be removed** — beyond the merge base it backs uncommitted in-flight state HEAD structurally cannot hold: `content_ours`, capture-replay hash validation, over-application repair, `reset --from-current`, and the next-cycle baseline persisted before commit.
+
+So the honest answer to your original question ("do we still need these files?"): **yes** — they hold *uncommitted current* state, which is a different thing from the *committed base* (git HEAD). They are not redundant. The churn you saw was the stale-base bug, and that's closed.
+
+**What's left (optional, filed as `#snbc2`):** the one *cosmetic* win — collapsing `baselines/<hash>.md` into a snapshot-store variant so there's one file instead of two — **without** changing merge-base semantics. It fixes no live bug, is moderate-risk on the closeout path, and the plan itself marks it lower-priority. Per your "test with SimWorld" directive it must be gated behind new SimWorld coverage for the prompt-bearing finalize-merge class before any closeout-path edit. I did **not** run it unprompted in this degraded session; if you want the file-count reduction, prioritize `#snbc2` and a clean session will land it SimWorld-tested.
+
+**Not auto-looping** — degraded session, and the substantive `#snbc` scope is complete (audit-resolved).
+<!-- agent:boundary:e428105f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -162,8 +187,8 @@ I drove a clean-context investigation (separate agent, `src/agent-doc` cwd, no i
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#kp5z]~~
 - ~~:pushpin: :round_pushpin: [#rtwbcast]~~
-- Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.
-- :round_pushpin: do [#snbc]
+- ~~:round_pushpin: do [#snbc]~~
+- :round_pushpin: [#rtwverify]. Use simworld tests
 - :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
 ---
 :pushpin: agent-doc monsterrodholders.md had an error:
@@ -247,7 +272,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: Upgrade lazily-rs + tsift-* dependencies.
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
-- [#rtwverify]. Use simworld tests
+- ~~Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.~~
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
@@ -279,7 +304,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#snbc] [recommended] Consolidate the separate snapshot + baseline files into git HEAD (durable committed merge base) + the realtime document model (uncommitted current via realtime_model::current_doc), eliminating the two drift-prone on-disk files that cause File Cache Conflicts / churn on realtime docs. Root cause: the merge base is read from disk and lags the authoritative editor buffer (same defect as #rtwwire/#rtwfeed). NEEDS a read-site audit first (recovery sidecars, reset --from-current, hash-keyed cycle state hold uncommitted state git HEAD does not cover) — migration, not a one-line delete. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md.
+- [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->

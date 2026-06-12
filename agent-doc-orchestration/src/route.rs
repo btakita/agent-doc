@@ -3854,5 +3854,3450 @@ pub use session_resolution::*;
 mod startup;
 pub use startup::*;
 
+
 #[cfg(test)]
-mod tests;
+use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+#[cfg(test)]
+use crate::supervisor::ipc::{IpcResponse, SupervisorIpc};
+#[cfg(test)]
+pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// Serialize mock agent launches without contending with tests that already
+// hold TMUX_START_MUTEX for broader prompt-readiness coverage.
+#[cfg(test)]
+pub(crate) static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// Serialize mutations of the route-specific binary override without
+// contending with current-dir guards that already hold the shared test lock.
+#[cfg(test)]
+pub(crate) static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(test)]
+pub(crate) fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
+    crate::test_support::env_lock()
+}
+// #codex-route-busy-ctrl-g-opens-editor: the busy-pane reroute must only send
+// `C-g` when the live capture proves a shell reverse-i-search / history-search.
+// The pre-existing live ctrl-g test only models the reverse-i-search recovery,
+// so this deterministic decision test covers the non-search composer / active
+// turn case that previously received an editor-opening `C-g`.
+#[cfg(test)]
+pub(crate) fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
+    TMUX_START_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+#[cfg(test)]
+pub(crate) fn tmux_inject_lock() -> std::sync::MutexGuard<'static, ()> {
+    TMUX_INJECT_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+#[cfg(test)]
+pub(crate) fn route_bin_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ROUTE_BIN_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+#[cfg(test)]
+pub(crate) fn test_cwd() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+// #jb-busy-reopen-auto-drain-when-idle: when a document's queue is ALREADY
+// auto-looping, there is no INACTIVE head to activate, so
+// activate_existing_route_queue_head returns None — but queue_continuation::detect
+// still returns Some because the active loop is continuing the document. The busy
+// FocusOnly / DispatchOnlyBusyQueue route paths key off exactly this signal to
+// report deferred success (the loop will continue) instead of a busy refusal,
+// so JB `Run Agent Doc` on an auto-looping pane no longer errors.
+#[cfg(test)]
+pub(crate) fn test_registry_entry(pane: &str, file: &str, cwd: &std::path::Path) -> sessions::SessionEntry {
+    sessions::SessionEntry {
+        pane: pane.to_string(),
+        pid: 1234,
+        cwd: cwd.to_string_lossy().to_string(),
+        started: "2026-01-01T00:00:00Z".to_string(),
+        session_id: "test-session".to_string(),
+        file: file.to_string(),
+        window: "@1".to_string(),
+        supervisor_instance_id: String::new(),
+    }
+}
+#[cfg(test)]
+pub(crate) struct ScopedCurrentDir {
+    prev_cwd: std::path::PathBuf,
+    _env_guard: crate::test_support::ProcessGlobalLockGuard,
+}
+#[cfg(test)]
+impl ScopedCurrentDir {
+    fn set(path: &std::path::Path) -> Self {
+        let env_guard = env_lock();
+        let prev_cwd = std::env::current_dir().unwrap_or_else(|_| test_cwd());
+        std::env::set_current_dir(path).unwrap();
+        Self {
+            prev_cwd,
+            _env_guard: env_guard,
+        }
+    }
+}
+#[cfg(test)]
+impl Drop for ScopedCurrentDir {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.prev_cwd);
+    }
+}
+#[cfg(test)]
+pub(crate) fn write_codex_proof_status_fixture(
+    dir: &std::path::Path,
+    session_id: &str,
+    event: &str,
+) -> std::path::PathBuf {
+    std::fs::create_dir_all(dir.join(".agent-doc/logs")).unwrap();
+    let doc = dir.join("session.md");
+    std::fs::write(
+            &doc,
+            "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_network_access: enabled\n---\n",
+        )
+        .unwrap();
+    std::fs::write(
+        dir.join(".agent-doc/logs")
+            .join(format!("{session_id}.log")),
+        format!(
+            "[1] session_start file={} pane=%1 session={}\n[2] {}\n",
+            doc.display(),
+            session_id,
+            event
+        ),
+    )
+    .unwrap();
+    doc
+}
+#[cfg(test)]
+pub(crate) fn write_codex_writable_proof_status_fixture(
+    dir: &std::path::Path,
+    session_id: &str,
+    event: &str,
+) -> (std::path::PathBuf, String) {
+    std::fs::create_dir_all(dir.join(".agent-doc/logs")).unwrap();
+    let writable = dir.join("writable-root");
+    std::fs::create_dir_all(&writable).unwrap();
+    let writable = writable.canonicalize().unwrap();
+    let doc = dir.join("session.md");
+    std::fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_args: \"--add-dir {}\"\n---\n",
+                writable.display()
+            ),
+        )
+        .unwrap();
+    std::fs::write(
+        dir.join(".agent-doc/logs")
+            .join(format!("{session_id}.log")),
+        format!(
+            "[1] session_start file={} pane=%1 session={}\n[2] {}\n",
+            doc.display(),
+            session_id,
+            event
+        ),
+    )
+    .unwrap();
+    let contract = crate::agent::codex::writable_root_contract_id(&[writable]).unwrap();
+    (doc, contract)
+}
+#[cfg(test)]
+pub(crate) fn wait_for_pane_contains(
+    iso: &IsolatedTmux,
+    pane: &str,
+    needle: &str,
+    timeout: std::time::Duration,
+) -> String {
+    let start = std::time::Instant::now();
+    let poll = std::time::Duration::from_millis(100);
+    let mut last = String::new();
+    while start.elapsed() < timeout {
+        last = sessions::capture_pane(iso, pane).unwrap_or_default();
+        if last.contains(needle) {
+            return last;
+        }
+        std::thread::sleep(poll);
+    }
+    last
+}
+#[cfg(test)]
+pub(crate) fn pane_capture_contains_wrapped(capture: &str, needle: &str) -> bool {
+    capture.contains(needle) || capture.replace(['\r', '\n'], "").contains(needle)
+}
+#[cfg(test)]
+pub(crate) fn send_keys_with_retry(iso: &IsolatedTmux, pane: &str, text: &str) {
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(3);
+    let poll = std::time::Duration::from_millis(100);
+    let mut last_err = None;
+
+    while start.elapsed() < timeout {
+        match iso.send_keys(pane, text) {
+            Ok(()) => return,
+            Err(err) => last_err = Some(err.to_string()),
+        }
+        std::thread::sleep(poll);
+    }
+
+    panic!(
+        "failed to send keys to pane {} after {:.1}s: {}",
+        pane,
+        start.elapsed().as_secs_f64(),
+        last_err.unwrap_or_else(|| "unknown error".to_string())
+    );
+}
+#[cfg(test)]
+pub(crate) fn pane_current_command(iso: &IsolatedTmux, pane: &str) -> Option<String> {
+    let output = iso
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane,
+            "-p",
+            "#{pane_current_command}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if cmd.is_empty() { None } else { Some(cmd) }
+}
+#[cfg(test)]
+pub(crate) fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
+    const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if let Some(cmd) = pane_current_command(iso, pane)
+            && IDLE_SHELLS.contains(&cmd.as_str())
+        {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+// --- rewrite_start_path tests ---
+// --- Split direction tests ---
+// --- Prompt detection tests (via HarnessConfig) ---
+// --- Routing logic tests ---
+// --- Integration tests (IsolatedTmux) ---
+#[cfg(test)]
+use sessions::IsolatedTmux;
+/// Create a mock agent script: blocks for delay, then prints ❯ prompt on its own line.
+/// Uses `cat` to keep the process alive after showing the prompt.
+#[cfg(test)]
+pub(crate) fn mock_agent_script(delay_ms: u64) -> String {
+    format!(
+        r#"exec /bin/sh -c 'printf "Starting agent...\n"; sleep {}; printf "❯ \n"; cat'"#,
+        delay_ms as f64 / 1000.0
+    )
+}
+#[cfg(test)]
+pub(crate) fn write_mock_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc");
+    std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  [ -z \"$CMD\" ] && continue\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_registered_agent_doc_with_prefix(
+    base: &Path,
+    name: &str,
+    prefix: &str,
+) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join(name);
+    std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf '{prefix}:%s\\n' \"$CMD\"\ndone\n",
+            ),
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_registered_agent_doc_extra_line_detector(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-extra-line-detector");
+    std::fs::write(
+            &script,
+            "#!/bin/bash\nprintf \"> \\n\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_registered_agent_doc_with_stale_trigger(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-stale-trigger-detector");
+    std::fs::write(
+            &script,
+            "#!/bin/bash\nprintf '> %s\\n' \"$1\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_busy_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-busy");
+    std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_active_codex_turn_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-active-codex-turn");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'Working...\\n'\ni=0\nwhile [ \"$i\" -lt 20 ]; do\n  printf 'Working (1m 34s - esc to interrupt)\\n'\n  i=$((i + 1))\ndone\nprintf '\\n> Write tests for @filename\\ngpt-5 high - ~/work/btakita/agent-loop - Context 41%% used\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_busy_registered_agent_doc_ignores_interrupt(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-busy-ignore-int");
+    std::fs::write(
+            &script,
+            "#!/bin/sh\ntrap '' INT\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_busy_opencode_recovers_on_escape(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-busy-opencode");
+    std::fs::write(
+        &script,
+        r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf '⬝⬝■■■■■■  esc interrupt\n'
+while IFS= read -r -n1 ch; do
+  stty sane
+  printf '> \n'
+  while IFS= read -r CMD; do
+    printf 'GOT:%s\n' "$CMD"
+  done
+  exit 0
+done
+"#,
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-busy-recovers-on-ctrl-g");
+    std::fs::write(
+        &script,
+        r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf 'Working...\n'
+printf 'reverse-i-search: bugs enter accept · esc cancel\n'
+while IFS= read -r -n1 ch; do
+  if [[ "$ch" == $'\a' ]]; then
+    stty sane
+    printf '› \n'
+    printf 'gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n'
+    while IFS= read -r CMD; do
+      printf 'GOT:%s\n' "$CMD"
+    done
+    exit 0
+  fi
+done
+"#,
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_start_agent_doc(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-start");
+    std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn write_mock_delayed_start_agent_doc(base: &Path, delay_secs: u64) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-start-delayed");
+    std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nsleep {}\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+                delay_secs
+            ),
+        )
+        .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+#[cfg(test)]
+pub(crate) fn launch_mock_registered_agent_doc(iso: &IsolatedTmux, pane: &str, script: &Path, file: &Path) {
+    {
+        let _tmux_guard = tmux_inject_lock();
+        assert!(
+            wait_for_shell(iso, pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
+        send_keys_with_retry(
+            iso,
+            pane,
+            &format!("exec {} {}", script.display(), file.display()),
+        );
+    }
+    let launch_command = format!("exec {} {}", script.display(), file.display());
+    let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
+    assert!(
+        content.lines().any(|line| line.trim() == ">"),
+        "mock agent-doc session should present a prompt, got: {content}"
+    );
+}
+#[cfg(test)]
+pub(crate) fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script: &Path) {
+    {
+        let _tmux_guard = tmux_inject_lock();
+        assert!(
+            wait_for_shell(iso, pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
+        send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
+    }
+    let launch_command = format!("exec {}", script.display());
+    let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
+    assert!(
+        content.lines().any(|line| line.trim() == ">"),
+        "mock agent-doc session should present a prompt, got: {content}"
+    );
+}
+#[cfg(test)]
+pub(crate) fn wait_for_mock_agent_prompt(iso: &IsolatedTmux, pane: &str, launch_command: &str) -> String {
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(20);
+    let poll = std::time::Duration::from_millis(100);
+    let mut last_submit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap_or_else(std::time::Instant::now);
+    let mut last = String::new();
+
+    while start.elapsed() < timeout {
+        last = sessions::capture_pane(iso, pane).unwrap_or_default();
+        if last.lines().any(|line| line.trim() == ">") {
+            return last;
+        }
+        if last.contains(launch_command)
+            && last_submit.elapsed() >= std::time::Duration::from_millis(500)
+        {
+            let _ = iso.send_keys_raw(pane, "Enter");
+            last_submit = std::time::Instant::now();
+        }
+        std::thread::sleep(poll);
+    }
+
+    last
+}
+#[cfg(test)]
+pub(crate) fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if let Ok(output) = std::process::Command::new("pgrep")
+            .args(["-f", pattern])
+            .output()
+            && output.status.success()
+        {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let pid = line.trim();
+                if pid.is_empty() {
+                    continue;
+                }
+                if let Ok(parsed) = pid.parse::<u32>() {
+                    return parsed;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("timed out waiting for process matching pattern: {pattern}");
+}
+// #jb-run-agent-doc-busy-wait-deadlock: a dispatch-only route on a busy active
+// turn must NOT honor the slow-start `--wait-for-ready` override when a queue
+// fallback exists — it should skip the wait and queue immediately, so JB `Run
+// Agent Doc` on a mid-turn Claude actor does not block for the full 60s.
+// #jb-run-agent-doc-busy-active-turn-stall: a bare dispatch-only Run Agent Doc
+// against a pane proven busy on an active turn (working spinner / `esc to
+// interrupt`) must NOT honor the 60s busy ready-wait — a multi-minute turn
+// cannot reach a dispatch-ready prompt in that budget, so waiting only produces
+// a silent stall before the inevitable "session still running" refusal. Skip the
+// wait so the refusal/notification fires immediately.
+// The refusal message must reflect whether the busy ready-wait was actually
+// served: an active-turn skip words it as a busy turn (no misleading "after
+// waiting Ns"), while the no-cue path keeps the cold-start ready-wait wording.
+// --- auto_start_in_session tests ---
+// --- has_named_window tests ---
+// --- tmux_session validation tests ---
+// --- Stash rescue tests ---
+// --- split_before positional target tests ---
+#[cfg(test)]
+pub(crate) fn test_actor_record(pane_id: &str) -> crate::session_actor::ActorRecord {
+    crate::session_actor::ActorRecord {
+        document_id: "test-doc".to_string(),
+        session_id: "test-session".to_string(),
+        generation: 1,
+        pane_id: pane_id.to_string(),
+        window_id: "@1".to_string(),
+        harness: "codex".to_string(),
+        state: crate::session_actor::ActorState::Ready,
+        last_transition: crate::session_actor::ActorLastTransition {
+            caller: "test".to_string(),
+            reason: "test".to_string(),
+            timestamp: 0,
+            prior_generation: 0,
+            new_generation: 1,
+        },
+    }
+}
+#[cfg(test)]
+pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTarget {
+    AuthoritativeActorDispatchTarget {
+        record: test_actor_record(pane_id),
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: None,
+        },
+    }
+}
+// #route-busy-vs-starting-wording: the FailClosed wait context distinguishes a
+// pane busy on an active harness turn from a genuine cold startup timeout.
+// #pcp3a: classify_drain_retry — the route-drain concurrent-finalize race
+// hardening decision. A mid-drain repair+session_check failure should retry
+// (not fail closed) when there is positive evidence a finalize in another
+// process is concurrently progressing or has just closed the cycle.
+#[cfg(test)]
+use crate::cycle_state::CyclePhase;
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+#[test]
+fn authoritative_actor_optimistic_queue_excludes_starting_state() {
+    assert!(
+        authoritative_actor_dispatch_can_queue_optimistically(
+            crate::session_actor::ActorState::Busy
+        ),
+        "busy actors may still accept a supervisor-owned queued reopen"
+    );
+    assert!(
+        !authoritative_actor_dispatch_can_queue_optimistically(
+            crate::session_actor::ActorState::Starting
+        ),
+        "starting actors must become ready before route submits a reopen"
+    );
+}
+#[test]
+fn authoritative_actor_start_wait_terminal_state_only_for_terminal_states() {
+    assert!(authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::Closed
+    ));
+    assert!(authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::Blocked
+    ));
+    assert!(!authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::Starting
+    ));
+    assert!(!authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::Busy
+    ));
+    assert!(!authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::WaitingInput
+    ));
+    assert!(!authoritative_actor_start_wait_terminal_state(
+        crate::session_actor::ActorState::Ready
+    ));
+}
+#[test]
+fn authoritative_actor_ready_poll_requires_ready_state_and_prompt_proof() {
+    use crate::session_actor::ActorState;
+
+    let schedule = [
+        (ActorState::Starting, false, true),
+        (ActorState::Busy, false, true),
+        (ActorState::Ready, false, true),
+    ];
+    for (state, prompt_ready, dispatch_eligible) in schedule {
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: actor_dispatch_state(state),
+                prompt_ready,
+                dispatch_eligible,
+            }),
+            PromptReadyBarrierDecision::Continue,
+            "route must keep waiting while the current generation is {state:?} prompt_ready={prompt_ready} eligible={dispatch_eligible}"
+        );
+    }
+
+    assert_eq!(
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Ready),
+            prompt_ready: true,
+            dispatch_eligible: false,
+        }),
+        PromptReadyBarrierDecision::Continue,
+        "a ready actor still cannot dispatch until the target passes dispatch eligibility"
+    );
+    assert_eq!(
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Ready),
+            prompt_ready: true,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Ready,
+        "route may dispatch only after ready state, prompt proof, and eligibility agree"
+    );
+}
+#[test]
+fn authoritative_actor_ready_poll_surfaces_terminal_states() {
+    use crate::session_actor::ActorState;
+
+    assert_eq!(
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Closed),
+            prompt_ready: false,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Terminal
+    );
+    assert_eq!(
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Blocked),
+            prompt_ready: false,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Terminal
+    );
+}
+#[test]
+fn route_low_level_cleanup_scrubs_duplicate_prompt_comment_without_preserve_doc() {
+    let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first and fix the implementation. #spec-test-build-install-commit-push";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "{prompt}\n",
+            "-->\n\n",
+            "<!--\n",
+            "Keep this unrelated scratch note hidden.\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
+        .unwrap()
+        .expect("route should canonicalize duplicate prompt scratch comments before dispatch");
+    let cleaned = cleanup.content;
+
+    let duplicate_comment = format!("<!--\n{prompt}\n-->");
+    assert!(
+        !cleaned.contains(&duplicate_comment),
+        "route must not dispatch with duplicate prompt text still in the post-exchange comment:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
+        "route must preserve the ordinary comment shell and unrelated scratch comments:\n{cleaned}"
+    );
+}
+#[test]
+fn route_preserves_duplicate_prompt_comment_from_snapshot() {
+    let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "{prompt}\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[&content]).unwrap();
+
+    assert!(
+        cleanup.is_none(),
+        "route cleanup must preserve snapshot-owned scratch comments"
+    );
+}
+#[test]
+fn route_preserves_scratch_comment_after_compact_summary_before_dispatch() {
+    let prompt = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted content:\n",
+            "- Trailing prompt/context: {prompt}\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: compact prompt duplication — gpt-5\n\n",
+            "Line-by-line diff was the right diagnostic.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{prompt}\n",
+            "#spec-test-build-install-commit-push\n",
+            "---\n",
+            "Look through the Claude + Codex + agent-doc session logs\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[&content]).unwrap();
+
+    assert!(
+        cleanup.is_none(),
+        "production route cleanup must preserve visible post-exchange scratch comments"
+    );
+}
+#[test]
+fn route_low_level_cleanup_scrubs_unowned_duplicate_prompt_comment() {
+    let prompt = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted content:\n",
+            "- Trailing prompt/context: {prompt}\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: compact prompt duplication — gpt-5\n\n",
+            "Line-by-line diff was the right diagnostic.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{prompt}\n",
+            "#spec-test-build-install-commit-push\n",
+            "---\n",
+            "Look through the Claude + Codex + agent-doc session logs\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
+        .unwrap()
+        .expect("route cleanup should scrub duplicate compact prompt residue");
+    let cleaned = cleanup.content;
+
+    assert!(
+        !cleaned.contains(&format!("<!--\n{prompt}")),
+        "route cleanup should remove only the duplicate prompt line:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("Look through the Claude + Codex + agent-doc session logs"),
+        "route cleanup must not erase unrelated post-exchange scratch comments:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
+        "route cleanup must preserve command and separator scratch lines:\n{cleaned}"
+    );
+}
+#[test]
+fn route_preserves_scratch_comment_when_response_quotes_same_text() {
+    let scratch =
+        "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please inspect the latest route cleanup report. #spec-test-build-install-commit-push\n",
+            "### Re: route cleanup — gpt-5\n\n",
+            "{scratch}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{scratch}\n",
+            "-->\n"
+        ),
+        scratch = scratch
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[]).unwrap();
+    let cleaned = cleanup
+        .as_ref()
+        .map(|cleanup| cleanup.content.as_str())
+        .unwrap_or(content.as_str());
+
+    assert!(
+        cleaned.contains(&format!("<!--\n{scratch}\n-->")),
+        "route cleanup must not treat assistant response quotes as prompt residue:\n{cleaned}"
+    );
+}
+#[test]
+fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
+    let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
+    // Genuine delayed replay re-adds the just-answered prompt in answered form
+    // (carrying the `❯ ` marker) — that is the ownership proof that lets route
+    // scrub it safely.
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: mixed scratch comment deletion — gpt-5\n\n",
+            "Answered already.\n",
+            "<!-- agent:boundary:head -->\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
+        .unwrap()
+        .expect("route should canonicalize duplicate answered prompt tails before dispatch");
+    let cleaned = cleanup.content;
+
+    assert!(cleanup.removed_answered_tail);
+    assert!(
+        cleaned.contains(&format!(
+            "❯ {prompt}\n❯ #spec-test-build-install-commit-push\n### Re:"
+        )),
+        "answered prompt block must remain in exchange history:\n{cleaned}"
+    );
+    assert!(
+        !cleaned.contains(&format!("<!-- agent:boundary:head -->\n❯ {prompt}")),
+        "route must not dispatch with duplicate answered-form prompt after the boundary:\n{cleaned}"
+    );
+}
+#[test]
+fn route_preserves_unprefixed_live_prompt_matching_an_answered_prompt() {
+    // Regression for #ipcfullprompt-recur: a freshly-typed prompt that happens to
+    // match a previously-answered prompt (e.g. a re-typed "go") has no `❯ ` marker
+    // and MUST be preserved for dispatch — never scrubbed as duplicate residue.
+    let content = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ go\n",
+        "### Re: go — gpt-5\n\n",
+        "Did the thing.\n",
+        "<!-- agent:boundary:head -->\n",
+        "go\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(content, &[]).unwrap();
+    assert!(
+        cleanup.is_none(),
+        "a bare re-typed prompt must not be scrubbed: {cleanup:?}"
+    );
+}
+#[test]
+fn route_rejects_duplicate_prompt_markdown_residue_before_dispatch() {
+    let prompt =
+        "Please keep this exact sentence around for duplicate residue coverage in markdown";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "# Notes\n\n",
+            "{prompt}\n"
+        ),
+        prompt = prompt
+    );
+
+    let err = scrub_duplicate_prompt_comments_for_route(&content, &[]).unwrap_err();
+
+    assert!(
+        err.to_string().contains("duplicate prompt residue"),
+        "route must fail closed before dispatching against duplicate prompt Markdown residue: {err}"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_creates_visible_plain_queue_and_snapshot() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "❯ prior prompt\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#qipc] Fix queue dispatch.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "❯ do [#qipc]. #spec-test-build-install-commit-push",
+        "test_busy_actor",
+        false,
+    )
+    .expect("route should persist a queued dispatch prompt");
+
+    assert!(outcome.appended);
+    assert!(outcome.component_created);
+    assert!(outcome.activated);
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#qipc]. #spec-test-build-install-commit-push"
+    );
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: start"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
+    let queue_pos = updated.find("<!-- agent:queue -->").unwrap();
+    let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
+    assert!(
+        queue_pos < backlog_pos,
+        "created queue component should be visible before tracked work components:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(
+        snapshot, updated,
+        "route queueing must sync the snapshot so queue continuation is not treated as a modified head prompt"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing() {
+    // Repro of "JB Run Agent Doc error: route queue dispatch: failed to parse
+    // existing agent:queue": an earlier corruption merged free-text prose into
+    // the agent:queue component, so `queue::parse` bails on a bare line. The
+    // route must not propagate that as a fatal error — it must preserve the
+    // polluted body and still append the new pending dispatch.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "JB `Run Agent Doc` error:\n",
+        "- do [#existing]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    // The polluted free-text line is preserved as a non-actionable Freeform
+    // entry (tolerant parse) rather than failing the consume/dispatch guards.
+    let parsed = crate::queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n").unwrap();
+    assert!(
+        parsed
+            .iter()
+            .any(|e| matches!(e, crate::queue::QueueEntry::Freeform(_)))
+    );
+
+    let outcome = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
+        .expect("route must not crash on a polluted agent:queue");
+    assert!(outcome.appended);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    // Existing (polluted) content preserved — not silently dropped.
+    assert!(updated.contains("JB `Run Agent Doc` error:"));
+    assert!(updated.contains("- do [#existing]"));
+    // New dispatch appended below it.
+    assert!(updated.contains("- do [#newitem]"));
+
+    // Re-dispatching the same prompt into the still-polluted queue is idempotent.
+    let outcome2 = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
+        .expect("route must stay resilient on repeat dispatch");
+    assert!(outcome2.already_present);
+    let updated2 = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated2.matches("- do [#newitem]").count(),
+        1,
+        "repeat dispatch into a polluted queue must not duplicate the entry:\n{updated2}"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#qipc]. #spec-test-build-install-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#qipc] Fix queue dispatch.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "do [#qipc]. #spec-test-build-install-commit-push",
+        "test_busy_actor",
+        false,
+    )
+    .expect("route should activate an existing queued dispatch prompt");
+
+    assert!(!outcome.appended);
+    assert!(outcome.already_present);
+    assert!(!outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: start"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert_eq!(
+        updated
+            .matches("- do [#qipc]. #spec-test-build-install-commit-push")
+            .count(),
+        1,
+        "route must not duplicate an already visible queue prompt:\n{updated}"
+    );
+}
+#[test]
+fn route_activates_existing_inactive_auto_queue_head_as_plain_queue_for_busy_deferral() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#shipstationaudit]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#shipstationaudit] Audit ShipStation settings.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap().as_deref(),
+        Some("do [#shipstationaudit]. #spec-test-commit-push")
+    );
+
+    let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        .unwrap()
+        .expect("legacy inactive auto queue head should activate");
+
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#shipstationaudit]. #spec-test-commit-push"
+    );
+    assert!(!outcome.appended);
+    assert!(outcome.already_present);
+    assert!(!outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue: start"));
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert_eq!(
+        updated
+            .matches("- do [#shipstationaudit]. #spec-test-commit-push")
+            .count(),
+        1,
+        "route must activate the existing head without duplicating it:\n{updated}"
+    );
+    assert_eq!(
+        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+        Some("shipstationaudit"),
+        "activated queue should become drainable by the idle-queue watch"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(snapshot, updated, "route activation must sync the snapshot");
+}
+#[test]
+fn route_does_not_activate_plain_inactive_queue_head() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#manual]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "plain inactive queues should stay inert without auto/start activation"
+    );
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), content);
+}
+#[test]
+fn busy_route_defers_to_active_auto_loop_instead_of_refusing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#regional]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    // No INACTIVE head — the queue is already active, so the activate path no-ops.
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap(),
+        None,
+        "an already-active auto-queue exposes no inactive head to activate"
+    );
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "activate path returns None when the queue is already auto-looping"
+    );
+    // But the active-loop continuation signal IS present — this is what the busy
+    // route path uses to defer (report success) instead of failing closed.
+    let continuation = crate::queue_continuation::detect(&doc)
+        .unwrap()
+        .expect("active auto-loop must expose a continuation head for busy deferral");
+    assert_eq!(continuation.head_prompt, "do [#regional]");
+}
+#[test]
+fn route_activates_queue_stop_with_marker_go_head() {
+    // #queue-state-unify: a `queue: stop` document carrying the marker-side
+    // `<!-- agent:queue go -->` control must be recognized as activatable by the
+    // route path so JB `Run Agent Doc` starts the queue. `go` is the marker
+    // spelling of the canonical start gesture and overrides the stale stop.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue: stop\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue go -->\n",
+        "- do [#shipstationaudit]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#shipstationaudit] Audit ShipStation settings.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap().as_deref(),
+        Some("do [#shipstationaudit]. #spec-test-commit-push"),
+        "marker-side `go` must be recognized as an activatable head despite `queue: stop`"
+    );
+
+    let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        .unwrap()
+        .expect("startable inactive `go` queue head should activate");
+
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#shipstationaudit]. #spec-test-commit-push"
+    );
+    assert!(outcome.activated);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("queue: start"),
+        "activation must flip the canonical control to start:\n{updated}"
+    );
+    assert_eq!(
+        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+        Some("shipstationaudit"),
+        "activated queue should become drainable by the idle-queue watch"
+    );
+}
+#[test]
+fn route_does_not_activate_queue_with_marker_stop() {
+    // A marker-side `stop` is an explicit halt gesture and must keep the queue
+    // inert even when it would otherwise activate via the legacy `auto`
+    // attribute (#queue-state-unify). `stop` wins over `auto`/`go`/`start`.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto stop -->\n",
+        "- do [#manual]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap(),
+        None,
+        "marker-side `stop` must keep the queue inert"
+    );
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "marker-side `stop` must not be activated by the route path"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
+    // Repro for #adoc-queue-ipc-drift: a halted/inactive-then-reactivated queue
+    // that still carries struck `Completed` residue plus a single live prompt.
+    // Re-dispatching the live head must NOT append a duplicate, and must NOT
+    // supersede the live head into a struck id.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "preset #spec-test-build-install-commit-push\n",
+        "- ~do [#adoc-sqlite-isolation]~\n",
+        "- ~do [#adoc-sqlite-seam]~\n",
+        "- do [#adoc-orch-shim-cleanup]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#adoc-orch-shim-cleanup] Finish the migration.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "do [#adoc-orch-shim-cleanup]",
+        "test_busy_actor",
+        true,
+    )
+    .expect("route should treat the live head as already queued");
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+        1,
+        "re-dispatching the live queue head must not duplicate it:\n{updated}\noutcome={outcome:?}"
+    );
+    assert!(
+        !outcome.appended,
+        "live head re-dispatch must not append:\n{updated}\noutcome={outcome:?}"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- Run Agent Doc queued the first prompt.\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "Run Agent Doc queued the edited prompt.",
+        "test_busy_actor",
+        false,
+    )
+    .expect("route should update a stale single auto-queue prompt");
+
+    assert!(!outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(
+        !updated.contains("- Run Agent Doc queued the first prompt."),
+        "stale route-owned queue prompt should be replaced:\n{updated}"
+    );
+    assert!(
+        updated.contains("- Run Agent Doc queued the edited prompt."),
+        "edited prompt should become the single queued rerun:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(
+        snapshot, updated,
+        "queue prompt supersession must sync the route snapshot"
+    );
+}
+#[test]
+fn route_enqueue_dispatch_prompt_appends_to_legacy_auto_queue_as_plain_queue() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- first queued prompt\n",
+        "- second queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
+            .expect("route should append to legacy multi-prompt queues");
+
+    assert!(outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(!outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(
+        updated.contains("- first queued prompt\n- second queued prompt\n- third queued prompt")
+    );
+}
+#[test]
+fn route_enqueue_priority_dispatch_preempts_legacy_auto_queue_as_plain_queue() {
+    // #jb-run-preempt-autoloop-priority: a manual operator Run Agent Doc into a
+    // busy pane must jump AHEAD of pending auto-loop items, not land at the tail.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- first queued prompt\n",
+        "- second queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+            .expect("priority route dispatch should preempt the pending queue");
+
+    assert!(outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(!outcome.superseded);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(
+        updated.contains(
+            "- :pushpin: manual preempt prompt\n- first queued prompt\n- second queued prompt"
+        ),
+        "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(snapshot, updated, "priority preempt must sync the snapshot");
+}
+#[test]
+fn route_enqueue_priority_dispatch_inserts_ahead_of_lone_legacy_auto_prompt() {
+    // #jb-run-preempt-autoloop-priority: a priority dispatch must NOT supersede a
+    // lone auto prompt — replacing it would silently drop the pending auto-loop
+    // item the manual run is preempting. Both prompts survive, manual first.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- pending auto-loop item\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+            .expect("priority route dispatch should insert ahead, not supersede");
+
+    assert!(outcome.appended);
+    assert!(!outcome.superseded, "priority dispatch must not supersede");
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    assert!(
+        updated.contains("- :pushpin: manual preempt prompt\n- pending auto-loop item"),
+        "priority dispatch must preserve the pending item and run ahead of it with operator pin:\n{updated}"
+    );
+}
+#[test]
+fn route_enqueue_priority_dispatch_preserves_leading_queue_directives() {
+    // #jb-run-preempt-autoloop-priority: the head-insert must land after leading
+    // queue directives (preset / start fence), before the first actionable prompt.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "preset #spec-test-build-install-commit-push\n",
+        "- first queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+        .expect("priority route dispatch should insert after leading directives");
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue -->"));
+    assert!(!updated.contains("agent:queue auto"));
+    let preset_pos = updated
+        .find("preset #spec")
+        .expect("preset directive preserved");
+    let preempt_pos = updated
+        .find("- :pushpin: manual preempt prompt")
+        .expect("preempt prompt inserted");
+    let first_pos = updated
+        .find("- first queued prompt")
+        .expect("first prompt preserved");
+    assert!(
+        preset_pos < preempt_pos && preempt_pos < first_pos,
+        "preempt prompt must sit after the preset directive and before the first prompt:\n{updated}"
+    );
+}
+#[test]
+fn managed_capability_proof_status_tracks_pending_and_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let session_id = "route-proof-status";
+    let doc = write_codex_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "codex_capability_proof status=pending",
+    );
+
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+        ManagedCapabilityProofStatus::Pending
+    );
+
+    let doc = write_codex_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "codex_capability_proof status=failed error=\"dns\"",
+    );
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+        ManagedCapabilityProofStatus::Failed
+    );
+}
+#[test]
+fn managed_capability_proof_status_requires_matching_writable_root_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let session_id = "route-writable-proof-status";
+    let (doc, contract) = write_codex_writable_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "codex_capability_proof status=proven network=not_required network_probe=not_required ssh_targets=0 writable_roots=1",
+    );
+
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+        ManagedCapabilityProofStatus::Missing
+    );
+
+    let (doc, _) = write_codex_writable_proof_status_fixture(
+        dir.path(),
+        session_id,
+        &format!(
+            "codex_capability_proof status=proven network=not_required network_probe=not_required ssh_targets=0 writable_roots=1 writable_root_contract={contract}"
+        ),
+    );
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+        ManagedCapabilityProofStatus::Proven
+    );
+}
+#[test]
+fn managed_capability_proof_status_opencode_tracks_pending_and_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let session_id = "route-proof-status-opencode";
+    let doc = write_codex_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "opencode_capability_proof status=pending",
+    );
+
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap(),
+        ManagedCapabilityProofStatus::Pending
+    );
+
+    let doc = write_codex_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "opencode_capability_proof status=failed error=\"ssh\"",
+    );
+    assert_eq!(
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap(),
+        ManagedCapabilityProofStatus::Failed
+    );
+}
+#[test]
+fn pane_registration_matches_file_resolves_entry_cwd() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let submodule = dir.path().join("src/session-share");
+    let tasks = submodule.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let doc = tasks.join("claudescore-3.md");
+    std::fs::write(&doc, "# session\n").unwrap();
+
+    let mut registry = sessions::SessionRegistry::new();
+    registry.insert(
+        "session-a".to_string(),
+        test_registry_entry("%401", "tasks/claudescore-3.md", &submodule),
+    );
+
+    assert!(
+        pane_registration_matches_file(&registry, "%401", &doc.to_string_lossy()),
+        "relative registry paths should resolve against the pane cwd"
+    );
+}
+#[test]
+fn ensure_dispatch_target_matches_file_rejects_cross_file_registration() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let submodule = dir.path().join("src/session-share");
+    let tasks = submodule.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let registered = tasks.join("monsterrodholders.md");
+    let requested = tasks.join("claudescore-3.md");
+    std::fs::write(&registered, "# registered\n").unwrap();
+    std::fs::write(&requested, "# requested\n").unwrap();
+
+    sessions::register_full_with_cwd_in(
+        dir.path(),
+        "session-a",
+        "%401",
+        "tasks/monsterrodholders.md",
+        1234,
+        "@1",
+        &submodule.to_string_lossy(),
+    )
+    .unwrap();
+
+    let err = ensure_dispatch_target_matches_file("%401", &requested.to_string_lossy())
+        .expect_err("cross-file pane reuse must fail closed");
+    assert!(
+        err.to_string().contains("refusing cross-file dispatch"),
+        "error should explain the rejected cross-file dispatch: {err}"
+    );
+}
+#[test]
+fn is_first_column_empty_cols() {
+    let file = Path::new("tasks/agent-doc.md");
+    assert!(!is_first_column(file, &[]));
+}
+#[test]
+fn is_first_column_single_col() {
+    let file = Path::new("tasks/agent-doc.md");
+    let cols = vec!["tasks/agent-doc.md".to_string()];
+    // Single column — no need to split before
+    assert!(!is_first_column(file, &cols));
+}
+#[test]
+fn is_first_column_in_first_col() {
+    let file = Path::new("tasks/agent-doc.md");
+    let cols = vec![
+        "tasks/agent-doc.md".to_string(),
+        "tasks/email.md".to_string(),
+    ];
+    assert!(is_first_column(file, &cols));
+}
+#[test]
+fn is_first_column_in_second_col() {
+    let file = Path::new("tasks/email.md");
+    let cols = vec![
+        "tasks/agent-doc.md".to_string(),
+        "tasks/email.md".to_string(),
+    ];
+    assert!(!is_first_column(file, &cols));
+}
+#[test]
+fn is_first_column_comma_separated() {
+    let file = Path::new("tasks/agent-doc.md");
+    let cols = vec![
+        "tasks/agent-doc.md,tasks/corky.md".to_string(),
+        "tasks/email.md".to_string(),
+    ];
+    assert!(is_first_column(file, &cols));
+}
+#[test]
+fn detects_unicode_prompt() {
+    let h = HarnessConfig::claude();
+    assert!(h.is_prompt_line("❯"));
+    assert!(h.is_prompt_line("❯ "));
+    assert!(h.is_prompt_line("  ❯  "));
+}
+#[test]
+fn detects_ascii_prompt() {
+    let h = HarnessConfig::codex();
+    assert!(h.is_prompt_line(">"));
+    assert!(h.is_prompt_line("> "));
+    assert!(h.is_prompt_line("  >  "));
+}
+#[test]
+fn rejects_non_prompt_lines() {
+    let h = HarnessConfig::claude();
+    assert!(!h.is_prompt_line("Starting claude..."));
+    assert!(!h.is_prompt_line("test result: ok"));
+    assert!(!h.is_prompt_line(""));
+    assert!(!h.is_prompt_line("  "));
+    assert!(!h.is_prompt_line("## User"));
+}
+#[test]
+fn handles_ansi_prompt() {
+    let h = HarnessConfig::claude();
+    assert!(h.is_prompt_line("\x1b[32m❯\x1b[0m"));
+    let h_codex = HarnessConfig::codex();
+    assert!(h_codex.is_prompt_line("\x1b[1m>\x1b[0m"));
+}
+#[test]
+fn dead_registered_pane_allows_lazy_claim() {
+    // When registered is Some but pane is dead, lazy-claim should be attempted.
+    let registered: Option<String> = Some("%99".to_string());
+    assert!(
+        registered.is_some(),
+        "dead registered pane should attempt lazy claim"
+    );
+}
+#[test]
+fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
+    let tracker = RoutedDispatchStartTracker::CodexHook {
+        trigger: "agent-doc /tmp/task.md".to_string(),
+        previous_session_id: Some("codex-session".to_string()),
+        previous_turn_id: Some("turn-1".to_string()),
+        previous_updated_at: Some(10),
+    };
+    let state = crate::codex_hook::ActiveSessionState {
+        session_id: "codex-session".to_string(),
+        doc_path: "/tmp/task.md".to_string(),
+        last_turn_id: "turn-2".to_string(),
+        last_prompt: "/review current changes".to_string(),
+        updated_at: 11,
+    };
+    assert_eq!(
+        codex_routed_dispatch_start_proof(&tracker, &state),
+        Some(RoutedDispatchStartProof::HookStateAdvanced)
+    );
+}
+#[test]
+fn opencode_pane_state_change_proof_requires_trigger_to_leave_composer() {
+    let harness = HarnessConfig::opencode();
+    let trigger = harness.trigger_command("tasks/bugs.md");
+    let before = ">\n";
+    let drafted = format!("> {trigger}\n");
+    assert!(
+        !opencode_pane_state_changed_from_idle(&harness, &trigger, before, &drafted),
+        "drafted trigger text is pane input, not dispatch-start proof"
+    );
+
+    let active = "\
+Working (2s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+    assert!(
+        opencode_pane_state_changed_from_idle(&harness, &trigger, before, active),
+        "OpenCode leaving idle chrome for active output should prove dispatch start"
+    );
+
+    let idle_status = "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n";
+    assert!(
+        !opencode_pane_state_changed_from_idle(&harness, &trigger, before, idle_status),
+        "idle status chrome alone must not prove dispatch start"
+    );
+}
+#[test]
+fn codex_dispatch_start_tracking_enabled_accepts_workspace_hook_for_nested_agent_doc_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path();
+    let nested = workspace.join("src/session-share");
+    let doc = nested.join("tasks/claudescore-3.md");
+
+    std::fs::create_dir_all(workspace.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(workspace.join(".codex")).unwrap();
+    std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    assert!(
+        codex_dispatch_start_tracking_enabled(&doc),
+        "workspace-level Codex hooks should enable routed dispatch tracking for nested agent-doc roots"
+    );
+}
+#[test]
+fn codex_dispatch_start_tracking_enabled_stays_false_without_any_hook_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("src/session-share");
+    let doc = nested.join("tasks/claudescore-3.md");
+
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    assert!(
+        !codex_dispatch_start_tracking_enabled(&doc),
+        "route should not wait for hook-backed submission proof when no tracked root has Codex hooks installed"
+    );
+}
+#[test]
+fn codex_dispatch_start_tracking_enabled_stays_false_when_nested_codex_path_shadows_hooks() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path();
+    let nested = workspace.join("src/session-share");
+    let doc = nested.join("tasks/claudescore-3.md");
+
+    std::fs::create_dir_all(workspace.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(workspace.join(".codex")).unwrap();
+    std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+    std::fs::write(nested.join(".codex"), "").unwrap();
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    assert!(
+        !codex_dispatch_start_tracking_enabled(&doc),
+        "route should not require hook-backed submission proof when a nearer `.codex` path shadows the workspace install"
+    );
+}
+#[test]
+fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
+    use crate::session_actor::ActorState;
+    // Busy + dispatch-only + a queue prompt available → do NOT wait (queue now).
+    assert!(
+        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true, false),
+        "a busy active turn with a queue fallback must skip the start-oriented ready wait"
+    );
+    // Busy + dispatch-only + no queue fallback + no live active-turn cue → still
+    // wait (the actor may be a transient/stale busy projection about to clear).
+    assert!(
+        busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, false),
+        "without a queue fallback the bounded ready wait is still the only recourse before bailing"
+    );
+    // Not dispatch-only, or not busy → the busy-wait guard does not apply.
+    assert!(!busy_dispatch_only_should_wait_for_ready(
+        false,
+        ActorState::Busy,
+        false,
+        false
+    ));
+    assert!(!busy_dispatch_only_should_wait_for_ready(
+        true,
+        ActorState::Ready,
+        false,
+        false
+    ));
+}
+#[test]
+fn busy_dispatch_only_skips_ready_wait_on_proven_active_turn() {
+    use crate::session_actor::ActorState;
+    // Busy + dispatch-only + no queue fallback + a live active-turn cue → skip
+    // the wait (immediate refusal), instead of stalling for the full budget.
+    assert!(
+        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, true),
+        "a proven active turn must skip the busy ready-wait and refuse immediately"
+    );
+}
+#[test]
+fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
+    use crate::session_actor::ActorState;
+    let harness = HarnessConfig::claude();
+    let file = std::path::Path::new("/tmp/monsterrodholders.md");
+
+    let active = dispatch_only_busy_refusal_message(
+        &harness,
+        282,
+        file,
+        "%1",
+        "actor not ready",
+        Some("Working (7m 29s · esc to interrupt)"),
+        ActorState::Busy,
+    );
+    assert!(
+        active.contains("busy on an active") && active.contains("esc to interrupt"),
+        "active-turn refusal must name the busy turn cue: {active}"
+    );
+    assert!(
+        !active.contains("after waiting"),
+        "active-turn refusal must not claim a ready-wait that was skipped: {active}"
+    );
+
+    let cold = dispatch_only_busy_refusal_message(
+        &harness,
+        282,
+        file,
+        "%1",
+        "actor not ready",
+        None,
+        ActorState::Busy,
+    );
+    assert!(
+        cold.contains("after waiting") && cold.contains("dispatch-ready prompt"),
+        "no-cue refusal keeps the cold-start ready-wait wording: {cold}"
+    );
+}
+#[test]
+fn routed_trigger_payload_keeps_bare_reopen() {
+    let codex_trigger = HarnessConfig::codex().trigger_command("test.md");
+    assert_eq!(routed_trigger_payload(&codex_trigger), "agent-doc test.md");
+    assert_eq!(
+        routed_trigger_payload("/agent-doc test.md"),
+        "/agent-doc test.md"
+    );
+}
+#[test]
+fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
+    let mut claude = HarnessConfig::claude();
+    apply_plain_trigger_override(&mut claude);
+    assert_eq!(claude.trigger_command("test.md"), "agent-doc test.md");
+
+    let mut opencode = HarnessConfig::opencode();
+    apply_plain_trigger_override(&mut opencode);
+    assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
+}
+#[test]
+fn routed_trigger_submit_payload_strips_trailing_line_endings() {
+    assert_eq!(
+        routed_trigger_submit_payload("agent-doc test.md\r\n"),
+        "agent-doc test.md"
+    );
+}
+#[test]
+fn validate_routed_trigger_payload_accepts_bare_codex_reopen() {
+    let harness = HarnessConfig::codex();
+    let trigger = harness.trigger_command("test.md");
+    let payload = routed_trigger_payload(&trigger);
+    validate_routed_trigger_payload(&harness, &trigger, &payload)
+        .expect("bare Codex reopen should remain dispatchable");
+}
+#[test]
+fn validate_routed_trigger_payload_rejects_multiline_codex_payload() {
+    let harness = HarnessConfig::codex();
+    let trigger = harness.trigger_command("test.md");
+    let err =
+        validate_routed_trigger_payload(&harness, &trigger, "agent-doc test.md\nfollow-up text")
+            .expect_err("Codex reroute payload must fail before injecting extra lines");
+    assert!(
+        err.to_string().contains("bare `agent-doc <FILE>` reopen"),
+        "unexpected error: {err:#}"
+    );
+}
+#[test]
+fn drain_reaps_completed_review_item_across_all_surfaces() {
+    // #route-drain reap-all-surfaces: the focused route-drain repair reaped only
+    // the backlog, so a deployed `[x]` item left in review blocked dispatch until
+    // a manual repeat ran full preflight maintenance ("JB Run Agent Doc failed; a
+    // repeat attempt succeeded"). The drain now runs all-surface pending
+    // maintenance first, so the completed review item is reaped on the first
+    // attempt regardless of the final drain outcome.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("drain-review.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [x] [#seocat] Implemented and deployed\n",
+        "<!-- /agent:review -->\n\n",
+        "## Completed / Reaped\n\n",
+        "<!-- agent:done -->\n",
+        "<!-- /agent:done -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+    // Open cycle so the drain actually runs (is_open()).
+    crate::cycle_state::start_preflight(&doc, None, Some(content)).unwrap();
+
+    // The drain may still report Blocked on later (committed/etc.) guards in this
+    // minimal fixture, but the all-surface reap runs before that — assert the
+    // completed review item is gone from the file.
+    let _ = super::drain_open_closeout_before_routed_dispatch(&doc);
+
+    let after = std::fs::read_to_string(&doc).unwrap();
+    let review = crate::component::parse(&after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&after)
+        .to_string();
+    assert!(
+        !review.contains("[#seocat]"),
+        "drain must reap the completed review item via all-surface maintenance: {review}"
+    );
+    assert!(after.contains("[#keep1]"), "open backlog item must remain");
+}
+#[test]
+fn route_latency_message_marks_budget_status() {
+    let harness = HarnessConfig::codex();
+    let ok = route_latency_message(
+        "dispatch_start_proof",
+        Duration::from_millis(999),
+        Duration::from_secs(1),
+        "%1",
+        &harness,
+        "submitted",
+    );
+    assert!(ok.contains("status=ok"), "{ok}");
+    assert!(ok.contains("elapsed_ms=999"), "{ok}");
+
+    let slow = route_latency_message(
+        "dispatch_start_proof",
+        Duration::from_secs(10),
+        Duration::from_secs(10),
+        "%1",
+        &harness,
+        "unproven_but_accepted",
+    );
+    assert!(slow.contains("status=over_budget"), "{slow}");
+    assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
+}
+#[test]
+fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
+    assert_eq!(
+        direct_pane_submit_acceptance_timeout(),
+        Duration::from_secs(5)
+    );
+    assert_eq!(
+        direct_pane_submit_acceptance_budget(),
+        Duration::from_secs(6)
+    );
+
+    let message = route_latency_message(
+        "direct_pane_submit",
+        Duration::from_millis(5180),
+        direct_pane_submit_acceptance_budget(),
+        "%1",
+        &HarnessConfig::codex(),
+        direct_pane_submit_outcome(
+            CommandDispatchStatus::TimedOut,
+            Some(RoutedDispatchStartProof::HookPromptMatched),
+        ),
+    );
+
+    assert!(message.contains("status=ok"), "{message}");
+    assert!(
+        message.contains("outcome=acceptance_unobserved_dispatch_proven"),
+        "{message}"
+    );
+    assert!(!message.contains("timed_out"), "{message}");
+}
+#[test]
+fn direct_pane_submit_outcome_separates_acceptance_from_dispatch_proof() {
+    assert_eq!(
+        direct_pane_submit_outcome(CommandDispatchStatus::Accepted, None),
+        "accepted"
+    );
+    assert_eq!(
+        direct_pane_submit_outcome(CommandDispatchStatus::TimedOut, None),
+        "acceptance_unobserved"
+    );
+    assert_eq!(
+        direct_pane_submit_outcome(
+            CommandDispatchStatus::TimedOut,
+            Some(RoutedDispatchStartProof::HookStateAdvanced),
+        ),
+        "acceptance_unobserved_dispatch_proven"
+    );
+}
+#[test]
+fn route_submit_observation_marks_prompt_not_submitted_without_prompt_text() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "direct_pane_acceptance",
+        observation: RouteSubmitObservation::TriggerStillVisible,
+        trigger_visible: Some(true),
+        elapsed: Duration::from_millis(5123),
+        capture_len: Some(2048),
+        capture_hash: Some("abc123def456"),
+        proof: None,
+    };
+
+    let message = route_submit_observation_message(facts);
+    assert!(message.contains("route_submit_observation"), "{message}");
+    assert!(
+        message.contains("result=trigger_still_visible"),
+        "{message}"
+    );
+    assert!(message.contains("trigger_visible=true"), "{message}");
+    assert!(message.contains("issue=prompt_not_submitted"), "{message}");
+    assert!(message.contains("capture_hash=abc123def456"), "{message}");
+    assert!(!message.contains("agent-doc "), "{message}");
+
+    let issue = route_submit_issue_message(facts).expect("prompt-not-submitted should be an issue");
+    assert!(issue.contains("route_submit_issue"), "{issue}");
+    assert!(issue.contains("issue=prompt_not_submitted"), "{issue}");
+    assert!(issue.contains("result=trigger_still_visible"), "{issue}");
+}
+#[test]
+fn route_submit_observation_marks_dispatch_start_proof_without_issue() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "dispatch_start_proof",
+        observation: RouteSubmitObservation::DispatchStartProven,
+        trigger_visible: None,
+        elapsed: Duration::from_millis(800),
+        capture_len: None,
+        capture_hash: None,
+        proof: Some(RoutedDispatchStartProof::HookStateAdvanced),
+    };
+
+    let message = route_submit_observation_message(facts);
+    assert!(
+        message.contains("result=dispatch_start_proven"),
+        "{message}"
+    );
+    assert!(message.contains("proof=submitted"), "{message}");
+    assert!(
+        route_submit_issue_message(facts).is_none(),
+        "dispatch-start proof should not emit an issue"
+    );
+}
+#[test]
+fn route_submit_observation_marks_accepted_without_dispatch_proof_as_issue() {
+    let facts = RouteSubmitObservationFacts {
+        file: Path::new("/tmp/run-agent-doc.md"),
+        pane: "%7",
+        harness: &HarnessConfig::codex(),
+        phase: "dispatch_start_proof",
+        observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+        trigger_visible: None,
+        elapsed: Duration::from_secs(10),
+        capture_len: None,
+        capture_hash: None,
+        proof: None,
+    };
+
+    let issue =
+        route_submit_issue_message(facts).expect("accepted-only Codex proof should be an issue");
+    assert!(
+        issue.contains("issue=accepted_without_dispatch_start_proof"),
+        "{issue}"
+    );
+    assert!(
+        issue.contains("result=accepted_without_dispatch_start_proof"),
+        "{issue}"
+    );
+}
+#[test]
+fn tracked_harness_clear_requires_fresh_restart_only_for_exact_clear_prompt() {
+    assert!(tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::codex(),
+        Some("/clear")
+    ));
+    assert!(tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::codex(),
+        Some("  /clear  ")
+    ));
+    assert!(!tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::codex(),
+        Some("agent-doc tasks/bugs.md")
+    ));
+    assert!(!tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::claude(),
+        Some("/clear")
+    ));
+    assert!(tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::opencode(),
+        Some("/clear")
+    ));
+    assert!(tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::opencode(),
+        Some("  /clear  ")
+    ));
+    assert!(!tracked_harness_clear_requires_fresh_restart(
+        &HarnessConfig::opencode(),
+        Some("agent-doc tasks/bugs.md")
+    ));
+}
+#[test]
+fn starting_pane_recovery_target_follows_same_file_handoff() {
+    let initial = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%151".to_string()),
+        latest_start_timestamp: Some(10),
+        latest_run_timestamp: Some(11),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+    let handed_off = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%183".to_string()),
+        latest_start_timestamp: Some(20),
+        latest_run_timestamp: Some(21),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+
+    assert_eq!(
+        starting_pane_recovery_target(Some(&initial), Some(&handed_off), "%151", Some("%183")),
+        Some(StartingPaneRecoveryTarget::DifferentPane(
+            "%183".to_string()
+        ))
+    );
+}
+#[test]
+fn starting_pane_recovery_target_retries_same_pane_after_new_generation() {
+    let initial = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%151".to_string()),
+        latest_start_timestamp: Some(10),
+        latest_run_timestamp: Some(11),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+    let restarted = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%151".to_string()),
+        latest_start_timestamp: Some(12),
+        latest_run_timestamp: Some(13),
+        latest_run_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+
+    assert_eq!(
+        starting_pane_recovery_target(Some(&initial), Some(&restarted), "%151", Some("%151")),
+        Some(StartingPaneRecoveryTarget::SamePane)
+    );
+}
+#[test]
+fn starting_pane_recovery_target_ignores_unchanged_open_start() {
+    let initial = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%151".to_string()),
+        latest_start_timestamp: Some(10),
+        latest_run_timestamp: Some(11),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+
+    assert_eq!(
+        starting_pane_recovery_target(Some(&initial), Some(&initial), "%151", Some("%151")),
+        None
+    );
+}
+#[test]
+fn busy_existing_pane_auto_fix_outcome_restarts_fresh_for_healthy_authoritative_session_without_changes()
+ {
+    assert_eq!(
+        busy_existing_pane_auto_fix_outcome(false, false, Some(SupervisorHealth::Healthy), false,),
+        BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
+    );
+    assert_eq!(
+        busy_existing_pane_auto_fix_outcome(
+            false,
+            false,
+            Some(SupervisorHealth::Restartable),
+            false,
+        ),
+        BusyPaneAutoFixOutcome::FailClosed
+    );
+    assert_eq!(
+        busy_existing_pane_auto_fix_outcome(
+            false,
+            false,
+            Some(SupervisorHealth::Restartable),
+            true,
+        ),
+        BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
+    );
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn resolve_fresh_dispatch_target_ignores_explicitly_blocked_startup_miss_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let iso = IsolatedTmux::new("route-test-fresh-start-blocked-handoff");
+
+    let doc = dir.path().join("fresh-start-blocked-handoff.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let session_id = "route-fresh-start-blocked-handoff";
+    let blocked_pane = "%364";
+    let new_pane = "%370";
+
+    sessions::register_full_with_cwd_in(
+        dir.path(),
+        session_id,
+        blocked_pane,
+        &file_path,
+        12345,
+        "@owner",
+        dir.path().to_string_lossy().as_ref(),
+    )
+    .unwrap();
+
+    let resolved = resolve_fresh_dispatch_target_after_ready_wait(
+        &iso,
+        session_id,
+        new_pane,
+        &file_path,
+        Some(blocked_pane),
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved, new_pane,
+        "resolver should keep dispatch in the fresh pane when the previous startup-miss owner is explicitly blocked"
+    );
+
+    let registry = sessions::load_in(dir.path()).unwrap();
+    let entry = registry
+        .values()
+        .find(|entry| entry.session_id == session_id)
+        .expect("fresh pane should be registered after the blocked handoff is ignored");
+    assert_eq!(entry.pane, new_pane);
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn duplicate_pane_policy_error_includes_manual_tmux_commands() {
+    let iso = IsolatedTmux::new("route-test-duplicate-policy");
+    let session = "test";
+    let rendered = format_duplicate_pane_policy_error(
+        session,
+        "tasks/agent-doc/agent-doc-bugs2.md",
+        Some("%42"),
+        "split-window failed alongside pane %42 (too small)",
+    );
+    assert!(rendered.contains("tmux list-panes -t test:agent-doc"));
+    assert!(rendered.contains("tmux kill-pane -t %42"));
+    assert!(rendered.contains("agent-doc tasks/agent-doc/agent-doc-bugs2.md"));
+    assert!(rendered.contains("split-window failed alongside pane %42"));
+    let _ = iso;
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn failed_route_cleanup_preserves_live_registered_owner() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
+    let session = format!("test-{}", std::process::id());
+    let pane = iso.new_session(&session, dir.path()).unwrap();
+    let file = dir.path().join("tasks/software/corky.md");
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&file, "# Corky\n").unwrap();
+    sessions::register_full_in(
+        dir.path(),
+        "session-1",
+        &pane,
+        "tasks/software/corky.md",
+        123,
+        "@1",
+    )
+    .unwrap();
+
+    assert!(
+        should_preserve_failed_route_pane(&iso, &file, &pane, "session-1"),
+        "failed-route cleanup must preserve the live registered owner pane"
+    );
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn failed_route_cleanup_does_not_preserve_unregistered_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let iso = IsolatedTmux::new("route-test-cleanup-unregistered");
+    let pane = iso.new_session("test", dir.path()).unwrap();
+    let file = dir.path().join("tasks/software/corky.md");
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&file, "# Corky\n").unwrap();
+
+    assert!(
+        !should_preserve_failed_route_pane(&iso, &file, &pane, "session-1"),
+        "failed-route cleanup should still remove panes that never became the live owner"
+    );
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn failed_route_cleanup_reaps_startup_miss_owner_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let iso = IsolatedTmux::new("route-test-cleanup-startup-miss");
+    let pane = iso.new_session("test", dir.path()).unwrap();
+    let file = dir.path().join("tasks/software/corky.md");
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&file, "# Corky\n").unwrap();
+    sessions::register_full_in(
+        dir.path(),
+        "session-1",
+        &pane,
+        "tasks/software/corky.md",
+        123,
+        "@1",
+    )
+    .unwrap();
+    crate::startup_miss::record(
+        &file,
+        &pane,
+        "session-1",
+        "claude",
+        crate::startup_miss::StartupMissOrigin::FreshStart,
+        None,
+    )
+    .unwrap();
+
+    cleanup_failed_route_panes(&iso, &file, "session-1", std::slice::from_ref(&pane));
+
+    assert!(
+        !iso.pane_alive(&pane),
+        "fresh-route startup-miss panes should be reaped instead of preserved idle"
+    );
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn failed_route_cleanup_only_reaps_attempt_local_created_panes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let iso = IsolatedTmux::new("route-test-cleanup-concurrent-sibling");
+    let pane_owned = iso.new_session("test", dir.path()).unwrap();
+    let pane_sibling = iso.split_window(&pane_owned, dir.path(), "-dh").unwrap();
+
+    sessions::register_full_in(
+        dir.path(),
+        "session-1",
+        &pane_owned,
+        "tasks/software/corky.md",
+        123,
+        "@1",
+    )
+    .unwrap();
+    sessions::register_full_in(
+        dir.path(),
+        "session-2",
+        &pane_sibling,
+        "tasks/software/tsift.md",
+        456,
+        "@1",
+    )
+    .unwrap();
+
+    let file = dir.path().join("tasks/software/corky.md");
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&file, "# Corky\n").unwrap();
+
+    cleanup_failed_route_panes(&iso, &file, "session-1", std::slice::from_ref(&pane_owned));
+
+    assert!(
+        iso.pane_alive(&pane_owned),
+        "cleanup should preserve the live owner pane for the failed route"
+    );
+    assert!(
+        iso.pane_alive(&pane_sibling),
+        "cleanup must not reap sibling panes that were not created by this route attempt"
+    );
+}
+#[test]
+fn run_with_tmux_resolves_file_path_to_absolute() {
+    // Verify that resolve_absolute_file_path turns a relative path into an
+    // absolute one when the file exists. This is the guard against submodule
+    // CWD-dependent resolution (#route1).
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let tasks = root.join("tasks");
+    fs::create_dir_all(&tasks).unwrap();
+    let doc = tasks.join("bugs.md");
+    fs::write(&doc, "# Bugs\n").unwrap();
+
+    let _cwd_guard = ScopedCurrentDir::set(&root);
+
+    let resolved = crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
+    assert!(
+        resolved.is_absolute(),
+        "route must send absolute paths to avoid submodule CWD misrouting"
+    );
+    assert_eq!(
+        resolved, doc,
+        "resolved path must point to the CWD-relative file, not a submodule shadow"
+    );
+}
+#[test]
+fn startup_miss_recorded_on_fresh_start_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    crate::startup_miss::record(
+        &doc,
+        "%42",
+        "session-test",
+        "claude",
+        crate::startup_miss::StartupMissOrigin::FreshStart,
+        None,
+    )
+    .unwrap();
+
+    let miss = crate::startup_miss::load(&doc)
+        .unwrap()
+        .expect("should have marker");
+    assert_eq!(miss.pane_id, "%42");
+    assert_eq!(
+        miss.origin,
+        crate::startup_miss::StartupMissOrigin::FreshStart
+    );
+    assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+}
+#[test]
+fn startup_miss_cleared_on_successful_ack() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    crate::startup_miss::record(
+        &doc,
+        "%42",
+        "session-test",
+        "claude",
+        crate::startup_miss::StartupMissOrigin::FreshStart,
+        None,
+    )
+    .unwrap();
+    assert!(crate::startup_miss::load(&doc).unwrap().is_some());
+
+    crate::startup_miss::clear(&doc).unwrap();
+    assert!(crate::startup_miss::load(&doc).unwrap().is_none());
+    assert!(!crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+}
+#[test]
+fn startup_miss_pane_detected_on_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    crate::startup_miss::record(
+        &doc,
+        "%99",
+        "session-test",
+        "codex",
+        crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+        Some("cycle-old"),
+    )
+    .unwrap();
+
+    assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%99"));
+    assert!(
+        !crate::startup_miss::is_startup_miss_pane(&doc, "%100"),
+        "different pane should not match"
+    );
+}
+#[test]
+fn startup_miss_routed_trigger_records_with_baseline_id() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    crate::startup_miss::record(
+        &doc,
+        "%50",
+        "session-test",
+        "claude",
+        crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+        Some("cycle-baseline-123"),
+    )
+    .unwrap();
+
+    let miss = crate::startup_miss::load(&doc).unwrap().expect("marker");
+    assert_eq!(
+        miss.origin,
+        crate::startup_miss::StartupMissOrigin::RoutedTrigger
+    );
+    assert_eq!(
+        miss.cycle_baseline_id.as_deref(),
+        Some("cycle-baseline-123")
+    );
+}
+#[test]
+fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
+    assert!(startup_miss_requires_fresh_start(
+        "%42",
+        None,
+        SupervisorHealth::NoSocket
+    ));
+    assert!(startup_miss_requires_fresh_start(
+        "%42",
+        Some("%99"),
+        SupervisorHealth::Unreachable
+    ));
+    assert!(!startup_miss_requires_fresh_start(
+        "%42",
+        Some("%42"),
+        SupervisorHealth::NoSocket
+    ));
+    assert!(!startup_miss_requires_fresh_start(
+        "%42",
+        None,
+        SupervisorHealth::Restartable
+    ));
+    assert!(!startup_miss_requires_fresh_start(
+        "%42",
+        None,
+        SupervisorHealth::Healthy
+    ));
+}
+#[test]
+fn startup_miss_live_owner_restart_requires_closed_unsuperseded_start() {
+    let miss = crate::startup_miss::StartupMiss {
+        file: "test.md".to_string(),
+        pane_id: "%42".to_string(),
+        session_id: "session-123".to_string(),
+        harness: "codex".to_string(),
+        timestamp: 10,
+        origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+        cycle_baseline_id: Some("cycle-abc".to_string()),
+    };
+    let closed_same_start = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%42".to_string()),
+        latest_start_timestamp: Some(10),
+        latest_run_timestamp: Some(10),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some(
+            "auto_trigger_timeout harness=codex reason=no_prompt_after_30s".to_string(),
+        ),
+        saw_process_exit_after_latest_start: true,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: true,
+        saw_session_end_after_latest_run: false,
+    };
+    let newer_open_start = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%42".to_string()),
+        latest_start_timestamp: Some(10),
+        latest_run_timestamp: Some(11),
+        latest_run_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+        saw_process_exit_after_latest_start: true,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+
+    assert!(startup_miss_should_restart_live_owner(
+        &miss,
+        "%42",
+        Some("%42"),
+        Some(&closed_same_start)
+    ));
+    assert!(!startup_miss_should_restart_live_owner(
+        &miss,
+        "%42",
+        Some("%42"),
+        Some(&newer_open_start)
+    ));
+    assert!(startup_miss_superseded_by_later_open_start(
+        &miss,
+        "%42",
+        Some(&newer_open_start)
+    ));
+    assert!(!startup_miss_superseded_by_later_open_start(
+        &miss,
+        "%42",
+        Some(&closed_same_start)
+    ));
+}
+#[test]
+fn startup_miss_fail_closed_only_for_alive_open_no_socket_sessions() {
+    let open = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%42".to_string()),
+        latest_start_timestamp: Some(1),
+        latest_run_timestamp: Some(1),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_process_exit_after_latest_start: false,
+        saw_session_end_after_latest_start: false,
+        saw_process_exit_after_latest_run: false,
+        saw_session_end_after_latest_run: false,
+    };
+    let closed = crate::startup_miss::SessionLogStatus {
+        latest_start_pane: Some("%42".to_string()),
+        latest_start_timestamp: Some(1),
+        latest_run_timestamp: Some(1),
+        latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+        saw_committed_cycle_after_latest_run: false,
+        last_event: Some("session_end".to_string()),
+        saw_process_exit_after_latest_start: true,
+        saw_session_end_after_latest_start: true,
+        saw_process_exit_after_latest_run: true,
+        saw_session_end_after_latest_run: true,
+    };
+
+    assert!(startup_miss_should_fail_closed(
+        true,
+        "%42",
+        None,
+        SupervisorHealth::NoSocket,
+        Some(&open)
+    ));
+    assert!(!startup_miss_should_fail_closed(
+        true,
+        "%42",
+        Some("%42"),
+        SupervisorHealth::NoSocket,
+        Some(&open)
+    ));
+    assert!(!startup_miss_should_fail_closed(
+        true,
+        "%42",
+        None,
+        SupervisorHealth::Healthy,
+        Some(&open)
+    ));
+    assert!(!startup_miss_should_fail_closed(
+        true,
+        "%42",
+        None,
+        SupervisorHealth::NoSocket,
+        Some(&closed)
+    ));
+    assert!(!startup_miss_should_fail_closed(
+        false,
+        "%42",
+        None,
+        SupervisorHealth::NoSocket,
+        Some(&open)
+    ));
+}
+#[test]
+fn startup_miss_diagnostic_message_includes_retry_command() {
+    let doc = std::path::Path::new("tasks/agent-doc/agent-doc-bugs2.md");
+    let message = startup_miss_diagnostic_message(
+        doc,
+        "routed trigger accepted but no document cycle started for pending #smdq",
+    );
+    assert!(message.contains("[agent-doc] startup-miss:"));
+    assert!(message.contains("agent-doc start tasks/agent-doc/agent-doc-bugs2.md"));
+}
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn startup_miss_diagnostic_does_not_queue_shell_echo_in_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+    let iso = IsolatedTmux::new("route-test-startup-miss-diagnostic");
+    let pane = iso.new_session("test", dir.path()).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "# Session\n").unwrap();
+
+    send_keys_with_retry(&iso, &pane, "printf '> '");
+    let before = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(5));
+    assert!(
+        before.contains("> "),
+        "shell prompt should be visible: {before}"
+    );
+
+    emit_startup_miss_diagnostic(&iso, &pane, &doc, "startup timed out");
+
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let after = sessions::capture_pane(&iso, &pane).unwrap();
+    assert!(
+        !after.contains("echo '[agent-doc] startup-miss:"),
+        "diagnostic should not be left as drafted shell input: {after}"
+    );
+}
+#[test]
+fn skip_capability_proof_bypasses_failed_proof_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let session_id = "route-skip-proof";
+    let doc = write_codex_proof_status_fixture(
+        dir.path(),
+        session_id,
+        "opencode_capability_proof status=failed error=\"dns\"",
+    );
+    let status =
+        managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap();
+    assert_eq!(status, ManagedCapabilityProofStatus::Failed);
+}
+#[test]
+fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
+    let mut blocked_record = test_actor_record("%42");
+    blocked_record.state = crate::session_actor::ActorState::Blocked;
+    blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+    let blocked_actor = AuthoritativeActorDispatchTarget {
+        record: blocked_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Starting),
+        },
+    };
+    assert_eq!(
+        blocked_actor.actor_state(),
+        crate::session_actor::ActorState::Blocked,
+        "a route-owned blocked record should remain a durable terminal gate even if stale supervisor IPC still reports starting"
+    );
+    assert!(
+        actor_blocked_by_starting_timeout(&blocked_actor),
+        "a route-owned starting timeout should be identifiable before route re-registers the stale pane"
+    );
+
+    let mut starting_record = test_actor_record("%43");
+    starting_record.state = crate::session_actor::ActorState::Starting;
+    let ready_actor = AuthoritativeActorDispatchTarget {
+        record: starting_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        },
+    };
+    assert_eq!(
+        ready_actor.actor_state(),
+        crate::session_actor::ActorState::Ready,
+        "non-terminal records should still accept fresher supervisor runtime state"
+    );
+}
+#[test]
+fn starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof() {
+    let mut blocked_record = test_actor_record("%42");
+    blocked_record.state = crate::session_actor::ActorState::Blocked;
+    blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+    let blocked_actor = AuthoritativeActorDispatchTarget {
+        record: blocked_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Starting),
+        },
+    };
+
+    assert!(
+        starting_timeout_blocked_actor_can_recover(&blocked_actor, true),
+        "a route-owned starting timeout may recover only after direct dispatch-ready prompt proof"
+    );
+    assert!(
+        !starting_timeout_blocked_actor_can_recover(&blocked_actor, false),
+        "route must not clear a durable starting timeout without prompt proof"
+    );
+    assert!(
+        !starting_timeout_blocked_actor_can_recover(&test_degraded_actor("%43"), true),
+        "ordinary degraded actors must not use the starting-timeout recovery path"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_none_for_healthy_with_state() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::Healthy,
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    assert!(authoritative_actor_dispatch_guard_reason(&runtime).is_none());
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_reason_for_restartable() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::Restartable,
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+    assert!(
+        reason.contains("restartable"),
+        "expected restartable in reason: {reason}"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_reason_for_halted() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::Halted { restart_count: 3 },
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+    assert!(
+        reason.contains("halted"),
+        "expected halted in reason: {reason}"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_reason_for_unreachable() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::Unreachable,
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+    assert!(
+        reason.contains("unreachable"),
+        "expected unreachable in reason: {reason}"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_reason_for_no_socket() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::NoSocket,
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+    assert!(
+        reason.contains("no_socket"),
+        "expected no_socket in reason: {reason}"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_guard_reason_returns_reason_for_missing_actor_state() {
+    let runtime = SupervisorRuntime {
+        health: SupervisorHealth::Healthy,
+        actor_state: None,
+    };
+    let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+    assert!(
+        reason.contains("missing"),
+        "expected missing in reason: {reason}"
+    );
+}
+#[test]
+fn authoritative_actor_dispatch_target_eligible_true_only_when_no_guard_reason() {
+    let healthy = AuthoritativeActorDispatchTarget {
+        record: test_actor_record("%1"),
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        },
+    };
+    assert!(authoritative_actor_dispatch_target_eligible(&healthy));
+
+    let degraded = AuthoritativeActorDispatchTarget {
+        record: test_actor_record("%1"),
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: None,
+        },
+    };
+    assert!(!authoritative_actor_dispatch_target_eligible(&degraded));
+
+    let no_state = AuthoritativeActorDispatchTarget {
+        record: test_actor_record("%1"),
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: None,
+        },
+    };
+    assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
+}
+#[test]
+fn dispatch_only_starting_pane_recovery_timeout_default() {
+    let timeout = dispatch_only_starting_pane_recovery_timeout(None);
+    assert_eq!(timeout, Duration::from_millis(400));
+}
+#[test]
+fn dispatch_only_starting_pane_ready_timeout_production_values() {
+    assert_eq!(
+        dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), false),
+        Duration::from_secs(15)
+    );
+    assert_eq!(
+        dispatch_only_starting_pane_ready_timeout_for_binary(Some("codex"), false),
+        Duration::from_secs(2)
+    );
+    assert_eq!(
+        dispatch_only_starting_pane_ready_timeout_for_binary(Some("claude"), false),
+        Duration::from_secs(2)
+    );
+    assert_eq!(
+        dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), true),
+        Duration::from_millis(250)
+    );
+}
+#[test]
+fn dispatch_only_starting_pane_recovery_timeout_opencode() {
+    let h = crate::harness::HarnessConfig::opencode();
+    let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+    assert_eq!(timeout, Duration::from_millis(400));
+}
+#[test]
+fn dispatch_only_starting_pane_recovery_timeout_claude() {
+    let h = crate::harness::HarnessConfig::claude();
+    let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+    assert_eq!(timeout, Duration::from_millis(400));
+}
+#[test]
+fn dispatch_only_starting_pane_recovery_timeout_codex() {
+    let h = crate::harness::HarnessConfig::codex();
+    let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+    assert_eq!(timeout, Duration::from_millis(400));
+}
+#[test]
+fn route_starting_actor_not_ready_log_line_includes_typed_lifecycle_facts() {
+    let h = crate::harness::HarnessConfig::codex();
+    let facts = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 42,
+        actor_state: ActorDispatchState::Busy,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "busy".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "restart_bootstrap".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    let line = route_starting_actor_not_ready_log_line(
+        Path::new("/tmp/doc.md"),
+        &h,
+        Duration::from_secs(8),
+        Duration::from_millis(8_125),
+        &facts,
+    );
+
+    assert!(line.contains("route_authoritative_actor_starting_not_ready"));
+    assert!(line.contains("file=/tmp/doc.md"));
+    assert!(line.contains("harness=codex"));
+    assert!(line.contains("timeout_ms=8000"));
+    assert!(line.contains("elapsed_ms=8125"));
+    assert!(line.contains("pane=%7"));
+    assert!(line.contains("generation=42"));
+    assert!(line.contains("actor_state=busy"));
+    assert!(line.contains("supervisor_health=healthy"));
+    assert!(line.contains("runtime_state=busy"));
+    assert!(line.contains("prompt_ready=false"));
+    assert!(line.contains("last_transition_reason=restart_bootstrap"));
+    assert!(line.contains("last_transition_caller=start"));
+}
+#[test]
+fn starting_actor_timeout_record_coalesces_same_generation_and_pane() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let facts = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 42,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    assert_eq!(
+        record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
+        StartingActorTimeoutLogDecision::NewTimeout
+    );
+    assert_eq!(
+        record_starting_actor_timeout(&file_path, &facts, "repeat timeout").unwrap(),
+        StartingActorTimeoutLogDecision::DuplicateTimeout
+    );
+
+    let mut next_generation = facts.clone();
+    next_generation.generation += 1;
+    assert_eq!(
+        record_starting_actor_timeout(&file_path, &next_generation, "next timeout").unwrap(),
+        StartingActorTimeoutLogDecision::NewTimeout
+    );
+}
+#[test]
+fn starting_actor_timeout_record_matches_same_generation_and_pane() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout-match.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let facts = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 3,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    assert!(!starting_actor_timeout_record_matches(&file_path, &facts));
+    record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap();
+    assert!(starting_actor_timeout_record_matches(&file_path, &facts));
+
+    let mut different_generation = facts.clone();
+    different_generation.generation += 1;
+    assert!(!starting_actor_timeout_record_matches(
+        &file_path,
+        &different_generation
+    ));
+
+    let mut different_pane = facts;
+    different_pane.pane_id = "%8".to_string();
+    assert!(!starting_actor_timeout_record_matches(
+        &file_path,
+        &different_pane
+    ));
+}
+#[test]
+fn starting_actor_timeout_record_does_not_match_nonstarting_actor_state() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout-busy.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let starting = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 3,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    record_starting_actor_timeout(&file_path, &starting, "first timeout").unwrap();
+
+    let mut busy = starting.clone();
+    busy.actor_state = ActorDispatchState::Busy;
+    busy.runtime_state = "busy".to_string();
+    busy.last_transition_reason = "ipc_inject".to_string();
+    busy.last_transition_caller = "dispatch".to_string();
+
+    assert!(
+        starting_actor_timeout_record_identity_matches(&file_path, &busy),
+        "the stale timeout has the same pane and generation as the post-clear busy projection"
+    );
+    assert!(
+        !starting_actor_timeout_record_matches(&file_path, &busy),
+        "a cached starting timeout must not short-circuit a later busy wait for the same generation"
+    );
+}
+#[test]
+fn starting_actor_timeout_record_clears_after_ready_or_terminal_refresh() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout-clear.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let facts = AuthoritativeActorReadyFacts {
+        pane_id: "%9".to_string(),
+        generation: 5,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    assert_eq!(
+        record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
+        StartingActorTimeoutLogDecision::NewTimeout
+    );
+    clear_starting_actor_timeout_record(&file_path);
+    assert_eq!(
+        record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
+        StartingActorTimeoutLogDecision::NewTimeout
+    );
+}
+#[test]
+fn wait_for_ready_override_guard_sets_and_restores_thread_local() {
+    use std::time::Duration;
+
+    // Baseline: no override set.
+    assert_eq!(wait_for_ready_override(), None);
+
+    // Outer scope sets a 30s override.
+    let outer = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(30)));
+    assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+
+    {
+        // Inner scope replaces with a 60s override.
+        let _inner = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
+        assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(60)));
+
+        // Nested unset is honored too.
+        let _none = WaitForReadyOverrideGuard::set(None);
+        assert_eq!(wait_for_ready_override(), None);
+    }
+
+    // Both nested guards dropped — back to outer 30s.
+    assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+
+    drop(outer);
+    // Outer dropped — back to unset baseline.
+    assert_eq!(wait_for_ready_override(), None);
+}
+#[test]
+fn busy_refusal_wait_secs_reports_override_then_default() {
+    use std::time::Duration;
+
+    // `#busy-not-ready-message-reports-actual-wait`: the busy/not-ready refusal
+    // must report the caller's `--wait-for-ready` override (the time route really
+    // waited), not the harness recovery constant. The JetBrains plugin passes 60,
+    // so the message must say 60 even when the Codex default is 8.
+    let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
+    assert_eq!(
+        dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
+        60
+    );
+    drop(guard);
+
+    // Without an override, the harness recovery-timeout default is reported.
+    let _none = WaitForReadyOverrideGuard::set(None);
+    assert_eq!(
+        dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
+        8
+    );
+}
+#[test]
+fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
+    let claude = crate::harness::HarnessConfig::claude();
+    // No busy cue → cold-startup timeout wording (unchanged behavior).
+    assert_eq!(
+        failclosed_wait_context(&claude, None, 12),
+        "waited 12s for claude startup"
+    );
+    // A live busy cue → the pane is busy on an active turn, not cold-starting.
+    assert_eq!(
+        failclosed_wait_context(&claude, Some("active claude turn"), 12),
+        "the pane is busy on an active claude turn (active claude turn), not cold-starting"
+    );
+}
+#[test]
+fn busy_route_queued_diagnostic_names_turn_in_progress_and_no_rerun() {
+    // #claude-busy-status-during-active-turn: the dispatch-only queued path
+    // surfaces a turn-in-progress + queued status (not the generic "rerun" busy
+    // message), so the operator sees why Run Agent Doc did not start now and that
+    // it will run on its own when the current turn finishes.
+    let claude = crate::harness::HarnessConfig::claude();
+    let msg = busy_route_queued_diagnostic_message(std::path::Path::new("plan.md"), &claude);
+    assert!(msg.contains("turn in progress"), "{msg}");
+    assert!(msg.contains("queued"), "{msg}");
+    assert!(msg.contains("plan.md"), "{msg}");
+    assert!(msg.contains("claude"), "{msg}");
+    assert!(msg.contains("No need to rerun"), "{msg}");
+    // Must NOT carry the generic busy diagnostic's rerun instruction.
+    assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");
+}
+#[test]
+fn drain_retry_concurrent_close_when_cycle_gone() {
+    // The cycle is no longer on disk — a concurrent finalize closed it.
+    assert_eq!(
+        classify_drain_retry("cyc-1", CyclePhase::PreflightStarted, None, 0, 3),
+        DrainRetryDecision::ConcurrentlyClosed
+    );
+}
+#[test]
+fn drain_retry_concurrent_close_when_cycle_no_longer_open() {
+    // The cycle reloaded as not-open (Committed) — a concurrent finalize closed it.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::Committed, false)),
+            0,
+            3
+        ),
+        DrainRetryDecision::ConcurrentlyClosed
+    );
+}
+#[test]
+fn drain_retry_retries_when_phase_advanced_and_attempts_remain() {
+    // The cycle is still open but its phase advanced (PreflightStarted ->
+    // WriteApplied) — a finalize is actively progressing in another process.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::WriteApplied, true)),
+            0,
+            3
+        ),
+        DrainRetryDecision::Retry
+    );
+}
+#[test]
+fn drain_retry_retries_when_cycle_id_changed_and_attempts_remain() {
+    // A different, newer open cycle replaced ours — concurrent progress.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-2", CyclePhase::PreflightStarted, true)),
+            1,
+            3
+        ),
+        DrainRetryDecision::Retry
+    );
+}
+#[test]
+fn drain_retry_gives_up_when_no_progress_observed() {
+    // Same cycle, same phase, still open — no concurrent finalize. A genuine
+    // stuck cycle must fail closed immediately rather than retry-spin.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::PreflightStarted, true)),
+            0,
+            3
+        ),
+        DrainRetryDecision::GiveUp
+    );
+}
+#[test]
+fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
+    // Concurrent progress, but this is the last attempt — fail closed instead
+    // of looping forever.
+    assert_eq!(
+        classify_drain_retry(
+            "cyc-1",
+            CyclePhase::PreflightStarted,
+            Some(("cyc-1", CyclePhase::WriteApplied, true)),
+            2,
+            3
+        ),
+        DrainRetryDecision::GiveUp
+    );
+}
+}
+

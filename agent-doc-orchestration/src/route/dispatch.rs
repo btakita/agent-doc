@@ -867,3 +867,100 @@ pub(crate) fn validate_routed_trigger_payload(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+#[test]
+fn authoritative_actor_starting_hint_names_reroute_and_restart() {
+    let file = std::path::Path::new("/tmp/session.md");
+    let hint = authoritative_actor_dispatch_recovery_hint(
+        crate::session_actor::ActorState::Starting,
+        file,
+    );
+    assert!(
+        hint.contains("rerun `agent-doc /tmp/session.md`"),
+        "starting actor hint should tell the user how to retry: {hint}"
+    );
+    assert!(
+        hint.contains("prompt_ready=true"),
+        "starting actor hint should name the dispatch-ready wait state: {hint}"
+    );
+    assert!(
+        hint.contains("agent-doc start /tmp/session.md"),
+        "starting actor hint should name the owner restart recovery: {hint}"
+    );
+}
+#[test]
+fn direct_pane_codex_resubmit_only_on_timeout_with_trigger_visible() {
+    // `#jbcodexsubmit`: a Codex direct-pane submit that times out with the
+    // trigger still drafted in the composer earns exactly one bare-Enter
+    // re-submit.
+    assert!(direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Trigger consumed → no re-submit even on a timeout report.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        false
+    ));
+    // Accepted → already submitted, never re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::Accepted,
+        true
+    ));
+    // Other harnesses are untouched — only Codex needs the separate Enter event.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "claude",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    assert!(!direct_pane_needs_codex_resubmit(
+        "opencode",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+}
+#[test]
+fn codex_direct_pane_resubmit_is_scoped_to_timed_out_visible_codex() {
+    // #jbcodexsubmit / #efscodexsubmit: a Codex direct-pane submit that timed out
+    // with the trigger STILL VISIBLE (the composer left the routed prompt drafted)
+    // warrants exactly one bare-Enter re-submit.
+    assert!(direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Strictly Codex-scoped: claude / opencode submit behavior is never perturbed.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "claude",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    assert!(!direct_pane_needs_codex_resubmit(
+        "opencode",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Already accepted ⇒ the prompt submitted, nothing to re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::Accepted,
+        true
+    ));
+    // Timed out but the trigger was consumed (not visible) ⇒ not a non-submit; a
+    // bare Enter here could fire an unintended empty submit, so don't re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        false
+    ));
+}
+}

@@ -553,3 +553,153 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let _cwd_guard = ScopedCurrentDir::set(dir.path());
+    let iso = IsolatedTmux::new("route-test-authoritative-actor-claude-harness");
+    let session = "claude";
+    let cwd = test_cwd();
+    let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+    let doc = dir.path().join("session.md");
+    std::fs::write(
+            &doc,
+            "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let session_id = "route-authoritative-actor-claude";
+    let actor_window = iso.pane_window(&actor_pane).unwrap();
+    crate::session_actor::project_binding_in(
+        dir.path(),
+        &file_path,
+        session_id,
+        &actor_pane,
+        &actor_window,
+        "route",
+        "dispatch_bind",
+    )
+    .unwrap();
+
+    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+        IpcMethod::State => IpcResponse::ok(serde_json::json!({
+            "running": true,
+            "state": "healthy",
+            "actor_state": "ready",
+            "restart_count": 0
+        })),
+        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
+        IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+        IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+    })
+    .unwrap();
+
+    let actor = load_authoritative_actor_dispatch_target(
+        &iso,
+        &doc,
+        session_id,
+        &file_path,
+        &HarnessConfig::claude(),
+        true,
+        true,
+    )
+    .expect("normalized Claude harness name should not fail the authoritative actor lookup")
+    .expect("healthy actor record should remain dispatchable");
+    assert_eq!(actor.record.harness, "claude-code");
+    assert_eq!(actor.record.pane_id, actor_pane);
+
+    ipc.stop();
+}
+#[test]
+fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_registered_matches() {
+    let actor = test_degraded_actor("%42");
+    assert!(dispatch_only_can_use_degraded_authoritative_actor(
+        &actor,
+        Some("%42"),
+        None,
+    ));
+}
+#[test]
+fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_live_owner_matches() {
+    let actor = test_degraded_actor("%42");
+    assert!(dispatch_only_can_use_degraded_authoritative_actor(
+        &actor,
+        None,
+        Some("%42"),
+    ));
+}
+#[test]
+fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_both_match() {
+    let actor = test_degraded_actor("%42");
+    assert!(dispatch_only_can_use_degraded_authoritative_actor(
+        &actor,
+        Some("%42"),
+        Some("%42"),
+    ));
+}
+#[test]
+fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_no_match() {
+    let actor = test_degraded_actor("%42");
+    assert!(!dispatch_only_can_use_degraded_authoritative_actor(
+        &actor,
+        Some("%99"),
+        Some("%99"),
+    ));
+}
+#[test]
+fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_none_provided() {
+    let actor = test_degraded_actor("%42");
+    assert!(!dispatch_only_can_use_degraded_authoritative_actor(
+        &actor, None, None,
+    ));
+}
+#[test]
+fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
+    let healthy_ready = SupervisorRuntime {
+        health: SupervisorHealth::Healthy,
+        actor_state: Some(crate::session_actor::ActorState::Ready),
+    };
+    assert!(
+        !mismatched_authoritative_actor_can_be_replaced(
+            &healthy_ready,
+            crate::session_actor::ActorState::Ready,
+        ),
+        "a healthy ready actor from another harness is still authoritative and must block"
+    );
+
+    let healthy_closed = SupervisorRuntime {
+        health: SupervisorHealth::Healthy,
+        actor_state: Some(crate::session_actor::ActorState::Closed),
+    };
+    assert!(
+        mismatched_authoritative_actor_can_be_replaced(
+            &healthy_closed,
+            crate::session_actor::ActorState::Closed,
+        ),
+        "a closed actor from another harness should not strand a fresh harness start"
+    );
+
+    let unreachable = SupervisorRuntime {
+        health: SupervisorHealth::Unreachable,
+        actor_state: None,
+    };
+    assert!(
+        mismatched_authoritative_actor_can_be_replaced(
+            &unreachable,
+            crate::session_actor::ActorState::Ready,
+        ),
+        "an unreachable supervisor cannot prove live cross-harness ownership"
+    );
+}
+}

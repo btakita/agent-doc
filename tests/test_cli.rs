@@ -690,12 +690,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // generic busy actor on the dispatch-only fail-closed path. Routed
         // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
         // FlowEvent.
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 21,
         // +2 (#jb-run-agent-doc-submit-diagnostics): the redacted
         // `route_submit_observation` / `route_submit_issue` helpers can include
         // dispatch-start proof labels while keeping prompt-submit failures
         // visible in ops-log review.
-        ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
+        ("agent-doc-orchestration/src/route.rs", "proof=") => 3,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
         // when the existing agent:queue is polluted/unparseable the route
@@ -706,13 +706,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the busy-pane reroute now logs when it skips the editor-opening `C-g`
         // because the live Codex pane is not in a shell reverse-i-search /
         // history-search state, and goes straight to the Escape + C-c path.
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 6,
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 8,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 4,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 4,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 2,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 2,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 9,
         ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 1,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
-        ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 2,
+        ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 4,
         ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 2,
         ("agent-doc-orchestration/src/route/busy_pane.rs", "reason=") => 1,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:

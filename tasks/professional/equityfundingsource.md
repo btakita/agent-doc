@@ -78,7 +78,37 @@ Once the account is ready, I can connect the test environment first, run through
 
 Best,
 Brian
-<!-- agent:boundary:96260398 -->
+Draft email:
+
+Subject: Stripe account setup for borrower payments
+
+Hi Robert and Judith,
+
+We are almost ready to launch the new Equity Funding Source website and portals. One of the last launch items is connecting Stripe so borrower payments can be tested safely first, then switched to live payments when you approve.
+
+Please create or prepare an EFS-owned Stripe account for borrower payments.
+
+Recommended Stripe setup path:
+
+1. Create the Stripe account under the Equity Funding Source business name: https://dashboard.stripe.com/register
+2. Complete Stripe's business verification and account checklist so the account can process live payments and receive payouts: https://docs.stripe.com/get-started/account/set-up
+3. Add the payout bank account that should receive borrower payment deposits.
+4. Enable the payment methods borrowers should be able to use. For the borrower portal, ACH Direct Debit is the most important option if you want bank-account payments; card payments can also be enabled if desired. Stripe's ACH setup reference is here: https://docs.stripe.com/payments/ach-direct-debit
+5. Use Stripe's sandbox/test mode first. Test mode uses separate API keys and simulated payments, so we can verify the borrower payment flow without moving real money. Stripe's API key guide is here: https://docs.stripe.com/keys
+6. After testing is approved, switch to live mode and use the live API keys/webhook signing secret for production. Please do not send live secret keys by email; either invite me/the implementation team as a Stripe team member or share credentials through a secure password manager.
+
+Items needed to finish the integration:
+
+- A Stripe team invite for the implementation work, or secure access to the account.
+- Confirmation on whether borrower payments should support ACH only, card only, or both ACH and card.
+- Confirmation of the payout bank account and the customer statement descriptor borrowers should see.
+- Approval before we turn on live borrower payments after the final test transaction passes.
+
+Once the account is ready, I can connect the test environment first, run through the borrower payment flow, and then prepare the live switch for your approval.
+
+Best,
+Brian
+<!-- agent:boundary:22729c49 -->
 <!-- /agent:exchange -->
 ###
 <!--

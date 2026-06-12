@@ -609,6 +609,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/queue_consume.rs",
     ];
     let tokens = [
         "guard_",
@@ -824,7 +825,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // fallback through the single `guard_visible_write_idle_and_current`
         // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
         // tokens, not more — the guard boundary is centralized, not added.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 67,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 66,
+        // queue-prompt consumption extracted into write/queue_consume.rs
+        // (#splitmods3 large-module split). The moved `guard_`/`reason=`
+        // tokens are tracked against the new submodule, not added anew.
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 1,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
@@ -885,7 +891,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `try_editor_converge_skips_wedged_socket_when_latched_degraded`). The
         // socket failure path also now feeds `record_ipc_socket_ack_timeout` /
         // clears via `clear_ipc_socket_ack_timeouts` — no new `reason=` token.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 31,
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 30,
         _ => 0,
     }
 }

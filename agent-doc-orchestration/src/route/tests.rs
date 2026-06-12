@@ -11581,3 +11581,39 @@ fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
         DrainRetryDecision::GiveUp
     );
 }
+
+#[test]
+fn codex_direct_pane_resubmit_is_scoped_to_timed_out_visible_codex() {
+    // #jbcodexsubmit / #efscodexsubmit: a Codex direct-pane submit that timed out
+    // with the trigger STILL VISIBLE (the composer left the routed prompt drafted)
+    // warrants exactly one bare-Enter re-submit.
+    assert!(direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Strictly Codex-scoped: claude / opencode submit behavior is never perturbed.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "claude",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    assert!(!direct_pane_needs_codex_resubmit(
+        "opencode",
+        CommandDispatchStatus::TimedOut,
+        true
+    ));
+    // Already accepted ⇒ the prompt submitted, nothing to re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::Accepted,
+        true
+    ));
+    // Timed out but the trigger was consumed (not visible) ⇒ not a non-submit; a
+    // bare Enter here could fire an unintended empty submit, so don't re-send.
+    assert!(!direct_pane_needs_codex_resubmit(
+        "codex",
+        CommandDispatchStatus::TimedOut,
+        false
+    ));
+}

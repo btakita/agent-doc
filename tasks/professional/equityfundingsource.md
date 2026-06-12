@@ -17,14 +17,14 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-EFS deployed Worker 0336450c-126f-49da-9321-1d4c74a6d2c1 on 2026-06-11: full-application validation failures now add red field-level error boxes for missing/invalid fields and those boxes disappear as completed values pass live validation. make check passed (559 tests + build + worker build); remote D1 has no pending migrations; smoke checks returned / 200 and /portal-borrower/new-application 303 unauthenticated redirect. CI workflow check is unavailable because this repo has no workflow named CI. EFS submodule has the intended uncommitted source changes per local no-commit instruction.
+EFS commit 3ffcc32 pushed on 2026-06-12: admin full-application Step 4 subject-property fields are editable, extended subject-property fields persist, and admin edits are tracked in application_subject_property_change_logs with field-level old/new values. Verification passed: targeted tests, full make check, and clean committed-tree make check; GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
 <!-- /agent:status -->
 
 ## Exchange
@@ -42,15 +42,15 @@ Implemented and pushed EFS commit 3ffcc32 (`feat(admin): edit subject property f
 Change history was not previously tracked for subject-property edits. It is now: migration `0061_application_subject_property_admin_history.sql` adds the extended subject-property columns plus `application_subject_property_change_logs`, and the admin endpoint records one history row per changed field with old value, new value, admin user, and timestamp. The Step 4 card also shows that history.
 
 Verification passed: targeted `bun test tests/admin-subject-property-edit.test.ts tests/apply4-full-application-p5.test.ts tests/admin-full-application-approve-ui.test.ts`, full `make check`, and a second clean committed-tree `make check` after stashing unrelated local EFS edits. GitHub CI lookup is still unavailable because this repo has no workflow named `CI`. Existing unrelated EFS local changes were restored and remain unstaged.
-<!-- agent:boundary:9fe2060b -->
+Implemented and pushed EFS commit 3ffcc32. Admin full-application Step 4 subject-property fields are now editable, extended subject-property fields persist, and admin edits are tracked per field in application_subject_property_change_logs with old and new values. Verification passed: targeted tests, full make check, and clean committed-tree make check. GitHub CI workflow check is unavailable because this repo has no workflow named CI. Existing unrelated EFS local changes remain unstaged.
+<!-- agent:boundary:e4325ef4 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
+Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The admin should be able to edit all fields in "Step 4 - Subject property" of https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3. Do we track the change history? We should.
 <!-- /agent:queue -->
 
 ## Backlog

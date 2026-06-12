@@ -50,6 +50,23 @@ Global flags: `--compact`, `--envelope`, `--pretty`, `--terse`, `--schema`, `--a
 
 When a search envelope includes `report.scale_guard`, run one of its `narrow_commands` before fanning out parallel agents.
 
+## Pure sessions (no `/agent-doc`, no hooks) — use tsift manually
+
+This skill applies in **every** session, not just hook-equipped Claude Code. In a pure Claude, Codex, or OpenCode session there is no `PreToolUse` rewrite hook to redirect `cat`/`grep`/`git diff` for you, so **drive the envelope-first commands yourself** to keep token cost down:
+
+- **Session start:** run `tsift status` from the owning repo (or submodule) root; if it prints a `run:` recommendation or `index: stale`, run `tsift status --fix` (or `tsift index .`). When the harness can't perform write commands, ask the user to run the printed command.
+- **Reading source:** `tsift --envelope source-read <file> --budget normal` and `tsift --envelope symbol-read <symbol> --budget normal` instead of `cat`/`head`/`sed` on code.
+- **Searching:** `tsift --envelope search <query> --budget normal` instead of `rg`/`grep -r`; `tsift --envelope explain <symbol> --budget normal` and `tsift graph <symbol> --callers|--callees` for navigation.
+- **Diffs / sessions / noisy output:** `tsift diff-digest [path]` instead of `git diff`/`git show`/`git log -p`; `tsift --envelope session-review <path> --next-context --budget normal` (or `context-pack`) instead of replaying long session docs / JSONL transcripts / runtime logs; `tsift --envelope digest-runner --kind test|log …` for `cargo test`/`pytest`/verbose cargo output.
+- **One-shot equivalent:** `tsift rewrite --run '<command>'` executes the same envelope-first, artifact-backed tsift rewrite for any supported command — the manual stand-in for the missing hook. It covers broad search, raw transcript/session/log reads, git diff/show/patch-log, cargo/pytest tests, and cargo build/check/clippy/install. If RTK is installed and supports the wrapped command, the output filter delegates to RTK while preserving tsift artifact handles.
+
+**Per-harness setup so the rewrites are one keystroke:**
+- **Claude Code:** install the `UserPromptSubmit` auto-reindex + `PreToolUse` rewrite hooks (see [runbooks/hook-integration.md](runbooks/hook-integration.md)) so the rewrites happen transparently.
+- **Codex:** `tsift init --codex` injects the prompt-time auto-reindex hook into `.codex/hooks.json`. Codex has no `PreToolUse` rewrite, so still run `tsift rewrite --run '<command>'` before broad search / raw reads / diffs / tests.
+- **OpenCode:** `tsift init --opencode` installs project-local command shortcuts including `/tsift-rewrite-run`; use it (or `tsift rewrite --run`) in place of the missing hook.
+
+Fall back to raw `cat`/`grep` only when a tsift result is genuinely insufficient.
+
 ## Verification
 
 Run `make check` (clippy + full suite) from `src/tsift` before committing; capture the exit explicitly (an rtk wrapper can mask it — grep output for `result: FAILED`). After local changes, check CI with `gh run list --workflow CI --limit 1` and fix failures before calling work complete.

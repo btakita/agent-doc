@@ -130,14 +130,39 @@ pkill -f 'agent-doc controller serve --project-root /home/brian/work/btakita/age
 After that, drive a `go` queue with `/loop` active and grep `ops.log` for `SkipSelfDrivingLoopOwner` + absence of stacked triggers. If you instead see real `idle_queue_watch_drain` lines firing *while* `/loop` is also dispatching, the lease isn't being claimed — file that and I'll check the logs.
 
 **Not auto-looping.** This session is degraded (preflight: session drift across 3 tmux sessions, stale install, recovered a wedged `preflight_started` cycle). The remaining queue items (`#rtwbcast`, `#snbc`) are explicitly clean-session / live-verify work that this controller races. I'm stopping here rather than draining further from inside the affected session.
-<!-- agent:boundary:cc299046 -->
+
+### Re: [#rtwbcast] — rung-4 multi-editor broadcast: investigated, blocked on a protocol decision — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: [#rtwbcast]
+
+
+I drove a clean-context investigation (separate agent, `src/agent-doc` cwd, no install, no controller drive — this affected session's controller is part of the IPC/patch path under test). Result: **rung 4 cannot be landed in the Rust layer alone, and nothing was committed speculatively.** It needs an editor-plugin protocol change plus a two-live-IDE verify, so it's genuinely blocked — not deferrable effort.
+
+**Why it's not Rust-only (three architectural gaps):**
+1. **Buffer ingest is single-sidecar, last-writer-wins, no per-editor identity.** `agent_doc_document_changed_digest_content` (`ffi.rs:238`) writes `.agent-doc/live-buffer/<pathhash>` keyed on the **document path only**. Two editors on one doc overwrite each other's sidecar — the model can't hold both buffers to merge or identify an originator.
+2. **Patch delivery is a single-consumer delete-on-first-ACK queue, not a broadcast bus.** `PatchWatcher.kt` applies `<hash>.json` and deletes it as ACK; the first editor to apply deletes it, so the second never reliably sees a broadcast patch written there.
+3. **No per-editor echo suppression.** `claimed-patches/<patch_id>` is a suppress-ALL sentinel for `--force-disk`, not per-editor; the FFI buffer-report and patch JSON carry no `editor_id`, so "originator must not re-apply" is inexpressible today.
+
+**What already exists (so this isn't from zero):** the CRDT merge primitive (`merge::merge_contents_crdt`) and the deterministic SimWorld coverage (`multi_editor_crdt_broadcast_converges_without_file_cache_conflict`, which currently calls the merge inline — there's no production seam behind it yet).
+
+**Recommended path — Option A (per-editor channel + `editor_id`):** add `editor_id` to the FFI buffer-report ABI + patch JSON; key live-buffer sidecars per editor; write `<hash>.<editorid>.json` per peer (skipping the originator); each plugin watches/ACKs only its own. Most correct; broad blast radius (FFI ABI bump + JB + VS Code + version bumps). I decomposed it into four shippable rungs in the plan — `#rtwbcast-id` → `#rtwbcast-deliver` → `#rtwbcast-merge` → `#rtwbcast-verify`. (Option B = multi-ACK shared patch + editor-presence registry, smaller delta but needs crashed-editor GC; Option C = Rust-only `compute_broadcast` seam now, but that's untested-in-production scaffolding, so I did not commit it.)
+
+**Recorded durably:** the full gap analysis + Options A/B/C + the rung decomposition are committed to `tasks/agent-doc/plan-realtime-editor-watcher.md` (new "Rung 4" section, commit `42c71f048`), and the `#rtwbcast` backlog item now carries the precise scope instead of a bare "needs live verify."
+
+**Your call to unblock:** confirm Option A (or pick B), then a clean session lands `#rtwbcast-id`/`-deliver`/`-merge` (each `make check` + SimWorld-tested) and you drive the two-IDE `#rtwbcast-verify`. I recommend Option A.
+
+**Not auto-looping** — degraded session (preflight: drift across 3 tmux sessions, stale install) and the next item genuinely needs your protocol decision before any clean-session implementation can start.
+<!-- agent:boundary:f5ee10a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: :round_pushpin: do [#kp5z]~~
-- :pushpin: :round_pushpin: [#rtwbcast]
+- ~~:pushpin: :round_pushpin: [#rtwbcast]~~
+- Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.
 - :round_pushpin: do [#snbc]
 - :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
 ---
@@ -256,7 +281,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#snbc] [recommended] Consolidate the separate snapshot + baseline files into git HEAD (durable committed merge base) + the realtime document model (uncommitted current via realtime_model::current_doc), eliminating the two drift-prone on-disk files that cause File Cache Conflicts / churn on realtime docs. Root cause: the merge base is read from disk and lags the authoritative editor buffer (same defect as #rtwwire/#rtwfeed). NEEDS a read-site audit first (recovery sidecars, reset --from-current, hash-keyed cycle state hold uncommitted state git HEAD does not cover) — migration, not a one-line delete. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md.
 - [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
-- [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. When disk or any editor buffer changes the file, update the realtime model and broadcast the merged (CRDT) change back to ALL open editor buffers, so the same doc open in JB + VS Code converges in both with zero File Cache Conflict. Acceptance bar: reliability (no File Cache Conflicts), sync-before-apply. Builds on #rtwfeed + #rtwwire. NEEDS multi-editor live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
+- [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 
 ## Review

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -53,13 +53,28 @@ Run in a fresh session NOT hosting a live agent-doc IPC document, decomposed as 
 Then build+install+push in that clean session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4).
 
 **Auto-loop halted:** the next queued item #jbcompactcrdt carries the same `MUST run in a CLEAN session` constraint, so I am NOT draining into it. Start a dedicated clean session for both.
-<!-- agent:boundary:abb4ba6b -->
+
+### Re: do [#rtwbcast] — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#rtwbcast]
+
+
+I did not execute #rtwbcast in this live IPC-hosting session. The item stays open because it is not code-complete: the remaining work includes editor_id ABI changes, per-editor patch delivery, per-editor echo suppression, and operator-driven two-live-IDE convergence verification.
+
+The immediate blocker is session safety. This pane is finalizing `tasks/agent-doc/agent-doc-bugs2.md` through the same agent-doc IPC machinery that #rtwbcast would require rebuilding/installing. Running the `#spec-test-build-install-commit-push` style flow here would risk hot-reloading the write path while this response is being persisted, which is the drift class already called out by the backlog.
+
+I narrowed `#rtwbcast` to the next executable clean-session path: start with `#rtwbcast-id`, then `#rtwbcast-deliver`, `#rtwbcast-merge`, and finally operator-run `#rtwbcast-verify`. No repository implementation files were changed in this cycle; only this session document closeout is being persisted.
+
+Commands/evidence used: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog/exchange/review, and the pending-ops runbook. Verification is this closeout plus `agent_doc_session_check`; confidence is high that this is the correct lifecycle outcome for the current queue head. Escalation: run the implementation from a dedicated clean session, then perform the two-live-IDE verification.
+<!-- agent:boundary:6b1f9472 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: :round_pushpin: do [#rtwbcast]
+- ~~:pushpin: :round_pushpin: do [#rtwbcast]~~
 - :pushpin: :round_pushpin: do [#jbcompactcrdt]
 <!-- /agent:queue -->
 ###
@@ -91,7 +106,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#jbcompactcrdt] JB Compact Exchange CRDT-driven (resolves File Cache Conflict). Direction CONFIRMED by operator. Re-implement+re-enable the disabled full-content editor-IPC path (try_ipc_full_content_with_mode, write.rs:13326, currently Ok(false) reason=disabled_by_default) as a component-scoped exchange op:replace via editor IPC (mirror #q7jm), replacing the direct disk write at compact.rs:332 (compact_exchange_direct_write). Keep disk write as transport=disk_fallback, gate behind listener-active, emit proof compact_writeback transport=editor_ipc|disk_fallback, add SimWorld coverage for the concurrent-edit convergence. MUST run in a CLEAN session (rebuilding the IPC-write cdylib mid-session hot-reloads the machinery finalizing the same response = drift). Live JB two-editor verify is operator-drive (ops.log transport=editor_ipc + no File Cache Conflict). Plan: tasks/agent-doc/plan-jb-compact-crdt.md
-- [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
+- [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 
 ## Review

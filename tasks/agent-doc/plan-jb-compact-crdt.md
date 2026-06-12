@@ -1,5 +1,23 @@
 # Plan: JB `Compact Exchange` / finalize raises `File Cache Conflict` — make it CRDT-driven
 
+## Status: CODE-COMPLETE (2026-06-12)
+
+The CRDT-driven compact path shipped as `#w42v` (agent-doc `7b6f022e`, in HEAD):
+`compact::apply_compacted_document` now calls `write::try_compact_editor_converge`
+— a component-scoped `exchange` `op:replace` over editor IPC (`transport=editor_ipc`)
+with the guarded disk write (`compact_exchange_direct_write`) as `transport=disk_fallback`,
+and `compact_writeback transport=…` proof in `ops.log`. The last open deliverable
+— deterministic concurrent-edit convergence coverage — landed `3083b821`:
+`compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits` (the
+convergence patch only `op:replace`s the changed `exchange`, so concurrent `queue`
+typing is never clobbered) and `try_compact_editor_converge_converges_via_editor_ipc_with_listener`
+(live-listener end-to-end `transport=editor_ipc`). Spec: `specs/12-deterministic-simulation.md`.
+
+**Remaining = operator-drive only:** to dogfood live, run `agent-doc lib-install`
+(deploys the already-committed cdylib so the open IDE picks it up via mtime
+hot-reload), then trigger `Compact Exchange` with the buffer dirty and confirm
+`ops.log` shows `compact_writeback … transport=editor_ipc` and NO `File Cache Conflict`.
+
 ## Symptom (operator reports, 2026-06-11)
 
 - "JB `Compact Exchange` should be CRDT driven... I'm getting a `File Cache Conflict`."

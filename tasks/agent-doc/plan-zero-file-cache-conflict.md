@@ -67,11 +67,24 @@ the fallback.
   highest-frequency operator paths) onto `converge_document_or_disk`. The
   force-disk repair path keeps its raw `atomic_write` bypass (intentionally skips
   IPC/IDE + the visible-write guard).
-- **#fcc0d** ◑ PARTIAL (`612a8dae`) — `run_template` (non-CRDT, the one remaining
-  genuine direct-disk-no-IPC component write) now converges first / bare-disk
-  fallback. The CRDT `run_stream` finalize/stream disk writes are NOT migrated:
-  they are post-`try_ipc`-failure fallbacks (see #fcc0a) — re-attempting IPC there
-  re-hits the failed listener. Their fix is #fcc0e, not the converger.
+- **#fcc0d** ✅ DONE (`612a8dae` + `9f0c63f8`) — Every genuine direct-disk-no-IPC
+  component write now converges through the editor: `run_template` (non-CRDT,
+  `612a8dae`) and `apply_template_from_string` (repair recovery, `9f0c63f8`). Each
+  converges first / bare-disk fallback (the guard already ran). The remaining
+  `atomic_write(file, …)` document sites are deliberately left direct, audited:
+  - `run_stream` exit(75) (9541) + `run_ipc_timeout_fallback` (10293):
+    post-`try_ipc`-timeout fallbacks — the listener just timed out, so socket
+    re-convergence is provably wasteful. Their dialogs are the wedge → **#fcc0e**.
+  - `run_stream` tail (9889): `force_disk` / no-plugin — force_disk must bypass IPC
+    by contract; no-plugin has no listener.
+  - inline `run` (8729) + `apply_append_from_string` (10336): inline
+    `## User`/`## Assistant` docs have no `agent:` components → component
+    `op:replace` convergence is N/A.
+  - `try_auto_recover_live_prompt_drift` (7373) + `repair_disk_from_{normalization_fallback,
+    ipc_dedupe}` (10796/12145): already editor-first — callers try
+    `redeliver_*_to_editor` and fall to disk only when redelivery didn't land.
+  - `repair_partial_response_materialization_before_fallback` (5026): IPC-degraded
+    pre-fallback cleanup of a mid-IPC partial write; not a clean current→target delta.
 - **#fcc0e** TODO — Resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops
   failing (stale `patch_id` replay, wedged `--handoff-state preparing` controllers)
   — once the listener is reliable, the `run_stream` fallbacks rarely fire and the
@@ -79,15 +92,21 @@ the fallback.
 
 ## Status (2026-06-12)
 
-`#fcc0a`/`#fcc0b`/`#fcc0c` + the `#fcc0d` template slice are committed and pushed
-(agent-doc `612a8dae`). `make check` green (4364 passed), clippy clean. Binaries
-rebuilt (`cargo install` + `cargo build --release`) and cdylib refreshed
-(`agent-doc lib-install`) — running controllers still serve the prior build until
-`agent-doc admin recycle --all-projects` / session restart. Remaining: **#fcc0e**
-(the IPC wedge — the real fix for the CRDT finalize fallbacks) and the operator-drive
-live JB "0 `File Cache Conflict` dialogs" proof (drive a queue drain with a live IDE,
-confirm `ops.log` shows `queue_consume_writeback … transport=editor_ipc` and zero
-disk-write dialogs).
+`#fcc0a`/`#fcc0b`/`#fcc0c`/`#fcc0d` are all committed and pushed (agent-doc
+`612a8dae` + `9f0c63f8`). Every genuine direct-disk-no-IPC document-write site
+(queue consume, done-id mark, `run_template`, `apply_template_from_string`) now
+converges through the editor IPC when a JB listener is active; the remaining direct
+writes are audited as post-IPC-timeout (#fcc0e), force_disk/no-plugin, inline (no
+components), or already editor-first. `make check` green (4364 passed), clippy
+clean. Binaries rebuilt (`cargo install` + `cargo build --release`) and cdylib
+refreshed (`agent-doc lib-install`) — running controllers still serve the prior
+build until `agent-doc admin recycle --all-projects` / session restart.
+
+Remaining for "0 dialogs": **#fcc0e** (the `#ipcdrift`/`#stuckhandoff2` IPC wedge —
+the real fix for the CRDT `run_stream` finalize/timeout fallbacks, the only writes
+that still hit disk under a live buffer) and the operator-drive live JB proof (drive
+a queue drain with a live IDE, confirm `ops.log` shows `queue_consume_writeback …
+transport=editor_ipc` and zero disk-write dialogs).
 
 ## Immediate operator action
 

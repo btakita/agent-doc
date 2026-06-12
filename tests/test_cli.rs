@@ -615,6 +615,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
         "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-orchestration/src/write/exchange_reconcile.rs",
     ];
     let tokens = [
         "guard_",
@@ -830,9 +831,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // fallback through the single `guard_visible_write_idle_and_current`
         // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
         // tokens, not more — the guard boundary is centralized, not added.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 44,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 43,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 3,
+        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 1,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into write/queue_consume.rs, write/ipc.rs, and
         // write/converge.rs (#splitmods3 large-module split). The moved

@@ -4078,6 +4078,47 @@ fn handle_dispatch(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
+    // M2 (#stuckhandoff2): only a `Stable` controller is authoritative for mutating
+    // dispatch admission. A controller still `Preparing` (mid-handoff, or wedged
+    // because the client died before `promote_handoff`), `Promoted`, `Retiring`, or
+    // `Failed` must refuse to admit dispatches that drive session writes — even
+    // before M1's self-watchdog reaps it — so a wedged controller cannot corrupt the
+    // worktree between wedge and reap (this also shrinks the `#pcwc` drift window).
+    // Read-only status/inspect and the operator/handoff/admin control RPCs are
+    // handled before `handle_dispatch` and stay available, so the operator can still
+    // pause/shut down a non-authoritative controller and the handoff can still
+    // promote it to `Stable`.
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        let receipt = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some("controller_not_authoritative"),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Rejected,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        crate::ops_log::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "dispatch_refused_non_stable_controller file={} handoff_state={:?} generation={} receipt_id={}",
+                file.display(),
+                bootstrap.handoff_state,
+                generation,
+                receipt.receipt_id,
+            ),
+        );
+        anyhow::bail!(
+            "dispatch refused for {}: controller not authoritative (handoff_state={:?})",
+            file.display(),
+            bootstrap.handoff_state
+        );
+    }
     let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
     let queue_control = {
@@ -7742,6 +7783,87 @@ agent:queue\n\
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+    }
+
+    // ---- M2 (#stuckhandoff2): non-Stable controller refuses dispatch ----
+
+    #[test]
+    fn dispatch_refused_when_controller_not_stable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/m2-gate.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-m2\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-m2", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-m2",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let dispatch_request = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-m2".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("m2 gate test".to_string()),
+        };
+
+        // A controller wedged in Preparing (client died before promote_handoff) is
+        // non-authoritative: it must refuse to admit the dispatch.
+        let preparing = ControllerBootstrap {
+            handoff_state: ControllerHandoffState::Preparing,
+            handoff_started_at: Some(timestamp_secs()),
+            ..test_bootstrap(&dir)
+        };
+        let err = handle_dispatch(&preparing, None, dispatch_request()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("controller not authoritative"),
+            "a Preparing controller must refuse dispatch admission: {err:#}"
+        );
+
+        // The refusal is recorded as a rejection receipt + ops-log line for forensics.
+        let conn = open_state_db(dir.path()).unwrap();
+        let refused: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'controller_not_authoritative'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(refused, 1, "non-Stable dispatch refusal must record a receipt");
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("dispatch_refused_non_stable_controller"));
+
+        // The identical dispatch on a Stable controller passes the authority gate —
+        // it may proceed to admit (or fail for an unrelated reason), but never for
+        // non-authority.
+        let stable = test_bootstrap(&dir); // handoff_state: Stable
+        if let Err(err) = handle_dispatch(&stable, None, dispatch_request()) {
+            assert!(
+                !format!("{err:#}").contains("controller not authoritative"),
+                "a Stable controller must not be refused for authority: {err:#}"
+            );
+        }
     }
 
     // ---- M4 (#stuckhandoff2): client handoff drop-guard ----

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -35,7 +35,15 @@ queue: start
 Compacted content:
 ❯ - Archived 25 response topic(s): do [#swint]; Root cause of "stuck-handoff" + how the binary mitigates it; Do we still need separate snapshot + baseline files?; 22 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1f4b774e -->
+
+### Re: struck `do [#fintol]` — opus-4-8
+
+Confirmed — `#fintol` is genuinely complete, so striking it is correct. The finalize forward-merge tolerance landed in the agent-doc submodule at `849ad9d9` (`agent-doc(#fintol2/#fintol3): land finalize forward-merge tolerance + green re-baseline`); current submodule HEAD is `9d1235cd`. No further work needed for `#fintol`.
+
+Queue state after this strike: the active head is now `#pcwc` (post-commit IPC worktree corruption — note `#pcwc` already has groundwork at `8aea7e3d agent-doc(#pcwc): auto-reconcile post-commit worktree corruption to HEAD`), followed by `#rtwbcast` and `#jbcompactcrdt`, then two free-text questions.
+
+One caution before draining further: this session is heavily bloated (largest turn ~477k tokens, ~97% cached resend, restart churn, ~18k no-op closeouts per next-context). Both `#pcwc` and `#rtwbcast` carry known blockers (carry-forward invariant; editor-plugin protocol decision + two-live-IDE verify) that won't close cleanly in one auto-loop cycle. Recommend `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` (or a fresh `agent-doc start`) before taking on the remaining implementation items.
+<!-- agent:boundary:1f9fca45 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -44,12 +52,7 @@ Compacted content:
 - ~~:pushpin: pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.~~
 - ~~:pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.~~
 - ~~:round_pushpin: do [#snbc2]~~
-- :round_pushpin: do [#fintol]
-- :round_pushpin: do [#pcwc]
-- :round_pushpin: do [#rtwbcast]
-- :round_pushpin: do [#jbcompactcrdt]
-- The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
-- If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
+- ~~:round_pushpin: do [#fintol]~~
 <!-- /agent:queue -->
 ###
 <!--

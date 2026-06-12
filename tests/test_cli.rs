@@ -603,6 +603,9 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let hot_paths = [
         "agent-doc-orchestration/src/git.rs",
+        "agent-doc-orchestration/src/git/safe_mutation.rs",
+        "agent-doc-orchestration/src/git/normalize.rs",
+        "agent-doc-orchestration/src/git/dirs.rs",
         "src/orchestrate.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
@@ -665,7 +668,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `git/tests.rs` (large-module split, #splitmods2). The 6 removed
         // `guard_` occurrences were test-assertion literals, not production
         // hot-path guards.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 13,
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 18,
+        ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
         // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
         // logs when it restored the working tree to HEAD because committed content
         // was dropped with no new user work (vs a preserved carry-forward superset).

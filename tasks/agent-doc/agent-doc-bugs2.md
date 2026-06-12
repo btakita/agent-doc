@@ -397,13 +397,38 @@ You're right, and I've **resumed the queue** (`receipt_id=13`). My pause to stop
 2. **Stay here but strike `#stuckhandoff2`** from the queue head (it can't finish here) so the go-queue advances to items that *can* be answered without the dirty-tree conflict.
 
 **EFS Codex-submit bug — captured.** `JB Run Agent Doc` in `equityfundingsource.md` entering but not submitting the prompt to Codex is the same class as `#2v7b`/`#jbcodexsubmit`: Codex direct-pane dispatch (`route.rs::send_command_unchecked`) detects `prompt_not_submitted` (the merged `text+\r` isn't treated as submit by the Codex TUI) but has no Enter re-submit fallback. I'm adding an actionable backlog item with the SimWorld coverage you asked for — to implement in the clean session (it touches `route.rs`, same dirty-tree constraint).
-<!-- agent:boundary:be9a7c6c -->
+
+### Re: #stuckhandoff2 queue head — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: [#stuckhandoff2]
+
+
+> Queue prompt:
+>
+> :pushpin: [#stuckhandoff2]
+
+I am gating `#stuckhandoff2` instead of re-answering it or marking it done. This is the explicit queue-consumption signal the writer expects for a tracked queue head, and it stops the known re-flood where `#stuckhandoff2` is answered and committed but then re-submitted as the head.
+
+Status:
+
+- M1 (self-watchdog/suicide timer for `Preparing`) and M3 (orphan `Preparing` proc-scan reaper) are already in `src/agent-doc` HEAD `08dfc27b`.
+- The older ancestor `23a3ce5b` contains the related `#kp5z/#qflood` drain-owner gate; current `HEAD` includes it.
+- The live install remains stale: preflight still reports `~/.cargo/bin` / cdylib predates `08dfc27b`, so active JB/tmux controllers are not necessarily running the landed code until rebuild/lib-install and controller recycle happen from a clean tree.
+- The item is not done: M2 (gate worktree/ipc writes on `Stable`), M4 (client handoff drop-guard), and M5 (cross-project gc sweep) remain.
+- I did not install or implement remaining controller code from this pane because `src/agent-doc` still has uncommitted `#fintol` work in `write.rs`, `sim_world.rs`, `finalize_integration.rs`, and `test_cli.rs`. Building or landing M2 here would mix closeout tolerance with controller lifecycle hardening.
+
+Unblock condition for the gated review item: clean `src/agent-doc` session, rebuild/install current `agent-doc` + lib, recycle controllers, then land M2/M4/M5 with SimWorld coverage against `tasks/agent-doc/plan-stuck-handoff-hardening.md`.
+
+No code changes this turn. Verification/context: `agent_doc_preflight` ok with queue head `#stuckhandoff2`; `agent_doc_plan` had no execution blocker; backlog/exchange confirm the prior M1/M3 status; `rg` and `git -C src/agent-doc log --oneline -8` confirmed the source refs; `git -C src/agent-doc status --short` confirmed dirty closeout-path files. Confidence: high. Escalation: none.
+<!-- agent:boundary:77c19c4b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#stuckhandoff2]
+- ~~:pushpin: [#stuckhandoff2]~~
 ---
 :pushpin: After typing into the queue, it stopped. It should not stop but allow me to type while the queue continues. I then tried JB `Run Agent Doc` and got an error:
 ```
@@ -489,6 +514,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :round_pushpin: do [#fintol]
 - :round_pushpin: do [#pcwc]
 - :round_pushpin: do [#rtwbcast]
+- :round_pushpin: do [#efscodexsubmit]
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
@@ -521,7 +547,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md
-- [ ] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [ ] [#pcwc] [recommended] Post-commit IPC worktree corruption (#postcommit-ipc-worktree-corruption): after a CORRECT finalize commit, a late IPC reposition / stale editor-buffer write-back overwrites the working tree (postcommit_worktree_check match=false), forcing a manual git checkout HEAD -- FILE. Reported on monsterrodholders.md AND reproduced live on agent-doc-bugs2.md 2026-06-11. DETECTION already landed (emit_postcommit_worktree_check, git.rs:3336); the open gap is AUTO-REMEDIATION: when HEAD is authoritative (match=false but HEAD holds the correct committed response), reconcile the worktree to HEAD automatically AND push the committed content to the editor buffer (so it stops writing stale content back) instead of warning + leaving a manual git checkout. The editor-buffer push is the durable fix and overlaps #rtwbcast (broadcast committed content to editor buffers); the worktree reconcile is doable now via show_head. Verify with SimWorld (worktree==HEAD guard + a post-commit stale-buffer-writeback case). Reuses existing plan: tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md (open 'auto-repair' checkbox). Related: #fintol, #rtwbcast.
 - [ ] [#fintol] [recommended] Finalize should tolerate concurrent UNRELATED user edits (typing a new prompt, editing elsewhere, compaction) by forward-MERGING them with the agent response instead of rejecting with live_prompt_drift_after_preflight / exit-75. Verified in code: the gate already auto-absorbs the benign superset case (#exch-intermix, write.rs:7049/7119) but FAILS CLOSED when the live buffer carries a new exchange PromptTarget or queue do[#id] the response does not own — to avoid dropping user content. Gap: that fail-closed conflates (a) collision with the response's CRDT target span vs (b) independent edit. Fix: response_target_disjoint_from_user_edit primitive → disjoint => CRDT-merge response+edit, commit the union, carry the new prompt to next cycle; collision => keep fail-closed. Closeout-side complement to #rtwatch. Rungs #fintol1 (conflict-scope primitive) / #fintol2 (forward-merge at gate) / #fintol3 (SimWorld coverage). CLEAN session; SimWorld-verified. Plan: tasks/agent-doc/plan-finalize-tolerance.md.
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
@@ -531,6 +556,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [/] [#w42v] #jbcompactconflict JB Compact Exchange writes the full doc to disk (atomic_write_if_current_pub, compact_exchange_direct_write), diverging from the open JB buffer = File Cache Conflict. The full-content editor-IPC path for compact (try_ipc_full_content_operator_mutation, source label compact_exchange) EXISTS but is HARD-DISABLED by design (always returns Ok(false), reason=disabled_by_default). Making it CRDT-driven = re-implement+re-enable that path with a component-scoped exchange op:replace convergence (mirror #q7jm) + JB-side apply + live verify. NEEDS OPERATOR DIRECTION before implementation (it was disabled deliberately). Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
 - [/] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).

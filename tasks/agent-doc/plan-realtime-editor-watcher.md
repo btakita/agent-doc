@@ -207,6 +207,16 @@ committed. Three architectural gaps block a correct broadcast bus today:
   wiring (no delivery) — landing it before the delivery protocol is chosen would
   imply a capability that doesn't exist.
 
+### Status — DEFERRED (operator, 2026-06-12)
+
+Operator chose **Option A** as the eventual delivery design but **deferred the
+implementation to a later session** — no rung is being landed now. The
+`compute_broadcast` seam + SimWorld Slice 3 harness groundwork stay committed
+(`97df6d8e`); the four rungs below remain unstarted. When resumed: confirm scope
+(start with `#rtwbcast-id` per "one shippable rung per phase", or batch the three
+agent-doable rungs), run in a CLEAN session, and leave `#rtwbcast-verify` for the
+operator two-live-IDE step.
+
 ### Decomposition once Option A is chosen (one shippable rung per phase)
 
 - **#rtwbcast-id** — add `editor_id` to the FFI buffer-report ABI + patch JSON;

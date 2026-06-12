@@ -162,6 +162,65 @@ issues with the rest of the project control pane."
   `#queue-user-edit-overwrite`). Fix + verify must run where the buffer does not
   race the writer (doc closed in IDEA, or a stable dedicated turn).
 
+## Rung 4 — multi-editor CRDT broadcast (`#rtwbcast`, investigated 2026-06-11; NOT Rust-only)
+
+Clean-context investigation (this turn) found rung 4 **cannot be landed in the Rust
+layer alone** — it requires editor-plugin (Kotlin + TS) protocol changes plus a
+two-live-IDE verify. A Rust-only `compute_broadcast` seam would be untested-in-
+production scaffolding (it could merge but could not deliver), so it was NOT
+committed. Three architectural gaps block a correct broadcast bus today:
+
+1. **Buffer ingest is single-sidecar, last-writer-wins, no per-editor identity.**
+   `agent_doc_document_changed_digest_content` (`ffi.rs:238`) →
+   `debounce::record_live_buffer_digest_content` writes
+   `.agent-doc/live-buffer/<pathhash>` keyed on the **document path only**
+   (`debounce::live_buffer_snapshot_path`). Two editors on one doc overwrite each
+   other's sidecar; the model cannot hold both buffers to merge, nor identify an
+   originator. `realtime_model::resolve_current_doc` resolves newest-of(disk, ONE
+   buffer) — there is no N-buffer notion.
+2. **Patch delivery is single-consumer delete-on-first-ACK, not a broadcast bus.**
+   `try_ipc` (`write.rs`) writes one `.agent-doc/patches/<hash>.json`;
+   `PatchWatcher.kt` applies it and `patchFile.delete()` as ACK. The first editor
+   to apply deletes it — the second never reliably sees it.
+3. **No per-editor echo suppression.** `claimed-patches/<patch_id>` is a single
+   suppress-ALL sentinel for `--force-disk` local closeout, not per-editor. The
+   FFI buffer-report and patch JSON carry no editor/client id, so "the originating
+   editor must not re-apply its own change" is inexpressible in the current
+   protocol.
+
+### Delivery options (operator design decision — broad blast radius)
+
+- **Option A (recommended) — per-editor channel + editor-id protocol.** Add an
+  `editor_id` to the FFI buffer-report and patch JSON; key live-buffer sidecars
+  per editor (`<pathhash>.<editorid>`); write `<hash>.<editorid>.json` per peer
+  (skipping the originator); each plugin watches/ACKs only its own. Most correct;
+  broadest blast radius (FFI ABI bump + both plugins + version bumps); must be
+  live-verified with two IDEs.
+- **Option B — multi-ACK shared patch + editor-presence registry.** Keep one
+  `<hash>.json` but delete only after every registered open editor ACKs. Smaller
+  protocol delta, but needs an editor-presence registry + GC/timeout for crashed
+  editors (a half-open editor wedges the queue) + per-editor ACK sentinels.
+- **Option C — Rust-only `compute_broadcast` seam now, defer delivery.** A pure
+  `realtime_model` fn (base, ours, theirs, originator) → merged + echo-suppress
+  flag, unit-tested, re-pointing the SimWorld `multi_editor_crdt_broadcast_*` test
+  off the inline `merge_contents_crdt`. Cheap and safe, but NOT rung-4 production
+  wiring (no delivery) — landing it before the delivery protocol is chosen would
+  imply a capability that doesn't exist.
+
+### Decomposition once Option A is chosen (one shippable rung per phase)
+
+- **#rtwbcast-id** — add `editor_id` to the FFI buffer-report ABI + patch JSON;
+  per-editor live-buffer sidecar keying. Deterministic unit coverage.
+- **#rtwbcast-deliver** — per-editor `<hash>.<editorid>.json` delivery + plugin
+  apply/ACK (JB `PatchWatcher.kt` + VS Code watcher); originator skip.
+- **#rtwbcast-merge** — production `compute_broadcast` seam (CRDT merge of N
+  buffers vs the on-disk base + echo-suppress); re-point SimWorld Slice 3 onto it.
+- **#rtwbcast-verify** — operator two-live-IDE verify: edit in JB + VS Code, both
+  converge, zero File Cache Conflict, sync-before-apply. CANNOT be agent-done.
+
+All of the above must run in a CLEAN session (touches the live IPC/patch path) and
+the verify needs two live IDEs.
+
 ## Files (anticipated)
 
 - `ffi.rs`, `ipc_socket.rs` — editor watcher ingestion + durable realtime model.

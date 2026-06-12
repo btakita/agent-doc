@@ -711,10 +711,14 @@ fn test_timing_constants_are_documented() {
         std::fs::read_to_string(root.join("agent-doc-orchestration/src/debounce.rs")).unwrap();
     let preflight_src =
         std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    // The run entry points (with the `Default: 2000ms` debounce doc) were
+    // extracted into preflight/run.rs (#splitmods4 large-module split).
+    let preflight_run_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight/run.rs")).unwrap();
     assert!(
         debounce_src.contains("1500")
             && preflight_src.contains("3000")
-            && preflight_src.contains("Default: 2000ms"),
-        "expected debounce.rs and preflight.rs to retain the documented debounce-related timeout constants"
+            && preflight_run_src.contains("Default: 2000ms"),
+        "expected debounce.rs and preflight{{,/run}}.rs to retain the documented debounce-related timeout constants"
     );
 }

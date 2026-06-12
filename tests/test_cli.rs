@@ -605,6 +605,9 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/git.rs",
         "src/orchestrate.rs",
         "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-orchestration/src/preflight/semantic_diff.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch_only.rs",
@@ -677,7 +680,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (`reason=struck_items_below_close_marker`): queue-escape repair logs
         // when it removed struck queue items displaced below the closing marker
         // (#queue-completed-items-escape-below-component).
-        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 4,
+        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 2,
+        ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 1,
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 1,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

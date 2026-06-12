@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -161,14 +161,15 @@ fix(admin): show emails in needs attention items
 
 Admin dashboard Needs Attention detail items now carry borrower and lead email addresses through the backend payload and render them in the expanded item list with wrapping. Covered by admin dashboard tests, verified with make check, and deployed to Worker version 5b15492f-ed7a-492d-ac77-17cb19c396a2.
 ```
-<!-- agent:boundary:3c163ef9 -->
+<!-- agent:boundary:423f4a61 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- I'm making a new loan application https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application but it does not show up in the admin portal Deal Pipeline. Should this be an application lead?
 <!-- /agent:queue -->
 
 ## Backlog

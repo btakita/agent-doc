@@ -8382,3 +8382,628 @@ Can you preserve the second paragraph too?
         assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
     }
 }
+
+#[cfg(test)]
+mod core_tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use fs2::FileExt;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[test]
+    fn ipc_live_prompt_drift_content_ours_preserves_live_queue_deletions() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content_ours = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "### Re: original prompt — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ original prompt\n",
+            "❯ live prompt after preflight\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#manual]\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = crate::test_support::init_repo_with_doc(dir.path(), "session.md", baseline);
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut decision = IpcRepairDecision::ack_content(candidate.to_string());
+
+        let blocked = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &doc,
+            "test",
+            Some("patch-q"),
+            Some(baseline),
+            Some(content_ours),
+            &mut decision,
+        );
+
+        assert!(blocked);
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert!(
+            decision
+                .snapshot_content
+                .contains("### Re: original prompt — gpt-5")
+        );
+        assert!(
+            !decision
+                .snapshot_content
+                .contains("❯ live prompt after preflight")
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#manual]"),
+            "live queue addition must not be absorbed into the response commit:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#deleted]"),
+            "live queue deletion must not be resurrected:\n{}",
+            decision.snapshot_content
+        );
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("queue_content_ours_reconciled")
+                && log.contains("reason=live_queue_deletion_authoritative")
+                && log.contains("dropped_queue_prompt_recorded"),
+            "queue reconciliation must leave ops.log proof:\n{log}"
+        );
+    }
+    #[test]
+    fn extract_response_headings_returns_re_lines_in_order() {
+        let patches = vec![
+            crate::test_support::patch_with_heading("### Re: first topic — opus-4-7"),
+            crate::test_support::patch_with_heading("### Re: second topic — opus-4-7"),
+            // Patch with no Re: heading should be skipped.
+            crate::template::PatchBlock::new("status", "Just a status update.\n"),
+        ];
+        let headings = extract_response_headings_from_patches(&patches);
+        assert_eq!(
+            headings,
+            vec![
+                "### Re: first topic — opus-4-7".to_string(),
+                "### Re: second topic — opus-4-7".to_string(),
+            ]
+        );
+    }
+    #[test]
+    fn extract_response_headings_picks_first_re_per_patch() {
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: outer — opus-4-7\n\nbody mentioning ### Re: inner — opus-4-7 elsewhere\n",
+        );
+        let headings = extract_response_headings_from_patches(&[patch]);
+        assert_eq!(headings, vec!["### Re: outer — opus-4-7".to_string()]);
+    }
+    #[test]
+    fn patch_response_headings_already_in_head_true_when_no_patches() {
+        // Empty patch list — conservatively preserve the existing late-fallback
+        // gate behavior (reject when no response evidence is present).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, "doc body\n").unwrap();
+        assert!(patch_response_headings_already_in_head(&doc, &[]));
+    }
+    #[test]
+    fn patch_response_headings_already_in_head_true_when_heading_in_head() {
+        let dir = TempDir::new().unwrap();
+        let doc = crate::test_support::init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: shipped — opus-4-7\n\nbody\n",
+        );
+        let patch = crate::test_support::patch_with_heading("### Re: shipped — opus-4-7");
+        assert!(patch_response_headings_already_in_head(&doc, &[patch]));
+    }
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_heading_missing_from_head() {
+        // Mid-turn rotation signature: HEAD has been advanced by a different
+        // operation (compact, sibling commit) and does not yet contain the
+        // response we're about to apply. The late-fallback gate must allow
+        // the patch through.
+        let dir = TempDir::new().unwrap();
+        let doc = crate::test_support::init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: prior cycle — opus-4-7\n\nold\n",
+        );
+        let patch = crate::test_support::patch_with_heading("### Re: new response — opus-4-7");
+        assert!(
+            !patch_response_headings_already_in_head(&doc, &[patch]),
+            "mid-turn rotation must allow the patch (response not in HEAD)"
+        );
+    }
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_any_heading_missing() {
+        let dir = TempDir::new().unwrap();
+        let doc = crate::test_support::init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: first — opus-4-7\n\nbody\n",
+        );
+        let patches = vec![
+            crate::test_support::patch_with_heading("### Re: first — opus-4-7"),
+            crate::test_support::patch_with_heading("### Re: second — opus-4-7"),
+        ];
+        assert!(
+            !patch_response_headings_already_in_head(&doc, &patches),
+            "all headings must be in HEAD for the gate to skip"
+        );
+    }
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_file_not_in_git() {
+        // No git repo → show_head returns Ok(None). Fail-safe: treat as not
+        // in HEAD so the late-fallback gate rotates the cycle rather than
+        // rejecting the patch.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, "no git\n").unwrap();
+        let patch = crate::test_support::patch_with_heading("### Re: something — opus-4-7");
+        assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
+    }
+    #[test]
+    fn ipc_ack_timeouts_degrade_current_session_to_direct_disk() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test-session\n---\n\ncontent").unwrap();
+
+        assert!(
+            !record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap(),
+            "first timeout should only record health state"
+        );
+        assert!(
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap(),
+            "second consecutive timeout should mark the listener degraded"
+        );
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "current session should now bypass IPC"
+        );
+
+        fs::write(&doc, "---\nsession: next-session\n---\n\ncontent").unwrap();
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a new session id must not inherit the old session's degraded marker"
+        );
+    }
+    #[test]
+    fn is_socket_ack_timeout_error_is_duration_agnostic() {
+        // `#ipc-ack-timeout-align`: the sender's ack budget is configurable, so
+        // the degrade-vote classifier must match the stable prefix, not a
+        // hard-coded "(2s)".
+        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack timeout (2s)"
+        )));
+        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack timeout (6s)"
+        )));
+        assert!(!is_socket_ack_timeout_error(&anyhow::anyhow!(
+            "IPC ack status error: something else"
+        )));
+    }
+    #[test]
+    fn degraded_latch_self_heals_when_listener_recovers() {
+        // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not
+        // a permanent session verdict. Once a recovered plugin socket is
+        // accepting connections again, `ipc_direct_disk_degraded` must clear the
+        // marker and resume the reliable IPC path instead of staying disk-only
+        // until session restart.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: heal-session\n---\n\ncontent").unwrap();
+
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "two timeouts with no live listener should stay degraded"
+        );
+
+        // Bring a live socket listener up (the recovered plugin).
+        let root_clone = dir.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&root_clone, |_msg| {
+                Some(r#"{"type":"ack","id":"x"}"#.to_string())
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a recovered live listener must self-heal the degrade latch"
+        );
+        let marker = dir
+            .path()
+            .join(".agent-doc/ipc-degraded")
+            .join(format!("{}.json", snapshot::doc_hash(&doc).unwrap()));
+        assert!(
+            !marker.exists(),
+            "self-heal must remove the degraded marker"
+        );
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        drop(server);
+    }
+    #[test]
+    fn try_ipc_prefers_file_ipc_when_socket_degraded() {
+        // `#ipc-degraded-prefers-file-ipc`: a latched-degraded socket must NOT
+        // jump straight to a raw disk write. The write routes through the
+        // file-IPC patch queue (plugin file watcher applies via Document API).
+        // With no plugin consuming the patch, file IPC times out and returns
+        // `false` so the caller can fall back to disk as the LAST resort — but
+        // the degraded write still attempted file IPC first.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+
+        assert!(
+            !result.success,
+            "degraded file-IPC with no plugin should report not consumed (disk is last resort)"
+        );
+        // The file-IPC poll cleans up the unconsumed patch on timeout.
+        let leftover: Vec<_> = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "file-IPC timeout must clean up the unconsumed patch"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_socket_degraded_prefer_file_ipc")
+                && ops_log.contains("transport=try_ipc"),
+            "degraded socket should log the prefer-file-IPC routing decision:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("ipc_write_attempt"),
+            "degraded write must still attempt the file-IPC patch queue, not bypass it:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("ipc_listener_degraded_direct_disk"),
+            "degraded write must NOT take the old direct-disk bypass:\n{ops_log}"
+        );
+    }
+    #[test]
+    fn try_ipc_degraded_succeeds_via_file_ipc_when_plugin_consumes() {
+        // `#ipc-degraded-prefers-file-ipc`: even with the socket latched
+        // degraded, a live plugin file watcher consuming the file-IPC patch
+        // makes the degraded write succeed through the plugin (Document API) —
+        // no raw disk write, so no manufactured File Cache Conflict.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "two timeouts with no live listener should latch degraded"
+        );
+
+        // Simulate the plugin file watcher applying then deleting the patch.
+        let watcher_dir = agent_doc_dir.join("patches");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            let _ = fs::write(
+                                &doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
+                            );
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            result.success,
+            "degraded write must succeed through the file-IPC patch queue when the plugin consumes it"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_socket_degraded_prefer_file_ipc"),
+            "degraded socket should log the prefer-file-IPC routing decision:\n{ops_log}"
+        );
+    }
+    #[test]
+    fn try_editor_converge_skips_wedged_socket_when_latched_degraded() {
+        // `#fcc0e`: once the de-wedge latch trips degraded (repeated socket ack
+        // timeouts) and no live listener can be re-probed, the converger must
+        // short-circuit to the disk fallback (`reason=listener_degraded`) instead
+        // of hammering the wedged socket on every queue/template converge — the
+        // same skip the reposition/finalize socket paths already take.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        // Trip the degraded latch (threshold = 2 distinct ack timeouts), mirroring
+        // the existing dewedge tests. No live listener exists, so the self-heal
+        // re-probe in `ipc_direct_disk_degraded` cannot clear it.
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "queue_consume").unwrap();
+        let degraded =
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "queue_consume").unwrap();
+        assert!(degraded, "two distinct ack timeouts must trip the degraded latch");
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            !converged,
+            "a latched-degraded session must skip the socket and disk-fall-back"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback") && log.contains("reason=listener_degraded"),
+            "the degraded skip must be source-labelled in ops.log:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=no_listener"),
+            "the degraded check must short-circuit before the no_listener check:\n{log}"
+        );
+    }
+    #[test]
+    fn ipc_snapshot_adoption_allowed_logs_benign_recheck() {
+        // Every adoption that the fail-closed guards did NOT block must still leave
+        // a diagnostic so a corruption slipping through as "allowed" is traceable.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Q\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Q\n### Re: Q — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let decision = IpcRepairDecision::content_ours(content_ours.to_string());
+
+        log_ipc_snapshot_adoption_allowed(
+            &doc,
+            "socket_ack_content",
+            Some("pid-allowed"),
+            Some(baseline),
+            Some(content_ours),
+            &decision,
+            false,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_snapshot_adoption_allowed")
+                && log.contains("source=socket_ack_content")
+                && log.contains("patch_id=pid-allowed")
+                && log.contains("drift_recheck=false")
+                && log.contains("dup_growth_recheck=0"),
+            "allowed adoption must log a benign re-check:\n{log}"
+        );
+    }
+    #[test]
+    fn ipc_snapshot_adoption_allowed_is_silent_when_blocked() {
+        // Blocked adoptions log their own rich diagnostic; the allowed line must not
+        // also fire (it would falsely report an unguarded adoption).
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let decision = IpcRepairDecision::content_ours("snapshot".to_string());
+        log_ipc_snapshot_adoption_allowed(
+            &doc,
+            "file_ipc",
+            Some("pid-blocked"),
+            None,
+            None,
+            &decision,
+            true,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default();
+        assert!(
+            !log.contains("ipc_snapshot_adoption_allowed"),
+            "allowed diagnostic must stay silent once a guard fired:\n{log}"
+        );
+    }
+    #[test]
+    fn ipcfullprompt_corruption_logged_on_deleted_response() {
+        // #ipcfullprompt-recur2: a live editor buffer (candidate) that dropped a
+        // previously-committed `### Re:` block must leave a forensic ops.log line
+        // and preserve the baseline + candidate for analysis — default-on capture,
+        // no manual editor debug opt-in required.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "### Re: second — opus-4-8\nA2.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // candidate dropped the second response block.
+        let candidate = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "socket_ack_content",
+            Some("pid-corrupt"),
+            Some(baseline),
+            candidate,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipcfullprompt_corruption_suspected")
+                && log.contains("source=socket_ack_content")
+                && log.contains("patch_id=pid-corrupt")
+                && log.contains("deleted=1")
+                && log.contains("response_deleted(### Re: second — opus-4-8:1->0)"),
+            "deleted prior response must be captured:\n{log}"
+        );
+        let forensic_dir = agent_doc_dir.join("logs/ipcfullprompt");
+        let preserved: Vec<_> = fs::read_dir(&forensic_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            preserved.iter().any(|n| n.ends_with(".baseline.md"))
+                && preserved.iter().any(|n| n.ends_with(".candidate.md")),
+            "forensic baseline + candidate must be preserved: {preserved:?}"
+        );
+    }
+    #[test]
+    fn ipcfullprompt_scaffold_duplication_logged_without_baseline() {
+        // The brandon-cinquegrana.md shape: a full-tail duplication leaves two
+        // `<!-- /agent:exchange -->` markers around an in-progress prompt. This is
+        // a self-check on the candidate, so it must fire even with no baseline.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let candidate = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — opus-4-8\nAnswer.\n",
+            "<!-- agent:boundary:709a41ae -->\n",
+            "Is the issue still happening?\nCan it be re\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "Can it be rep11ro\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "socket_ack_content",
+            Some("pid-x"),
+            None,
+            candidate,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipcfullprompt_corruption_suspected")
+                && log.contains("scaffold_duplicated=")
+                && log.contains("scaffold_duplicated(<!-- /agent:exchange -->:1->2)"),
+            "full-tail scaffold duplication must be captured without a baseline:\n{log}"
+        );
+    }
+    #[test]
+    fn ipcfullprompt_corruption_silent_on_clean_candidate() {
+        // A candidate that only *adds* a new response (expected growth) must not
+        // be flagged — no false positive on normal cycles.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "### Re: second — opus-4-8\nA2.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "file_ipc",
+            Some("pid-clean"),
+            Some(baseline),
+            candidate,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default();
+        assert!(
+            !log.contains("ipcfullprompt_corruption_suspected"),
+            "clean growth must not be flagged as corruption:\n{log}"
+        );
+    }
+}

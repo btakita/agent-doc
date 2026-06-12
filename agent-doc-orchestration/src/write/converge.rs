@@ -701,3 +701,481 @@ pub(crate) fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
     let end = rest.find("\n---")?;
     Some(&rest[..end])
 }
+
+#[cfg(test)]
+mod core_tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use fs2::FileExt;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {
+        // Snapshot owns the response the fragmented disk file lost; no disk-only
+        // user prompt → safe to auto-recover.
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+        assert!(
+            live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "benign live-prompt-drift wedge should be recoverable"
+        );
+    }
+    #[test]
+    fn live_prompt_drift_convergence_patches_builds_replace_patch_for_exchange() {
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+
+        let patches = live_prompt_drift_convergence_patches(&fragmented, &snapshot).unwrap();
+
+        assert_eq!(patches.len(), 1, "only exchange should need convergence");
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["op"], "replace");
+        assert!(
+            patches[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("### Re: do #fix"),
+            "replace payload should carry the recovered response body: {patches:?}"
+        );
+    }
+    #[test]
+    fn try_compact_editor_converge_falls_back_to_disk_without_listener() {
+        // `#w42v`: with no live JB IPC listener, compact convergence must report
+        // disk fallback (Ok(false)) so the caller does the guarded disk write —
+        // never silently skip the compaction.
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let current = crate::test_support::drift_baseline();
+        let compacted = crate::test_support::drift_content_ours();
+        std::fs::write(&doc, &current).unwrap();
+
+        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
+        assert!(
+            !converged,
+            "without a live JB IPC listener, compact must fall back to the disk write"
+        );
+    }
+    /// Pre-compact document with a multi-item `queue` an operator could be
+    /// concurrently editing while compaction archives the exchange tail.
+    /// Post-compact document: the `exchange` collapses to a summary marker while
+    /// the `queue` is byte-identical to the source (compaction never touches it).
+    #[test]
+    fn compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits() {
+        // `#jbcompactcrdt`/`#w42v`: compaction only rewrites `exchange`, so the
+        // editor-IPC convergence patch must be component-scoped to `exchange` and
+        // never carry a `queue` replace. That scoping is exactly what lets an
+        // operator concurrently typing queue items survive compaction without a
+        // JB `File Cache Conflict` — the editor applies the exchange `op:replace`
+        // via the Document API and leaves the live queue buffer untouched.
+        let source = crate::test_support::compact_convergence_source();
+        let compacted = crate::test_support::compact_convergence_compacted();
+
+        let patches = live_prompt_drift_convergence_patches(&source, &compacted).unwrap();
+
+        assert_eq!(
+            patches.len(),
+            1,
+            "only exchange changed during compaction; queue must not be patched: {patches:?}"
+        );
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["op"], "replace");
+        assert!(
+            patches[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("*Compacted. Content archived"),
+            "the exchange replace must carry the compacted summary body: {patches:?}"
+        );
+        assert!(
+            !patches
+                .iter()
+                .any(|patch| patch["component"] == "queue"),
+            "a queue replace would clobber the operator's concurrent edits: {patches:?}"
+        );
+    }
+    #[test]
+    fn try_compact_editor_converge_converges_via_editor_ipc_with_listener() {
+        // `#jbcompactcrdt`/`#w42v`: with a live JB IPC listener, compaction must
+        // converge the compacted document through the editor (`transport=editor_ipc`)
+        // instead of a direct disk write that diverges from the open buffer and
+        // raises a `File Cache Conflict`.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::compact_convergence_source();
+        let compacted = crate::test_support::compact_convergence_compacted();
+        fs::write(&doc, &source).unwrap();
+
+        // The fake editor acks with the compacted content, mirroring a JB plugin
+        // that applied the exchange `op:replace` and converged its buffer.
+        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), compacted.clone());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
+        assert!(
+            converged,
+            "an active JB IPC listener that converges the buffer must report editor_ipc transport"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_editor_convergence_attempt"),
+            "compact convergence attempt should be observable in ops.log:\n{log}"
+        );
+        assert!(
+            log.contains("compact_writeback") && log.contains("transport=editor_ipc"),
+            "successful compaction must record the editor_ipc writeback transport:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "a converged compaction must not also take the disk fallback:\n{log}"
+        );
+    }
+    /// Pre-consume document with a `go` queue head an operator could be concurrently
+    /// editing while the queue is struck.
+    /// Post-consume document: only the `queue` head is struck; every other
+    /// component is byte-identical (queue consume never touches the exchange).
+    #[test]
+    fn queue_consume_writeback_converges_via_editor_ipc_with_listener() {
+        // `#fcc0`: the queue-consume write must route through the shared
+        // converger so an active JB listener converges the struck queue through
+        // the editor (`transport=editor_ipc`, `queue_consume`-labelled) instead of
+        // a direct disk write that raises a `File Cache Conflict`.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), target.clone());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            converged,
+            "an active JB IPC listener that converges the buffer must report editor_ipc transport"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_editor_convergence_attempt"),
+            "queue-consume convergence attempt should be source-labelled in ops.log:\n{log}"
+        );
+        assert!(
+            log.contains("queue_consume_writeback") && log.contains("transport=editor_ipc"),
+            "a converged queue consume must record the editor_ipc writeback transport:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "a converged queue consume must not also take the disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn converge_document_or_disk_falls_back_to_guarded_disk_without_listener() {
+        // `#fcc0`: with no live JB listener the shared converger must land the
+        // target on disk via the guarded write and record the source-labelled
+        // disk fallback — never silently skip the write.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "with no listener the converger must write the target to disk"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("transport=disk_fallback")
+                && log.contains("reason=no_listener"),
+            "a no-listener queue consume must record the source-labelled disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_no_wedge() {
+        // Snapshot == file: no wedge, nothing to recover, must not fire.
+        let snapshot = crate::test_support::drift_content_ours();
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &snapshot),
+            "no drift means no auto-recovery"
+        );
+    }
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
+        // The visible file carries a NEW user prompt the snapshot never saw —
+        // adopting content_ours would silently drop it. Fail closed.
+        let snapshot = crate::test_support::drift_content_ours();
+        let mut fragmented = crate::test_support::drift_baseline();
+        fragmented = fragmented.replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "a disk-only user prompt must block auto-recovery"
+        );
+    }
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_queue_item() {
+        // A user-added `do [#id]` queue line on disk the snapshot lacks must
+        // block auto-recovery (the silent-queue-deletion class).
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline().replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
+        );
+        assert!(
+            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            "a disk-only queue item must block auto-recovery"
+        );
+    }
+    #[test]
+    fn try_auto_recover_live_prompt_drift_writes_snapshot_when_blocked_and_safe() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        // The drift guard fired this cycle and adopted content_ours.
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert_eq!(
+            recovered.as_deref(),
+            Some(snapshot.as_str()),
+            "recovery should return the adopted snapshot content"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "the working-tree file should now carry the full response"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("live_prompt_drift_auto_recovered"),
+            "auto-recovery must leave an observable ops.log marker:\n{log}"
+        );
+    }
+    #[test]
+    fn try_auto_recover_live_prompt_drift_prefers_editor_ipc_when_listener_active() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert_eq!(
+            recovered.as_deref(),
+            Some(snapshot.as_str()),
+            "recovery should accept the editor-applied snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "the fake editor listener should converge the working tree through IPC"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("[jbstalecache] editor_convergence_attempt")
+                && log.contains("[jbstalecache] editor_convergence_succeeded"),
+            "active listener recovery should be observable as editor convergence:\n{log}"
+        );
+        assert!(
+            log.contains("live_prompt_drift_auto_recovered")
+                && log.contains("transport=editor_ipc")
+                && log.contains("ipc_listener_active=true"),
+            "recovery marker should name the editor transport:\n{log}"
+        );
+        assert!(
+            !log.contains("auto_recovery_disk_write_during_ipc_listener")
+                && !log.contains("transport=disk_fallback"),
+            "successful editor convergence must not take the stale-cache disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn try_auto_recover_live_prompt_drift_skips_without_blocked_flag() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        // A cycle exists but the drift guard never fired (flag stays false) →
+        // not the wedge we own.
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_none(),
+            "without the drift flag this is not the auto-recovery case"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fragmented,
+            "the working tree must be untouched when recovery does not apply"
+        );
+    }
+    #[test]
+    fn try_auto_recover_live_prompt_drift_skips_when_dropped_prompts_recorded() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline();
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        // A genuine dropped user prompt was recorded this cycle → session-check
+        // owns the fail-closed; auto-recovery must NOT paper over it.
+        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["do #dropped".to_string()])
+            .unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_none(),
+            "recorded dropped prompts must block auto-recovery (fail closed)"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fragmented,
+            "the working tree must be untouched when a dropped prompt was recorded"
+        );
+    }
+    #[test]
+    fn snapshot_contains_dropped_prompt_matches_consumed_and_active() {
+        let snapshot = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#consumed]~~\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Consumed (struck) item still present → not lost.
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#consumed]"));
+        // Active item present → not lost.
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#active]"));
+        // Genuinely absent → real loss.
+        assert!(!snapshot_contains_dropped_prompt(snapshot, "do [#gone]"));
+    }
+    #[test]
+    fn try_auto_recover_live_prompt_drift_fires_when_dropped_prompt_is_consumed_in_snapshot() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        // Snapshot consumed the queued `do [#fix]` (struck) and carries the full
+        // `### Re:` response; the fragmented disk file also struck it but lost the
+        // response body → wedge shape.
+        let snapshot = crate::test_support::drift_content_ours().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let fragmented = crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        // The drift heuristic recorded the consumed item as a dropped queue prompt.
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()]).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert!(
+            recovered.is_some(),
+            "a dropped prompt that survives (struck) in the snapshot must not block recovery"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            snapshot,
+            "auto-recovery must write the adopted snapshot to disk"
+        );
+
+        // `#jbstalecache`: the recovery write records the IPC-listener state so the
+        // operator can correlate a stale-cache dialog with this disk write. No live
+        // listener exists in the test env, so the canonical marker reports
+        // `ipc_listener_active=false` and the dedicated stale-cache-risk line stays
+        // silent (it only fires when a listener is genuinely active).
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("live_prompt_drift_auto_recovered")
+                && ops_log.contains("ipc_listener_active=false"),
+            "recovery marker must record the IPC-listener state:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("[jbstalecache]"),
+            "the stale-cache-risk marker must stay silent without an active listener:\n{ops_log}"
+        );
+    }
+    #[test]
+    fn stale_snapshot_reset_drift_blocks_large_snapshot_only_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let stale_exchange = "duplicated response\n".repeat(20);
+        let snapshot = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n",
+            stale_exchange
+        );
+        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\nclean\n<!-- /agent:exchange -->\n";
+
+        let result =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write");
+
+        let message = result
+            .expect_err("stale larger snapshot must fail closed")
+            .to_string();
+        assert!(
+            message.contains("agent-doc reset --from-current"),
+            "recovery guidance should name deterministic sidecar reset: {message}"
+        );
+    }
+    #[test]
+    fn stale_snapshot_reset_drift_allows_small_size_delta() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot = "a".repeat(1000);
+        let current = "b".repeat(940);
+
+        let result =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "stream write");
+
+        assert!(
+            result.is_ok(),
+            "minor snapshot/file size drift should not block writes"
+        );
+    }
+}

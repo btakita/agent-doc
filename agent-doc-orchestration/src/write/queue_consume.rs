@@ -1535,3 +1535,647 @@ mod queue_prompt_echo_summary_tests {
         assert!(summary.contains("more chars"));
     }
 }
+
+#[cfg(test)]
+mod core_tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use fs2::FileExt;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[test]
+    fn free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt() {
+        // #free-text-head-consume-genuine-not-struck: the consume decision diffs
+        // the normalized snapshot baseline against the LIVE editor buffer. The
+        // buffer preserves `❯` prefixes on already-answered prompts that the
+        // snapshot normalized to the bare form. A pure `do x` → `❯ do x`
+        // prefix flip then surfaces as an added `+❯ …` diff line. It must
+        // NOT be read as a new foreign prompt — that wrongly blocked the
+        // free-text head strike and stalled the auto-loop.
+        let head = "Evaluate axocoatl thing";
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Live buffer: the prior prompt regained its `❯` prefix; this cycle
+        // only added the `### Re: axocoatl` answer.
+        let prefix_flip = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "### Re: axocoatl\n",
+            "plan written.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), prefix_flip, head),
+            "a `❯` prefix flip on an already-answered baseline prompt is not new foreign work"
+        );
+
+        // A genuinely new `❯` prompt whose text never appeared at baseline still
+        // counts as foreign work, keeping the free-text head queued.
+        let genuine_foreign = concat!(
+            "<!-- agent:exchange -->\n",
+            "do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "❯ a brand new unrelated prompt\n",
+            "### Re: axocoatl\n",
+            "plan.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            cycle_answered_foreign_exchange_prompt(Some(baseline), genuine_foreign, head),
+            "a genuinely new unrelated `❯` prompt absent from baseline is foreign work"
+        );
+    }
+    #[test]
+    fn explicit_signal_halt_without_flag_does_not_consume() {
+        // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
+        assert!(!queue_head_has_explicit_completion_signal(crate::test_support::HALT_QUEUE_DOC, &[], &[], &[]).unwrap());
+    }
+    #[test]
+    fn explicit_signal_done_flag_consumes() {
+        // (b) --done naming the head → consume. (c) also covers no-heading + --done.
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &["foo".to_string()],
+                &[],
+                &[],
+            )
+            .unwrap()
+        );
+    }
+    #[test]
+    fn explicit_signal_gate_and_edit_flags_consume() {
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &[],
+                &["foo".to_string()],
+                &[],
+            )
+            .unwrap(),
+            "--pending-gate naming the head is a completion signal"
+        );
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &[],
+                &[],
+                &["foo=rewritten text".to_string()],
+            )
+            .unwrap(),
+            "--pending-edit naming the head is a completion signal"
+        );
+    }
+    #[test]
+    fn explicit_signal_flag_for_other_id_does_not_consume() {
+        assert!(
+            !queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &["bar".to_string()],
+                &["baz".to_string()],
+                &["qux=text".to_string()],
+            )
+            .unwrap(),
+            "flags for non-head ids must not consume the head"
+        );
+    }
+    #[test]
+    fn explicit_signal_none_when_queue_inactive() {
+        let inactive = crate::test_support::HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
+        assert!(
+            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()], &[], &[],)
+                .unwrap()
+        );
+    }
+    #[test]
+    fn done_head_consumes_despite_bundled_pending_add() {
+        // #pending-add-suppresses-queue-consume: a finalize that completes the
+        // queue head with --done must still consume it even when --pending-add
+        // added a new backlog item in the same diff. The bundled add makes the
+        // diff-based "active prompt" check return false, but the explicit --done
+        // short-circuit authorizes consumption regardless.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#foo] head work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n- do [#bar]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Current = baseline + a bundled --pending-add backlog item (the diff
+        // shape that used to suppress consumption).
+        let current = baseline.replace(
+            "- [ ] [#foo] head work\n",
+            "- [ ] [#newitem] bundled follow-up\n- [ ] [#foo] head work\n",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        assert!(
+            should_consume_queue_prompt_for_write(
+                &doc,
+                Some(baseline),
+                &current,
+                &["foo".to_string()],
+            )
+            .unwrap(),
+            "--done naming the head must consume despite a bundled --pending-add"
+        );
+        // Without an explicit completion flag, the bare do[#id] head is NOT
+        // consumed by the diff alone (#queue-strike-on-halt).
+        assert!(
+            !should_consume_queue_prompt_for_write(&doc, Some(baseline), &current, &[]).unwrap(),
+            "bare do[#id] head needs an explicit completion flag"
+        );
+    }
+    #[test]
+    fn done_id_marks_later_queue_prompt_completed_without_consuming_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#opportunistic]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let marked =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["opportunistic".to_string()], true)
+                .unwrap();
+        assert_eq!(marked, 1);
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- do [#head]\n"), "{updated}");
+        assert!(updated.contains("- ~~do [#opportunistic]~~\n"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+        let snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snapshot.contains("- ~~do [#opportunistic]~~\n"),
+            "{snapshot}"
+        );
+    }
+    #[test]
+    fn done_id_marking_ignores_already_completed_queue_prompt() {
+        let entries = crate::queue::parse(concat!(
+            "- do [#head]\n",
+            "- ~~do [#opportunistic]~~\n",
+            "- do [#tail]\n",
+        ))
+        .unwrap();
+
+        let (updated, marked) =
+            mark_entries_completed_by_done_ids(&entries, &["opportunistic".to_string()]);
+        assert!(marked.is_empty());
+        assert_eq!(updated, entries);
+    }
+    #[test]
+    fn free_text_queue_head_detection() {
+        // #free-text-queue-head-consume: a plain question typed into the queue
+        // has no #id and is not a do-directive/preset/trigger → free text.
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Is tsift properly integrated into multi-crate architecture?\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(doc).unwrap(),
+            "a no-#id queue head is free text and consumable by being answered"
+        );
+        // A bare do[#id] head is NOT free text (needs an explicit completion flag).
+        assert!(!queue_head_is_free_text_prompt(crate::test_support::HALT_QUEUE_DOC).unwrap());
+        let pinned_do = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- :pushpin: do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(pinned_do).unwrap(),
+            "a pinned do[#id] head is still id-backed, not free text"
+        );
+        // A #preset head carries an #id, so it is not free text either.
+        let preset = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(!queue_head_is_free_text_prompt(preset).unwrap());
+        // Inactive queue → no head → not free text.
+        let inactive = doc.replace("queue_active: true", "queue_active: false");
+        assert!(!queue_head_is_free_text_prompt(&inactive).unwrap());
+
+        // #free-text-queue-owner-consume: a free-text head that MENTIONS ids in
+        // prose (but is not a pure id directive) is still free text — it has no
+        // single id to `--done`, so it must complete on being answered. This is
+        // the live repro head from src/boost-client/tasks/monsterrodholders.md.
+        let id_mentioning = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Approve [#shoptiers]. What are #next-steps?\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(id_mentioning).unwrap(),
+            "a free-text head that merely mentions #ids must stay free text (consumable by being answered)"
+        );
+
+        // A leading action verb + bracketed id alone (`re [#id]`) is NOT a pure
+        // `#id`/`[#id]`/`do [#id]` directive, so it is treated as free text and
+        // completes on answer (it still has a single mentioned id, but the verb
+        // makes it prose, not a bare directive).
+        let verb_prefixed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Summarize the findings for #report and ship it\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
+            "a prose head mentioning a single #id is still free text"
+        );
+    }
+    #[test]
+    fn queue_consume_reconciles_diverged_snapshot_instead_of_bailing() {
+        // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: when
+        // the post-merge document queue diverges from the snapshot queue (a
+        // concurrent user/editor edit the CRDT merge already reconciled), consume
+        // must RECONCILE (the merged document wins) and strike the head — not
+        // hard-bail and orphan the unstruck head. Regression for the divergence
+        // error hit repeatedly under live editor races.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do the thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do the thing\n",
+            "- user added later\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // Snapshot diverges: same head, but missing the concurrently-added item.
+        let snap = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do the thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do the thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        snapshot::save(&doc, snap).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("consume must not bail on a reconcilable divergence");
+        assert!(outcome.is_some(), "the answered head should be consumed");
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~do the thing~~"),
+            "head must be struck after reconcile:\n{result}"
+        );
+        assert!(
+            result.contains("- user added later"),
+            "the concurrently-added item must be preserved (document wins):\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap_result.contains("- user added later"),
+            "snapshot must adopt the reconciled document queue:\n{snap_result}"
+        );
+    }
+    #[test]
+    fn queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: duplicate prose\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- duplicate prose\n",
+            "- duplicate prose\n",
+            "- keep\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("node-keyed queue consume should handle duplicates")
+            .expect("the answered duplicate head should be consumed");
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~duplicate prose~~\n- duplicate prose\n- keep\n"),
+            "only the first duplicate prompt should be struck:\n{result}"
+        );
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.node_ops.len(), 1);
+        assert_eq!(outcome.node_ops[0].component, "queue");
+        assert_eq!(outcome.node_ops[0].op, "consume");
+        assert!(
+            outcome.node_ops[0].node_id.starts_with("queue:")
+                && outcome.node_ops[0].node_id.contains(":ft-"),
+            "node op should carry the queue node key, got {:?}",
+            outcome.node_ops[0]
+        );
+        assert_eq!(
+            outcome.node_ops[0].to_json()["op"].as_str(),
+            Some("consume")
+        );
+    }
+    #[test]
+    fn consume_decision_strikes_answered_free_text_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: JB Run Agent Doc should start the queue\n\nFixed in route.rs.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- JB `Run Agent Doc` on a `queue: stop` + `agent:queue go` doc should start the queue.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // baseline == current (no new exchange prompt this cycle), non-empty
+        // response → the free-text head is answered and must be consumed.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: JB Run Agent Doc should start the queue\n\nFixed.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "an answered free-text head must be consumed even on the IPC-timeout closeout"
+        );
+    }
+    #[test]
+    fn consume_decision_strikes_synthetic_preset_head_on_heading_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #spec-test-build-install-commit-push\n\nDone.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "a preset head answered by a matching heading id must be consumed"
+        );
+    }
+    #[test]
+    fn consume_decision_keeps_bare_do_id_head_without_explicit_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // A bare do[#id] head is halt-safe: a response that does not record an
+        // explicit --done/--gate/--edit outcome must NOT strike it.
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: not doing this, here is why",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "a bare do[#id] head must stay queued without an explicit completion flag"
+        );
+        // The same head WITH --done foo is consumed.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: do [#foo]\n\nDone.",
+                &["foo".to_string()],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "--done naming the head id must consume it"
+        );
+    }
+    #[test]
+    fn consume_decision_keeps_operator_pinned_tracked_backlog_head_without_explicit_flag() {
+        // #zwn5: an operator-pinned bare id head (`:round_pushpin: [#ktw8]`) whose
+        // id names a tracked agent:backlog item is an id-backed directive — e.g. an
+        // operator-drive live-verify item the agent answers with a log-check but can
+        // never close itself. A `### Re: #ktw8` log-check heading must NOT strike it
+        // (the old synthetic/preset heading-id path wrongly consumed it, then
+        // session-check dropped the struck head and locked the snapshot).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ktw8] operator live-verify: destructive /clear path, operator drives.\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- :round_pushpin: [#ktw8]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #ktw8 — destructive /clear live-verify (operator-drive log check)\n\nops.log shows 0 markers; stays open.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "an operator-pinned head naming a tracked backlog item must stay queued without an explicit completion flag"
+        );
+        // The same head WITH --pending-gate naming its id is a real completion signal.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: #ktw8\n\nGated pending live verification.",
+                &[],
+                &["ktw8".to_string()],
+                &[],
+            )
+            .unwrap(),
+            "--pending-gate naming the head id must consume it"
+        );
+    }
+    #[test]
+    fn free_text_head_kept_only_when_cycle_answered_foreign_prompt() {
+        // #queue-head-struck-on-foreign-exchange-answer: the predicate that gates
+        // free-text head consumption. A drain cycle (only this turn's `### Re:`
+        // response added, no new user prompt) is NOT foreign → head drains. A
+        // cycle that added a NEW unrelated `❯` exchange prompt IS foreign → the
+        // free-text head stays queued so its work is not silently struck.
+        let head = "lazily-rs plan-update";
+        let baseline = "\
+---
+agent_doc_format: template
+queue_active: true
+---
+
+<!-- agent:exchange -->
+### Re: older
+Old.
+<!-- agent:boundary:x -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+- lazily-rs plan-update
+<!-- /agent:queue -->
+";
+        let drain = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "### Re: updated the plan\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), &drain, head),
+            "a drain cycle (only a new response, no new prompt) is not foreign work"
+        );
+
+        let foreign = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "❯ Fix the JB cache conflict instead\n### Re: fix jb\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            cycle_answered_foreign_exchange_prompt(Some(baseline), &foreign, head),
+            "a cycle that added a new unrelated exchange prompt answered foreign work"
+        );
+    }
+    #[test]
+    fn queue_skip_diagnostic_names_head_shape_and_repair_path() {
+        let id_backed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let id_message = queue_skip_diagnostic_for_content(id_backed).unwrap();
+        assert!(id_message.contains("[queue] kept head `do #foo`"));
+        assert!(id_message.contains("`--done foo`"));
+        assert!(id_message.contains("`--pending-gate foo`"));
+        assert!(id_message.contains("`--pending-edit \"foo=...\"`"));
+        assert!(id_message.contains("missing proof"));
+
+        let free_text = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Review the queue diagnostics\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let free_text_message = queue_skip_diagnostic_for_content(free_text).unwrap();
+        assert!(
+            free_text_message
+                .contains("[queue] kept free-text head `Review the queue diagnostics`")
+        );
+        assert!(free_text_message.contains("answered-response path"));
+    }
+    #[test]
+    fn heading_topic_matches_head_exactly_or_by_exact_id() {
+        // Codex Stop-hook path: exact-topic match, or a topic that resolves to
+        // EXACTLY the head id (#queue-head-consume-on-topic-id-regression).
+        assert!(response_topic_matches_queue_head("do [#foo]", "do [#foo]"));
+        assert!(response_topic_matches_queue_head(
+            "do [#foo]",
+            ":pushpin: do [#foo]"
+        ));
+        assert!(response_topic_matches_queue_head("#fix1", "do #fix1"));
+        assert!(response_topic_matches_queue_head("#foo", "do [#foo]"));
+        // Halt/modifier headings must NOT count as completion (#queue-strike-on-halt).
+        assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
+        assert!(!response_topic_matches_queue_head(
+            "#foo deferred",
+            "do [#foo]"
+        ));
+    }
+    #[test]
+    fn bare_do_directive_detection() {
+        // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
+        assert!(queue_head_is_bare_do_directive("do [#foo]"));
+        assert!(queue_head_is_bare_do_directive("do #foo"));
+        assert!(queue_head_is_bare_do_directive(":pushpin: do [#foo]"));
+        assert!(queue_head_is_bare_do_directive(":round_pushpin: do #foo"));
+        // A synthetic/preset prompt carrying a trailing `#preset` id is NOT a
+        // bare directive.
+        assert!(!queue_head_is_bare_do_directive(
+            "JB Run Agent Doc on tsift.md add the prompt into agent:queue.\n#spec-test-build-install-commit-push"
+        ));
+        // A bare preset id on its own line is also not a `do` directive.
+        assert!(!queue_head_is_bare_do_directive(
+            "#spec-test-build-install-commit-push"
+        ));
+    }
+    #[test]
+    fn topic_resolves_to_exact_id_rejects_modifiers() {
+        assert!(topic_resolves_to_exact_id(
+            "#spec-test-build-install-commit-push",
+            "spec-test-build-install-commit-push"
+        ));
+        assert!(topic_resolves_to_exact_id("do [#foo]", "foo"));
+        assert!(topic_resolves_to_exact_id("#Foo", "foo")); // case-insensitive
+        // Trailing modifiers (#queue-strike-on-halt) must never resolve to the id.
+        assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
+        assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
+        assert!(!topic_resolves_to_exact_id("#other", "foo"));
+    }
+}

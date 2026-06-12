@@ -824,3 +824,59 @@ mod pending_patch_normalization_tests {
             .expect("same-size todo rewrite should remain allowed");
     }
 }
+
+#[cfg(test)]
+mod core_tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use fs2::FileExt;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[test]
+    fn materialization_probe_uses_patch_body_not_patch_markers() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: materialized — gpt-5\n\n",
+            "Committed through boundary insertion.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let probe = response_materialization_probe_from_response(response);
+
+        assert!(probe.contains("### Re: materialized — gpt-5"));
+        assert!(!probe.contains("<!-- patch:exchange -->"));
+        assert!(!probe.contains("<!-- /patch:exchange -->"));
+    }
+    #[test]
+    fn patch_wrapped_response_is_materialized_by_visible_patch_body() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+    #[test]
+    fn marker_bearing_zero_patch_parse_is_rejected_before_capture() {
+        let err = reject_marker_response_with_zero_patches(1, 0).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("parsed zero patches despite 1 patch marker")
+        );
+        assert!(reject_marker_response_with_zero_patches(0, 0).is_ok());
+        assert!(reject_marker_response_with_zero_patches(2, 1).is_ok());
+    }
+}

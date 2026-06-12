@@ -6099,5 +6099,3390 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
     }
 }
 
+
 #[cfg(test)]
-mod tests;
+mod tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use fs2::FileExt;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    /// #pcp2: a document disk write records write-provenance, but `.agent-doc/`
+    /// sidecar/snapshot writes do not (provenance is only meaningful for the
+    /// editor-visible document).
+    #[test]
+    fn atomic_write_records_provenance_for_document_not_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+
+        let doc = tmp.path().join("prov-doc.md");
+        atomic_write(&doc, "hello document").unwrap();
+        let doc_key = doc
+            .canonicalize()
+            .unwrap_or(doc.clone())
+            .to_string_lossy()
+            .to_string();
+        let prov = crate::debounce::write_provenance(&doc_key)
+            .expect("document write should record provenance");
+        assert_eq!(prov.len, "hello document".len());
+        assert_eq!(prov.hash, crate::debounce::content_hash("hello document"));
+        assert_eq!(prov.actor, "agent");
+        assert!(!prov.write_id.is_empty());
+
+        // A write under .agent-doc/ (sidecar/snapshot) must NOT record provenance.
+        let sidecar = tmp.path().join(".agent-doc").join("snapshots").join("s.md");
+        fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        atomic_write(&sidecar, "snapshot bytes").unwrap();
+        let sidecar_key = sidecar
+            .canonicalize()
+            .unwrap_or(sidecar.clone())
+            .to_string_lossy()
+            .to_string();
+        assert!(
+            crate::debounce::write_provenance(&sidecar_key).is_none(),
+            "an .agent-doc/ sidecar write must not record document provenance"
+        );
+    }
+    /// 08b end state: a routed visible-document write still records write
+    /// provenance, because the queue job runs `atomic_write` on the owner thread
+    /// where the owner-scope guard takes the raw path (`atomic_write_raw`), and
+    /// that raw path is what records provenance.
+    #[test]
+    fn write_authority_routed_write_records_provenance() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("logs")).unwrap();
+        let doc = tmp.path().join("routed-doc.md");
+        atomic_write(&doc, "routed content").unwrap();
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "routed content");
+        let key = doc
+            .canonicalize()
+            .unwrap_or(doc.clone())
+            .to_string_lossy()
+            .to_string();
+        assert!(
+            crate::debounce::write_provenance(&key).is_some(),
+            "the routed write's inner raw path records provenance"
+        );
+    }
+    /// 08b end state: every editor-visible document write is routed through the
+    /// session actor's ordered write queue (no flag). The routed write executes
+    /// `atomic_write` again on the owner thread; the owner-scope re-entrancy
+    /// guard keeps that inner write on the raw path, so this must not deadlock
+    /// and the content must land.
+    #[test]
+    fn write_authority_visible_write_routes_through_queue_without_deadlock() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("logs")).unwrap();
+        let doc = tmp.path().join("routed-doc2.md");
+        atomic_write(&doc, "routed content").unwrap();
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "routed content");
+        let ops = fs::read_to_string(tmp.path().join(".agent-doc").join("logs").join("ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops.contains("write_authority action=routed"),
+            "a visible-document write must report the routed decision to ops.log: {ops:?}"
+        );
+    }
+    /// `.agent-doc/` sidecar writes are never routed — they always take the raw
+    /// path directly.
+    #[test]
+    fn write_authority_never_routes_agent_doc_sidecars() {
+        let tmp = TempDir::new().unwrap();
+        let sidecar = tmp.path().join(".agent-doc").join("snapshots").join("s.md");
+        fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        atomic_write(&sidecar, "sidecar bytes").unwrap();
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), "sidecar bytes");
+    }
+    #[test]
+    fn queued_file_reposition_patch_carries_generation_token() {
+        // #late-ipc-patch-duplicate-stall: the durable file reposition patch must
+        // carry the cycle id + a baseline content hash so a LATE applier can
+        // fence a superseded patch (drop instead of re-materialize a duplicate
+        // response block). Reposition-only body invariant must hold too.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        let doc = root.join("plan.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — opus\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        let cs = crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
+        assert!(matches!(result, FileIpcRepositionResult::Queued));
+
+        let hash = snapshot::doc_hash(&doc).unwrap();
+        let patch_file = root.join(".agent-doc/patches").join(format!("{hash}.json"));
+        let payload: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
+
+        assert_eq!(
+            payload["cycle_id"].as_str(),
+            Some(cs.cycle_id.as_str()),
+            "queued reposition patch must tag the originating cycle id"
+        );
+        assert_eq!(
+            payload["baseline_hash"].as_str(),
+            Some(crate::debounce::content_hash(content).as_str()),
+            "queued reposition patch must tag the baseline content hash it targets"
+        );
+        // Reposition-only invariant: no response body re-materialized.
+        assert_eq!(payload["patches"], serde_json::json!([]));
+        assert_eq!(payload["unmatched"], serde_json::json!(""));
+        assert_eq!(payload["reposition_boundary"], serde_json::json!(true));
+        assert!(existing_patch_is_reposition_only(&payload));
+    }
+    // #queue-strike-on-halt: queue head consumption requires an explicit
+    // closeout flag, not a `### Re:` heading that merely names the head.
+    // #queue-consume-on-stream-ipc-timeout: the shared decision used by both the
+    // strict closeout and the stream IPC-timeout `exit(75)` closeout. Mirrors the
+    // exact scenario that treadmilled the auto-loop: a free-text head answered by
+    // a finalize response whose write fell back to direct disk on IPC timeout.
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_captures_unowned_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // candidate (disk / ack sidecar) carries the user's freshly-typed "go".
+        let candidate = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+        // content_ours (baseline + response, no user edits) does NOT have "go".
+        let content_ours = baseline;
+
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &candidate, content_ours);
+        assert_eq!(dropped, vec!["go".to_string()]);
+    }
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_empty_when_content_ours_owns_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let with_go = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+        // Both candidate and content_ours contain "go" → nothing is dropped.
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &with_go, &with_go);
+        assert!(dropped.is_empty());
+    }
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_captures_adjacent_free_text_items() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- item being edited\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- previous user queue item\n",
+            "- item being edited\n",
+            "- next user queue item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, baseline);
+        assert_eq!(
+            dropped,
+            vec![
+                "previous user queue item".to_string(),
+                "next user queue item".to_string()
+            ]
+        );
+    }
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_empty_when_items_are_owned() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- item being edited\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- previous user queue item\n",
+            "- item being edited\n",
+            "- next user queue item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, candidate);
+        assert!(dropped.is_empty());
+    }
+    // #dropqueue-consumed-falsecount: a queue item the user added this cycle that
+    // content_ours CONSUMED (struck `~~...~~`) is answered, not dropped. It must
+    // not be recorded as a dropped user edit (which would trip the
+    // #queue-user-edit-overwrite guard on a correct closeout).
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_excludes_consumed_struck_item() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- do [#consumed]\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content_ours = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- ~~do [#consumed]~~\n",
+            "- keep me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let dropped =
+            dropped_queue_prompt_lines_after_content_ours(baseline, candidate, content_ours);
+        assert!(
+            dropped.is_empty(),
+            "a struck/consumed item is answered, not dropped: {dropped:?}"
+        );
+    }
+    #[test]
+    fn dropped_queue_prompt_lines_after_content_ours_counts_duplicate_user_items() {
+        let baseline = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- repeat me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- repeat me\n",
+            "- repeat me\n",
+            "- repeat me\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, candidate, baseline);
+        assert_eq!(
+            dropped,
+            vec!["repeat me".to_string(), "repeat me".to_string()]
+        );
+    }
+    #[test]
+    fn apply_live_queue_deletions_removes_deleted_items_without_absorbing_additions() {
+        let content_ours = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: response — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do [#deleted]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let live_candidate = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ live prompt after preflight\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto priority -->\n",
+            "- do [#manual]\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let reconciled =
+            apply_live_queue_deletions_to_content_ours(content_ours, live_candidate, content_ours);
+
+        assert!(reconciled.contains("### Re: response — gpt-5"));
+        assert!(!reconciled.contains("❯ live prompt after preflight"));
+        assert!(reconciled.contains("<!-- agent:queue auto -->"));
+        assert!(
+            !reconciled.contains("do [#manual]"),
+            "live queue additions stay next-cycle visible, not in content_ours:\n{reconciled}"
+        );
+        assert!(reconciled.contains("do [#head]"));
+        assert!(
+            !reconciled.contains("do [#deleted]"),
+            "live queue deletion must not be resurrected:\n{reconciled}"
+        );
+    }
+    #[test]
+    fn write_appends_response() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello\n").unwrap();
+
+        // Simulate stdin by calling run logic directly
+        let base = fs::read_to_string(&doc).unwrap();
+        let response = "This is the assistant response.";
+
+        let mut content_ours = base.clone();
+        if !content_ours.ends_with('\n') {
+            content_ours.push('\n');
+        }
+        content_ours.push_str("## Assistant\n\n");
+        content_ours.push_str(response);
+        content_ours.push('\n');
+        content_ours.push_str("\n## User\n\n");
+
+        atomic_write(&doc, &content_ours).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("## Assistant\n\nThis is the assistant response."));
+        assert!(result.contains("\n\n## User\n\n"));
+        assert!(result.contains("## User\n\nHello"));
+    }
+    #[test]
+    fn write_updates_snapshot() {
+        // Use a direct snapshot write/read to avoid CWD dependency.
+        // The snapshot module uses relative paths (.agent-doc/snapshots/),
+        // so we verify the pattern works via snapshot::path_for + direct I/O.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&doc, content).unwrap();
+
+        // Verify snapshot path computation works
+        let snap_path = snapshot::path_for(&doc).unwrap();
+        assert!(
+            snap_path
+                .to_string_lossy()
+                .contains(".agent-doc/snapshots/")
+        );
+
+        // Verify atomic_write + read roundtrip (the core of snapshot save)
+        let snap_abs = dir.path().join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, content).unwrap();
+        let loaded = fs::read_to_string(&snap_abs).unwrap();
+        assert_eq!(loaded, content);
+    }
+    #[test]
+    fn visible_write_guard_blocks_when_editor_typing_active() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/typing")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "body\n").unwrap();
+
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::document_changed(&doc_str);
+
+        let err = guard_visible_write_idle_with_budget(&doc, "test_visible_write", 60_000, 0)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("editor typing did not settle"));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_typing_defer_active_typing:test_visible_write"));
+        assert!(log.contains("visible_write_deferred_active_typing"));
+    }
+    #[test]
+    fn visible_write_guard_blocks_when_current_changed_after_merge() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+<!--
+scratch
+-->
+";
+        fs::write(&doc, expected).unwrap();
+        fs::write(
+            &doc,
+            expected.replace("scratch", "scratch\nstill typing this line"),
+        )
+        .unwrap();
+
+        let err = guard_visible_write_idle_and_current(&doc, "test_current_changed", expected)
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("document changed after the response merge was computed")
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_current_changed:test_current_changed"));
+        assert!(log.contains("visible_write_deferred_current_changed"));
+    }
+    #[test]
+    fn visible_write_guard_blocks_when_idle_editor_buffer_differs_from_disk() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: old
+<!-- /agent:exchange -->
+";
+        let live_buffer = expected.replace(
+            "<!-- /agent:exchange -->",
+            "prompt typed but not saved\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, expected).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest(
+            &doc_str,
+            live_buffer.len(),
+            &crate::debounce::content_hash(&live_buffer),
+        )
+        .unwrap();
+
+        let err = guard_visible_write_idle_and_current(&doc, "test_live_buffer_changed", expected)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("visible editor buffer"),
+            "expected live-buffer guard error: {err}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), expected);
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_current_changed:test_live_buffer_changed"));
+        assert!(log.contains("visible_write_deferred_live_buffer_changed"));
+    }
+    #[test]
+    fn visible_write_reconcile_treats_editor_matching_disk_as_reconcilable_drift() {
+        // #nm1x: the editor reported a buffer that diverges from `expected` but
+        // *matches the current on-disk content* (an independent document edit the
+        // editor already saved). That is not a pending unsaved user edit, so the
+        // guard must not fail closed — it reports the reconcilable DiskDrifted case
+        // instead, letting the response re-merge against the fresh disk content.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: old
+<!-- /agent:exchange -->
+";
+        // Disk + editor both carry an independent queue edit not present in
+        // `expected`; the editor digest equals disk (saved, no pending edit).
+        let drifted = expected.replace(
+            "<!-- /agent:exchange -->",
+            "<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#sibling]\n<!-- /agent:queue -->",
+        );
+        fs::write(&doc, &drifted).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest(
+            &doc_str,
+            drifted.len(),
+            &crate::debounce::content_hash(&drifted),
+        )
+        .unwrap();
+
+        let outcome =
+            guard_visible_write_reconcile(&doc, "test_editor_matches_disk", expected).unwrap();
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, drifted);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_live_buffer_matches_disk"),
+            "expected provenance-suppression log: {log}"
+        );
+        assert!(
+            log.contains("source=test_editor_matches_disk"),
+            "marker must identify the write source: {log}"
+        );
+        assert!(
+            log.contains(&format!("expected_len={}", expected.len())),
+            "marker must carry expected length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "expected_hash={}",
+                crate::ops_log::content_hash(expected)
+            )),
+            "marker must carry expected hash: {log}"
+        );
+        assert!(
+            log.contains(&format!("disk_len={}", drifted.len())),
+            "marker must carry disk length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "disk_hash={}",
+                crate::ops_log::content_hash(&drifted)
+            )),
+            "marker must carry disk hash: {log}"
+        );
+        assert!(
+            log.contains(&format!("live_len={}", drifted.len())),
+            "marker must carry live-buffer length: {log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "live_hash={}",
+                crate::ops_log::content_hash(&drifted)
+            )),
+            "marker must carry live-buffer hash: {log}"
+        );
+        assert!(
+            log.contains("live_ts="),
+            "marker must carry live timestamp: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "must not record a fail-closed live-buffer block: {log}"
+        );
+    }
+    #[test]
+    fn visible_write_reconcile_reports_clean_when_disk_matches() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected =
+            "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, expected).unwrap();
+
+        let outcome = guard_visible_write_reconcile(&doc, "test_clean", expected).unwrap();
+        assert!(matches!(outcome, VisibleWriteReconcile::Clean));
+    }
+    #[test]
+    fn visible_write_reconcile_reports_disk_drift_without_live_buffer_edit() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected =
+            "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
+        // Disk grew under us with a foreign agent-doc append (no live editor buffer
+        // sidecar = no pending user edit), so the guard must report it as a
+        // reconcilable drift rather than failing closed (#ipc-drift-visbuf-reconcile).
+        let drifted = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: foreign\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &drifted).unwrap();
+
+        let outcome = guard_visible_write_reconcile(&doc, "test_drift", expected).unwrap();
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, drifted);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("visible_write_disk_drift_reconcilable"));
+    }
+    #[test]
+    fn reconcile_visible_write_remerges_foreign_append_then_lands_clean() {
+        // The first guard call sees a foreign disk append; the loop must re-merge
+        // the captured response against the fresh disk content and then succeed
+        // without failing closed and stranding the response (#ipc-drift-visbuf-reconcile).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed\n").unwrap();
+
+        let base = "BASE";
+        let foreign = "BASE+FOREIGN";
+        let guard_calls = std::cell::RefCell::new(0usize);
+        let recompute_calls = std::cell::RefCell::new(0usize);
+
+        let guard = |_f: &Path, expected: &str| -> Result<VisibleWriteReconcile> {
+            let mut n = guard_calls.borrow_mut();
+            *n += 1;
+            if *n == 1 {
+                assert_eq!(expected, base);
+                Ok(VisibleWriteReconcile::DiskDrifted {
+                    fresh_current: foreign.to_string(),
+                })
+            } else {
+                assert_eq!(expected, foreign);
+                Ok(VisibleWriteReconcile::Clean)
+            }
+        };
+        let recompute = |current: &str| -> Result<String> {
+            *recompute_calls.borrow_mut() += 1;
+            // The re-merge incorporates the foreign disk content + the response.
+            Ok(format!("{current}+RESPONSE"))
+        };
+        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+            panic!("must not fail closed on a reconcilable foreign append");
+        };
+
+        let (current, payload) = reconcile_visible_write(
+            &doc,
+            base.to_string(),
+            format!("{base}+RESPONSE"),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap();
+
+        assert_eq!(current, foreign);
+        assert_eq!(payload, "BASE+FOREIGN+RESPONSE");
+        assert_eq!(*guard_calls.borrow(), 2);
+        assert_eq!(*recompute_calls.borrow(), 1);
+    }
+    #[test]
+    fn reconcile_visible_write_falls_back_to_fail_closed_when_drift_never_settles() {
+        // A document that keeps drifting past the attempt bound must fall back to
+        // the fail-closed guard so the operator retries instead of looping forever.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed\n").unwrap();
+
+        let counter = std::cell::RefCell::new(0usize);
+        let guard = |_f: &Path, _e: &str| -> Result<VisibleWriteReconcile> {
+            let mut n = counter.borrow_mut();
+            *n += 1;
+            Ok(VisibleWriteReconcile::DiskDrifted {
+                fresh_current: format!("drift-{n}"),
+            })
+        };
+        let recompute = |current: &str| -> Result<String> { Ok(current.to_string()) };
+        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+            anyhow::bail!("document still changing");
+        };
+
+        let err = reconcile_visible_write(
+            &doc,
+            "start".to_string(),
+            "start".to_string(),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("document still changing"));
+        assert_eq!(*counter.borrow(), 3);
+    }
+    #[test]
+    fn capture_locked_pre_response_reads_live_content_after_lock_wait() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "original\n").unwrap();
+
+        let lock_path = snapshot::lock_path_for(&doc).unwrap();
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        let held_lock = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        held_lock.lock_exclusive().unwrap();
+
+        let doc_for_thread = doc.clone();
+        let capture = std::thread::spawn(move || capture_locked_pre_response(&doc_for_thread));
+
+        std::thread::sleep(Duration::from_millis(100));
+        fs::write(&doc, "updated while waiting\n").unwrap();
+        drop(held_lock);
+
+        let (captured_lock, captured_content) = capture.join().unwrap().unwrap();
+        drop(captured_lock);
+
+        assert_eq!(captured_content, "updated while waiting\n");
+        assert_eq!(
+            snapshot::load_pre_response(&doc).unwrap().unwrap(),
+            "updated while waiting\n"
+        );
+    }
+    #[test]
+    fn missing_explicit_baseline_reads_migrated_baseline_after_document_move() {
+        let dir = TempDir::new().unwrap();
+        for subdir in [
+            "snapshots",
+            "baselines",
+            "locks",
+            "pending",
+            "crdt",
+            "pre-response",
+        ] {
+            fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let session_uuid = "moved-baseline-session";
+        let old_doc = dir.path().join("old.md");
+        let doc_content = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nBody\n",
+            session_uuid
+        );
+        fs::write(&old_doc, &doc_content).unwrap();
+
+        let old_hash = snapshot::doc_hash(&old_doc).unwrap();
+        let old_snapshot = dir
+            .path()
+            .join(".agent-doc/snapshots")
+            .join(format!("{}.md", old_hash));
+        fs::write(&old_snapshot, &doc_content).unwrap();
+        let old_baseline = dir
+            .path()
+            .join(".agent-doc/baselines")
+            .join(format!("{}.md", old_hash));
+        fs::write(&old_baseline, "preflight baseline\n").unwrap();
+
+        let new_doc = dir.path().join("new.md");
+        fs::rename(&old_doc, &new_doc).unwrap();
+
+        assert!(snapshot::try_migrate_renamed(&new_doc).unwrap());
+        assert!(!old_baseline.exists());
+        let migrated_baseline = snapshot::baseline_path_for(&new_doc).unwrap();
+        assert!(migrated_baseline.exists());
+
+        let baseline = read_explicit_baseline(&new_doc, Some(&old_baseline))
+            .unwrap()
+            .expect("baseline should be recovered from migrated hash");
+        assert_eq!(baseline, "preflight baseline\n");
+    }
+    #[test]
+    fn apply_template_from_string_compact_exchange_replaces_exchange_body() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n\n",
+            "compact exchange\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n",
+        );
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("Compacted summary.\n"));
+        assert!(!result.contains("Old progress."));
+        assert!(!result.contains("compact exchange"));
+    }
+    #[test]
+    fn apply_template_from_string_same_base_retry_adopts_existing_response() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "do #duppb. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            result.matches("### Re: closeout follow-up — gpt-5").count(),
+            1,
+            "same-base retry must not append a duplicate response block"
+        );
+        assert!(result.contains("❯ do #duppb. spec-test-build-install-commit-push"));
+        assert!(!result.contains("\ndo #duppb. spec-test-build-install-commit-push\n"));
+    }
+    #[test]
+    fn apply_template_from_string_strips_safe_progress_before_exchange_patch() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #rspdigest. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let response = concat!(
+            "I am checking the write path and existing replay guard before editing.\n",
+            "The fix is small; next I will run the targeted regression.\n\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: rspdigest — gpt-5\n\n",
+            "Implemented and verified.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("### Re: rspdigest — gpt-5"));
+        assert!(result.contains("Implemented and verified."));
+        assert!(!result.contains("I am checking the write path"));
+        assert!(!result.contains("The fix is small"));
+    }
+    #[test]
+    fn apply_template_from_string_rejects_trailing_unmatched_patchback_text() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #rspdigest. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: rspdigest — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /patch:exchange -->\n",
+            "extra transcript text\n",
+        );
+
+        let err = apply_template_from_string(&doc, response).unwrap_err();
+
+        assert!(
+            err.to_string().contains("unsafe unmatched content"),
+            "trailing unmatched patchback text must fail closed, got: {err:#}"
+        );
+    }
+    #[test]
+    fn apply_template_from_string_rejects_raw_component_form_without_mutating() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #churn. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // Operator pipes the raw template form (component markers) instead of
+        // `<!-- patch:exchange -->` blocks — this is the shape that previously
+        // committed escaped directives into the live exchange.
+        let raw_template_form = concat!(
+            "<!-- agent:status -->\nWork complete.\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange -->\n### Re: churn — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n",
+        );
+        let err = apply_template_from_string(&doc, raw_template_form).unwrap_err();
+        assert!(
+            err.to_string().contains("escaped template patchback"),
+            "raw component-form stdin must fail closed, got: {err:#}"
+        );
+
+        // The document must be untouched — no escaped markers committed.
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            after, content,
+            "rejected patchback must not mutate the document"
+        );
+        assert!(!after.contains("### Re: churn"));
+    }
+    #[test]
+    fn guard_rejects_normal_write_when_diff_requests_compact_exchange() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n\n",
+            "compact exchange\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let err = guard_no_exchange_compaction_request_between(&doc, Some(baseline), current)
+            .expect_err("ordinary response write should be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("compact exchange"));
+        assert!(msg.contains("agent-doc compact"));
+    }
+    #[test]
+    fn write_preserves_user_edits_via_merge() {
+        let base = "---\nsession: test\n---\n\n## User\n\nOriginal question\n";
+        let response = "My response";
+
+        // "ours" = base + response
+        let mut ours = base.to_string();
+        ours.push_str("\n## Assistant\n\n");
+        ours.push_str(response);
+        ours.push_str("\n\n## User\n\n");
+
+        // "theirs" = user added a follow-up to the User block
+        let theirs = "---\nsession: test\n---\n\n## User\n\nOriginal question\nAnd a follow-up!\n";
+
+        let merged = merge::merge_contents(base, &ours, theirs).unwrap();
+
+        // Both the response and the user's follow-up should be in the merge
+        assert!(
+            merged.contains("My response"),
+            "response missing from merge"
+        );
+        assert!(
+            merged.contains("And a follow-up!"),
+            "user edit missing from merge"
+        );
+    }
+    #[test]
+    fn write_no_merge_when_unchanged() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "Response here";
+
+        let mut ours = base.to_string();
+        ours.push_str("\n## Assistant\n\n");
+        ours.push_str(response);
+        ours.push_str("\n\n## User\n\n");
+
+        // theirs == base (no edit)
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, base).unwrap();
+
+        let doc_lock = acquire_doc_lock(&doc).unwrap();
+        let content_current = fs::read_to_string(&doc).unwrap();
+
+        let final_content = if content_current == base {
+            ours.clone()
+        } else {
+            merge::merge_contents(base, &ours, &content_current).unwrap()
+        };
+
+        drop(doc_lock);
+        assert_eq!(final_content, ours);
+    }
+    #[test]
+    fn atomic_write_correct_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("atomic.md");
+        atomic_write(&path, "hello world").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
+    }
+    #[test]
+    fn concurrent_writes_no_corruption() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("concurrent.md");
+        fs::write(&path, "initial").unwrap();
+
+        let n = 20;
+        let barrier = Arc::new(Barrier::new(n));
+        let mut handles = Vec::new();
+
+        for i in 0..n {
+            let p = path.clone();
+            let parent = dir.path().to_path_buf();
+            let bar = Arc::clone(&barrier);
+            let content = format!("writer-{}-content", i);
+            handles.push(std::thread::spawn(move || {
+                bar.wait();
+                let mut tmp = tempfile::NamedTempFile::new_in(&parent).unwrap();
+                std::io::Write::write_all(&mut tmp, content.as_bytes()).unwrap();
+                tmp.persist(&p).unwrap();
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let final_content = fs::read_to_string(&path).unwrap();
+        assert!(
+            final_content.starts_with("writer-") && final_content.ends_with("-content"),
+            "unexpected content: {}",
+            final_content
+        );
+    }
+    #[test]
+    fn snapshot_matches_disk_state() {
+        // Snapshot saved after write must equal the actual post-merge file on disk.
+        // Using content_ours (pre-merge) as the snapshot risks phantom diffs when
+        // the baseline is stale (e.g. streaming checkpoint with an outdated baseline).
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc").join("snapshots");
+        fs::create_dir_all(&agent_doc_dir).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let base = "---\nsession: test\n---\n\n## User\n\nOriginal question\n";
+        fs::write(&doc, base).unwrap();
+
+        // Build content_ours = baseline + response
+        let response = "Agent response here";
+        let mut content_ours = base.to_string();
+        content_ours.push_str("\n## Assistant\n\n");
+        content_ours.push_str(response);
+        content_ours.push_str("\n\n## User\n\n");
+
+        // Simulate user editing the file concurrently (adding a follow-up)
+        let user_edited = format!("{}Follow-up question\n", base);
+        fs::write(&doc, &user_edited).unwrap();
+
+        // Merge: content_ours + user edits
+        let merged = merge::merge_contents(base, &content_ours, &user_edited).unwrap();
+
+        // Write merged content (includes both response and user edit)
+        atomic_write(&doc, &merged).unwrap();
+        assert!(merged.contains(response), "response missing from merged");
+        assert!(
+            merged.contains("Follow-up question"),
+            "user edit missing from merged"
+        );
+
+        // KEY: Save snapshot as final_content (the actual disk state after merge)
+        snapshot::save(&doc, &merged).unwrap();
+
+        // Verify: snapshot matches what's on disk exactly
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let current = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            snap, current,
+            "snapshot must match actual disk state after write"
+        );
+        assert!(
+            snap.contains(response),
+            "snapshot should contain agent response"
+        );
+        assert!(
+            snap.contains("Follow-up question"),
+            "snapshot should contain merged user edit"
+        );
+    }
+    #[test]
+    fn explicit_baseline_preserves_concurrent_user_edits_for_next_cycle() {
+        let baseline = Some("baseline");
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::ContentOurs
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            content_ours
+        );
+    }
+    #[test]
+    fn explicit_baseline_forward_merges_concurrent_comment_tail_into_this_cycle() {
+        // `#fintol2`: a PLAIN concurrent edit to a parked comment-note outside
+        // `exchange` (`old note` -> `edited note`) carries NO next-cycle directive,
+        // so `non_exchange_drift_carries_directive` is false and
+        // `snapshot_persist_mode_with_current` falls through to `FinalContent`. The
+        // edit is forward-merged into THIS cycle's commit (the response lands AND
+        // the user's edit is preserved together) instead of being carried forward
+        // uncommitted. A directive-bearing outside edit (a new prompt, `do #id`,
+        // `#tag`, question) still routes to `ContentOurs` via the sibling
+        // `explicit_baseline_preserves_concurrent_user_edits_for_next_cycle`.
+        let baseline = Some("baseline");
+        let base = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let content_current = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+        let content_ours = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let final_content = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+
+        assert_eq!(
+            snapshot_persist_mode_with_current(
+                baseline,
+                base,
+                content_current,
+                content_ours,
+                final_content
+            ),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode_with_current(
+                    baseline,
+                    base,
+                    content_current,
+                    content_ours,
+                    final_content
+                ),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+    #[test]
+    fn implicit_baseline_still_persists_final_merged_disk_state() {
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(None, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(None, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+    #[test]
+    fn explicit_baseline_keeps_final_content_when_delta_is_prior_streamed_agent_prefix() {
+        let baseline = Some("baseline");
+        let content_ours = "<!-- agent:exchange -->\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: orchestrate streaming — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+    #[test]
+    fn try_ipc_file_fallback_skips_when_patches_already_applied_to_live_buffer() {
+        // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+        // `[#ipcfilehashskip]` defense-in-depth dedupe gate.
+        //
+        // When the live file already contains the response body (e.g. via a
+        // prior socket-IPC retry whose sidecar ack arrived late), the file-IPC
+        // fallback must hash-compare patch outcome vs current and skip the
+        // write so it does not stack a duplicate `### Re:` heading.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let already_applied_content = concat!(
+            "---\nsession: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, already_applied_content).unwrap();
+
+        // Build a patch whose application against the current file is a no-op
+        // (replace exchange with the same content it already has).
+        let exchange_body = "### Re: topic — gpt-5\n\nImplemented.\n";
+        let patch = crate::template::PatchBlock::new("exchange", exchange_body);
+
+        let started = std::time::Instant::now();
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.success,
+            "already-applied file-IPC fallback must short-circuit as success"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "skip path must not block on the 2s IPC timeout: elapsed={:?}",
+            elapsed
+        );
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let leftover: Vec<_> = fs::read_dir(&patches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "skip path must clean up any fallback patch files left around"
+        );
+
+        let live_after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            live_after, already_applied_content,
+            "skip path must not mutate the live file"
+        );
+
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("file_ipc_fallback_skip_already_applied"),
+            "skip event must be logged for audit:\n{ops_log}"
+        );
+    }
+    #[test]
+    fn try_ipc_returns_false_when_no_patches_dir() {
+        // Without .agent-doc/patches/, IPC should return false immediately
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "content").unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let result = try_ipc(&doc, &patches, "", None, None, None, None, None).unwrap();
+        assert!(
+            !result.success,
+            "should return false when patches dir doesn't exist"
+        );
+    }
+    #[test]
+    fn try_ipc_times_out_when_no_plugin() {
+        // With .agent-doc/patches/ existing but no plugin consuming, should timeout
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+
+        // This will timeout after 2s — patch file is written but never consumed
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            !result.success,
+            "should return false on timeout (no plugin)"
+        );
+
+        // Patch file should be cleaned up after timeout
+        let patches_dir = agent_doc_dir.join("patches");
+        let entries: Vec<_> = fs::read_dir(&patches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "patch file should be cleaned up after timeout"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=no_ack")
+                && log.contains("recovery=direct_write_fallback"),
+            "IPC timeout should log the failed invariant and recovery path:\n{log}"
+        );
+    }
+    #[test]
+    fn try_ipc_succeeds_when_plugin_consumes() {
+        // Simulate plugin by spawning a thread that deletes the patch file
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
+
+        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            // Simulate plugin applying the patch by modifying the doc
+                            let _ = fs::write(
+                                &doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
+                            );
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(
+            result.success,
+            "should return true when plugin consumes patch"
+        );
+    }
+    #[test]
+    fn try_ipc_rejects_consumed_partial_response_materialization() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: missed patchback - gpt-5\n\nRecovered answer.",
+        );
+        let partial = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "content\n",
+            "### Re: missed patchback - gpt-5\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let partial_for_watcher = partial.to_string();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let _ = fs::write(&doc_for_watcher, &partial_for_watcher);
+                            let _ =
+                                fs::write(ack_dir.join(format!("{pid}.md")), &partial_for_watcher);
+                        }
+                        let _ = fs::remove_file(path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(&doc, &[patch], "", None, Some(original), None, None, None).unwrap();
+        assert!(
+            !result.success,
+            "IPC consume without the full response body must fall back instead of saving a successful snapshot"
+        );
+
+        let snap = snapshot::load(&doc).unwrap();
+        assert!(
+            snap.as_deref()
+                .is_none_or(|content| !content.contains("Recovered answer.")),
+            "partial IPC materialization must not become the committed snapshot: {snap:?}"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_materialization_missing_response") && log.contains("source=file_ipc"),
+            "missing response materialization should be logged for operator repair:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=missing_response_probe")
+                && log.contains("recovery=direct_write_fallback"),
+            "missing response materialization should name its invariant and recovery:\n{log}"
+        );
+    }
+    #[test]
+    fn file_ipc_consumed_with_live_exchange_edit_requires_ack_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-live-edit"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            !result.success,
+            "file IPC consumption with live exchange edits and unchanged disk content must fall back"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unacknowledged live-edit IPC must not become the saved snapshot"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("file_ipc_live_exchange_unacknowledged")
+                && log.contains("patch_id=patch-live-edit"),
+            "unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=live_exchange_without_ack_content")
+                && log.contains("recovery=direct_write_fallback"),
+            "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
+        );
+    }
+    #[test]
+    fn file_ipc_accepts_ack_content_sidecar_when_disk_lags_live_exchange() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "### Re: live prompt — gpt-5\n\n",
+            "Handled.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch =
+            crate::template::PatchBlock::new("exchange", "### Re: live prompt — gpt-5\n\nHandled.");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-live-edit-ack"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "ack-content proof should let file IPC accept an applied response even when disk still shows the pre-ack live exchange edit"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(ack_content),
+            "snapshot must use the authoritative ack-content sidecar"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before,
+            "this regression models the sidecar-only path where the editor proved the apply before disk caught up"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("file_ipc_live_exchange_unacknowledged"),
+            "ack-content proof must bypass the unacknowledged live-edit fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ New prompt typed during closeout\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ New prompt typed during closeout\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("patch-live-prompt-drift"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery itself should remain successful"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "snapshot must not absorb prompt-bearing drift typed after preflight"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            ack_content,
+            "visible live prompt should remain in the working tree for the next cycle"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("flow=document_mutation")
+                && log.contains("stage=ipc_snapshot_adoption")
+                && log.contains("reason=live_prompt_drift_after_preflight")
+                && log.contains("ipc_snapshot_adoption_blocked"),
+            "unsafe snapshot adoption should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=live_prompt_drift_after_preflight")
+                && log.contains("recovery=content_ours_snapshot_next_cycle"),
+            "live prompt drift should name its failed invariant and recovery:\n{log}"
+        );
+    }
+    // #exch-intermix fixtures: a wedge requires the adopted `content_ours`
+    // snapshot (baseline + response) to be meaningfully larger than the
+    // fragmented visible file that lost the response.
+    // -------- #fintol1: response_target_disjoint_from_user_edit primitive --------
+    #[test]
+    fn fintol_queue_directive_carries_forward() {
+        // A user adds a `do [#id]` queue directive — a next-cycle instruction, not
+        // a plain content edit — so it is carried forward, never forward-merged.
+        let baseline = crate::test_support::drift_baseline();
+        let ours = crate::test_support::drift_content_ours();
+        let candidate = ours.replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-directive]\n<!-- /agent:queue -->",
+        );
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a queue do-directive is a next-cycle instruction and must carry forward"
+        );
+    }
+    #[test]
+    fn fintol_plain_outside_edit_is_forward_mergeable() {
+        // A plain prose edit OUTSIDE `exchange` (no prompt/directive) is the case
+        // that forward-merges: the response and the edit occupy independent regions.
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace("old parked note body", "edited parked note body");
+        assert!(
+            response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a plain comment-note edit outside the response must be forward-mergeable"
+        );
+    }
+    #[test]
+    fn fintol_response_body_rewrite_collides_fails_closed() {
+        // The user rewrites the response body the agent just wrote — a genuine
+        // collision in the response target span. `git merge-file` would
+        // append-resolve it into a duplicated response, so the exchange-confinement
+        // guard must reject it instead.
+        let baseline = crate::test_support::drift_baseline();
+        let ours = crate::test_support::drift_content_ours();
+        let candidate = ours.replace(
+            "Implemented the fix and verified it end to end. The response body is long",
+            "User rewrote the committed response body inside the live buffer.",
+        );
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a user rewrite of the response body must collide and fail closed"
+        );
+    }
+    #[test]
+    fn fintol_new_exchange_prompt_below_is_not_forward_merged() {
+        // A new prompt typed below the response is disjoint but lives in
+        // `exchange`; it is carried forward uncommitted, never folded into the
+        // commit, so the primitive excludes it.
+        let baseline = crate::test_support::drift_baseline();
+        let ours = crate::test_support::drift_content_ours();
+        let candidate = ours.replace(
+            "<!-- /agent:exchange -->",
+            "❯ a brand new prompt typed during closeout\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "a new exchange prompt must stay on the carry-forward path"
+        );
+    }
+    #[test]
+    fn fintol_no_user_edit_is_not_forward_merged() {
+        // No concurrent user edit (candidate == content_ours): there is nothing to
+        // forward-merge, so the primitive returns false (the caller commits
+        // content_ours directly).
+        let baseline = crate::test_support::drift_baseline();
+        let ours = crate::test_support::drift_content_ours();
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &ours),
+            "an unchanged candidate has no user edit to forward-merge"
+        );
+    }
+    // #exch-intermix-falsedrop: a queue item consumed (struck) this cycle is
+    // recorded as "dropped" by the drift-time candidate-vs-content_ours heuristic,
+    // but it survives struck in the adopted snapshot, so auto-recovery must STILL
+    // fire (it is a false-positive drop record, not real user-content loss). This
+    // is the exact live wedge from agent-doc-bugs2 #opsproof-falsepos closeout.
+    #[test]
+    fn file_ipc_ack_content_post_exchange_comment_drift_uses_content_ours_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Typing a new prompt below exchange during closeout. #next-steps\n",
+            "-->\n"
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Typing a new prompt below exchange during closeout. #next-steps\n",
+            "-->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("patch-post-exchange-comment-drift"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery itself should remain successful"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "snapshot must not absorb post-exchange comment text typed after preflight"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            ack_content,
+            "visible post-exchange comment text should remain in the working tree for the next cycle"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("flow=document_mutation")
+                && log.contains("stage=ipc_snapshot_adoption")
+                && log.contains("reason=live_prompt_drift_after_preflight")
+                && log.contains("ipc_snapshot_adoption_blocked"),
+            "unsafe post-exchange drift adoption should be logged:\n{log}"
+        );
+    }
+    #[test]
+    fn file_ipc_post_dedupe_unchanged_exchange_requires_ack_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let plugin_after = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    let _ = fs::write(&doc_for_watcher, plugin_after);
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new("exchange", "live prompt\n");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-post-dedupe"),
+        )
+        .unwrap();
+
+        assert!(
+            !result.success,
+            "file IPC must fall back when final deduped exchange is unchanged without ack-content proof"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unacknowledged post-dedupe no-op IPC must not become the saved snapshot"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("file_ipc_live_exchange_unacknowledged")
+                && log.contains("patch_id=patch-post-dedupe"),
+            "post-dedupe unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("snapshot_saved_file_ipc"),
+            "post-dedupe unacknowledged live-edit IPC must not save a file-IPC snapshot:\n{log}"
+        );
+    }
+    #[test]
+    fn try_ipc_full_content_returns_false_when_disabled() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "content").unwrap();
+
+        let result = try_ipc_full_content(&doc, "new content").unwrap();
+        assert!(
+            !result,
+            "full-content IPC is disabled and should return false"
+        );
+    }
+    // --- sanitize_component_tags tests ---
+    #[test]
+    fn sanitize_escapes_open_agent_tag() {
+        let input = "Here is an example: <!-- agent:exchange --> marker.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "open agent tag should be escaped, got: {}",
+            result
+        );
+        assert!(
+            !result.contains("<!-- agent:exchange -->"),
+            "raw open agent tag should not remain"
+        );
+    }
+    #[test]
+    fn sanitize_escapes_close_agent_tag() {
+        let input = "End marker: <!-- /agent:pending --> done.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("&lt;!-- /agent:pending --&gt;"),
+            "close agent tag should be escaped, got: {}",
+            result
+        );
+        assert!(
+            !result.contains("<!-- /agent:pending -->"),
+            "raw close agent tag should not remain"
+        );
+    }
+    #[test]
+    fn sanitize_does_not_escape_patch_markers() {
+        let input = "<!-- patch:exchange -->\nsome content\n<!-- /patch:exchange -->\n";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "patch markers must not be escaped");
+    }
+    #[test]
+    fn sanitize_passes_normal_content_through() {
+        let input = "Just some normal markdown content.\n\nWith paragraphs and **bold**.";
+        let result = sanitize_component_tags(input);
+        assert_eq!(
+            result, input,
+            "normal content should pass through unchanged"
+        );
+    }
+    #[test]
+    fn sanitize_preserves_utf8_em_dash() {
+        // Em dash U+2014 is 3 bytes in UTF-8: 0xE2, 0x80, 0x94
+        let input = "This is a test \u{2014} with em dashes \u{2014} in content.";
+        let result = sanitize_component_tags(input);
+        assert_eq!(
+            result, input,
+            "em dashes must survive sanitization unchanged"
+        );
+
+        // Verify at the byte level
+        assert_eq!(
+            result.as_bytes(),
+            input.as_bytes(),
+            "byte-level content must be identical"
+        );
+    }
+    #[test]
+    fn sanitize_preserves_mixed_utf8_and_agent_tags() {
+        // Content with UTF-8 characters AND agent tags that need escaping
+        let input = "Response with \u{2014} em dash and <!-- agent:exchange --> tag reference.";
+        let result = sanitize_component_tags(input);
+        assert!(
+            result.contains("\u{2014}"),
+            "em dash must be preserved, got: {:?}",
+            result
+        );
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "agent tag must be escaped"
+        );
+    }
+    #[test]
+    fn sanitize_preserves_various_unicode() {
+        // Test various multi-byte UTF-8 characters
+        let input = "Caf\u{00E9} \u{2019}quotes\u{2019} \u{2014} \u{2026} \u{1F600}";
+        let result = sanitize_component_tags(input);
+        assert_eq!(result, input, "all unicode must survive sanitization");
+    }
+    #[test]
+    fn sanitize_unmatched_escapes_exchange_markers_in_response() {
+        let mut unmatched =
+            "### Re: deploy\n\nDone.\n\n<!-- agent:exchange -->\nExtra\n<!-- /agent:exchange -->\n"
+                .to_string();
+        sanitize_unmatched(&mut unmatched);
+        assert!(
+            !unmatched.contains("<!-- agent:exchange -->"),
+            "agent exchange markers must be escaped in unmatched text, got: {unmatched}"
+        );
+        assert!(
+            unmatched.contains("&lt;!-- agent:exchange --&gt;"),
+            "escaped markers expected, got: {unmatched}"
+        );
+    }
+    #[test]
+    fn apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Existing answer.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        let unmatched = "### Re: deploy — gpt-5\n\nDeployed.\n\n<!-- agent:exchange -->\nLeaked content\n<!-- /agent:exchange -->\n";
+        let mut sanitized_unmatched = unmatched.to_string();
+        sanitize_unmatched(&mut sanitized_unmatched);
+
+        let result = crate::template::apply_patches(doc, &[], &sanitized_unmatched, &file).unwrap();
+
+        let exchange_opens = result.matches("<!-- agent:exchange").count();
+        assert_eq!(
+            exchange_opens, 1,
+            "must have exactly one exchange opener, got {exchange_opens}:\n{result}"
+        );
+        assert!(
+            !result.contains("<!-- agent:exchange -->\nLeaked content"),
+            "leaked exchange markers must be escaped, not create a second block"
+        );
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "escaped markers should appear in result"
+        );
+    }
+    #[test]
+    fn try_ipc_snapshot_saves_disk_state() {
+        // Verify that after IPC succeeds, the snapshot contains the actual post-write
+        // disk state (file read after the 200ms flush delay), NOT content_ours.
+        // Using the actual disk state prevents stale baselines from perpetuating
+        // ghost diffs cycle after cycle.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response content");
+
+        let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
+
+        // Simulate the plugin applying the patch and performing a safe boundary
+        // reposition in the same editor-visible write.
+        let after_plugin_write = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- agent:boundary:plugin-boundary -->\n<!-- /agent:exchange -->\n";
+
+        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
+        let after_plugin_write_owned = after_plugin_write.to_string();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().extension().is_some_and(|e| e == "json") {
+                            // Simulate plugin applying patch + leaving user edits in file
+                            let _ = fs::write(&doc_for_watcher, &after_plugin_write_owned);
+                            let _ = fs::remove_file(entry.path());
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),     // baseline
+            Some(content_ours), // content_ours (no longer used for snapshot)
+            None,               // normalize_prefix_lines
+            None,               // reuse_patch_id
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("agent response content"),
+            "snapshot must contain agent response, got: {}",
+            snap
+        );
+        assert!(snap.contains("plugin-boundary"));
+        assert_eq!(
+            snap, after_plugin_write,
+            "snapshot must exactly match post-write disk state"
+        );
+    }
+    #[test]
+    fn ipc_json_preserves_utf8_em_dash() {
+        // Verify that serde_json serialization preserves em dashes in IPC payloads
+        let content = "Response with \u{2014} em dash.";
+        let payload = serde_json::json!({
+            "file": "/tmp/test.md",
+            "patches": [{
+                "component": "exchange",
+                "content": content,
+            }],
+            "unmatched": "",
+            "baseline": "",
+        });
+
+        let json_str = serde_json::to_string_pretty(&payload).unwrap();
+        // Parse it back and verify the content is preserved
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let parsed_content = parsed["patches"][0]["content"].as_str().unwrap();
+        assert_eq!(
+            parsed_content, content,
+            "em dash must survive JSON round-trip"
+        );
+
+        // Also verify the raw JSON contains the UTF-8 bytes, not escaped sequences
+        assert!(
+            json_str.contains("\u{2014}"),
+            "JSON should contain raw UTF-8 em dash"
+        );
+    }
+    // --- is_append_mode_component tests ---
+    #[test]
+    fn append_mode_component_exchange() {
+        assert!(is_append_mode_component("exchange"));
+        assert!(is_append_mode_component("findings"));
+    }
+    #[test]
+    fn replace_mode_components_not_append() {
+        assert!(!is_append_mode_component("pending"));
+        assert!(!is_append_mode_component("backlog"));
+        assert!(!is_append_mode_component("status"));
+        assert!(!is_append_mode_component("output"));
+        assert!(!is_append_mode_component("todo"));
+    }
+    #[test]
+    fn find_boundary_id_skips_code_blocks() {
+        // Boundary-looking text inside a fenced code block must not be returned
+        let content = "<!-- agent:exchange -->\n```\n<!-- agent:boundary:fake-id -->\n```\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert!(
+            result.is_none(),
+            "boundary inside code block must not be found, got: {:?}",
+            result
+        );
+    }
+    #[test]
+    fn find_boundary_id_finds_real_marker() {
+        let content = "<!-- agent:exchange -->\nSome text.\n<!-- agent:boundary:real-uuid-5678 -->\nMore text.\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert_eq!(result, Some("real-uuid-5678".to_string()));
+    }
+    #[test]
+    fn build_ipc_node_patches_json_tracks_strike_and_insert_by_node_key() {
+        let before = "\
+<!-- agent:queue priority go -->
+- :pushpin: do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:queue priority go -->
+- :pushpin: do [#alpha]
+- ~~do [#beta]~~
+- do [#gamma]
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:beta:0"
+                && patch["op"] == "strike"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("- ~~do [#beta]~~"))
+        }));
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:gamma:0"
+                && patch["op"] == "insert"
+                && patch["after"] == "queue:0:beta:0"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("- do [#gamma]"))
+        }));
+    }
+    #[test]
+    fn build_ipc_node_patches_json_tracks_reorder_without_text_matching() {
+        let before = "\
+<!-- agent:queue priority go -->
+- do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:queue priority go -->
+- do [#beta]
+- do [#alpha]
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["node_key"] == "queue:0:beta:0"
+                && patch["op"] == "move"
+                && patch["before"] == "queue:0:alpha:0"
+        }));
+    }
+    #[test]
+    fn stale_baseline_guard_prefix_check() {
+        // Baseline that starts with snapshot content (user added text) = NOT stale
+        let snapshot = "## Exchange\nResponse here.\n";
+        let baseline_with_user_edit = "## Exchange\nResponse here.\nNew user question\n";
+        let snap_clean = strip_boundary_for_dedup(snapshot);
+        let base_clean = strip_boundary_for_dedup(baseline_with_user_edit);
+        assert!(
+            base_clean.starts_with(&snap_clean),
+            "baseline with user edits should start with snapshot content"
+        );
+
+        // Baseline that doesn't contain snapshot content = STALE
+        let stale_baseline = "## Exchange\nOld content only.\n";
+        let stale_clean = strip_boundary_for_dedup(stale_baseline);
+        assert!(
+            !stale_clean.starts_with(&snap_clean),
+            "stale baseline should not start with snapshot content"
+        );
+    }
+    // --- is_stale_baseline tests ---
+    #[test]
+    fn stale_baseline_identical_content_not_stale() {
+        let doc = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(doc, doc));
+    }
+    #[test]
+    fn stale_baseline_user_appended_text_not_stale() {
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+    }
+    #[test]
+    fn stale_baseline_user_edited_replace_component_not_stale() {
+        // User edits replace-mode component (status) — should NOT trigger stale guard
+        let snapshot = "<!-- agent:status patch=replace -->\nOld status\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:status patch=replace -->\nEdited status by user\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\nNew question\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "user editing replace-mode status component should NOT trigger stale guard"
+        );
+    }
+    #[test]
+    fn stale_baseline_missing_committed_content_is_stale() {
+        let snapshot = "<!-- agent:exchange patch=append -->\nCommitted response from agent.\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld content only.\n<!-- /agent:exchange -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "baseline missing committed content should be stale"
+        );
+    }
+    #[test]
+    fn stale_baseline_missing_append_component_is_stale() {
+        // Missing an append-mode component = stale
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:other patch=append -->\nDifferent.\n<!-- /agent:other -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "baseline missing an append-mode component should be stale"
+        );
+    }
+    #[test]
+    fn stale_baseline_missing_replace_component_not_stale() {
+        // Missing a replace-mode component is fine — user can delete it
+        let snapshot = "<!-- agent:status patch=replace -->\nActive\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "missing replace-mode component should NOT trigger stale guard"
+        );
+    }
+    #[test]
+    fn stale_baseline_boundary_markers_ignored() {
+        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:xyz -->\nUser edit\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "different boundary marker IDs should not cause false stale detection"
+        );
+    }
+    #[test]
+    fn stale_baseline_non_template_fallback_to_prefix() {
+        // Non-template (no components) falls back to prefix check
+        let snapshot = "## Exchange\nResponse.\n";
+        let baseline = "## Exchange\nResponse.\nNew question\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+
+        let stale = "## Exchange\nDifferent content.\n";
+        assert!(is_stale_baseline(stale, snapshot));
+    }
+    #[test]
+    fn stale_baseline_empty_snapshot_component_skipped() {
+        // Empty append components in snapshot should not cause false positives
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nUser added content\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+    }
+    #[test]
+    fn stale_baseline_default_exchange_is_append() {
+        // exchange without explicit patch attr defaults to append via is_append_mode_component
+        let snapshot = "<!-- agent:exchange -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange -->\nOld stuff.\n<!-- /agent:exchange -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "exchange without patch attr should default to append-mode check"
+        );
+    }
+    #[test]
+    fn strip_boundary_for_dedup_removes_markers() {
+        let with_boundary = "Hello\n<!-- agent:boundary:abc123 -->\nWorld\n";
+        let without = strip_boundary_for_dedup(with_boundary);
+        assert!(!without.contains("agent:boundary"));
+        assert!(without.contains("Hello"));
+        assert!(without.contains("World"));
+    }
+    // --- build_ipc_patches_json / synthesis dedup tests ---
+    #[test]
+    fn synthesis_dedup_skips_when_content_already_present() {
+        // If the unmatched content already exists in the target component,
+        // synthesis should be skipped (idempotent write guard).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let existing = "This is the agent response.";
+        let doc_content = format!(
+            "<!-- agent:exchange patch=append -->\n{}\n<!-- /agent:exchange -->\n",
+            existing
+        );
+        fs::write(&doc, &doc_content).unwrap();
+
+        // No explicit patches (simulates skill sending raw content)
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        // Unmatched content is identical to what's already in the exchange
+        let result = build_ipc_patches_json(&doc, &patches, existing, None, None).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "synthesis should be skipped when content already exists in target component, \
+             got {} patches: {:?}",
+            result.len(),
+            result
+        );
+    }
+    #[test]
+    fn synthesis_proceeds_when_content_is_new() {
+        // When unmatched content is NOT present in the target component,
+        // synthesis should create an IPC patch.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nExisting content.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let new_content = "Completely new agent response.";
+        let result = build_ipc_patches_json(&doc, &patches, new_content, None, None).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "synthesis should produce one patch for new content"
+        );
+        assert_eq!(
+            result[0]["component"].as_str().unwrap(),
+            "exchange",
+            "synthesized patch should target exchange"
+        );
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            new_content,
+            "synthesized patch content should match unmatched"
+        );
+    }
+    #[test]
+    fn build_ipc_patches_json_preserves_leading_code_fence_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ show fenced prompt\n",
+            "```\n",
+            "prompt body\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "```\nresponse body\n```\n",
+        )];
+        let result = build_ipc_patches_json(&doc, &patches, "", None, None).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["component"].as_str().unwrap(), "exchange");
+        assert_eq!(result[0]["op"].as_str().unwrap(), "append");
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            "```\nresponse body\n```\n",
+            "IPC payload must keep a leading code fence byte-for-byte"
+        );
+    }
+    #[test]
+    fn synthesis_normalizes_prefix_lines_for_unmatched_exchange_content() {
+        // Regression for the JB-plugin bare `do #expatch...` shape: when IPC
+        // synthesizes an exchange patch from unmatched content, it must bake the
+        // computed `normalize_prefix_lines` into that synthesized patch because
+        // the plugin normalizes before applying patches.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nPrevious response.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
+        let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
+        let result = build_ipc_patches_json(
+            &doc,
+            &patches,
+            unmatched,
+            Some(prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "synthesis should still produce one exchange patch"
+        );
+        assert_eq!(
+            result[0]["component"].as_str().unwrap(),
+            "exchange",
+            "synthesized patch should target exchange"
+        );
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            "❯ do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.",
+            "synthesized unmatched exchange content must carry the prefixed prompt line"
+        );
+    }
+    #[test]
+    fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
+        // #finalize-visible-buffer-ipc-timeout-race ROOT-CAUSE REGRESSION:
+        // a single write builds its IPC patches more than once (socket attempt →
+        // file-IPC fallback → run_stream timeout re-write). Each rebuild used to
+        // mint a FRESH random boundary, so the plugin saw the same response under
+        // two different boundary IDs and appended it twice — doubling the editor
+        // buffer (live repro: 57970 → 107235 bytes). Seeding the boundary from the
+        // stable patch_id must make every rebuild carry an IDENTICAL boundary.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("agent-doc-bugs2.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nPrior response.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: fix\n\nNew response body.",
+        )];
+        let seed = "2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a";
+
+        // Two rebuilds of the SAME write (same seed) → identical boundary.
+        let build_a = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
+        let build_b = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
+        let bid_a = build_a[0]["boundary_id"].as_str();
+        let bid_b = build_b[0]["boundary_id"].as_str();
+        assert!(
+            bid_a.is_some(),
+            "patch should carry a boundary_id: {build_a:?}"
+        );
+        assert_eq!(
+            build_a[0]["op"].as_str(),
+            Some("append"),
+            "append-mode patches should carry an explicit IPC op"
+        );
+        assert_eq!(
+            build_a[0]["node_id"].as_str(),
+            bid_a,
+            "append-mode patches should address the boundary node"
+        );
+        assert_eq!(
+            bid_a, bid_b,
+            "same patch_id seed must yield the SAME boundary across rebuilds (no double-apply)"
+        );
+        assert_eq!(
+            bid_a,
+            Some("2ffa57c0:agent-doc-bugs2"),
+            "boundary must derive from the patch_id hex prefix + doc-stem slug"
+        );
+
+        // A different write (different seed) must NOT collide on one boundary.
+        let other_seed = "99887766-1111-2222-3333-444455556666";
+        let build_c = build_ipc_patches_json(&doc, &patches, "", None, Some(other_seed)).unwrap();
+        assert_ne!(
+            build_c[0]["boundary_id"].as_str(),
+            bid_a,
+            "distinct writes must derive distinct boundaries"
+        );
+    }
+    #[test]
+    fn file_ipc_synthesized_exchange_patch_omits_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let prompt = "do #ipcfull. spec-test-build-install-commit-push";
+        let original = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n{prompt}\n<!-- /agent:exchange -->\n"
+        );
+        let unmatched = "### Re: ipc full-content guard - gpt-5\n\nDone.";
+        let after_plugin_write = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n❯ {prompt}\n{unmatched}\n<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, &original).unwrap();
+
+        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let seen_for_watcher = seen_payload.clone();
+        let after_for_watcher = after_plugin_write.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = fs::read_to_string(&path)
+                            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text)
+                        {
+                            if let Some(pid) = payload.get("patch_id").and_then(|v| v.as_str()) {
+                                let _ = fs::write(
+                                    ack_dir.join(format!("{pid}.md")),
+                                    &after_for_watcher,
+                                );
+                            }
+                            *seen_for_watcher.lock().unwrap() = Some(payload);
+                        }
+                        let _ = fs::write(&doc_for_watcher, &after_for_watcher);
+                        let _ = fs::remove_file(path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let prefix_lines = vec![prompt.to_string()];
+        let result = try_ipc(
+            &doc,
+            &[],
+            unmatched,
+            None,
+            Some(&original),
+            Some(&after_plugin_write),
+            Some(prefix_lines.as_slice()),
+            Some("patch-synth-no-full-content"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "file IPC should accept the synthesized exchange patch"
+        );
+        let payload = seen_payload
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("watcher should capture the IPC payload");
+        assert!(
+            payload.get("fullContent").is_none(),
+            "template response IPC with a synthesized component patch must not send fullContent: {payload}"
+        );
+        assert_eq!(
+            payload["unmatched"], "",
+            "synthesized exchange patch must consume unmatched text instead of sending it twice"
+        );
+        let patches = payload["patches"]
+            .as_array()
+            .expect("payload patches should be an array");
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["content"], unmatched);
+        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
+    }
+    #[test]
+    fn template_normalization_only_file_ipc_omits_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let prompt = "do #norm-only. spec-test-build-install-commit-push";
+        let original = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n{prompt}\n<!-- agent:boundary:test -->\n<!-- /agent:exchange -->\n"
+        );
+        let normalized = original.replace(prompt, &format!("❯ {prompt}"));
+        fs::write(&doc, &original).unwrap();
+
+        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let normalized_for_watcher = normalized.clone();
+        let seen_for_watcher = seen_payload.clone();
+        let watcher = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_secs(3) {
+                let Ok(entries) = fs::read_dir(&patches_dir) else {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let text = fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let patch_id = payload
+                        .get("patch_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap()
+                        .to_string();
+                    fs::write(&doc_for_watcher, &normalized_for_watcher).unwrap();
+                    fs::write(
+                        ack_dir.join(format!("{patch_id}.md")),
+                        &normalized_for_watcher,
+                    )
+                    .unwrap();
+                    *seen_for_watcher.lock().unwrap() = Some(payload);
+                    fs::remove_file(path).unwrap();
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            false
+        });
+
+        let prefix_lines = vec![prompt.to_string()];
+        let result = try_ipc(
+            &doc,
+            &[],
+            "",
+            None,
+            Some(&original),
+            Some(&normalized),
+            Some(prefix_lines.as_slice()),
+            Some("patch-template-norm-only-no-full-content"),
+        )
+        .unwrap();
+
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+        assert!(
+            result.success,
+            "normalization-only template IPC should accept a narrow payload"
+        );
+        let payload = seen_payload
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("watcher should capture the IPC payload");
+        assert!(
+            payload.get("fullContent").is_none(),
+            "template normalization-only IPC must not send fullContent: {payload}"
+        );
+        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
+        assert_eq!(payload["unmatched"], "");
+        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
+
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_scope_rejected")
+                && ops_log.contains("scope=template_frontmatter"),
+            "template fullContent rejection should be logged:\n{ops_log}"
+        );
+    }
+    #[test]
+    fn effective_unmatched_cleared_when_synthesis_consumes_content() {
+        // When synthesis consumes the unmatched content (patches input was empty,
+        // ipc_patches output is non-empty), effective_unmatched should be "".
+        // This prevents the plugin from applying the content twice (IPC duplicate bug).
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let unmatched = "some response content";
+
+        // Case 1: synthesis happened (patches empty → ipc_patches non-empty)
+        let ipc_patches: Vec<serde_json::Value> = vec![serde_json::json!({
+            "component": "exchange",
+            "content": unmatched,
+        })];
+        let effective = if patches.is_empty() && !ipc_patches.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective, "",
+            "effective_unmatched must be empty when synthesis consumed content"
+        );
+
+        // Case 2: explicit patches (no synthesis) — unmatched passes through
+        let explicit_patch = crate::template::PatchBlock::new("exchange", "response");
+        let patches_explicit = [explicit_patch];
+        let ipc_explicit: Vec<serde_json::Value> = vec![serde_json::json!({
+            "component": "exchange",
+            "content": "response",
+        })];
+        let effective2 = if patches_explicit.is_empty() && !ipc_explicit.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective2,
+            unmatched.trim(),
+            "effective_unmatched should pass through when explicit patches exist"
+        );
+
+        // Case 3: no patches, no synthesis (empty doc or dedup skipped it) — unmatched passes through
+        let ipc_empty: Vec<serde_json::Value> = vec![];
+        let effective3 = if patches.is_empty() && !ipc_empty.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective3,
+            unmatched.trim(),
+            "effective_unmatched should pass through when no synthesis occurred"
+        );
+    }
+    // ── normalize_user_prompts_in_exchange ──────────────────────────────────
+    #[test]
+    fn exchange_write_diagnostic_logs_live_edit_provenance() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld content.\n<!-- /agent:exchange -->\n";
+        let before = "<!-- agent:exchange patch=append -->\nOld content.\nlive prompt\n<!-- /agent:exchange -->\n";
+        let after = "<!-- agent:exchange patch=append -->\nOld content.\n❯ live prompt\nlive prompt\n### Re: response\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, before).unwrap();
+        let patches = vec![template::PatchBlock::new(
+            "exchange",
+            "### Re: response\nDone.\n",
+        )];
+
+        log_exchange_write_diagnostic(
+            &doc,
+            "test_source",
+            "test_mode",
+            Some("patch-123"),
+            Some(baseline),
+            before,
+            after,
+            &patches,
+            "",
+        );
+
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("exchange_write_diagnostic"));
+        assert!(log.contains("source=test_source"));
+        assert!(log.contains("write_mode=test_mode"));
+        assert!(log.contains("patch_id=patch-123"));
+        assert!(log.contains("live_exchange_edited=true"));
+        assert!(log.contains("prompt_text_duplicated=true"));
+        assert!(log.contains("prompt_text_normalized=true"));
+        assert!(log.contains("normalized_prefix_delta=1"));
+        assert!(log.contains("before_hash="));
+        assert!(log.contains("after_hash="));
+        assert!(log.contains("writer_pid="));
+    }
+    #[test]
+    fn prompt_dedupe_skips_assistant_response_quotes() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:old -->\n",
+            "quote this exact line\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let after = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ quote this exact line\n",
+            "### Re: response — gpt-5\n\n",
+            "quote this exact line\n",
+            "Done.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
+
+        assert!(
+            !changed,
+            "assistant response quotes must not be treated as duplicate prompt text"
+        );
+        assert_eq!(repaired.matches("quote this exact line").count(), 2);
+    }
+    #[test]
+    fn normalize_template_structure_repairs_live_prompt_prefix_variant_after_boundary() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert_eq!(repaired.matches("sent + re \n").count(), 0);
+        assert_eq!(repaired.matches("sent + received \n").count(), 1);
+    }
+    #[test]
+    fn normalize_template_structure_rejects_mixed_duplicate_scaffold_prompt_prefix_variant() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, content).unwrap();
+
+        let err = normalize_template_structure_or_fail(content, &doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains("mixed duplicate scaffold"),
+            "unexpected error: {err}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
+    }
+    #[test]
+    fn normalize_template_structure_keeps_prefix_variant_inside_response_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: example — gpt-5\n\n",
+            "This sentence is a prefix\n",
+            "This sentence is a prefix variant in assistant prose\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert!(repaired.contains("This sentence is a prefix\n"));
+        assert!(repaired.contains("This sentence is a prefix variant in assistant prose\n"));
+    }
+    #[test]
+    fn ipc_snapshot_dedupes_live_prompt_prefix_variant() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let after = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
+
+        assert!(changed);
+        assert_eq!(repaired.matches("sent + re \n").count(), 0);
+        assert_eq!(repaired.matches("sent + received \n").count(), 1);
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("live_prompt_prefix_variant_repaired"));
+        assert!(log.contains("ipc_snapshot_deduped"));
+    }
+    #[test]
+    fn ipc_snapshot_scrubs_post_exchange_duplicate_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let after = before
+            .replace(
+                "<!-- /agent:exchange -->",
+                "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+            )
+            .replace(
+                "<!-- agent:backlog -->",
+                "<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n-->\n\n<!-- agent:backlog -->",
+            );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc").unwrap();
+
+        assert!(changed);
+        assert!(
+            !repaired.contains(
+                "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
+            ),
+            "IPC ack-content dedupe must scrub duplicate post-exchange prompt text:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "IPC ack-content dedupe must preserve the ordinary HTML comment shell:\n{repaired}"
+        );
+        assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("post_exchange_duplicate_prompt_comment_removed"));
+        assert!(log.contains("duplicate_prompt_artifact_repair"));
+        assert!(log.contains("post_exchange_comments=true"));
+    }
+    #[test]
+    fn ipc_snapshot_preserves_owned_post_exchange_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "The post-exchange IPC handoff scratch comment should not be deleted. #spec-test-build-install-commit-push";
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "---\n",
+                "Keep this owned scratch note visible.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let after = before.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: IPC handoff — gpt-5\n\nHandled.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+    );
+        fs::write(&doc, &before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap();
+
+        assert!(
+            !changed,
+            "owned post-exchange comments should not force IPC snapshot repair"
+        );
+        assert!(
+        repaired.contains(&format!(
+            "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep this owned scratch note visible.\n-->"
+        )),
+        "IPC ack-content dedupe must preserve owned mixed scratch comments:\n{repaired}"
+    );
+    }
+    #[test]
+    fn ipc_snapshot_rejects_plain_markdown_duplicate_prompt_residue() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        let after = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: response — gpt-5\n\n",
+                "Done.\n",
+                "<!-- agent:boundary:new -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "# Notes\n\n",
+                "{prompt}\n"
+            ),
+            prompt = prompt
+        );
+        fs::write(&doc, &before).unwrap();
+
+        let err = dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap_err();
+
+        assert!(
+            err.to_string().contains("duplicate prompt residue"),
+            "IPC snapshot dedupe must fail closed on duplicate prompt Markdown residue: {err}"
+        );
+    }
+    #[test]
+    fn normalize_patch_content_applies_prefix_to_matching_lines() {
+        let patch_content =
+            "transferred line 1\ntransferred line 2\n### Re: Response\nAgent answer\n";
+        let prefix_lines = vec![
+            "transferred line 1".to_string(),
+            "transferred line 2".to_string(),
+        ];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let expected =
+            "❯ transferred line 1\n❯ transferred line 2\n### Re: Response\nAgent answer\n";
+        assert_eq!(
+            result, expected,
+            "prefix lines should get ❯  in patch content"
+        );
+    }
+    #[test]
+    fn normalize_patch_content_idempotent_already_prefixed() {
+        let patch_content = "❯ already prefixed\nnot prefixed\n";
+        let prefix_lines = vec!["already prefixed".to_string(), "not prefixed".to_string()];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let expected = "❯ already prefixed\n❯ not prefixed\n";
+        assert_eq!(
+            result, expected,
+            "already-prefixed lines should not get double prefix"
+        );
+    }
+    #[test]
+    fn normalize_patch_content_empty_prefix_lines_passthrough() {
+        let patch_content = "some line\nanother line\n";
+        let result = normalize_patch_content(patch_content, &[]);
+        assert_eq!(
+            result, patch_content,
+            "empty prefix_lines should leave content unchanged"
+        );
+    }
+    #[test]
+    fn normalize_patch_content_non_matching_lines_unchanged() {
+        let patch_content = "agent response line\n### heading\n";
+        let prefix_lines = vec!["user line".to_string()];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        assert_eq!(
+            result, patch_content,
+            "non-matching lines should pass through unchanged"
+        );
+    }
+    #[test]
+    fn normalize_patch_content_counts_duplicate_targets() {
+        let patch_content = "spec-test-build-install-commit-push\nspec-test-build-install-commit-push\nspec-test-build-install-commit-push\n";
+        let prefix_lines = vec![
+            "spec-test-build-install-commit-push".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+        ];
+
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+
+        assert_eq!(
+            result,
+            "❯ spec-test-build-install-commit-push\n❯ spec-test-build-install-commit-push\nspec-test-build-install-commit-push\n"
+        );
+    }
+    #[test]
+    fn normalize_prefix_lines_skipped_for_replace_mode_components() {
+        // Regression: normalize_patch_content was applied to ALL patches including agent:pending.
+        // When a line from the exchange user_added set also appeared in a pending patch, it would
+        // incorrectly receive the ❯  prefix. The fix gates normalization on is_append_mode_component.
+        let pending_content =
+            "- [ ] Build Gutenberg replacement HTML for home page\n- [ ] Update page content\n";
+        let prefix_lines = vec!["- [ ] Build Gutenberg replacement HTML for home page".to_string()];
+        // Simulate the guard: only apply normalize_patch_content for exchange (append-mode) components.
+        // For pending (replace-mode), content must pass through unchanged.
+        let is_pending = !is_append_mode_component("pending");
+        assert!(is_pending, "pending should not be an append-mode component");
+        // If the guard is respected, pending content is not normalized.
+        let result = if is_append_mode_component("pending") {
+            normalize_patch_content(pending_content, &prefix_lines)
+        } else {
+            pending_content.to_string()
+        };
+        assert_eq!(
+            result, pending_content,
+            "agent:pending content must NOT receive ❯  prefix"
+        );
+        assert!(
+            !result.contains("❯ "),
+            "no ❯  prefix should appear in pending patches"
+        );
+    }
+    // ── agent-response-block tracking ────────────────────────────────────────
+    // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
+    // --- exchange shrink guard tests ---
+    #[test]
+    fn splice_pending_replaces_content_when_both_have_pending() {
+        // target has stale/empty pending (built from pre-mutation baseline)
+        let target = "\
+<!-- agent:exchange -->
+response content
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [ ] [#aaaa] old item
+<!-- /agent:pending -->
+";
+        // source is the current on-disk file with a pending-done mutation applied
+        let source = "\
+<!-- agent:exchange -->
+original content
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [x] [#aaaa] old item
+<!-- /agent:pending -->
+";
+        let result = splice_pending_component(target, source);
+        // exchange content from target is preserved
+        assert!(
+            result.contains("response content"),
+            "exchange content should come from target"
+        );
+        // pending content from source (with [x]) is used
+        assert!(
+            result.contains("- [x] [#aaaa] old item"),
+            "pending done state should come from source"
+        );
+        // old pending from target is gone
+        assert!(
+            !result.contains("- [ ] [#aaaa] old item"),
+            "stale open pending should be replaced"
+        );
+    }
+    #[test]
+    fn splice_pending_noop_when_source_has_no_pending() {
+        let target = "\
+<!-- agent:exchange -->
+response
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [ ] [#bbbb] task
+<!-- /agent:pending -->
+";
+        let source = "\
+<!-- agent:exchange -->
+original
+<!-- /agent:exchange -->
+";
+        let result = splice_pending_component(target, source);
+        assert_eq!(
+            result, target,
+            "target should be returned unchanged when source has no pending"
+        );
+    }
+    #[test]
+    fn splice_pending_warns_when_target_missing_pending() {
+        // target has no pending component; source does — should return target unchanged
+        let target = "\
+<!-- agent:exchange -->
+response
+<!-- /agent:exchange -->
+";
+        let source = "\
+<!-- agent:exchange -->
+original
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [x] [#cccc] done item
+<!-- /agent:pending -->
+";
+        let result = splice_pending_component(target, source);
+        assert_eq!(
+            result, target,
+            "target should be returned unchanged when target has no pending"
+        );
+    }
+}

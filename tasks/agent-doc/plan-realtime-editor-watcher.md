@@ -239,3 +239,12 @@ the verify needs two live IDEs.
 - `preflight.rs`, `write.rs`, `template.rs` — read current doc from realtime model.
 - `editors/jetbrains/`, `editors/vscode/` — thin buffer-change emit (already exists; verify durability + reconnect).
 - SimWorld tests for the reconciliation + no-clobber invariants.
+
+<!-- agent:exchange -->
+Completed Rung 4 Option A’s agent-doable work.
+
+Implemented per-editor live-buffer identity, targeted per-editor patch delivery, and the production N-buffer CRDT broadcast planner/delivery path in `src/agent-doc` commit `cddad87b`. The local CLI/cdylib are installed (`agent-doc 0.34.0`), JetBrains plugin version is bumped to `0.2.162` with signed/unsigned zips built, and VS Code extension version is bumped to `0.2.26`.
+
+Verification passed: `make check`, `npm test` for VS Code, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`, `make plugin-version-check`, `make bump-plugin`, `make install`, and latest GitHub Actions CI on `main` is green. Remaining gate is still `#rtwbcast-verify`, which requires the operator’s two-live-IDE test with JB + VS Code.
+<!-- agent:boundary:eafa4915 -->
+<!-- /agent:exchange -->

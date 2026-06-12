@@ -120,6 +120,13 @@ pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Res
         installed.display(),
         ext,
     );
+    // R4 (#ctlrecycle): the JetBrains plugin hot-reloads this cdylib by mtime, but
+    // already-running agent-doc controllers/supervisors keep serving the PRIOR binary
+    // until they recycle. Surface the deterministic recycle so the new build actually
+    // goes live everywhere, not just in the editor cdylib.
+    eprintln!(
+        "[lib-install] note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
+    );
 
     Ok(())
 }

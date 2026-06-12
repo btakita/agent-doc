@@ -1265,6 +1265,26 @@ pub fn has_open_in_flight_dispatch(
     Ok(count > 0)
 }
 
+/// `#ctlrecycle`: is ANY dispatch in flight across every document/generation? The
+/// controller's idle self-recycle (R1) uses this as its idle proof — it must never
+/// exit while a turn is mid-dispatch for any session it coordinates. Same open-set
+/// definition as [`has_open_in_flight_dispatch`] without the document/generation
+/// filter.
+pub fn has_any_open_in_flight_dispatch(conn: &Connection) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM dispatch_attempts
+        WHERE failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND dispatch_start_proven = 0
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
 /// when the actor transitions to `Ready` (the turn finished → its dispatch is done),
 /// keeping the open-dispatch set accurate for the next busy episode's coalescing and

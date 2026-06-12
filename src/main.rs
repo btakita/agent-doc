@@ -1342,6 +1342,20 @@ enum AdminAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Recycle running controllers onto the freshly-installed binary at their next
+    /// idle boundary (no dispatch in flight). Run after `cargo install` so a
+    /// long-running controller stops serving the prior binary (`#ctlrecycle`).
+    Recycle {
+        /// Project root to recycle (defaults to the nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Recycle the controller in every project root with a running controller
+        #[arg(long)]
+        all_projects: bool,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Handoff a document actor to another pane after generation verification
     Handoff {
         /// Document to hand off
@@ -2974,6 +2988,60 @@ fn main() -> anyhow::Result<()> {
                     );
                 } else {
                     println!("[admin] reap-stale-controllers: {reaped} terminated, {kept} kept");
+                }
+                Ok(())
+            }
+            AdminAction::Recycle {
+                project_root,
+                all_projects,
+                json,
+            } => {
+                if all_projects {
+                    let (recycled, skipped) =
+                        agent_doc_orchestration::project_controller::recycle_controllers_all_projects()?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "scope": "all_projects", "recycled": recycled, "skipped": skipped })
+                        );
+                    } else {
+                        println!(
+                            "[admin] recycle (all projects): {recycled} controller(s) marked to recycle at next idle boundary, {skipped} skipped"
+                        );
+                    }
+                } else {
+                    let root = match project_root {
+                        Some(r) => r,
+                        None => {
+                            let cwd = std::env::current_dir()?;
+                            agent_doc_orchestration::fs_util::find_project_root(&cwd).ok_or_else(
+                                || {
+                                    anyhow::anyhow!(
+                                        ".agent-doc/ project root not found from {}",
+                                        cwd.display()
+                                    )
+                                },
+                            )?
+                        }
+                    };
+                    let recycled =
+                        agent_doc_orchestration::project_controller::recycle_controller(&root)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "scope": "project", "project_root": root.display().to_string(), "recycled": recycled })
+                        );
+                    } else if recycled {
+                        println!(
+                            "[admin] recycle: controller for {} marked to recycle at next idle boundary",
+                            root.display()
+                        );
+                    } else {
+                        println!(
+                            "[admin] recycle: no running controller for {} (nothing to recycle)",
+                            root.display()
+                        );
+                    }
                 }
                 Ok(())
             }

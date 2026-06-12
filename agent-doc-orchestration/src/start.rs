@@ -2041,6 +2041,30 @@ fn live_transcript_context_pct(
     crate::context_pct::transcript_context_pct(harness_kind, &transcript, &model)
 }
 
+/// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
+/// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
+#[derive(Debug, PartialEq, Eq)]
+enum SupervisorStaleAction {
+    /// Not stale, or not idle — do nothing.
+    None,
+    /// Stale + idle but auto-recycle is off: surface it so the operator restarts.
+    Detect,
+    /// Stale + idle + opt-in flag: recycle this supervisor onto the fresh binary.
+    Recycle,
+}
+
+/// `#ctlrecycle` R3 — pure recycle policy for the `start` supervisor. Recycling ends
+/// the operator's live agent child, so `Recycle` requires the opt-in flag; without it
+/// a stale idle supervisor only surfaces (`Detect`). The debounce that gates the
+/// actual `Recycle` is applied separately by the caller via `recycle_debounce_decision`.
+fn supervisor_stale_action(stale: bool, idle: bool, auto_recycle: bool) -> SupervisorStaleAction {
+    match (stale && idle, auto_recycle) {
+        (false, _) => SupervisorStaleAction::None,
+        (true, true) => SupervisorStaleAction::Recycle,
+        (true, false) => SupervisorStaleAction::Detect,
+    }
+}
+
 fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -2057,6 +2081,14 @@ fn spawn_idle_queue_watch_thread(
             let mut last_context_reset_head: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut idle_busy_ticks: u32 = 0;
+            // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
+            // installed binary at process start). A later `cargo install` makes
+            // `current_binary_identity()` differ, marking this supervisor stale.
+            let recycle_launch_identity = crate::project_controller::current_binary_identity().ok();
+            let recycle_auto_enabled = crate::project_controller::supervisor_auto_recycle_enabled();
+            let recycle_grace = crate::project_controller::recycle_idle_grace();
+            let mut recycle_stale_since: Option<std::time::Instant> = None;
+            let mut recycle_detected_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -2131,6 +2163,59 @@ fn spawn_idle_queue_watch_thread(
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
+
+                // R3 (#ctlrecycle): recycle this supervisor onto a freshly-installed
+                // binary when fully idle. Recycling ends the live agent child, so the
+                // automatic path is opt-in (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`);
+                // otherwise we only surface staleness once so the operator can restart
+                // deliberately. Debounced so a brief idle gap between turns never trips
+                // it. Idle = a dispatch-ready prompt is up, no turn is running, and no
+                // queue head is waiting to drain.
+                let supervisor_idle = prompt_visible && !turn_active && active_head.is_none();
+                let supervisor_stale = crate::project_controller::process_binary_is_stale(
+                    recycle_launch_identity.as_ref(),
+                );
+                let (recycle_debounced, next_recycle_since) =
+                    crate::project_controller::recycle_debounce_decision(
+                        supervisor_stale && supervisor_idle && recycle_auto_enabled,
+                        recycle_stale_since,
+                        std::time::Instant::now(),
+                        recycle_grace,
+                    );
+                recycle_stale_since = next_recycle_since;
+                match supervisor_stale_action(
+                    supervisor_stale,
+                    supervisor_idle,
+                    recycle_auto_enabled,
+                ) {
+                    SupervisorStaleAction::Detect if !recycle_detected_logged => {
+                        recycle_detected_logged = true;
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_binary_stale_detected pane={} hint=restart_or_set_AGENT_DOC_SUPERVISOR_AUTO_RECYCLE",
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor is running a prior agent-doc binary; restart this session (or set AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1) to pick up the new build"
+                        );
+                    }
+                    SupervisorStaleAction::Recycle if recycle_debounced => {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_binary_stale_self_recycled via=process_exit pane={}",
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary (idle); the next launch uses the new build"
+                        );
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                }
 
                 // `#autoloop-command-preemption` Phase 2b: a non-interrupting
                 // `session clear` against this busy auto-loop deferred itself
@@ -5901,6 +5986,21 @@ Done.
         tracker.events.push_back(now - Duration::from_secs(5));
         let count = tracker.record(now);
         assert_eq!(count, 2, "only recent failures should remain in the window");
+    }
+
+    #[test]
+    fn supervisor_stale_action_policy() {
+        use SupervisorStaleAction::*;
+        // `#ctlrecycle` R3 policy truth table.
+        // Fresh binary → never act.
+        assert_eq!(supervisor_stale_action(false, true, true), None);
+        assert_eq!(supervisor_stale_action(false, true, false), None);
+        // Stale but busy (not idle) → never act mid-turn, even with the flag on.
+        assert_eq!(supervisor_stale_action(true, false, true), None);
+        // Stale + idle, auto-recycle OFF → surface only (operator restarts).
+        assert_eq!(supervisor_stale_action(true, true, false), Detect);
+        // Stale + idle, opt-in ON → recycle.
+        assert_eq!(supervisor_stale_action(true, true, true), Recycle);
     }
 
     #[test]

@@ -65,6 +65,17 @@ const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 const DEFAULT_STALE_PREPARING_CONTROLLER_SECS: u64 = 45;
 const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
 
+/// `#ctlrecycle` — how long a process must continuously observe "wants-recycle AND
+/// idle" before it self-recycles onto a freshly-installed binary. Debounce so a
+/// short gap between queue items never triggers a recycle.
+const DEFAULT_RECYCLE_IDLE_GRACE_SECS: u64 = 5;
+const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
+/// `#ctlrecycle` R3 — opt-in flag for the `start --route-owned` supervisor to
+/// auto-recycle (re-exec) onto a fresh binary when idle. Default OFF: recycling the
+/// supervisor ends the operator's live agent child, so it stays a deliberate opt-in
+/// until validated; when off the supervisor only logs `supervisor_binary_stale_detected`.
+const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
+
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {
     pub session_id: String,
@@ -194,6 +205,11 @@ impl ControllerMemoryState {
 struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
+    /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
+    /// The serve-loop idle poll honors it the same way it honors binary staleness:
+    /// once no dispatch is in flight (debounced), the controller self-terminates and
+    /// the next `connect_or_launch` relaunches the fresh binary.
+    recycle_requested: AtomicBool,
 }
 
 impl ControllerRuntime {
@@ -205,7 +221,17 @@ impl ControllerRuntime {
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
+            recycle_requested: AtomicBool::new(false),
         })
+    }
+
+    /// `#ctlrecycle` R2 — mark this controller to recycle at the next idle boundary.
+    fn request_recycle(&self) {
+        self.recycle_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn recycle_requested(&self) -> bool {
+        self.recycle_requested.load(Ordering::SeqCst)
     }
 
     fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
@@ -945,7 +971,7 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
         .map(Some)
 }
 
-fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
+pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
     let path = current_agent_doc_binary()?;
     let metadata = std::fs::metadata(&path)
         .with_context(|| format!("failed to stat current agent-doc binary {}", path.display()))?;
@@ -3111,12 +3137,68 @@ fn controller_status_matches_current_binary(status: &ControllerStatus) -> Result
 /// treated as "not stale" so a transiently-unreadable binary path can never block a
 /// live dispatch (fail-open — staleness is a recycle hint, never a hard stop).
 fn controller_binary_is_stale(bootstrap: &ControllerBootstrap) -> bool {
-    let Some(running) = bootstrap.controller_binary.as_ref() else {
+    process_binary_is_stale(bootstrap.controller_binary.as_ref())
+}
+
+/// `#ctlrecycle` — process-type-agnostic generalization of [`controller_binary_is_stale`].
+/// Compares a long-lived process's RECORDED launch identity against the
+/// freshly-installed binary (`current_binary_identity` stats the install *path*, so
+/// it reflects a `cargo install` even though this process still runs the old mapped
+/// inode). Shared by the controller serve loop (R1) and the `start` supervisor (R3).
+/// Fail-open: a missing recorded identity or any stat error reads as "not stale".
+pub(crate) fn process_binary_is_stale(recorded: Option<&ControllerBinaryIdentity>) -> bool {
+    let Some(recorded) = recorded else {
         return false;
     };
     match current_binary_identity() {
-        Ok(current) => running != &current,
+        Ok(current) => recorded != &current,
         Err(_) => false,
+    }
+}
+
+/// `#ctlrecycle` — idle grace before a stale/recycle-requested process actually
+/// recycles. A process must observe "wants-recycle AND idle" continuously for this
+/// long so a brief lull between queue items never triggers a recycle. Override with
+/// `AGENT_DOC_RECYCLE_IDLE_GRACE_SECS`.
+pub(crate) fn recycle_idle_grace() -> Duration {
+    let secs = std::env::var(RECYCLE_IDLE_GRACE_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RECYCLE_IDLE_GRACE_SECS);
+    Duration::from_secs(secs)
+}
+
+/// `#ctlrecycle` R3 — is the opt-in `start --route-owned` supervisor auto-recycle
+/// enabled? Default OFF: recycling the supervisor ends the operator's live agent
+/// child, so a stale supervisor only logs `supervisor_binary_stale_detected` unless
+/// the operator opts in. Truthy: `1`/`true`/`yes`/`on` (case-insensitive).
+pub(crate) fn supervisor_auto_recycle_enabled() -> bool {
+    matches!(
+        std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
+/// (R3). Given whether the process currently "wants recycle AND is idle", the
+/// instant staleness was first observed, the clock, and the grace window, returns
+/// `(should_recycle_now, next_stale_since)`. Pure so the recycle timing is unit
+/// testable without sleeping. Resets the timer the moment the process is no longer
+/// idle-and-stale, so transient busy windows restart the debounce.
+pub(crate) fn recycle_debounce_decision(
+    wants_recycle_and_idle: bool,
+    stale_since: Option<Instant>,
+    now: Instant,
+    grace: Duration,
+) -> (bool, Option<Instant>) {
+    match (wants_recycle_and_idle, stale_since) {
+        (false, _) => (false, None),
+        (true, None) => (false, Some(now)),
+        (true, Some(since)) => (now.duration_since(since) >= grace, Some(since)),
     }
 }
 
@@ -3240,6 +3322,53 @@ fn shutdown_stale_controller(project_root: &Path) {
         }
         std::thread::sleep(CONNECT_POLL);
     }
+}
+
+/// `#ctlrecycle` R2 — ask the active controller for `project_root` to recycle at its
+/// next idle boundary (`agent-doc admin recycle`). Returns `Ok(true)` when a
+/// controller was reached, `Ok(false)` when none is running (nothing to recycle).
+/// Never launches a controller — connect-only, so it is a no-op on a clean project.
+pub fn recycle_controller(project_root: &Path) -> Result<bool> {
+    if connect(project_root).is_err() {
+        return Ok(false);
+    }
+    let response = request(project_root, "recycle")?;
+    Ok(response.contains("\"ok\":true"))
+}
+
+/// `#ctlrecycle` R2 — recycle the active controller in EVERY project root that has a
+/// running `controller serve` process (the cross-project breadth of `admin recycle
+/// --all-projects`). Walks `/proc` for controllers, dedups by canonical project
+/// root, and sends each a `recycle`. Returns `(recycled, skipped)`.
+pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Ok((0, 0));
+    };
+    let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        if let Some(root) = controller_serve_project_root(pid) {
+            roots.insert(canonical_path_for_compare(&root));
+        }
+    }
+    let mut recycled = 0;
+    let mut skipped = 0;
+    for root in roots {
+        match recycle_controller(&root) {
+            Ok(true) => recycled += 1,
+            _ => skipped += 1,
+        }
+    }
+    Ok((recycled, skipped))
 }
 
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
@@ -3546,6 +3675,8 @@ fn serve_with_options(
     let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let should_stop = Arc::new(AtomicBool::new(false));
     let watchdog_threshold = stale_preparing_controller_threshold();
+    let recycle_grace = recycle_idle_grace();
+    let mut recycle_stale_since: Option<Instant> = None;
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -3569,6 +3700,30 @@ fn serve_with_options(
                 // (which completes well under the threshold) never trips this.
                 if controller_self_watchdog_should_suicide(&runtime, watchdog_threshold) {
                     controller_self_watchdog_suicide(&runtime, watchdog_threshold);
+                    should_stop.store(true, Ordering::SeqCst);
+                    break;
+                }
+                // R1/R2 (#ctlrecycle): recycle onto a freshly-installed binary (R1) or
+                // on an operator `recycle` request (R2) once no dispatch is in flight,
+                // debounced so a brief lull between queue items never triggers it. The
+                // idle DB probe only runs when a recycle is actually wanted (rare), so
+                // the common hot path stays an atomic load plus one binary `stat`.
+                let wants_recycle_and_idle =
+                    controller_wants_recycle(&runtime) && controller_recycle_idle(&runtime);
+                let (do_recycle, next_since) = recycle_debounce_decision(
+                    wants_recycle_and_idle,
+                    recycle_stale_since,
+                    Instant::now(),
+                    recycle_grace,
+                );
+                recycle_stale_since = next_since;
+                if do_recycle {
+                    let reason = if runtime.recycle_requested() {
+                        "operator_request"
+                    } else {
+                        "stale_binary"
+                    };
+                    controller_self_recycle(&runtime, reason);
                     should_stop.store(true, Ordering::SeqCst);
                     break;
                 }
@@ -3632,6 +3787,66 @@ fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, threshold: Dura
     eprintln!(
         "[controller] self-watchdog: terminating controller wedged in preparing past {}s pid={pid} generation={generation} age_secs={age}",
         threshold.as_secs()
+    );
+}
+
+/// `#ctlrecycle` R1/R2 — does this controller want to recycle onto a fresh binary?
+/// True when an operator `recycle` RPC asked it to (R2) or its own binary is stale
+/// after a `cargo install` (R1). Cheap: an atomic load, then one `stat` of the
+/// install path only when no explicit request is pending.
+fn controller_wants_recycle(runtime: &ControllerRuntime) -> bool {
+    if runtime.recycle_requested() {
+        return true;
+    }
+    match runtime.bootstrap_snapshot() {
+        Ok(bootstrap) => process_binary_is_stale(bootstrap.controller_binary.as_ref()),
+        Err(_) => false,
+    }
+}
+
+/// `#ctlrecycle` R1 — is the controller safe to recycle right now? Only when it is
+/// `Stable` (not mid-handoff) AND no dispatch is in flight for ANY document, so a
+/// recycle never interrupts an in-flight turn. Fail-closed on the idle proof: a
+/// bootstrap-lock or DB error reads as "not idle" so we never recycle on uncertainty.
+fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return false;
+    };
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        return false;
+    }
+    let Ok(conn) = open_state_db(&bootstrap.project_root) else {
+        return false;
+    };
+    !state_store::has_any_open_in_flight_dispatch(&conn).unwrap_or(true)
+}
+
+/// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next
+/// `connect_or_launch` relaunches the freshly-installed binary. State lives in
+/// SQLite, so a coordinator exit loses nothing; the new controller adopts it. The
+/// caller flips `should_stop`, drops the listener, and removes the socket.
+fn controller_self_recycle(runtime: &ControllerRuntime, reason: &str) {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return;
+    };
+    let old_version = bootstrap
+        .controller_binary
+        .as_ref()
+        .map(|id| id.version.clone())
+        .unwrap_or_default();
+    let new_version = current_binary_identity()
+        .map(|id| id.version)
+        .unwrap_or_default();
+    crate::ops_log::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_self_recycled pid={} generation={} reason={reason} old_version={old_version} new_version={new_version}",
+            bootstrap.pid, bootstrap.controller_generation
+        ),
+    );
+    eprintln!(
+        "[controller] recycling onto freshly-installed binary pid={} generation={} reason={reason}",
+        bootstrap.pid, bootstrap.controller_generation
     );
 }
 
@@ -3746,6 +3961,23 @@ fn handle_request_locked(
         }
         "shutdown" => {
             *should_stop = true;
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "recycle" => {
+            // R2 (#ctlrecycle): mark this controller to recycle at the next idle
+            // boundary. Unlike `shutdown`, it does NOT stop immediately — the
+            // serve-loop idle poll honors it only once no dispatch is in flight, so
+            // an explicit recycle never interrupts an in-flight turn.
+            runtime.request_recycle();
+            crate::ops_log::log_op(
+                &bootstrap_snapshot.project_root,
+                &format!(
+                    "controller_recycle_requested pid={} generation={} reason={}",
+                    bootstrap_snapshot.pid,
+                    bootstrap_snapshot.controller_generation,
+                    request.reason.as_deref().unwrap_or("operator_request"),
+                ),
+            );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "start_session" => controller_envelope(handle_start_session(
@@ -7788,6 +8020,7 @@ agent:queue\n\
                 actor_store: BTreeMap::new(),
                 map_backend: "std_btree_map",
             }),
+            recycle_requested: AtomicBool::new(false),
         }
     }
 
@@ -8236,6 +8469,58 @@ agent:queue\n\
                 "a current-binary controller must not be refused for staleness: {err:#}"
             );
         }
+    }
+
+    #[test]
+    fn process_binary_is_stale_matches_and_differs() {
+        // `#ctlrecycle` foundation. No recorded identity → never stale (fail-open).
+        assert!(!process_binary_is_stale(None));
+        // The freshly-installed identity matches itself → not stale.
+        let current = current_binary_identity().unwrap();
+        assert!(!process_binary_is_stale(Some(&current)));
+        // A different recorded identity (an old build) → stale.
+        let stale = ControllerBinaryIdentity {
+            path: current.path.clone(),
+            version: "0.0.0-stale".to_string(),
+            len: current.len.wrapping_add(1),
+            modified_secs: current.modified_secs.wrapping_add(1),
+            modified_nanos: 0,
+        };
+        assert!(process_binary_is_stale(Some(&stale)));
+    }
+
+    #[test]
+    fn recycle_debounce_decision_requires_continuous_idle_grace() {
+        // `#ctlrecycle` foundation: a recycle fires only after "wants-recycle AND
+        // idle" holds continuously for the grace window, and any busy blip resets it.
+        let grace = Duration::from_secs(5);
+        let t0 = Instant::now();
+        // Not idle-and-stale → no recycle, timer cleared.
+        assert_eq!(
+            recycle_debounce_decision(false, Some(t0), t0, grace),
+            (false, None)
+        );
+        // First observation arms the timer but does not recycle yet.
+        let (do_recycle, since) = recycle_debounce_decision(true, None, t0, grace);
+        assert!(!do_recycle);
+        assert_eq!(since, Some(t0));
+        // Before the grace elapses → still no recycle, timer preserved.
+        let t_mid = t0 + Duration::from_secs(2);
+        assert_eq!(
+            recycle_debounce_decision(true, since, t_mid, grace),
+            (false, Some(t0))
+        );
+        // After the grace elapses while continuously idle-and-stale → recycle.
+        let t_late = t0 + Duration::from_secs(6);
+        assert_eq!(
+            recycle_debounce_decision(true, since, t_late, grace),
+            (true, Some(t0))
+        );
+        // A busy blip between samples resets the timer (no recycle, cleared).
+        assert_eq!(
+            recycle_debounce_decision(false, since, t_late, grace),
+            (false, None)
+        );
     }
 
     // ---- M4 (#stuckhandoff2): client handoff drop-guard ----

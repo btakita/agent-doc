@@ -1240,6 +1240,50 @@ pub fn upsert_supervisor_lease_in_db(
     Ok(())
 }
 
+/// `#qflood`: is a dispatch already in flight (accepted, not yet consumed) for this
+/// document at `generation`? Mirrors the open-dispatch shape the restart reconciler
+/// keys on. An open dispatch means the current turn already has work queued/running,
+/// so an auto re-fire would only pile a redundant trigger into the busy pane.
+pub fn has_open_in_flight_dispatch(
+    conn: &Connection,
+    document_id: &str,
+    generation: u64,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND generation = ?2
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND dispatch_start_proven = 0
+        "#,
+        params![document_id, generation as i64],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
+/// when the actor transitions to `Ready` (the turn finished → its dispatch is done),
+/// keeping the open-dispatch set accurate for the next busy episode's coalescing and
+/// for restart recovery. Returns the number of receipts released.
+pub fn mark_open_dispatches_consumed(conn: &Connection, document_id: &str) -> Result<usize> {
+    let released = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND dispatch_start_proven = 0
+        "#,
+        params![document_id],
+    )?;
+    Ok(released)
+}
+
 pub fn insert_dispatch_attempt_in_db(
     conn: &Connection,
     attempt: &DispatchAttemptInsert<'_>,

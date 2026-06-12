@@ -3981,6 +3981,28 @@ fn handle_mark_lifecycle(
         new_generation: current.generation,
     };
     let record = store_actor_record(&bootstrap.project_root, Some(current.generation), &record)?;
+    // #qflood: a transition to Ready means the turn finished, so any dispatch in
+    // flight for this document is now consumed — release the in-flight marker so the
+    // open-dispatch set stays accurate for the next busy episode's coalescing and for
+    // restart recovery. Stall-safety does not depend on this (a turn always starts
+    // from a Ready dispatch, which never coalesces); it keeps the table honest.
+    if matches!(state, crate::session_actor::ActorState::Ready) {
+        match open_state_db(&bootstrap.project_root)
+            .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
+        {
+            Ok(released) if released > 0 => crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_in_flight_released document_id={} count={} reason=actor_ready",
+                    document_id, released
+                ),
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!(
+                "[controller] #qflood in-flight release on Ready failed (non-fatal): {e}"
+            ),
+        }
+    }
     refresh_runtime_after_actor_write(runtime)?;
     upsert_supervisor_lease(
         &bootstrap.project_root,
@@ -4261,6 +4283,54 @@ fn handle_dispatch(
             },
         )?;
         anyhow::bail!("{message} receipt_id={}", receipt.receipt_id);
+    }
+
+    // #qflood: coalesce a redundant in-flight re-dispatch. While the actor is
+    // actively running a turn (Busy) and a dispatch for this cycle is already in
+    // flight (accepted, not yet consumed), an AUTO re-fire (route auto-start on a
+    // file-change save, idle-queue continuation, `/loop` tick) must not pile another
+    // trigger into the busy pane. The first dispatch of a turn comes from a Ready
+    // actor and is never coalesced, so this can never stall the queue — it only
+    // suppresses the redundant re-fire; the next dispatch once the actor is Ready
+    // submits cleanly. Backpressure, never a queue stop.
+    if matches!(record.state, crate::session_actor::ActorState::Busy) {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let in_flight =
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, record.generation)?;
+        if dispatch_should_coalesce_in_flight(in_flight, false) {
+            let receipt = insert_dispatch_attempt_record(
+                &bootstrap.project_root,
+                ControllerDispatchReceiptInsert {
+                    document_id: &document_id,
+                    generation: record.generation,
+                    command_kind: &command_kind,
+                    accepted_stage: None,
+                    failed_stage: Some("coalesced_in_flight"),
+                    diagnostic_payload: &diagnostic_payload,
+                    result_status: ControllerDispatchResultStatus::Blocked,
+                    proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                    dispatch_start_proven: false,
+                },
+            )?;
+            crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_coalesced_in_flight session={} pane={} generation={} state={} kind={} receipt_id={} reason=in_flight_redispatch",
+                    session_id,
+                    pane_id,
+                    record.generation,
+                    record.state.as_str(),
+                    command_kind,
+                    receipt.receipt_id
+                ),
+            );
+            anyhow::bail!(
+                "dispatch coalesced for {}: a dispatch for generation {} is already in flight (#qflood); receipt_id={}",
+                file.display(),
+                record.generation,
+                receipt.receipt_id
+            );
+        }
     }
 
     let accepted_stage = match record.state {
@@ -7823,6 +7893,98 @@ agent:queue\n\
         // Nothing in flight (prior consumed / new cycle) → always admit.
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/qflood.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-qf\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-qf", "%41", "@1", 1)
+            .unwrap();
+        // Actor actively running a turn (mid-turn / pane busy).
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-qf",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Busy,
+            "supervisor",
+            "turn_started",
+        )
+        .unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let bootstrap = test_bootstrap(&dir);
+        let dispatch = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-qf".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("qflood test".to_string()),
+        };
+
+        // First dispatch while Busy: nothing in flight yet ⇒ admitted (queued),
+        // recording the in-flight marker. The first dispatch of a turn is never lost.
+        handle_dispatch(&bootstrap, None, dispatch()).expect("first busy dispatch must queue");
+        let conn = open_state_db(dir.path()).unwrap();
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "the first busy dispatch must be in flight"
+        );
+
+        // Re-fire while still Busy and in flight ⇒ coalesced (bail), not piled into
+        // the pane as another trigger.
+        let err = handle_dispatch(&bootstrap, None, dispatch()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("coalesced"),
+            "a redundant in-flight re-dispatch must coalesce: {err:#}"
+        );
+        let coalesced: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'coalesced_in_flight'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(coalesced, 1, "the coalesced re-dispatch must be recorded");
+
+        // Actor returns to Ready (turn finished): the in-flight marker is released so
+        // the next turn dispatches cleanly.
+        let mark_ready = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-qf".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("prompt_ready".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        handle_mark_lifecycle(&bootstrap, None, mark_ready).expect("mark ready");
+        assert!(
+            !state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "the Ready transition must release the in-flight marker"
+        );
     }
 
     // ---- M2 (#stuckhandoff2): non-Stable controller refuses dispatch ----

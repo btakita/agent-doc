@@ -179,7 +179,33 @@ So the honest answer to your original question ("do we still need these files?")
 **What's left (optional, filed as `#snbc2`):** the one *cosmetic* win — collapsing `baselines/<hash>.md` into a snapshot-store variant so there's one file instead of two — **without** changing merge-base semantics. It fixes no live bug, is moderate-risk on the closeout path, and the plan itself marks it lower-priority. Per your "test with SimWorld" directive it must be gated behind new SimWorld coverage for the prompt-bearing finalize-merge class before any closeout-path edit. I did **not** run it unprompted in this degraded session; if you want the file-count reduction, prioritize `#snbc2` and a clean session will land it SimWorld-tested.
 
 **Not auto-looping** — degraded session, and the substantive `#snbc` scope is complete (audit-resolved).
-<!-- agent:boundary:e428105f -->
+
+### Re: [#rtwverify] — rung-3b proof via SimWorld; #rtwfeed + #rtwwire resolved — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: [#rtwverify]. Use simworld tests
+
+
+Per your directive (use SimWorld instead of the live grep), `#rtwverify` is **proven and closed done**, and its dependents `#rtwfeed` + `#rtwwire` are **resolved** (removed from review → archived to done). The deterministic SimWorld test is the equivalent of the live ops.log proof and it's green.
+
+**The proof — `simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit` (`sim_world.rs:4527`, passed):** not a tautology — it drives the *production* seam end-to-end:
+1. Clean buffer in sync with disk → `resolve()` reports `DocAuthority::Disk`.
+2. Types an **unsaved** `#buffer-only-edit` into the buffer → `resolve()` (which calls production `realtime_model::resolve_current_doc`) now reports `DocAuthority::EditorBuffer` and surfaces the unsaved edit — i.e. the realtime model reads newest-of(disk, buffer), not stale disk.
+3. Asserts the on-disk `.agent-doc/logs/ops.log` contains `realtime_doc_resolve authority=editor_buffer` — the **same grep-able marker** the live `#rtwverify` called for, emitted by production code, not the test.
+4. Runs a full finalize cycle on the resolved content → `CyclePhase::Committed`, the snapshot still contains `#buffer-only-edit` (no `#queue-user-edit-overwrite` clobber), and `strict_closeout_invariants()` holds.
+
+This is exactly the rung-3b acceptance ("type an unsaved queue/exchange edit, confirm the realtime model fed the buffer and the edit survived the commit") expressed deterministically — and per your point, it's now stronger than a one-off live grep because it's a permanent regression guard in CI.
+
+**Closed this turn:**
+- `#rtwverify` → done (SimWorld proof green).
+- `#rtwfeed` (rung 2 — durable buffer feed) → resolved; code landed `69924c09`, live-verify now covered by the SimWorld feed/authority evals.
+- `#rtwwire` (rung 3 — cycle read-site wiring) → resolved; code landed `320a21d5`, classification + write-merge reads route through `resolve_current_doc`, covered deterministically.
+
+The `#rtwatch` realtime-editor-watcher line (rungs 1/2/3a/3b) is now fully landed **and** SimWorld-verified; the only open relative is `#rtwbcast` (rung 4 broadcast), which still needs the Option-A protocol decision per my earlier turn.
+
+**Not auto-looping** — degraded session; this handled a real queue prompt. Review list is now down to 3 (`#w42v`, `#qt32`, `#2v7b`).
+<!-- agent:boundary:08f525a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -188,7 +214,7 @@ So the honest answer to your original question ("do we still need these files?")
 - ~~:pushpin: :round_pushpin: do [#kp5z]~~
 - ~~:pushpin: :round_pushpin: [#rtwbcast]~~
 - ~~:round_pushpin: do [#snbc]~~
-- :round_pushpin: [#rtwverify]. Use simworld tests
+- ~~:round_pushpin: [#rtwverify]. Use simworld tests~~
 - :pushpin: Finalize should allow the user to type into the document, make unrelated changes, compaction, without being rejected. As long as the CRDT plan is not affected, the finalize step should be tolerant.
 ---
 :pushpin: agent-doc monsterrodholders.md had an error:
@@ -273,6 +299,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: JB `Compact Exchange` should be CRDT driven...I'm getting a `File Cache Conflict`.
 - :pushpin: As the queue runs, I'm getting `agent-doc tasks/agent-doc/agent-doc-bugs2.md` prompts submitted into the running Claude Code session. I have to manually delete the prompt from the Claude Code session queue.
 - ~~Use Simworld to test [#kp5z] and [#rtwbcast]. Any live tests should be tested with Simworld. Even if I previously claimed I will live test it. I said that before we had the full Simworld integration tests.~~
+- :round_pushpin: do [#snbc2]
 - The repair used an old snapshot. Why are we still using snapshots and not the document model? What is the wedge controller? Do we still need it?
 - If the document changes on disk or another editor buffer changes the file, the realtime document model should be updated and changes broadcasted to the editor buffers and merged with CRDT. So if I have the same agent doc opened in JB and VSCode, I shoud be able to change the buffer in either editor and the other editor should see the changes...without a `File Cache Conflict`.
 <!-- /agent:queue -->
@@ -305,15 +332,12 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
-- [ ] [#rtwverify] [VERIFY-NEXT-FINALIZE] #rtwatch rung 3b live verify — rungs 2/3a/3b are CODE-COMPLETE and installed (commits 69924c09 + 320a21d5; new agent-doc binary + cdylib live; make check green). During THIS turn finalize, prove the realtime model fed the editor buffer instead of stale disk: before finalizing, type an unsaved queue/exchange edit in the IDEA buffer, then grep .agent-doc/logs/ops.log for "realtime_doc_resolve authority=editor_buffer reason=editor_unsaved_newer" paired with "live_buffer_classify decision=diverges", and confirm the unsaved edit SURVIVED the commit (no queue-user-edit-overwrite, no differs-from-disk false block). If ops.log shows only authority=disk, the buffer feed did not engage — report it. On success, mark #rtwfeed and #rtwwire done (code landed; only live-verify remained). Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. INVESTIGATED 2026-06-11 (clean context): NOT Rust-only — blocked on an editor-plugin protocol decision + two-live-IDE verify. Three gaps: (1) buffer ingest is single-sidecar last-writer-wins, no per-editor id (ffi.rs:238/debounce live_buffer_snapshot_path keys on path only); (2) patch delivery is single-consumer delete-on-first-ACK (PatchWatcher.kt deletes <hash>.json on first apply), not a broadcast bus; (3) no per-editor echo suppression (claimed-patches is suppress-ALL; no editor_id in FFI buffer-report or patch JSON). Recommended path: Option A (per-editor channel + editor_id ABI), decomposed into #rtwbcast-id / #rtwbcast-deliver / #rtwbcast-merge / #rtwbcast-verify. CRDT merge primitive + SimWorld Slice 3 already exist. Must run in a CLEAN session; verify needs two live IDEs. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#rtwfeed] #rtwatch rung 2 — feed the durable editor-buffer snapshot. Source BufferState{content,dirty,generation} from the socket IPC layer (ipc_socket.rs/ffi.rs): the plugin already reports buffer state over IPC; expose a debounced query returning current buffer content + dirty flag + monotonic generation, off the project-control-pane hot path, durable across controller restart, then feed realtime_model::reconcile_current_doc live. NEEDS live verify. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
-- [/] [#rtwwire] #rtwatch rung 3 — wire cycle read sites. Replace the direct std::fs::read_to_string(file) "current document" reads at the cycle entry points (preflight.rs/write.rs/session_check.rs) with realtime_model::current_doc(disk, buffer) so the agent reads newest-of(disk, buffer) and stops clobbering buffer-only edits (#queue-user-edit-overwrite / test-test clobber). TOUCHES the closeout path — MUST run in a dedicated stable turn with live edit-during-finalize verify; cannot be done in an affected session. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md.
 - [/] [#w42v] #jbcompactconflict JB Compact Exchange writes the full doc to disk (atomic_write_if_current_pub, compact_exchange_direct_write), diverging from the open JB buffer = File Cache Conflict. The full-content editor-IPC path for compact (try_ipc_full_content_operator_mutation, source label compact_exchange) EXISTS but is HARD-DISABLED by design (always returns Ok(false), reason=disabled_by_default). Making it CRDT-driven = re-implement+re-enable that path with a component-scoped exchange op:replace convergence (mirror #q7jm) + JB-side apply + live verify. NEEDS OPERATOR DIRECTION before implementation (it was disabled deliberately). Plan: tasks/agent-doc/plan-jb-compact-crdt.md.
 - [/] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).

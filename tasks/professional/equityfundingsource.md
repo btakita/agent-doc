@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781199410858
   step: write_applied
@@ -40,7 +40,7 @@ EFS deployed Worker 0336450c-126f-49da-9321-1d4c74a6d2c1 on 2026-06-11: full-app
 Compacted content:
 - Archived 2 response topic(s): validation toasts and deploy; field-level validation boxes and deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:f5aa4907 -->
+<!-- agent:boundary:5f3276f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,6 +48,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The admin portal "Needs attention" section should default to open. deploy
 <!-- /agent:queue -->
 
 ## Backlog

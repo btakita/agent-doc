@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,58 +32,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-052903.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-054654.md`*
 
 Compacted content:
-- Archived 1 response topic(s): next-steps to fix tsift bugs
+- Archived 2 response topic(s): do #cicacheguard; do #tscodereview
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: do #cicacheguard — opus-4-8
-
-> **Queue prompt:**
->
-> [#cicacheguard]
-
-
-Done. The v0.1.69 CI re-run I triggered last cycle went **green** (`27369227934` is now `[ok]`) — confirming that red was a transient cache-service abort, not code.
-
-Then I hardened the step so it can't fail the suite again: both `actions/cache@v4` steps in `.github/workflows/ci.yml` (the `clippy + test` and `live Convex graph acceptance` jobs) now carry `continue-on-error: true`. A cache-*service* outage (as opposed to a normal cache miss) now falls through to a cold build instead of aborting the job.
-
-- **Spec/tests:** N/A — a GitHub Actions YAML resilience tweak with no Rust surface to unit-test; rationale documented inline in the workflow.
-- **Verify:** YAML validated, `make check` green (clippy `-D warnings` clean, 49 tests ok, 0 failed).
-- **Build/install:** skipped — no Rust code changed, so the binary is unchanged.
-- **Commit + push:** tsift `96b42c4` pushed to `origin/main`; superproject pointer bumped (`cd6d56632`).
-
-Next in the `go` queue: `#tscodereview`.
-
-### Re: do #tscodereview — opus-4-8
-
-> **Queue prompt:**
->
-> [#tscodereview]
-
-
-Done — ran a fresh concurrency/edge-case review across the three subsystems that landed since the last sweep, fanned out as three parallel review agents (graph-db/SQLite/snapshot, log-digest, prompt-cache). Each agent verified findings by executing the real crate code, not just reading it. **9 genuine root-cause findings captured to the backlog in priority order**; no fabricated/speculative items.
-
-**Highest-severity findings:**
-- `#logclassfn` (top) — log-digest drops canonical failure lines (`test result: FAILED`, pytest `N failed`, `make: *** Error 1`, `Segmentation fault`, Rust assert). The digest can silently omit the *only* failure line in a transcript.
-- `#logfoldloss` — distinct error lines fold into one line-family and get truncated past the 12-signal cap, so 8+ failures vanish from the digest body.
-- `#pcacheattr` — prompt-cache drift attribution always reports `stable_prefix_fingerprint` (the derived composite is pushed first), so it never names the real changed field; the one test can't catch it because it changes everything at once.
-- `#gdbwritelock` — graph-db writes/refresh and snapshot-import rename take **no** cross-process lock (only `busy_timeout(5s)`); TOCTOU corruption + spurious `database is locked` under parallel agents. The fix reuses the existing `index.lock` discipline.
-
-Then `#pcacheregtrunc`, `#loggatefidelity`, `#gdbwalcheckpoint`, and two `[recommended]` precision items (`#logfoldname`, `#pcachebp`).
-
-**Verified sound** (not flagged): `#logsigfp` token-anchoring, unicode-safe tokenizer, read-only snapshot fallback / fail-closed export+refresh, `temp_table_active` single-conn re-entrancy guard, full-projection cache reuse (stale → correct cache-miss), no timestamp/path/run-id leakage into the cache fingerprint, scorecard ROI math.
-
-No code changed this cycle — this is a review pass; each finding is its own actionable backlog item, so nothing to spec/test/build/install/commit in the tsift repo. Queue `#<id>` (e.g. `[#logclassfn]`) to execute any fix, exactly as you drove `#cicacheguard`.
-
-**Top of backlog: `#logclassfn`.**
-<!-- agent:boundary:66fe95fd -->
+<!-- agent:boundary:57a19537 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#logclassfn]
+- [#logfoldloss]
+- [#pcacheattr]
+- [#gdbwritelock]
+- [#pcacheregtrunc]
+- [#loggatefidelity]
+- [#gdbwalcheckpoint]
+- [#logfoldname]
+- [#pcachebp]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

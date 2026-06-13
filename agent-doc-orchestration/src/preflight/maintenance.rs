@@ -1048,6 +1048,72 @@ pub(crate) fn collect_after_deps(
     deps
 }
 
+/// Why a backlog id was skipped from the auto-drain queue (`#goqueuestall`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UndrainableSkip {
+    pub(crate) id: String,
+    /// `clean_session` or `operator_verify`.
+    pub(crate) reason: &'static str,
+}
+
+/// Partition the to-be-synced backlog ids into the drainable set (kept, in
+/// order) and the skipped set (deferred), per the go-mode undrainable rules
+/// (`#goqueuestall`):
+/// - `[operator-verify]` items are ALWAYS skipped from the auto-drain queue
+///   (they need a human); they belong on the gated review surface.
+/// - `[clean-session]` items are skipped only when a live editor-IPC listener is
+///   active (`live_ipc == true`); a clean session drains them normally.
+///
+/// Ids absent from `ctxs` (plain backlog items) are always kept. Pure + testable
+/// — the hot path supplies `live_ipc` from `ipc_socket::is_listener_active`.
+pub(crate) fn partition_drainable_backlog_ids(
+    backlog_ids: &[String],
+    ctxs: &std::collections::HashMap<String, crate::pending::ExecutionContext>,
+    live_ipc: bool,
+) -> (Vec<String>, Vec<UndrainableSkip>) {
+    let mut drainable = Vec::new();
+    let mut skipped = Vec::new();
+    for id in backlog_ids {
+        let key = id.trim().to_ascii_lowercase();
+        let ctx = ctxs.get(&key).copied().unwrap_or_default();
+        if ctx.operator_verify_required {
+            skipped.push(UndrainableSkip {
+                id: key,
+                reason: "operator_verify",
+            });
+        } else if ctx.clean_session_required && live_ipc {
+            skipped.push(UndrainableSkip {
+                id: key,
+                reason: "clean_session",
+            });
+        } else {
+            drainable.push(id.clone());
+        }
+    }
+    (drainable, skipped)
+}
+
+/// Build an id→execution-context map from active `agent:backlog` / `agent:icebox`
+/// items (`#goqueuestall`) so the go-mode backlog→queue sync can skip heads that
+/// are not agent-drainable in the current session type. First-seen context wins
+/// on duplicate ids across components.
+pub(crate) fn collect_backlog_execution_contexts(
+    components: &[crate::component::Component],
+    content: &str,
+) -> std::collections::HashMap<String, crate::pending::ExecutionContext> {
+    let mut ctxs = std::collections::HashMap::new();
+    for comp in components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+            ctxs.entry(id.to_ascii_lowercase()).or_insert(ctx);
+        }
+    }
+    ctxs
+}
+
 pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
     let before_nodes =
         agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
@@ -1155,6 +1221,41 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 eprintln!(
                     "[preflight] queue: excluded {excluded} completed id(s) from backlog→queue sync (already in agent:done; #ynra)"
                 );
+            }
+        }
+        // #goqueuestall: keep agent-undrainable heads out of the auto-drain queue
+        // so a `go`-mode queue does not perpetually re-mirror items it cannot run
+        // in the current session type. `[operator-verify]` items are always
+        // skipped (they need a human); `[clean-session]` items are skipped only
+        // while a live editor-IPC listener is active (running them live risks
+        // closeout corruption — a clean session re-queues them next cycle).
+        {
+            let exec_ctxs = collect_backlog_execution_contexts(&components, &content);
+            if exec_ctxs.values().any(|c| c.is_deferred()) {
+                let live_ipc = project_root
+                    .as_deref()
+                    .map(crate::ipc_socket::is_listener_active)
+                    .unwrap_or(false);
+                let (drainable, skipped) =
+                    partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs, live_ipc);
+                if !skipped.is_empty() {
+                    let session_label = if live_ipc { "live_ipc" } else { "clean" };
+                    for skip in &skipped {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "go_queue_skip_undrainable id=#{} reason={} session={}",
+                                skip.id, skip.reason, session_label
+                            ),
+                        );
+                    }
+                    eprintln!(
+                        "[preflight] queue: skipped {} agent-undrainable backlog head(s) from the auto-drain queue \
+                         (clean-session under live IPC / operator-verify; #goqueuestall)",
+                        skipped.len()
+                    );
+                    backlog_ids = drainable;
+                }
             }
         }
         // #backlog-queue-sync-pending-add-amplification (decision B/C): while the
@@ -4282,5 +4383,71 @@ fn resolve_pipeline_state_cycle_state_wins_over_frontmatter() {
     assert_eq!(p.step.as_deref(), Some("preflight_started"));
     assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
     assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
+}
+
+#[test]
+fn partition_drainable_backlog_ids_skips_clean_session_under_live_ipc() {
+    // #goqueuestall: a `[clean-session]` head is skipped (with reason
+    // clean_session) when a live editor-IPC listener is active, and queued when
+    // the session is clean; `[operator-verify]` is always skipped; plain ids
+    // always stay drainable.
+    use std::collections::HashMap;
+    let mut ctxs: HashMap<String, crate::pending::ExecutionContext> = HashMap::new();
+    ctxs.insert(
+        "fcc0".into(),
+        crate::pending::ExecutionContext {
+            clean_session_required: true,
+            operator_verify_required: false,
+        },
+    );
+    ctxs.insert(
+        "qflood2".into(),
+        crate::pending::ExecutionContext {
+            clean_session_required: false,
+            operator_verify_required: true,
+        },
+    );
+    let ids = vec![
+        "fcc0".to_string(),
+        "qflood2".to_string(),
+        "splitmodswrite".to_string(),
+    ];
+
+    // Live IPC: clean-session and operator-verify both skipped.
+    let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, true);
+    assert_eq!(drainable, vec!["splitmodswrite".to_string()]);
+    let reasons: Vec<(&str, &str)> = skipped
+        .iter()
+        .map(|s| (s.id.as_str(), s.reason))
+        .collect();
+    assert!(reasons.contains(&("fcc0", "clean_session")));
+    assert!(reasons.contains(&("qflood2", "operator_verify")));
+
+    // Clean session: clean-session re-queues; operator-verify still skipped.
+    let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, false);
+    assert_eq!(
+        drainable,
+        vec!["fcc0".to_string(), "splitmodswrite".to_string()]
+    );
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0].id, "qflood2");
+    assert_eq!(skipped[0].reason, "operator_verify");
+}
+
+#[test]
+fn collect_backlog_execution_contexts_reads_tags() {
+    // #goqueuestall: the collector surfaces the parsed deferral booleans per id.
+    let content = concat!(
+        "<!-- agent:backlog queue=sync -->\n",
+        "- [ ] [#a] [clean-session] needs a quiet session\n",
+        "- [ ] [#b] [operator-verify] live drive\n",
+        "- [ ] [#c] plain drainable\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let components = crate::component::parse(content).unwrap();
+    let ctxs = collect_backlog_execution_contexts(&components, content);
+    assert!(ctxs.get("a").unwrap().clean_session_required);
+    assert!(ctxs.get("b").unwrap().operator_verify_required);
+    assert!(!ctxs.get("c").unwrap().is_deferred());
 }
 }

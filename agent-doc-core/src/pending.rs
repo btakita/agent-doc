@@ -1512,6 +1512,94 @@ pub fn active_item_after_deps(body: &str) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
+/// Author-controlled execution-context tag literals on a backlog item
+/// (`#goqueuestall`). They live as bracketed tokens in the item text alongside
+/// markers like `[recommended]` / `[TOP]`, and gate whether a `go`-mode queue
+/// may auto-drain the item in the current session type.
+pub const CLEAN_SESSION_TAG: &str = "[clean-session]";
+pub const OPERATOR_VERIFY_TAG: &str = "[operator-verify]";
+
+/// Machine-readable execution-context attributes parsed from a backlog item's
+/// text (`#goqueuestall`).
+///
+/// - `clean_session_required` — `[clean-session]`: the item must run from a
+///   session WITHOUT a live editor-IPC listener; running it under a live IPC
+///   listener risks closeout corruption, so go-mode skips it while live.
+/// - `operator_verify_required` — `[operator-verify]`: completion needs
+///   operator-driven live verification the agent cannot perform, so go-mode
+///   never auto-drains it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExecutionContext {
+    pub clean_session_required: bool,
+    pub operator_verify_required: bool,
+}
+
+impl ExecutionContext {
+    /// True when at least one deferral tag is present.
+    pub fn is_deferred(&self) -> bool {
+        self.clean_session_required || self.operator_verify_required
+    }
+}
+
+/// True when the item text carries a `[clean-session]` tag token
+/// (`#goqueuestall`). Matched case-insensitively as a whitespace-delimited
+/// bracketed token so prose mentions of the word do not trip it.
+pub fn item_clean_session_required(text: &str) -> bool {
+    text_has_bracket_tag(text, "clean-session")
+}
+
+/// True when the item text carries an `[operator-verify]` tag token
+/// (`#goqueuestall`).
+pub fn item_operator_verify_required(text: &str) -> bool {
+    text_has_bracket_tag(text, "operator-verify")
+}
+
+/// Parse both execution-context tags from an item's text (`#goqueuestall`).
+pub fn item_execution_context(text: &str) -> ExecutionContext {
+    ExecutionContext {
+        clean_session_required: item_clean_session_required(text),
+        operator_verify_required: item_operator_verify_required(text),
+    }
+}
+
+fn text_has_bracket_tag(text: &str, tag: &str) -> bool {
+    text.split_whitespace().any(|token| {
+        let trimmed = token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
+        trimmed.len() == tag.len() + 2
+            && trimmed.starts_with('[')
+            && trimmed.ends_with(']')
+            && trimmed[1..trimmed.len() - 1].eq_ignore_ascii_case(tag)
+    })
+}
+
+/// Remove the `[clean-session]` / `[operator-verify]` execution-context tags
+/// from display text (`#goqueuestall`), collapsing the whitespace they leave
+/// behind. Mirrors how machine-only markers are kept out of rendered prose.
+pub fn strip_execution_context_tags(text: &str) -> String {
+    let kept: Vec<&str> = text
+        .split_whitespace()
+        .filter(|token| {
+            let trimmed =
+                token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
+            !(trimmed.eq_ignore_ascii_case(CLEAN_SESSION_TAG)
+                || trimmed.eq_ignore_ascii_case(OPERATOR_VERIFY_TAG))
+        })
+        .collect();
+    kept.join(" ")
+}
+
+/// Active (open) backlog item ids paired with their parsed execution context,
+/// in document order (`#goqueuestall`). Feeds the go-mode backlog→queue sync
+/// skip and the queue-continuation drainable-head computation.
+pub fn active_item_execution_contexts(body: &str) -> Vec<(String, ExecutionContext)> {
+    PendingLayout::parse(body)
+        .items()
+        .into_iter()
+        .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .map(|item| (item.id.clone(), item_execution_context(&item.text)))
+        .collect()
+}
+
 /// Stable-sort the item lines of a pending body by per-item priority
 /// (`#backlog-priority-attribute`), preserving every non-item segment (blank
 /// lines, prose, ordered-list separators) at its original position. Returns
@@ -2341,6 +2429,73 @@ mod tests {
             active_enqueue_item_ids(body),
             vec!["inbox", "bold", "slash"]
         );
+    }
+
+    #[test]
+    fn execution_context_tags_parse_booleans() {
+        // #goqueuestall: `[clean-session]` / `[operator-verify]` flip booleans.
+        let clean = item_execution_context("[clean-session] needs a quiet session");
+        assert!(clean.clean_session_required);
+        assert!(!clean.operator_verify_required);
+        assert!(clean.is_deferred());
+
+        let oper = item_execution_context("ship it [operator-verify] live drive");
+        assert!(!oper.clean_session_required);
+        assert!(oper.operator_verify_required);
+        assert!(oper.is_deferred());
+
+        // Plain items set neither and are not deferred.
+        let plain = item_execution_context("just do the thing");
+        assert!(!plain.clean_session_required);
+        assert!(!plain.operator_verify_required);
+        assert!(!plain.is_deferred());
+
+        // Both tags combine, and they coexist with `[recommended]` / `[TOP]`.
+        let both = item_execution_context("[recommended] [TOP] [clean-session] [operator-verify] go");
+        assert!(both.clean_session_required);
+        assert!(both.operator_verify_required);
+
+        // Prose mention of the word (not a bracketed token) does not trip it.
+        let prose = item_execution_context("run from a clean session please");
+        assert!(!prose.clean_session_required);
+    }
+
+    #[test]
+    fn execution_context_tags_stripped_from_display_text() {
+        // #goqueuestall: tags are kept out of rendered display text.
+        assert_eq!(
+            strip_execution_context_tags("[clean-session] fix the converge path"),
+            "fix the converge path"
+        );
+        assert_eq!(
+            strip_execution_context_tags("[recommended] [operator-verify] live verify the flow"),
+            "[recommended] live verify the flow"
+        );
+        assert_eq!(
+            strip_execution_context_tags("[clean-session] [operator-verify] both"),
+            "both"
+        );
+        // No tags → unchanged words (whitespace normalized on rejoin).
+        assert_eq!(
+            strip_execution_context_tags("plain item text"),
+            "plain item text"
+        );
+    }
+
+    #[test]
+    fn active_item_execution_contexts_skips_closed_and_idless() {
+        // #goqueuestall: only open, id-bearing items surface a context.
+        let body = concat!(
+            "- [ ] [#a] [clean-session] needs quiet\n",
+            "- [x] [#b] [operator-verify] already done\n",
+            "- [ ] [#c] plain drainable\n",
+        );
+        let ctxs = active_item_execution_contexts(body);
+        assert_eq!(ctxs.len(), 2);
+        assert_eq!(ctxs[0].0, "a");
+        assert!(ctxs[0].1.clean_session_required);
+        assert_eq!(ctxs[1].0, "c");
+        assert!(!ctxs[1].1.is_deferred());
     }
 
     #[test]

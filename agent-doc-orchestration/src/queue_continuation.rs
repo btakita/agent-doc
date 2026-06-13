@@ -109,7 +109,28 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
         }
     }
 
-    let Some(head) = crate::queue::first_prompt(&activation.entries_after) else {
+    // #goqueuestall: continuation is computed over the DRAINABLE head set only.
+    // A head whose backlog id carries `[operator-verify]` (never agent-drainable)
+    // or `[clean-session]` under a live editor-IPC listener is deferred, not a
+    // stall. Walk past deferred heads; if every remaining head is deferred,
+    // continuation is NOT required so the session does not perpetually re-converge
+    // an undrainable queue.
+    let deferred_ids = deferred_backlog_ids(file, content);
+    let head = activation
+        .entries_after
+        .iter()
+        .find_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                let id = extract_head_id(&prompt.text);
+                let deferred = id
+                    .as_deref()
+                    .map(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
+                    .unwrap_or(false);
+                if deferred { None } else { Some(prompt) }
+            }
+            _ => None,
+        });
+    let Some(head) = head else {
         return Ok(None);
     };
     let head_prompt = head.text.clone();
@@ -125,6 +146,70 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
         head_id,
         head_prompt,
     }))
+}
+
+/// The set of active backlog ids (lowercase) that are NOT agent-drainable in the
+/// current session type (`#goqueuestall`): `[operator-verify]` items always, plus
+/// `[clean-session]` items when a live editor-IPC listener is active for `file`.
+/// Used to compute queue continuation over the drainable head set only.
+fn deferred_backlog_ids(file: &Path, content: &str) -> std::collections::HashSet<String> {
+    let live_ipc = crate::snapshot::find_project_root(file)
+        .or_else(|| file.parent().map(std::path::Path::to_path_buf))
+        .map(|root| crate::ipc_socket::is_listener_active(&root))
+        .unwrap_or(false);
+    deferred_backlog_ids_with_ipc(content, live_ipc)
+}
+
+/// Pure core of [`deferred_backlog_ids`] — testable without a live socket.
+fn deferred_backlog_ids_with_ipc(
+    content: &str,
+    live_ipc: bool,
+) -> std::collections::HashSet<String> {
+    let mut deferred = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return deferred;
+    };
+    for comp in &components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+            if ctx.operator_verify_required || (ctx.clean_session_required && live_ipc) {
+                deferred.insert(id.to_ascii_lowercase());
+            }
+        }
+    }
+    deferred
+}
+
+/// Count of active queue head prompts whose backlog id is deferred
+/// (`#goqueuestall`). Used by `session-check` to surface a "queue idle: N head(s)
+/// deferred" note when continuation is not required because every remaining head
+/// is undrainable in the current session type.
+pub fn deferred_head_count(file: &Path) -> usize {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return 0;
+    };
+    let Ok(components) = crate::component::parse(&content) else {
+        return 0;
+    };
+    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
+        return 0;
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = crate::queue::parse(body) else {
+        return 0;
+    };
+    let deferred_ids = deferred_backlog_ids(file, &content);
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => extract_head_id(&prompt.text),
+            _ => None,
+        })
+        .filter(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
+        .count()
 }
 
 /// The live auto-queue continuation head of a document **string**, independent
@@ -591,6 +676,85 @@ mod tests {
         );
         // Clearing an absent marker is a no-op, not an error.
         clear_deferred_operator_clear_marker(&doc).unwrap();
+    }
+
+    fn doc_with_backlog(queue_prompts: &[&str], backlog_items: &[&str]) -> String {
+        let queue: String = queue_prompts.iter().map(|p| format!("- {p}\n")).collect();
+        let backlog: String = backlog_items.iter().map(|b| format!("{b}\n")).collect();
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
+## Backlog\n\n<!-- agent:backlog queue=sync -->\n{backlog}<!-- /agent:backlog -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn deferred_backlog_ids_respects_session_type() {
+        // #goqueuestall: operator-verify is always deferred; clean-session only
+        // under a live editor-IPC listener.
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]", "do [#c]"],
+            &[
+                "- [ ] [#a] [clean-session] needs quiet",
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#c] plain",
+            ],
+        );
+        let live = deferred_backlog_ids_with_ipc(&content, true);
+        assert!(live.contains("a"));
+        assert!(live.contains("b"));
+        assert!(!live.contains("c"));
+
+        let clean = deferred_backlog_ids_with_ipc(&content, false);
+        assert!(!clean.contains("a"), "clean-session drains in a clean session");
+        assert!(clean.contains("b"), "operator-verify always deferred");
+        assert!(!clean.contains("c"));
+    }
+
+    #[test]
+    fn detect_skips_deferred_head_and_continues_on_drainable() {
+        // #goqueuestall: with no live IPC listener, the clean-session head drains
+        // normally, so continuation lands on it (first drainable head).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let content = doc_with_backlog(
+            &["do [#b]", "do [#c]"],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#c] plain drainable",
+            ],
+        );
+        std::fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        // No socket → not live IPC. operator-verify (#b) is deferred regardless,
+        // so continuation must land on the drainable #c head.
+        let continuation = detect(&doc).unwrap().expect("drainable head remains");
+        assert_eq!(continuation.head_id.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn detect_none_when_only_deferred_heads_remain() {
+        // #goqueuestall: when every remaining head is undrainable
+        // (operator-verify), continuation is NOT required — this is the stall fix.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let content = doc_with_backlog(
+            &["do [#b]", "do [#d]"],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#d] [operator-verify] also live",
+            ],
+        );
+        std::fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        assert!(
+            detect(&doc).unwrap().is_none(),
+            "all-deferred heads must not require continuation"
+        );
+        assert_eq!(deferred_head_count(&doc), 2);
     }
 
     #[test]

@@ -697,7 +697,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // (#queue-completed-items-escape-below-component).
         ("agent-doc-orchestration/src/preflight.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 1,
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 1,
+        // 1 -> 2 (`reason=clean_session|operator_verify`): the go-mode
+        // backlog→queue sync skips agent-undrainable heads and logs
+        // `go_queue_skip_undrainable id=#<id> reason=<reason> session=<...>`
+        // (#goqueuestall).
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

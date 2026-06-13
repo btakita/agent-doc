@@ -181,7 +181,25 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     std::process::exit(2);
                 }
             } else {
-                println!("queue_continuation_required=false");
+                // #goqueuestall: when continuation is not required because every
+                // remaining queue head is undrainable in the current session type
+                // (`[clean-session]` under live IPC, or `[operator-verify]`),
+                // surface a one-line deferred-heads note so the idle queue reads
+                // as deferred work, not a silent stall.
+                let deferred = crate::queue_continuation::deferred_head_count(file);
+                if deferred > 0 {
+                    println!(
+                        "queue_continuation_required=false queue_deferred_heads={}",
+                        deferred
+                    );
+                    eprintln!(
+                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify) — drain from a clean session ({}; #goqueuestall).",
+                        deferred,
+                        file.display()
+                    );
+                } else {
+                    println!("queue_continuation_required=false");
+                }
             }
             // #finalize-owned-pane-response-patchback: proactive final-gate
             // block. When a Codex same-pane recursive invocation was refused

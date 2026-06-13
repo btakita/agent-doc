@@ -179,15 +179,31 @@ Fix in `packages/tsift-sqlite/src/lib.rs`: read the checkpoint result via `query
 - **Commit + push:** tsift `7914b31` → `origin/main`; superproject pointer `ea5cf2fa3`. CI triggered (pending; local gate green).
 
 Next in queue: `#logfoldname` (the `[recommended]` cargo-progress `<name>` over-fold precision fix).
-<!-- agent:boundary:99dae3bb -->
+
+### Re: do #logfoldname — opus-4-8
+
+> **Queue prompt:**
+>
+> [#logfoldname]
+
+
+Done. `templatize_line` folded the bare identifier immediately before a `v`-prefixed version into `<name>` regardless of position, so connectives in `Downgrading serde from v1.0.0` / `Updating tokio to v2.0.0` had their `from`/`to` token folded — collapsing the two into indistinct templates.
+
+Fix in `packages/tsift-digest/src/log_digest.rs`: restrict the fold to the canonical `<Verb> <crate> v<version>` three-token shape — the version must be the third token (`out.len() == 2`) after a Title-case progress verb (`is_cargo_progress_verb`). Canonical `Compiling serde v1.0.193` still folds to `Compiling <name> <ver>`; `Downgrading serde from v1.0.0` now keeps `from` and stays distinct from the `to` variant.
+
+- **Tests:** `templatize_line_folds_only_canonical_cargo_progress_shape` (canonical folds; connectives preserved + distinct; lowercase non-progress lines don't fold). Existing `log_digest_folds_near_duplicate_line_families` stays green.
+- **Spec:** noted the canonical-shape restriction in `specs/digests-sessions.md`.
+- **Verify:** `make check` green; release+install rebuilt.
+- **Commit + push:** tsift `4e08a6d` → `origin/main`; superproject pointer `52d08b7f1`. CI triggered (pending; local gate green).
+
+Next in queue: `#pcachebp` (the last `[recommended]` fix — breakpoint identity array-index instability).
+<!-- agent:boundary:e3835f4f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#loggatefidelity]~~
-- ~~[#gdbwalcheckpoint]~~
-- [#logfoldname]
+- ~~[#logfoldname]~~
 - [#pcachebp]
 - What are #next-steps for fixing bugs?
 <!-- /agent:queue -->
@@ -198,7 +214,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logfoldname] [recommended] log-digest templatize_line <name> over-fold (log_digest.rs:872-878) rewrites the plain token before a v-prefixed version to <name> without checking the cargo `<Verb> <crate> v<ver>` shape, so `Downgrading serde from v1.0.0` and `Updating tokio to v2.0.0` both fold to `... <name> <ver>`, losing the from/to distinction. Restrict the fold to the cargo-progress shape. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#pcachebp] [recommended] prompt-cache breakpoint identity includes the JSON array index (session_cost.rs:3368-3372 via path content[N]), so inserting a non-cached content block ahead of the cached one (e.g. a leading thinking/text block) shifts content[0]->content[1] and reports false breakpoints/fingerprint drift though the cache boundary did not move. Make breakpoint identity position-independent (key by type:ephemeral + count, drop array indices). med conf, low-med sev (#tscodereview).
 <!-- /agent:backlog -->
 

@@ -38,7 +38,29 @@ committed
 Compacted content:
 - Archived 2 response topic(s): emails, TMO webhooks, funded-deals copy, disclosure; borrower notification emails
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:58501bcb -->
+
+### Re: advance the review items — opus-4-8
+
+Went through all 10. Two genuinely unblocked items became backlog; the rest are either already shipped or waiting on something external. Triage:
+
+**Actionable now — added to backlog:**
+- **#tmopoll** (advances #dzmm, and is the keystone for the whole writeback cluster): the TMO tightened-polling sync you chose over webhooks. Phase P1 = a scheduled Worker cron mirroring TMO loan/funding/schedule reads into D1 + a sync-log. Plan: `tasks/professional/equityfundingsource/plan-tmo-polling-sync.md` (committed). This is what unblocks #vd8s, #67v2, #zwws phase 4, and #7a4d.
+- **#xcvginbound** (advances #xcvg): the inbound email→chat path — `POST /api/email/inbound` with sender/thread resolution + auth, appending into `chat_messages`. This is the code half and is **not** gated on the sending domain. The outbound borrower notification stays config-gated on #f4rq (the `#emrt` done item covers the flip).
+
+**Already shipped — only a TMO-gated remainder is left (candidates to resolve):**
+- **#qakx** — investor document pages are D1/R2-backed (shipped via #qakx-impl).
+- **#37ah** — broker portal backend is D1-backed (shipped via #37ah-backend); live TMO sync rides on #tmopoll.
+- **#vd8s** — drag-to-confirm-wire shipped; the Active-lane AddLoanFunding sync is now tracked under #tmopoll.
+- **#67v2** — Kanban shipped; auto-advance-on-requirements is now tracked under #tmopoll.
+
+**Externally gated — not agent-actionable, here's the unblock:**
+- **#jnzs** — Judith's sign-off. Per your call we sync directly rather than emailing her; this needs you to capture her approval.
+- **#zwws** — remaining phases gated on TMO writeback (#tmopoll) + the Resend domain (#f4rq); queue one phase at a time.
+- **#next-steps** — custom-domain cutover is intentionally deferred; true Workspace SSO is gated on Google admin creds (#m6ch).
+- **#dropbox-sync-adapter** — gated on Dropbox access from you/Robert.
+
+Net new actionable work: **#tmopoll** and **#xcvginbound**. Say the word (or queue one) to implement.
+<!-- agent:boundary:8385de65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,6 +74,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#tmopoll] TMO tightened-polling sync — Phase P1: scheduled Worker cron polling TMO loan/funding/schedule read endpoints into a read-only D1 mirror + per-run sync-log table (operator-chosen replacement for unavailable TMO webhooks). Keystone that unblocks #vd8s Active-lane AddLoanFunding sync, #67v2 auto-advance, #zwws phase 4, and #7a4d writeback. Plan: tasks/professional/equityfundingsource/plan-tmo-polling-sync.md
+- [ ] [#xcvginbound] Borrower-message inbound email reply path (the #xcvg code half, NOT gated on the verified sending domain): implement POST /api/email/inbound with sender/loan-thread resolution + sender-auth, appending into chat_messages. Outbound borrower notification stays config-gated on #f4rq (see done #emrt).
 <!-- /agent:backlog -->
 
 ## Review

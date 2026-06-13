@@ -141,7 +141,7 @@ Done — implemented the recommended polling first step, tested, committed + pus
 **Files:** `shared/ui.tsx` (`use_poll_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +4 tests in `tests/admin-poll-refresh.test.ts`. Full suite **614 pass / 0 fail**; builds clean.
 
 **Queue drained.** All four items done: ongoing e-sign legal doc + Judith draft email, `#gz9h` (soft printed-name match), `#fxsv` (ESIGN/UETA hardening), `#xn77` (admin polling). The e-sign code (migrations 0063/0064) ships on the next deploy; the consumer-disclosure wording still wants EFS counsel's review per the tracking doc.
-<!-- agent:boundary:cb665c93 -->
+<!-- agent:boundary:20d7241c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,6 +154,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#7djh] [recommended] Admin live-updates upgrade (follow-on to #xn77): if 20s polling latency becomes an issue, replace it with a Cloudflare push path — Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (reuse the BorrowerChatRoom DO pattern) fanning an 'application:<id> changed' event to open admin sessions. Also consider ETag/If-None-Match on the list/detail/pipeline GETs so polling returns 304s instead of full payloads.
 <!-- /agent:backlog -->
 
 ## Review

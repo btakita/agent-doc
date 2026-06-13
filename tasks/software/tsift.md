@@ -39,7 +39,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): #bugs-observed + improve prompt caching; do [#avbq]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:610cf875 -->
+<!-- agent:boundary:fdb60f6c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,9 +48,9 @@ Compacted content:
 - ~~:round_pushpin: do [#1td4]~~
 - ~~:round_pushpin: do [#0g7c]~~
 - ~~:round_pushpin: do [#avbq]~~
-- :round_pushpin: do [#wwm1]
-- #bugs-observed
-- Add backlog items for tsift to improve prompt caching?
+- ~~:round_pushpin: do [#wwm1]~~
+- :pushpin: #bugs-observed
+- :pushpin: Add backlog items for tsift to improve prompt caching?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -102,7 +102,27 @@ Did the agent-doable half of `#qflood2`: a benign in-flight dispatch coalesce no
 **Verification.** `make check` = **4381 passed, 0 failed**, clippy clean (project gate). New `qflood2_coalesce_marker_survives_ipc_wrapping` (proves the marker survives IPC wrapping and that a real failure like `queue_paused` is *not* swallowed as success) + extended `qflood_coalesces_busy_…`. Spec line added to `08b-single-process-control-plane.md`; VERSIONS Unreleased entry. Built + installed (binary + cdylib via `lib-install`) and `admin recycle --all-projects` queued 1 controller to recycle at its next idle boundary.
 
 **Your half (operator-drive, gating `#qflood2`).** The "does it *still* collide" part needs a live multi-process repro I can't drive. After the recycle promotes the new binary: trigger the efs dual-drain collision again; `ops.log` should now show `route_dispatch_deduped reason=in_flight_coalesce` and the JB action should report **success** (no exit-1, no manual prompt deletion) instead of the old `dispatch coalesced … (#qflood)` error. Gating, not closing, until you confirm that live.
-<!-- agent:boundary:434b77ee -->
+
+### Re: do [#splitmodswrite] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#splitmodswrite]
+
+
+`#splitmodswrite` is **already done** — closing it, no new code. The item describes a 27.7k-line write.rs with an irregular layout that no longer exists; `splitmods3`/`splitmods4` already split it.
+
+**Evidence (current committed state).**
+- `write.rs` is **7,439 lines** (not 27.7k): 4,287 production + a single clean trailing `#[cfg(test)] mod tests` at line 4288 → EOF. That *is* the "clean single-trailing-mod-tests pattern" the item said write.rs lacked.
+- The irregular layout the item targets — module-scope `cfg(test)` helpers "around line 12109", `mod tests` at 15201, non-contiguous `cfg(test)` blocks to EOF — is gone. Those line numbers don't exist in a 7,439-line file; there is exactly one `cfg(test)` block.
+- The split landed as functional extraction into 8 submodules, each with inline tests: `write/{converge, exchange_reconcile, ipc, materialize, normalize, pending_checks, queue_consume, run_entry}.rs` (commits `a15ed055`, `c81539c3`, `80c56f62`, `d0d1e1a1`, …).
+
+**Why I'm not extracting the remaining test mod further.** `splitmods3` (`80c56f62`) deliberately *bundled write tests inline with functionality and eliminated `write/tests.rs`*. Pulling the remaining 3,151-line `mod tests` back out into a separate file would reverse that intentional decision, not advance it. The item's goal — write.rs no longer the oversized irregular module — is met.
+
+**Verification.** Full workspace was green last cycle (`make check` = 4381 passed, 0 failed) and write.rs is unchanged since the splitmods commits, so the "make check + full workspace 0 failed" gate the item asked for is satisfied by the already-committed split.
+
+Marking `#splitmodswrite` done. Queue now: `#rtwbcast` (clean-session, multi-editor CRDT broadcast — operator-drive) is the next head; the remaining backlog is the `[clean-session]`/`[operator-verify]` set that defers under live IPC.
+<!-- agent:boundary:43e21266 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -119,7 +139,7 @@ JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
 ```
-- :round_pushpin: do [#splitmodswrite]
+- ~~:round_pushpin: do [#splitmodswrite]~~
 - :round_pushpin: do [#rtwbcast]
 ---
 - :round_pushpin: do [#fcc0]
@@ -173,7 +193,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
-- [ ] [#splitmodswrite] [recommended] Split write.rs (27.7k lines, largest module) test layout. Unlike the clean single-trailing-mod-tests pattern used for route/session_check/git/preflight/sync, write.rs has an irregular layout: module-scope cfg(test) helper fns (around line 12109) PLUS several non-contiguous top-level cfg(test) blocks (mod tests at 15201 closes at 21827, then more cfg(test) blocks to EOF). Needs a bespoke extraction that moves each test block into write/tests.rs (or several files) and updates the FlowCore guard_ budget (currently 91) + any structural guards in tests/test_cli.rs. Verify make check + full workspace 0 failed.
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:backlog -->
 

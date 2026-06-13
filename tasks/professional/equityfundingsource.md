@@ -57,7 +57,27 @@ Investigated before building: #qakx-impl is already delivered by the #rpzm dashb
 **Verification:** `bun test` → **621 pass / 0 fail** (incl. `tests/investor-documents.test.ts` 5/5 covering the migration tables + route wiring). Grep confirmed zero `sample/fixture/mock/demo/static` data left in `lib/ui--browser--efs/portal/investor/`. No source changed → nothing to commit/push.
 
 Marking **#qakx-impl done**. Next in the go-queue: #vd8s-dragwire.
-<!-- agent:boundary:d5f9f6fb -->
+
+### Re: do [#vd8s-dragwire] — drag-to-confirm-wire shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#vd8s-dragwire]
+
+
+Implemented the non-TMO half of Investor Pipeline phase 2: drag a Committed-lane card onto the Active lane to confirm a wire, with multi-pending-fund disambiguation. Shipped in EFS `b081fb2` (superproject pointer `08f5d2e3c`).
+
+**What changed:**
+- **Backend** (`repo.ts`, `admin/investor_management/index.ts`): the pipeline card now carries a per-commitment `pending_funds` list (id, amount, loan #, borrower/property label) via a second **read-only** SELECT joining `funds → investment_deals → loans`. The board endpoint stays mutation-free.
+- **Board** (`investor_pipeline.tsx`): Committed cards (`pending_fund_count > 0`) are draggable (grab cursor + "Drag to Active to confirm wire" hint); the Active lane is the drop target ("Drop to confirm wire"). The drop opens `ConfirmWireModal`.
+- **Disambiguation**: a single pending fund is preselected; multiple force an explicit radio pick before confirming — the multi-pending-fund disambiguation the PRD flagged as the blocker.
+- **Confirm**: calls the existing `PUT /api/admin/funds/:id/confirm-wire` (moves the fund pending→active and performs the TMO AddLoanFunding writeback). If TMO is unavailable the endpoint error surfaces in the dialog — the wire is never silently lost. Clicking a card still opens the detail modal (#vtx8); a drag suppresses the click.
+- **Spec**: `prds/investor-pipeline-admin.md` Phase 4 recorded as shipped. The remaining "Future phase" is the TMO sync-**state** display in the Active lane (distinct from this confirm trigger), still gated on #dzmm/#k2xg.
+
+**Verification:** `bun run check` → **626 pass / 0 fail** (+5 new tests), TypeScript build + worker bundle clean. Committed + pushed.
+
+Marking **#vd8s-dragwire done**. Next in the go-queue: #67v2-kanban.
+<!-- agent:boundary:4b537b94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +86,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#qakx-impl]~~
-- do [#vd8s-dragwire]
+- ~~do [#vd8s-dragwire]~~
 - do [#67v2-kanban]
 - do [#37ah-backend]
 - do [#xcvg-admin]
@@ -77,7 +97,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#vd8s-dragwire] Investor Pipeline phase 2 (non-TMO half): drag-to-confirm-wire from the Committed lane with multi-pending-fund disambiguation. TMO AddLoanFunding Active-lane sync stays gated on #dzmm/#k2xg. Advances #vd8s. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [ ] [#67v2-kanban] Admin loan pipeline: build TMO-aligned-stage Kanban UI (drag cards, manual stage advance) wired to dashboard with TMO stages as single source of truth; auto-advance-on-requirements deferred to #dzmm/#k2xg. Advances #67v2.
 - [ ] [#37ah-backend] Broker portal backend: replace static broker demo data with D1-backed submit-deal, pipeline, commissions, documents, and notifications; TMO sync behind the #dzmm webhook gate. Advances #37ah.
 - [ ] [#xcvg-admin] Borrower secure-message admin: add admin owner/assignment, in-app notification surface, and inbound-reply -> D1 chat-append plumbing (non-email half of #xcvg). Email send/receive stays gated on #f4rq/#m6ch/#p40t. Advances #xcvg.

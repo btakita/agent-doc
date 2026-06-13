@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -90,7 +90,29 @@ Done — and deployed. (Heads up: the queue split your bulleted list into three 
 - EFS commit `c26fda9`; submodule bump `1a6166be0`.
 
 `tsc --noEmit` still flags the file's pre-existing pattern lines (fetch `.then` value:unknown, render-prop `close` implicit-any) — no new error classes; the project builds via esbuild and the suite is green. Hard-refresh to pick up the new bundle.
-<!-- agent:boundary:552f78c6 -->
+
+### Re: Move Activity History to the right of Application Progress — opus-4.8
+
+> **Queue prompt:**
+>
+> Move Activity History to the right of Application Progress. dep
+
+
+Done and deployed. The Activity history card now sits **beside** Application Progress at the top of the full application detail, instead of at the bottom of the right column.
+
+**Changes:**
+- `full_application_detail.tsx` — added a `progress_aside` prop to `FullApplicationDetailView`. When present, Application Progress and the aside render in a responsive 2-up grid (`auto-fit, minmax(340px,1fr)`): Progress on the left, Activity history on the right, collapsing to stacked on narrow screens.
+- `full_applications.tsx` — moved `<ActivityHistoryCard>` out of the `actions` slot and passed it as `progress_aside`. It still renders on **both** the standalone page and the pipeline dialog (which reuses this view), so the placement is consistent everywhere.
+
+**Verified + deployed:**
+- `bun test` — **568 pass / 0 fail** (added `#full-app-activity-right` coverage for the 2-up layout).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `4a1f9453`).
+- EFS commit `4f704d5`; submodule bump `aba9d6f8a`.
+
+Hard-refresh to pick up the new bundle.
+
+Heads-up (not blocking, outside this session's scope): preflight flagged a stale `agent-doc` install — the local binary/cdylib predate source commit `7bfc82e3`, so tmux/JetBrains sessions may run older agent-doc code. Run `make install` in `src/agent-doc` when you want to refresh it.
+<!-- agent:boundary:6901e53c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +120,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Move Activity History to the right of Application Progress. dep
 <!-- /agent:queue -->
 
 ## Backlog

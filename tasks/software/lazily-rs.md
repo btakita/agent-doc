@@ -197,7 +197,7 @@ Per your "abstraction now, concrete later" call, shipped the transport **structu
 **Backlog:** `#webrtc3` (loopback tests + bench, now points at `InMemoryDataChannel`) → **`#webrtcbackend`** [recommended, new] (wire the concrete webrtc-rs/str0m backend behind an additive opt-in feature — the deferred heavy half) → `#shuttleeval`.
 
 **Still stopping the auto-drain.** `#webrtc3` is a clean next cycle (it can fully reuse the in-memory loopback), but the `#ipcdrift` supervisor (pid 337083, stale pre-`7bfc82e3` binary) is *still* live and corrupted this finalize too — recovered via hand-rebuild. Please **`make install` in `src/agent-doc` + recycle the route-owned supervisor** before continuing; I'm not auto-looping through the corruption.
-<!-- agent:boundary:12c35479 -->
+<!-- agent:boundary:4f0ec631 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -207,9 +207,10 @@ Per your "abstraction now, concrete later" call, shipped the transport **structu
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Go through each review item. Add actionable items into the backlog to complete the review items.~~
-- do [#webrtc2]
+- ~~do [#webrtc2]~~
 - do [#webrtc3]
 - do [#shuttleeval]
+- do [#webrtcbackend]
 <!-- /agent:queue -->
 
 ## Backlog

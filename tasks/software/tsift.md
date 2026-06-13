@@ -161,14 +161,32 @@ Fix in `packages/tsift-digest/src/log_digest.rs`:
 - **Commit + push:** tsift `d4ee76e` → `origin/main`; superproject pointer `a5ddf0398`. CI triggered (pending; local gate green).
 
 Next in queue: `#gdbwalcheckpoint`.
-<!-- agent:boundary:cbd11e86 -->
+
+### Re: do #gdbwalcheckpoint — opus-4-8
+
+> **Queue prompt:**
+>
+> [#gdbwalcheckpoint]
+
+
+Done. After a projection refresh, `replace_projection_with_version` ran `let _ = execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")`. That pragma reports its outcome in a **result row** `(busy, log, checkpointed)` rather than erroring, and `execute_batch` discards rows entirely — so a `busy` result (concurrent readers pinning the WAL → not truncated) was invisible, and the `-wal` file could grow unbounded across refreshes until a later snapshot export/import tripped the live-sidecar check.
+
+Fix in `packages/tsift-sqlite/src/lib.rs`: read the checkpoint result via `query_row` and record a `wal_checkpoint:ok` / `:busy` / `:error` phase in `phase_timings` (which the refresh report already surfaces), so the outcome is observable instead of swallowed.
+
+- **Tests:** `wal_checkpoint_outcome_is_recorded_not_swallowed` (happy path → `:ok`) and `wal_checkpoint_records_busy_when_a_reader_blocks_truncate` (a second connection holds a read transaction, deterministically pinning the WAL → `:busy`).
+- **Spec:** documented the recorded outcome in `specs/graph.md`.
+- **Verify:** `make check` green (comprehensive error grep); release+install rebuilt.
+- **Commit + push:** tsift `7914b31` → `origin/main`; superproject pointer `ea5cf2fa3`. CI triggered (pending; local gate green).
+
+Next in queue: `#logfoldname` (the `[recommended]` cargo-progress `<name>` over-fold precision fix).
+<!-- agent:boundary:99dae3bb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#loggatefidelity]~~
-- [#gdbwalcheckpoint]
+- ~~[#gdbwalcheckpoint]~~
 - [#logfoldname]
 - [#pcachebp]
 - What are #next-steps for fixing bugs?
@@ -180,7 +198,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#gdbwalcheckpoint] graph-db swallows WAL checkpoint failures: after a successful projection write, tsift-sqlite/src/lib.rs:1042-1046 does `let _ = ...wal_checkpoint(TRUNCATE)`. Concurrent readers block TRUNCATE (SQLITE_BUSY is normal), the error is discarded, -wal grows unbounded across refreshes, and a later snapshot-export/import trips fail_if_unsafe_sidecars (live -wal). Log/warn on checkpoint failure (surface in phase_timings/warnings) + consider PASSIVE fallback. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#logfoldname] [recommended] log-digest templatize_line <name> over-fold (log_digest.rs:872-878) rewrites the plain token before a v-prefixed version to <name> without checking the cargo `<Verb> <crate> v<ver>` shape, so `Downgrading serde from v1.0.0` and `Updating tokio to v2.0.0` both fold to `... <name> <ver>`, losing the from/to distinction. Restrict the fold to the cargo-progress shape. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#pcachebp] [recommended] prompt-cache breakpoint identity includes the JSON array index (session_cost.rs:3368-3372 via path content[N]), so inserting a non-cached content block ahead of the cached one (e.g. a leading thinking/text block) shifts content[0]->content[1] and reports false breakpoints/fingerprint drift though the cache boundary did not move. Make breakpoint identity position-independent (key by type:ephemeral + count, drop array indices). med conf, low-med sev (#tscodereview).
 <!-- /agent:backlog -->

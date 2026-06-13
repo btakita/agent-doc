@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,192 +32,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-060756.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-071321.md`*
 
 Compacted content:
-- Archived 5 response topic(s): "Open full application" should open a Full Application dialog with a page link; Add Decision / Feedback report / Sent feedback + Activity history to the Full Application dialog; Move Activity History to the right of Application Progress; 2 more
+- Archived 7 response topic(s): Where are the sample upload documents?; Sample documents for all required uploads; Borrower dashboard "Needs action" component; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Where are the sample upload documents? — opus-4.8
-
-> **Queue prompt:**
->
-> Where are the sample documents that I can upload for the borrower applications and the lender acreditation?
-
-
-They live in `src/equityfundingsource-dev/tmp/`, split by audience. They're synthetic, safe-for-testing fixtures (documented in `tmp/README.md`) using only extensions allowed by `app/equityfundingsource/lib/security/upload_guard.ts`. Note: `tmp/` is **gitignored** — these are local-only on this machine, not in the repo.
-
-**Borrower application uploads** — `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/borrower/`
-- `borrower-appraisal-report.pdf`
-- `borrower-bank-statement.csv`
-- `borrower-entity-authorization.txt`
-- `borrower-payoff-statement.txt`
-
-**Lender / investor accreditation uploads** — `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/investor/`
-- `investor-accreditation-letter.pdf`
-- `investor-bank-statement.csv`
-- `investor-tax-k1-summary.csv`
-- `investor-entity-formation.txt`
-- `investor-wire-instructions.txt`
-
-When you click upload in the borrower application document flow or the lender accreditation flow, browse to the matching folder above. They're tiny (under 1 KB each) and exist only to exercise the upload/validation paths, not to look like real documents.
-
-If you want a richer or more realistic set (or want them checked into the repo / a seed script so they survive a fresh clone), say the word and I'll generate them.
-
-### Re: Sample documents for all required uploads — opus-4.8
-
-> **Queue prompt:**
->
-> Please look at all required documents for the Deal Pipeline and Investor Pipeline. Please make sample documents in a valid format that I can use to upload to Loan Applications and Investor Applications and any other form that requires documents.
-
-
-Done. I traced every required document type from the DB catalogs and generated a complete set of **valid, openable** sample files (verified with `file`, `pdftotext`, and ImageMagick `identify`).
-
-**Required-document sources (source of truth):**
-- **Loan Applications / Deal Pipeline** — `document_types` table (migrations 0010 + 0056): Appraisal Report, Preliminary Title Report, Property Photos, Purchase Agreement, Executed Promissory Note, Deed of Trust.
-- **Investor accreditation** — `investor_accreditation_verifications.verification_type` (migration 0024): income, net_worth, institution, professional.
-- **Investor documents** — `investor_documents.category` (migration 0024): tax (K-1), legal (subscription agreement), due_diligence (PPM), statement (account statement).
-- Formats restricted to what `upload_guard.ts` allows (pdf / png / csv / txt; ≤25 MB).
-
-**Where they are:** `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/samples/`
-- `loan-applications/` — appraisal-report.pdf, preliminary-title-report.pdf, property-photos.png (640×420 RGB), purchase-agreement.pdf, executed-promissory-note.pdf, deed-of-trust.pdf
-- `investor-accreditation/` — accreditation-income.pdf, accreditation-net-worth.pdf, accreditation-institution.pdf, accreditation-professional.pdf
-- `investor-documents/` — tax-k1-2025.pdf, subscription-agreement-legal.pdf, due-diligence-ppm.pdf, account-statement.pdf
-
-14 files, each a real PDF (v1.4, one page, readable text) or a real PNG — so they pass the upload guard and actually open. All clearly watermarked "SAMPLE — synthetic … for upload testing only."
-
-**Reproducible:** the generator is committed at `bin/make-sample-documents.ts` (hand-rolls valid PDF + PNG bytes, no deps), so the set survives a fresh clone — regenerate any time with `bun run bin/make-sample-documents.ts`. (`tmp/` itself stays gitignored.)
-
-**Verified:**
-- `bun test` — **574 pass / 0 fail**, incl. new `#sample-upload-docs` coverage (PDF/PNG validity, guard-allowed extensions, size limit).
-- No app/worker change, so nothing to deploy this cycle.
-
-If you also want a CSV/spreadsheet variant for the K-1 or bank statements (some reviewers prefer those), or a deliberately-oversized/disallowed file to test the rejection path, say so.
-
-### Re: Borrower dashboard "Needs action" component — opus-4.8
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard should have a similar needs action component as the admin dashboard. An incomplete application or application that needs some action should be on the borrower dashboard. deploy
-
-
-Done and deployed. The borrower dashboard now has a **"Needs action"** panel that mirrors the admin dashboard's attention card and surfaces both incomplete applications and items needing action.
-
-**What I found:** the borrower dashboard already had a small "Needs attention" card, but it only listed loans missing documents — **incomplete (draft) applications weren't surfaced at all** (the dashboard data only read the `loans` table, never `full_applications`).
-
-**Changes:**
-- **Backend** (`borrower/dashboard/index.ts`): added a query for the borrower's own **draft** full applications (`full_applications WHERE borrower_user_id = ? AND status = 'draft'`) and returns them as `incomplete_applications` plus an `incomplete` count.
-- **Frontend** (`borrower/dashboard.tsx`): renamed the card to **"Needs action"** and rebuilt it as a unified, prioritized list:
-  1. **Finish your loan application** — one per incomplete draft, linking to `/portal-borrower/new-application?application_id=<id>` to complete + submit it (shown first, since nothing progresses until it's done).
-  2. **Documents needed** — submitted applications still missing required docs (existing behavior, preserved).
-  - Shows the top 2 with a count badge and a "Show N more" expander, same pattern as before.
-
-So an incomplete application — or any application needing action — now appears on the borrower dashboard, like the admin side.
-
-**Verified + deployed:**
-- `bun test` — **576 pass / 0 fail** (added `#borrower-needs-action` coverage for the panel + the draft-application API; updated the e2e source assertions for the rebuilt component).
-- `bun run build:worker` clean; `bun run deploy:worker` live (version `0482680d`).
-- EFS commit `a7372df`; submodule bump `b950f9eb1`.
-
-Hard-refresh `/portal-borrower/dashboard` to see it (it only appears when there's an incomplete application or a docs-needed item).
-
-### Re: All document upload fields allow multiple uploads — opus-4.8
-
-> **Queue prompt:**
->
-> All document upload fields should allow multiple uploads. deploy
-
-
-Done and deployed. Every document upload field now accepts multiple files (the OS picker allows multi-select, and the handlers upload all selected files).
-
-**8 upload fields updated:**
-- **Borrower required-doc slots** (`documents.tsx`, grid + list) — backend already accepts a `files` array, so all selected files go up in one request.
-- **Borrower new-application uploader** (`doc_uploader.tsx`) — this is a "choose file → pick its category" flow, so multi-select now **queues** the files and walks you through one category at a time (drop or file-picker).
-- **Borrower full application** + **admin full-application detail** (`full_application.tsx`, `full_application_detail.tsx`) — per-type slots upload every selected file.
-- **Investor accreditation** (`accreditation.tsx`) — attach several supporting documents at once under the chosen verification type.
-- **Admin public documents** (`documents.tsx`), **lender documents** (`lender_documents.tsx`), **deal documents** (`deal_documents.tsx`) — multi-select uploads each file (single-name field still applies when you pick one).
-
-I intentionally left the **image** fields single-file — the deal hero image and public-content image (`PortalFileInput`) are single-image pickers, not document collections.
-
-**Verified + deployed:**
-- `bun test` — **586 pass / 0 fail** (added `#multi-upload` coverage asserting every document field is `multiple` and its handler iterates all files).
-- `bun run build:worker` clean; `bun run deploy:worker` live (version `45c271fd`).
-- EFS commit `fc4447f`; submodule bump `933d5eb7b`.
-
-Hard-refresh to pick up the new bundle. (`tsc` still flags two pre-existing non-strict lines in `admin/documents.tsx` — a `confirm_` string arg and a json `value:unknown` — neither touched by this change; esbuild builds clean and the suite is green.)
-
-### Re: Loan application "Replace file" buttons → multi-file upload form — opus-4.8
-
-> **Queue prompt:**
->
-> The loan application still has "Replace file" buttons ![img_8.png](img_8.png). These should be a multi-file upload form. deploy
-
-
-Done and deployed. The loan application Documents section is now a **single multi-file upload form** instead of per-type "Replace file" buttons.
-
-**New flow** (from img_8.png's per-type buttons → one form):
-1. A drop-zone at the top — **drop or choose many files at once**.
-2. Each selected file appears in a "Ready to upload" list with a **category dropdown** (auto-defaulted to the next required-but-missing type) and a Remove button.
-3. **Upload all** — groups files by category and uploads them in one action.
-4. Below, a read-only **checklist** of the required types shows each one's status (Uploaded / Required / Optional) with the uploaded filename — so borrowers still see exactly what's needed, without per-type buttons.
-
-Applied to **both** surfaces: the borrower loan application (`full_application.tsx` — the screenshot) and the shared admin/pipeline-dialog full-application detail (`full_application_detail.tsx`), so they stay unified. The per-type "Replace file"/"Choose file" controls are gone.
-
-**Verified + deployed:**
-- `bun test` — **587 pass / 0 fail** (added `#app-docs-multi-upload` coverage: the form exists, `upload_all` groups by type, and the old per-type Replace control is gone).
-- `bun run build:worker` clean; `bun run deploy:worker` live (version `3da65bae`).
-- EFS commit `8e5960f`; submodule bump `6d5961c60`.
-
-Hard-refresh the application form to see it. Note this builds on the prior multi-file change: each category still accepts multiple files, and the backend stores them per type.
-
-### Re: Upload friction — drop area + click-to-open on every form — opus-4.8
-
-> **Queue prompt:**
->
-> The upload UI has too much friction. Each form should have its own drop file area along with supporting click to open the file dialog. deploy
-
-
-Done and deployed. I added a shared drag-and-drop upload area (with click/keyboard to open the file dialog) and rolled it out across the upload forms.
-
-**New shared component** — `FileDropZone` in `shared/ui.tsx`: a dashed drop area that highlights on drag-over, accepts dropped files, and opens the native picker on click or Enter/Space. Multiple-capable by default.
-
-**Applied to the forms that were plain pickers:**
-- **Investor accreditation**, **admin public documents**, **admin lender documents**, **admin deal documents** — the bare `<input type=file>` is now a `FileDropZone`.
-- **Borrower documents** (per required-doc slot) — each slot card is now a drop target too (drop onto the card), keeping its Upload/Replace button for click-to-open.
-
-The forms that already had a drop area keep it: the **loan application** Documents form and the **new-application** category uploader both already support drop + click.
-
-So every upload form now has its own drop-file area plus click-to-open — less friction, consistent everywhere.
-
-**Verified + deployed:**
-- `bun test` — **589 pass / 0 fail** (added `#upload-dropzone` coverage: the shared component does drop + click + multiple; each refactored form uses it; borrower slots accept drops).
-- `bun run build:worker` clean; `bun run deploy:worker` live (version `0448b93f`).
-- EFS commit `728baef`; submodule bump `581224173`.
-
-Hard-refresh to pick up the new bundle.
-
-### Re: "Still see the old high-friction interface" — opus-4.8
-
-> **Queue prompt:**
->
-> I still see the old high-friction multi-file download interface ![img_9.png](img_9.png). Deploy the new interface.
-
-
-Two things here:
-
-**1. The new interface IS live.** img_9.png actually shows the *new* multi-file form (drop-zone + "Ready to upload" list + per-file category + "Upload N files" + the required-type checklist). The old per-type "Replace file" buttons are gone (deployed in versions `3da65bae` → `0448b93f`). If you ever still see the old buttons, it's a cached JS bundle — hard-refresh (Cmd/Ctrl-Shift-R).
-
-**2. I found and fixed the real friction in that screenshot.** `appraisal-report.pdf` had auto-defaulted to the wrong category, **"Purchase Agreement"** — because the form just picked "the next required type still missing," so you had to hand-correct the category on every file. That's the friction.
-
-**Fix (`#app-docs-smart-match`):** dropped files now **auto-pick their category by matching the file name to the document-type name**. So `appraisal-report.pdf` → **Appraisal Report**, `preliminary-title-report.pdf` → **Preliminary Title Report**, `property-photos.png` → **Property Photos**, etc. A match needs to cover at least half the type name (so it won't mis-tag); anything unmatched falls back to the next-required default, and you can still override via the dropdown. Applied to both the borrower application form and the admin/pipeline-dialog version.
-
-**Verified + deployed:**
-- `bun test` — **589 pass / 0 fail** (added `#app-docs-smart-match` coverage).
-- `bun run build:worker` clean; `bun run deploy:worker` live (version `f46ff9f2`).
-- EFS commit `f879dd3`; submodule bump `d7e7f1762`.
-
-If by "new interface" you meant something different from what img_9 shows (e.g. drop-and-auto-upload with no category step at all), tell me and I'll adjust — but documents map to specific required types, so some category assignment is needed; smart-match makes it automatic in the common case.
-<!-- agent:boundary:0d9c03cd -->
+<!-- agent:boundary:7d39efed -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- This interface is still high friction. What I want instead is to replace the single upload area with an upload areas for each form type. deploy
 <!-- /agent:queue -->
 
 ## Backlog

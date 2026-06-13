@@ -77,7 +77,27 @@ Implemented the non-TMO half of Investor Pipeline phase 2: drag a Committed-lane
 **Verification:** `bun run check` → **626 pass / 0 fail** (+5 new tests), TypeScript build + worker bundle clean. Committed + pushed.
 
 Marking **#vd8s-dragwire done**. Next in the go-queue: #67v2-kanban.
-<!-- agent:boundary:4b537b94 -->
+
+### Re: do [#67v2-kanban] — already shipped (LOAN_PIPELINE Kanban); verified + closed — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#67v2-kanban]
+
+
+The TMO-aligned-stage loan Kanban already exists — verify-and-close.
+
+**Already in place:**
+- **TMO-aligned stages** (`repo.ts` `LOAN_PIPELINE`, `status_source: 'tmo'`): Applications → Processing → Documents → Underwriting → Funded → Closed, plus On Hold / Unassigned / Application Denied. Lanes map 1:1 to TMO `tmo_loan_status` values — TMO is the single source of truth.
+- **Kanban + drag + manual advance** (`pipeline.tsx`): loan cards drag between columns → `change_loan_status_` → `PUT /api/admin/loans/:id/status`, which writes `tmo_loan_status`, syncs the linked investor-deal status (`admin_deal_status_sync_by_loan_`), and the board live-refreshes on pushed admin events (dashboard sync). The loan dialog's status dropdown shares the same write path.
+- Leads funnel column is read-only (a lead isn't a loan/TMO status); the board is Kanban-only with in-place search (PRD phase 3b).
+
+**Gated remainder:** the "auto-advance when stage requirements met" half of review #67v2 needs the TMO writeback gate (#dzmm/#k2xg) — already deferred there; the manual-advance Kanban is complete.
+
+**Verification:** `bun test tests/admin-pipeline.test.ts` → **44 pass / 0 fail**. No source changed → nothing to commit/push.
+
+Marking **#67v2-kanban done** (review #67v2 stays gated for the TMO auto-advance piece). Next in the go-queue: #37ah-backend.
+<!-- agent:boundary:d35d3819 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,7 +107,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#qakx-impl]~~
 - ~~do [#vd8s-dragwire]~~
-- do [#67v2-kanban]
+- ~~do [#67v2-kanban]~~
 - do [#37ah-backend]
 - do [#xcvg-admin]
 - do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
@@ -97,7 +117,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#67v2-kanban] Admin loan pipeline: build TMO-aligned-stage Kanban UI (drag cards, manual stage advance) wired to dashboard with TMO stages as single source of truth; auto-advance-on-requirements deferred to #dzmm/#k2xg. Advances #67v2.
 - [ ] [#37ah-backend] Broker portal backend: replace static broker demo data with D1-backed submit-deal, pipeline, commissions, documents, and notifications; TMO sync behind the #dzmm webhook gate. Advances #37ah.
 - [ ] [#xcvg-admin] Borrower secure-message admin: add admin owner/assignment, in-app notification surface, and inbound-reply -> D1 chat-append plumbing (non-email half of #xcvg). Email send/receive stays gated on #f4rq/#m6ch/#p40t. Advances #xcvg.
 - [ ] [#dzmm-followup] Send Robert the six-question TMO outbound-webhook prompt (src/equityfundingsource-dev/docs/tmo-webhooks-question.md) and record his answer; this single unblock clears the writeback gate behind #dzmm/#k2xg/#7a4d/#vd8s/#67v2/#zwws. Operator/comms action.

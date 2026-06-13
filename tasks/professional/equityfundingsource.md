@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -145,7 +145,31 @@ I intentionally left the **image** fields single-file — the deal hero image an
 - EFS commit `fc4447f`; submodule bump `933d5eb7b`.
 
 Hard-refresh to pick up the new bundle. (`tsc` still flags two pre-existing non-strict lines in `admin/documents.tsx` — a `confirm_` string arg and a json `value:unknown` — neither touched by this change; esbuild builds clean and the suite is green.)
-<!-- agent:boundary:6107b757 -->
+
+### Re: Loan application "Replace file" buttons → multi-file upload form — opus-4.8
+
+> **Queue prompt:**
+>
+> The loan application still has "Replace file" buttons ![img_8.png](img_8.png). These should be a multi-file upload form. deploy
+
+
+Done and deployed. The loan application Documents section is now a **single multi-file upload form** instead of per-type "Replace file" buttons.
+
+**New flow** (from img_8.png's per-type buttons → one form):
+1. A drop-zone at the top — **drop or choose many files at once**.
+2. Each selected file appears in a "Ready to upload" list with a **category dropdown** (auto-defaulted to the next required-but-missing type) and a Remove button.
+3. **Upload all** — groups files by category and uploads them in one action.
+4. Below, a read-only **checklist** of the required types shows each one's status (Uploaded / Required / Optional) with the uploaded filename — so borrowers still see exactly what's needed, without per-type buttons.
+
+Applied to **both** surfaces: the borrower loan application (`full_application.tsx` — the screenshot) and the shared admin/pipeline-dialog full-application detail (`full_application_detail.tsx`), so they stay unified. The per-type "Replace file"/"Choose file" controls are gone.
+
+**Verified + deployed:**
+- `bun test` — **587 pass / 0 fail** (added `#app-docs-multi-upload` coverage: the form exists, `upload_all` groups by type, and the old per-type Replace control is gone).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `3da65bae`).
+- EFS commit `8e5960f`; submodule bump `6d5961c60`.
+
+Hard-refresh the application form to see it. Note this builds on the prior multi-file change: each category still accepts multiple files, and the backend stores them per type.
+<!-- agent:boundary:56b2ec9a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,7 +177,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The loan application still has "Replace file" buttons ![img_8.png](img_8.png). These should be a multi-file upload form. deploy
 <!-- /agent:queue -->
 
 ## Backlog

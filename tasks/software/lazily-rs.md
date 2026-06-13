@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#mermaid': Include explanatory mermaid diagram(s).
@@ -62,7 +63,27 @@ Phases: **0** discovery (current — ask Steve), **1** read-only inbound (holon 
 Since you have a direct line to Steve, the immediate next step is getting those 7 answers — they unblock `#lzholons` Phase 1. Everything lazily-side (transports + bridge) can proceed in parallel via #akp3 / #97xn.
 
 Note: preflight flagged a semantic-completion match suggesting #akp3 (WebSocket transport) may already be done by #webrtcbackend — that's a false positive. #webrtcbackend is the WebRTC str0m DataChannel backend; a WebSocket transport is separate (and simpler). Leaving #akp3 open.
-<!-- agent:boundary:97412f96 -->
+
+### Re: do [#akp3] — WebSocket DataChannel backend — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#akp3]
+
+
+Done. Shipped a concrete WebSocket backend behind an additive `websocket` feature, committed + pushed to `lazily-hub/lazily-rs` (`e1bb1e9`), superproject pointer bumped (`2be46c8b1`).
+
+**What landed (`src/ws_backend.rs`, +302 lines):**
+- `WsDataChannel` implements the existing `DataChannel` trait (#webrtc2) over `tokio-tungstenite`. Because WebSocket is already ordered + reliable, it satisfies the frame contract **directly** — no SDP/ICE handshake and no sans-IO pump, unlike the str0m backend.
+- The only mismatch is async-vs-sync: a background tokio **driver task** bridges async tungstenite to the sync, non-blocking `DataChannel` — `send_frame` does a non-blocking enqueue onto an unbounded mpsc the driver drains as binary WS frames; inbound WS messages land on a shared queue `try_recv_frame` pops. One whole serialized `IpcMessage` per frame, so the `WebRtcSink`/`WebRtcSource` permission-filter + codec bridge runs over it **unchanged**.
+- `from_stream` takes any upgraded `WebSocketStream`, so the same backend serves a real socket and the tests. Driver aborts on last-handle drop (no leaked task on a dead socket).
+
+**Tests (deterministic, no network):** in-process loopback over a **real WS handshake** via `tokio::io::duplex` (`accept_async`/`client_async`) — one test asserts an unreadable node is omitted from a permission-filtered snapshot, another asserts delta send-order is preserved. Both green.
+
+**CI gap also closed:** the whole WebRTC/WebSocket transport family was *not* wired into `make check` or CI. Added `test-webrtc` (`webrtc-str0m`) + `test-websocket` targets and matching CI steps, so the str0m backend (#webrtcbackend) and this backend are now both covered. Local `make check` green; clippy/fmt clean (only the two pre-existing `ipc.rs` dead-code warnings remain).
+
+Next in the queue: `do [#97xn]` (the multi-channel bridge hub) — that one consumes both transports.
+<!-- agent:boundary:2c29b5dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,15 +93,15 @@ Note: preflight flagged a semantic-completion match suggesting #akp3 (WebSocket 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~I'm in contact with Steve Melville, creator of Map Holons. Please create an ongoing plan document for the Map Holons integration work.~~
-- do [#akp3]
+- ~~do [#akp3]~~
 - do [#97xn]
+- do [#xccx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
 - [ ] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
-- [ ] [#akp3] #lzwstransport=[recommended] WebSocket IpcSink/IpcSource transport. WebSocket is ordered+reliable so it satisfies the DataChannel frame contract directly — no signaling/ICE/sans-IO backend needed (much smaller than #webrtcbackend). Implement a WsDataChannel over a ws stream and reuse WebRtcSink/WebRtcSource, or impl IpcSink/IpcSource directly.
 - [ ] [#97xn] #lzmuxbridge=[recommended] Multi-channel reactive bridge hub: fan one reactive graph across heterogeneous IpcSink/IpcSource attachments (WebRTC + WebSocket + in-process IPC) at once. Re-derive per-peer filtered deltas through the graph-apply authority — do NOT relay raw frames — to preserve PeerPermissions default-deny. Plan: tasks/software/plan-lazily-multichannel-bridge.md.
 <!-- /agent:backlog -->
 

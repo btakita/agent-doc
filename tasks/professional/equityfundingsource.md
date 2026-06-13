@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -133,7 +133,31 @@ Refactored the row rendering into a shared `ActivityTimeline` component reused b
 - EFS commit `c264f91`; submodule bump `fb5c79ae3`.
 
 Hard-refresh to pick up the new bundle. (Session note: the exchange is getting long — 8 cycles in 30 min — but I'm keeping the queue draining per the no-stall rule; compact when you're ready with `/agent-doc compact`.)
-<!-- agent:boundary:d42106d8 -->
+
+### Re: Unify all pipeline dialogs with their full detail pages — opus-4.8
+
+> **Queue prompt:**
+>
+> The Full Application dialog on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new should match the full design and behavior of https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/48b67fd8-31a9-4cdf-a59b-c9c192da2026. That means Activity history should be to the right of the Application progress. All the sections should be present in both. The components should probably be unified. Do the same for all dialog + page combos. All elements and behavior in the full pages should be in the dialogs. Deploy 
+
+
+Done and deployed. Every pipeline card dialog now **reuses its full detail-page component**, embedded — so each dialog is the same component as the page, not a separate summary. One source of truth per type.
+
+**The pattern:** each detail page got an `embedded` prop that hides only its page chrome (topbar/Back); the dialog supplies its own header + close + "Open page" link and renders the page component as the body.
+
+- **Application dialog** → `<AdminFullApplications embedded>` (already unified last cycle). Activity history sits to the right of Application Progress via the shared `progress_aside` 2-up grid; widened the dialog to `72rem` so the 2-up always has room.
+- **Lead dialog** → now `<ApplicationLeadDetail lead_id embedded>` — full Contact / Property / Loan request / **Deal Pipeline controls** (status + borrower invite) / Message sections, identical to `/portal-admin/application-leads/:id`. Removed the dialog's duplicated field grid and `LeadPipelineControls` (they live in the reused page now).
+- **Loan dialog** → now `<AdminLoanDetail loan_id embedded>` — full status stepper, Application Record, Borrower Info, TMO loan details, Payment Schedule, Wire Links, Onboarding Data, and Documents. Kept the pipeline-only controls (status dropdown, deal action, delete) in the footer, so the dialog is a **superset**: everything on the page plus the board actions.
+
+So all "dialog + page combos" are unified, and all page elements/behavior are present in the dialogs.
+
+**Verified + deployed:**
+- `bun test` — **570 pass / 0 fail** (rewrote the lead-dialog and dialog-width tests for the reuse structure; added `#dialog-page-unify` coverage for all three combos + the embedded-mode page props).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `67fe78cf`).
+- EFS commit `4fe8034`; submodule bump `94312c766`.
+
+Hard-refresh to pick up the new bundle. (Session note: exchange is long — compact with `/agent-doc compact tasks/professional/equityfundingsource.md` when convenient; I'm continuing to drain the queue per the no-stall rule.)
+<!-- agent:boundary:6f059af8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +165,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The Full Application dialog on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new should match the full design and behavior of https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/48b67fd8-31a9-4cdf-a59b-c9c192da2026. That means Activity history should be to the right of the Application progress. All the sections should be present in both. The components should probably be unified. Do the same for all dialog + page combos. All elements and behavior in the full pages should be in the dialogs. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

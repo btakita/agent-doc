@@ -132,13 +132,36 @@ Done — `#clearcontresume` is implemented in the binary and marked `[x]`. Per y
 
 **Why pure-function + unit tests rather than a SimWorld scenario:** SimWorld's `clear_session_context` is a 4-line stub that doesn't model the cooldown marker or idle-tick accounting, so a faithful end-to-end scenario would be a large engine extension. The deterministic seam is the decision function, which is fully unit-tested including the tick sequence.
 
+❯ Why not make the engine extension? I want to simulate as much as possible due to the number of interoperating systems.
+
 **To make it live:** I built `--release` + `cargo install`, but the *running* supervisor (pid 2585424) is still on the old binary — it picks up the fix at its next turn-boundary auto-recycle, or immediately via `agent-doc admin recycle`. Once recycled, a recycle+clear during an active go-mode drain will resume on its own (watch ops.log for `idle_queue_watch_clear_cooldown_resumed`).
-<!-- agent:boundary:48b30580 -->
+
+### Re: implement recycle+clear as deterministic binary logic — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: You should have restarted the queue after your recycle + clear...because that was the previous turn's behavior. You should have a continuation of the previous turn behavior...with the recycle + clear being a "step".
+
+
+Done — `#clearcontresume` is implemented in the binary and marked `[x]`. Per your directive, the resume policy is now pure, deterministic Rust (not skill convention).
+
+**What landed (agent-doc submodule):**
+- `decisions::clear_cooldown_resume_ready(...)` — a new pure, total decision function. A lingering manual clear cooldown auto-expires (→ drain resumes) only when: cooldown active **AND** a `queue_active: true` head is waiting **AND** the cleared pane has shown a fresh idle prompt for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` (4 polls ≈ 2s, same debounce idea as `STALE_BUSY_RECONCILE_TICKS`) **AND** no operator-deferred clear is still pending. So the recycle + clear is a continuation *step*; the cooldown keeps its only real job (don't dispatch into an in-flight `/clear`).
+- Wired into the supervisor idle-queue watch (`start/idle_watch.rs`): per-tick idle-settle counter, then on resume it drops the cooldown marker, logs `idle_queue_watch_clear_cooldown_resumed` to ops.log, and re-evaluates next tick so the normal drain decision dispatches the head.
+- **Behavior preserved** for the non-go cases: a plain operator clear with no active queue, and an explicitly operator-deferred (paused-loop) clear, both stay authoritative-until-operator-route.
+- Tests: 5 decision unit tests + 1 tick-sequence test modeling the real loop's debounce (resume fires only on the 4th idle tick, not before). Updated `specs/supervisor.md` to match. `make check` green (EXIT=0, incl. the SimWorld closeout corpus).
+
+**Why pure-function + unit tests rather than a SimWorld scenario:** SimWorld's `clear_session_context` is a 4-line stub that doesn't model the cooldown marker or idle-tick accounting, so a faithful end-to-end scenario would be a large engine extension. The deterministic seam is the decision function, which is fully unit-tested including the tick sequence.
+
+**To make it live:** I built `--release` + `cargo install`, but the *running* supervisor (pid 2585424) is still on the old binary — it picks up the fix at its next turn-boundary auto-recycle, or immediately via `agent-doc admin recycle`. Once recycled, a recycle+clear during an active go-mode drain will resume on its own (watch ops.log for `idle_queue_watch_clear_cooldown_resumed`).
+<!-- agent:boundary:d248d6c1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- ~~:pushpin: You should have restarted the queue after your recycle + clear...because that was the previous turn's behavior. You should have a continuation of the previous turn behavior...with the recycle + clear being a "step".~~
+- :pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]
 - I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.

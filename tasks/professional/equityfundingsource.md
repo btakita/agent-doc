@@ -24,7 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-Answered: `Requested loan number` is the optional subject-property `loan_number`, distinct from canonical TMO loan number; the live application row has it stored as an empty string.
+committed
 <!-- /agent:status -->
 
 ## Exchange
@@ -32,76 +32,12 @@ Answered: `Requested loan number` is the optional subject-property `loan_number`
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260612-225138.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260612-232655.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Stripe account email; Stripe account email sent; Remove payment processors; 1 more
+- Archived 3 response topic(s): Requested loan number; Loan application admin editing; Google Ads API token third-party tool question
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Requested loan number — gpt-5
-
-> **Queue prompt:**
->
-> What is "Requested loan number" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3? Why is it blank? 
-
-
-`Requested loan number` is not the canonical TMO loan number. It is the subject-property form field stored as `application_subject_property.loan_number`, labeled in the admin/detail UI as `Requested loan number`. Migration `0050_full_application_tmo_loan_number.sql` explicitly separates it from `full_applications.tmo_loan_number`, which is the real/canonical TMO loan number after admin/TMO writeback.
-
-For the specific production application `a8cf595e-06d0-4f73-b41d-f68e1422e8e3`, remote D1 currently has:
-
-- `full_applications.status = 'draft'`
-- `full_applications.tmo_application_number = null`
-- `full_applications.tmo_loan_number = null`
-- `full_applications.writeback_status = 'not_started'`
-- `application_subject_property.loan_number = ''`
-- subject-property data otherwise exists, including `loan_amount = 100000`, `loan_purpose = 'purchase'`, and the Thompson, CT property address
-- no `application_subject_property_change_logs` rows for this application
-
-So it is blank because nobody has supplied that optional requested loan number on this application, and the save path persists an omitted `loan_number` / `requested_loan_number` as an empty string. This is not a missing join or rendering bug. If EFS expected that row to show the TMO loan identifier, that is the separate `tmo_loan_number` field, and this draft application has not been submitted or written back to TMO yet.
-
-Related production note: the remote D1 migration list currently stops at `0061_public_content_home.sql` / `0061_application_subject_property_admin_history.sql`; `0062_full_application_admin_change_history.sql` is not applied yet, so the newer all-form `application_change_logs` table is not present in production. That does not cause this blank `Requested loan number`, but it does mean the prior all-form history change is not fully reflected in remote D1 yet.
-
-### Re: Loan application admin editing — gpt-5
-
-> **Queue prompt:**
->
-> The admin should be able to edit loan applications such as https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/a8cf595e-06d0-4f73-b41d-f68e1422e8e3. Ensure we have the change history saved in the database. Make the change history viewable for all forms.
-
-
-Implemented and shipped the admin loan-application editor/history work.
-
-Changed paths: `src/equityfundingsource-dev` at `a0d5dde` adds `PUT /api/admin/full-applications/:id/sections/:section`, migration `0062_full_application_admin_change_history.sql`, per-section admin editors for broker source, personal, addresses, employment, income, assets, liabilities, REO, subject property, and declarations, plus D1-backed `application_change_logs` history displayed in each form card. Subject-property `PATCH` remains available and now refreshes the new all-section history too. The parent repo records that submodule pointer in `1a93213b2`.
-
-Commands: `bun test tests/admin-subject-property-edit.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`; `git commit`/`git push` in `src/equityfundingsource-dev`; parent `git commit`/`git push` for the submodule pointer.
-
-Verification: targeted admin tests passed; full `make check` passed with 565 tests plus browser and worker builds. GitHub Actions check could not find a workflow named `CI`, and `gh workflow list` returned no workflows for this submodule, so local verification is the available proof.
-
-Escalation: no escalated shell permissions were needed. Existing unrelated uncommitted changes in the EFS submodule and parent repo were left untouched. Confidence: high.
-
-### Re: Google Ads API token third-party tool question — gpt-5
-
-> **Queue prompt:**
->
-> I plan to use Claude Code & Codex to use the api. How should I answer "9. Do you plan to use your Google Ads API token with a tool developed by someone else? *". If yes, "Please provide the URL of the tool. *".
-
-
-For the way you described it, I would answer **No** if Claude Code and Codex are being used as coding assistants to help build/debug **your own EFS integration**, with the Google Ads API token kept in your own local environment/secret store and the final API client being code you own.
-
-Reasoning: Google describes the developer token as the credential that lets **your app** connect to the Google Ads API and says that when a company uses a third-party app/service, the developer of that third-party app needs to get the token for that app: https://developers.google.com/google-ads/api/docs/api-policy/developer-token. Google also documents that every Google Ads API call must include the developer token header: https://developers.google.com/google-ads/api/rest/auth.
-
-So the practical split is:
-
-- **Answer No** when Claude Code/Codex are helping write or run your code during development, but the tool/application is your own EFS integration.
-- **Answer Yes** if you plan to give the token to a third-party hosted product, connector, SaaS app, or MCP/tool package that directly uses the token as its own Google Ads API client.
-
-If you truly intend Claude Code/Codex themselves, or an MCP server, to directly operate the token as the API client, then answer **Yes** and provide the relevant tool URL(s), for example:
-
-- Claude Code: https://code.claude.com/docs/en/overview
-- OpenAI Codex: https://developers.openai.com/codex/cloud
-- Google Ads MCP server, if used: https://developers.google.com/google-ads/api/docs/developer-toolkit/mcp-server
-
-My recommended compliant path: use Claude Code/Codex to generate and review the EFS code, keep the Google Ads token out of prompts and hosted agent settings, store it only in EFS-controlled secrets, and answer **No** because the API token is for EFS's own integration rather than a third-party tool.
-<!-- agent:boundary:efeae3cc -->
+<!-- agent:boundary:71666203 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore.
 <!-- /agent:queue -->
 
 ## Backlog

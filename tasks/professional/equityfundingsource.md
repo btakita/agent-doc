@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -195,7 +195,7 @@ So every upload form now has its own drop-file area plus click-to-open — less 
 - EFS commit `728baef`; submodule bump `581224173`.
 
 Hard-refresh to pick up the new bundle.
-<!-- agent:boundary:5f1ce13f -->
+<!-- agent:boundary:b1e2cd71 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -203,6 +203,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Add https://www.youtube.com/watch?v=ZLQ1P6Vg2HE to the https://monsterrodholders.com/product/hd150-hydroweb-heavy-duty-landing-net/ carousel.
 <!-- /agent:queue -->
 
 ## Backlog

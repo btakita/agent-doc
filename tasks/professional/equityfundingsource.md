@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -58,7 +58,7 @@ Done. In the admin pipeline (tab=pipeline), the Application dialog's **Open full
 - EFS commit `8614fe4`; submodule pointer bumped (`5ed5132c2`).
 
 Note: `tsc --noEmit` flags the new fetch/render-prop lines, but those mirror the file's existing accepted patterns (lead-modal fetch, the other modal render-props) — the project builds via esbuild, not strict tsc, and the suite is green. Hard-refresh to pick up the new JS bundle.
-<!-- agent:boundary:b4a1809e -->
+<!-- agent:boundary:4ae22a9f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +66,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+In the Full Application dialog, add
+- Decision
+- Feedback report
+- Sent feedback
+
+Also, add an activity history to the Full Application dialog and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/48b67fd8-31a9-4cdf-a59b-c9c192da2026.
+
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

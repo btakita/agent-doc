@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -49,12 +49,13 @@ One reproducible tsift bug observed this session, added to the backlog as **#car
 Out of scope for this doc but noted: the **agent-doc IPC ack-timeout / exit-75-on-finalize** behavior I hit this session is an agent-doc bug, not a tsift one — it belongs in `tasks/agent-doc/agent-doc-bugs2.md` (per the `#agent-doc-bug` preset), so I did not add it to tsift's backlog.
 
 Backlog top: **#cargoidxcov**.
-<!-- agent:boundary:9e4c4923 -->
+<!-- agent:boundary:30cc805f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#cargoidxcov]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

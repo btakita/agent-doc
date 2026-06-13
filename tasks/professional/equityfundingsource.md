@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,25 @@ committed
 Compacted content:
 - Archived 7 response topic(s): Where are the sample upload documents?; Sample documents for all required uploads; Borrower dashboard "Needs action" component; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:7d39efed -->
+
+### Re: Replace the single upload area with one per form type — opus-4-8
+
+> **Queue prompt:**
+>
+> This interface is still high friction. What I want instead is to replace the single upload area with an upload area for each form type. deploy
+
+
+Done — shipped and deployed. The loan-application Documents step no longer makes you drop everything into one box and then tag each file. Each document type now has its own labeled upload area; the area you drop on **is** the category, so the category-picking step is gone entirely.
+
+**What changed (#app-docs-per-type-upload):**
+- **Borrower application** (`portal/borrower/full_application.tsx`) — `ApplicationDocumentsUpload` now renders one `FileDropZone` per document type, each showing the type's name, description, Required/Uploaded status, and the uploaded filename. Drop or click straight into the right type → it uploads directly to that category.
+- **Admin / pipeline detail** (`portal/shared/full_application_detail.tsx`) — same treatment in `FullApplicationDocumentsUpload`, with each per-type zone also surfacing the download link for the already-uploaded file. The read-only checklist still renders when upload isn't available.
+- Removed the single pooled drop zone, the per-file category `<select>` + "Upload N files" button, and the filename→category guessing (`document_type_match_`, the old #app-docs-multi-upload / #app-docs-smart-match logic).
+
+**Spec + tests:** updated `tests/multi-upload.test.ts` to the per-type-upload spec (moved both loan-app forms into the `FileDropZone` group; assert one zone per type uploading to its own type id; assert the pooled-area/category-picker markers are gone) and fixed the `BoolCheckbox` import assertion in `boolean-checkbox-fields.test.ts`. Full suite green: **589 pass / 0 fail**; client + worker builds clean.
+
+**Commit + push + deploy:** committed `5f5cd57`, pushed to `origin/main`, deployed to https://equityfundingsource.brian-takita.workers.dev (Version `70080d90`). No D1 migrations involved (UI-only).
+<!-- agent:boundary:6c6feae6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +63,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- This interface is still high friction. What I want instead is to replace the single upload area with an upload areas for each form type. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -185,7 +185,50 @@ Brian
 ---
 
 **Send path:** I left this as a draft. Say the word and I'll push it to Gmail Drafts via corky (threaded to Robert), or adjust tone/length first. Marking **#dzmm-followup done** (the craft is complete; sending is your call). Next in the go-queue: #jnzs-approval.
-<!-- agent:boundary:cdc8d9ae -->
+
+### Re: do [#jnzs-approval] — drafted the funded-deals approval request to Judith — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#jnzs-approval]
+
+
+The technical side of Funded Deals shipped 2026-05-23 (D1 migration, Worker deploy, live smoke tests), so #jnzs is purely a sign-off gate. Here's the approval-request email to Judith (CC Robert) covering the four items she owns: images, copy, lien-position wording, and legal/disclosure language. **Draft only — not sent.** (Large exchange noted; queue still draining.)
+
+---
+
+**To:** Judith Krug &lt;judithkrug@gmail.com&gt;
+**CC:** Robert Waldman &lt;rwaldman100@gmail.com&gt;
+**Subject:** Funded Deals page ready for your review before launch
+
+Hi Judith,
+
+The Funded Deals page is built and live on the staging site, and the technical side is done... the data, the deploy, and the page itself all tested out as of late May. Before we put it in front of the public and move to invoicing, I'd like your sign-off on the parts that are really yours to approve: the wording and the legal language.
+
+You can see it here: https://equityfundingsource.brian-takita.workers.dev/funded-deals
+
+Four things I'd like you to look at:
+
+1. **Deal images.** Are these the right photos for each funded deal, and are you comfortable showing them publicly?
+2. **Copy.** The headlines and descriptions for each deal... anything you'd word differently.
+3. **Lien-position wording.** How each deal states its lien position (first, second, and so on). I want that language to match how you'd put it.
+4. **Legal and disclosure language.** Any disclaimers or disclosures on the page... please confirm they're accurate and complete for your compliance comfort.
+
+If everything looks good, just reply "approved" and I'll treat that as the green light for launch and invoicing. If anything needs changing, mark it up however is easiest and I'll turn it around quickly.
+
+Robert, copying you in case you want to weigh in on the marketing copy.
+
+Thanks both.
+
+Best,
+Brian
+
+---
+
+**Send path:** left as a draft. Say the word and I'll push it to Gmail Drafts via corky (to Judith, CC Robert), or tweak first. Marking **#jnzs-approval done** (craft complete; sending + the actual approval are operator/Judith actions — review #jnzs stays gated until she signs off).
+
+**Go-queue drained — all 7 items closed.** Summary in the next note.
+<!-- agent:boundary:fdddaafe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,19 +236,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#qakx-impl]~~
-- ~~do [#vd8s-dragwire]~~
-- ~~do [#67v2-kanban]~~
-- ~~do [#37ah-backend]~~
-- ~~do [#xcvg-admin]~~
-- ~~do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?~~
-- do [#jnzs-approval]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#jnzs-approval] Draft the funded-deal images/copy/lien-position/legal-disclosure approval request to Judith or the EFS reviewer to unblock invoicing and launch sign-off. Advances #jnzs. Operator/comms action.
 <!-- /agent:backlog -->
 
 ## Review

@@ -49,7 +49,7 @@ One reproducible tsift bug observed this session, added to the backlog as **#car
 Out of scope for this doc but noted: the **agent-doc IPC ack-timeout / exit-75-on-finalize** behavior I hit this session is an agent-doc bug, not a tsift one — it belongs in `tasks/agent-doc/agent-doc-bugs2.md` (per the `#agent-doc-bug` preset), so I did not add it to tsift's backlog.
 
 Backlog top: **#cargoidxcov**.
-<!-- agent:boundary:30cc805f -->
+<!-- agent:boundary:ff1f1434 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -64,7 +64,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cargoidxcov] tsift index coverage gap: status reports the index fresh (188 files) and recommends use: search/explain/graph, but only 9 of 23 workspace members have a .tsift/indexes/cargo/<pkg>/index.db. packages/tsift-agent-doc plus 13 other members (tsift-libsql, tsift-tokensave, tsift-memgraphrag, tsift-md-ast, tsift-algorithms, tsift-resolution, tsift-cache, tsift-session, tsift-summarize, tsift-digest, tsift-search, tsift-surrealdb, tsift-sim-world) lack one, so source-read/symbol-read for files in those packages emit "index refs unavailable: no index found at .../indexes/cargo/<pkg>/index.db" and silently fall back to window-only output with no AST symbol refs. status does not surface this partial cargo-index coverage, so an agent trusting fresh gets degraded symbol projection for ~60% of packages and no actionable fix hint. Fix: build cargo indexes for all workspace members on index/refresh, or have status report partial cargo coverage and emit a targeted reindex/--fix hint for uncovered members. Observed 2026-06-13.
 <!-- /agent:backlog -->
 
 ## Review

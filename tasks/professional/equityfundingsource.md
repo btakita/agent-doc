@@ -144,7 +144,48 @@ The non-email half of the borrower secure-message system is already built — ve
 This also closes the borrower-portal-messages question from earlier in the session: admin owner + in-app round-trip is live now; the email legs are the gated piece.
 
 Marking **#xcvg-admin done** (review #xcvg stays gated for the email legs). Next in the go-queue: #dzmm-followup (the email to Robert).
-<!-- agent:boundary:d0d39af3 -->
+
+### Re: do [#dzmm-followup] — drafted the TMO-webhook email to Robert — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
+
+
+Right call that Robert won't know the answers — he's Judith's tech/marketing consultant (`rwaldman100@gmail.com`), not a Mortgage Office engineer. So the email explains the *purpose* in plain terms, asks him to forward the technical question or introduce us, states the "TMO API may be basic" assumption up front, and shows the fallback so it's clearly not a blocker either way. **Draft only — not sent.** Source: `docs/tmo-webhooks-question.md`.
+
+---
+
+**To:** Robert Waldman &lt;rwaldman100@gmail.com&gt;
+**Subject:** Getting EFS portal updates from TMO faster (and our fallback if it can't)
+
+Hi Robert,
+
+Wanted to give you the context on a technical question about The Mortgage Office before we ask them anything, since it touches how fresh the data is in the EFS portal.
+
+**What this is about.** Right now the EFS site pulls loan information from TMO once a day. So when a loan's status changes in TMO (moves to Processing, Underwriting, Funded, and so on), it can take up to a day before borrowers, investors, and the admin team see that change on the site. Everything works, it's just delayed, and users currently see a "last synced" note that makes the data feel stale.
+
+What we'd like is for TMO to tell us the moment something changes instead of us checking once a day... in plain terms, a "push" from TMO to our system whenever a loan, funding, or document record updates.
+
+**The question for Mortgage Office.** I've written up the specific technical question for their support team (I can send it as a one-page attachment). The short version: does TMO support outbound webhooks (automatic notifications when a record changes), and if so, how do we authenticate and subscribe? If you can forward that to your Mortgage Office contact, or introduce us directly, that's all we need from them.
+
+**My assumption, and why it's not a blocker.** I'm assuming TMO's API is fairly basic and may not support push notifications at all. That's completely fine. If they can't, here's the fallback, which gets us most of the benefit without anything from TMO:
+
+1. Check TMO more often. Instead of once a day, we pull every 5 to 15 minutes, and only the records that changed, so it stays light. This is a small config change on our side.
+2. A "Sync now" button for the admin team, so a reviewer can force a fresh pull immediately instead of waiting on the schedule.
+3. A clear "TMO sync pending" label on anything mid-update, so users always know whether the site is current.
+
+So whether or not TMO supports webhooks, the portal gets noticeably fresher. The webhook route is just the cleanest option if it happens to exist.
+
+Happy to hop on a quick call if that's easier. Thanks, Robert.
+
+Best,
+Brian
+
+---
+
+**Send path:** I left this as a draft. Say the word and I'll push it to Gmail Drafts via corky (threaded to Robert), or adjust tone/length first. Marking **#dzmm-followup done** (the craft is complete; sending is your call). Next in the go-queue: #jnzs-approval.
+<!-- agent:boundary:cdc8d9ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,14 +198,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~do [#67v2-kanban]~~
 - ~~do [#37ah-backend]~~
 - ~~do [#xcvg-admin]~~
-- do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
+- ~~do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?~~
 - do [#jnzs-approval]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#dzmm-followup] Send Robert the six-question TMO outbound-webhook prompt (src/equityfundingsource-dev/docs/tmo-webhooks-question.md) and record his answer; this single unblock clears the writeback gate behind #dzmm/#k2xg/#7a4d/#vd8s/#67v2/#zwws. Operator/comms action.
 - [ ] [#jnzs-approval] Draft the funded-deal images/copy/lien-position/legal-disclosure approval request to Judith or the EFS reviewer to unblock invoicing and launch sign-off. Advances #jnzs. Operator/comms action.
 <!-- /agent:backlog -->
 

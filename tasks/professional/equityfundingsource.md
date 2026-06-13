@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -90,7 +90,7 @@ Done — and deployed. (Heads up: the queue split your bulleted list into three 
 - EFS commit `c26fda9`; submodule bump `1a6166be0`.
 
 `tsc --noEmit` still flags the file's pre-existing pattern lines (fetch `.then` value:unknown, render-prop `close` implicit-any) — no new error classes; the project builds via esbuild and the suite is green. Hard-refresh to pick up the new bundle.
-<!-- agent:boundary:4348666b -->
+<!-- agent:boundary:552f78c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +98,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Move Activity History to the right of Application Progress. dep
 <!-- /agent:queue -->
 
 ## Backlog

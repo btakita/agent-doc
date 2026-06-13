@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,12 +63,13 @@ Note for the record: #wwm1's `### Re:` response section was lost from this docum
 So: nothing added to the tsift backlog for this item — no tsift-scoped observed bug to capture (`no-pending-capture`).
 - **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
 - **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
-<!-- agent:boundary:f63735b9 -->
+<!-- agent:boundary:2bb31c02 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

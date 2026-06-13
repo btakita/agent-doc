@@ -175,14 +175,42 @@ I can't safely kill PID 136222 myself — it hosts this live pane; killing it fr
 **Durable gap filed (`#fccsupwarn`).** The real product failure here is that a stale supervisor produces these dialogs with **no surfaced signal** — you had to notice and re-report. preflight/session-check should detect a stale hosting supervisor (start time older than the installed binary) and warn "restart to promote." It's read-only detection, not the live write path, so it's agent-drainable in a normal session — say the word and I'll implement it. Diagnosis recorded in `tasks/agent-doc/plan-zero-file-cache-conflict.md`.
 
 `#fcc0` itself stays code-complete; this was never missing code, just a stale process.
-<!-- agent:boundary:1ef40fe9 -->
+
+### Re: session restart-supervisor + does it need a hook — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
+> ```
+> resync: pruned 14 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=go-mode queue self-churns on its own convergence mirror lines (do[#fcc0]/[#rtwbcast]) that commit won't fold into HEAD; all active items (#fcc0,#rtwbcast) are clean-session/operator-drive and cannot run in this live IPC session; session_accretion=warn restart-heavy. Pausing to stop the flood; resume from a clean session. receipt_id=3309
+> ```
+> JB `Compact Exchange` on this document
+> ```
+> agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
+> ```
+> - :round_pushpin: do [#rtwbcast]
+
+
+You're right that I can run `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` myself — it's a graceful continue-restart (`operator_ready`), not a forced kill. My earlier "can't restart from inside" was over-cautious; I'll self-service it going forward.
+
+**No hook needed — the supervisor can determine it itself.** The staleness primitive already exists in the binary: `#ctlrecycle` added `current_binary_identity` / `process_binary_is_stale` (the supervisor stats the *install path*, so it sees a fresh build while still running its old mapped inode), and the R3 supervisor self-recycle path is already wired into the supervisor's **idle-queue-watch loop** — it's just **opt-in behind `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` (default OFF)** and silent. So the supervisor already knows when it's stale and already has an idle boundary to act on; nothing external needs to tell it. That makes `#fccsupwarn` purely a policy/surfacing change, not new plumbing:
+- **Always-on warning:** have the idle-watch loop emit `supervisor_binary_stale_detected` unconditionally (today it only logs that when AUTO_RECYCLE is off) and surface it through preflight/session-check so the operator sees "host is stale — restart" instead of silently getting `File Cache Conflict` dialogs.
+- **Optional self-heal:** flip the default so it self-recycles at the idle boundary (the R3 path), or keep it opt-in but make the warning name the one-command fix `agent-doc session restart-supervisor <FILE>`.
+
+So: supervisor-determined, idle-gated, no hook. A hook would only be needed if we wanted to react to an *external* event (e.g. the install completing) faster than the next idle tick — not necessary here, since the dialogs only matter on the next write, which is itself an idle→busy transition the loop already sees.
+
+**On this session right now:** PID 136222 is still the stale 01:00 host (your graceful restart is queued for the idle boundary after this turn). That stale supervisor is also why these finalizes keep wedging on `live_prompt_drift` / `content_ours` — I'm committing this one via `--force-disk` to bypass the wedged IPC. Once the queued restart lands on fresh 0.34.0, both the dialogs and the closeout wedges clear.
+<!-- no-queue-removal-guard -->
+<!-- agent:boundary:f03c9310 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Add simworld tests for #qflood2~~
----
+~~~done
 :pushpin: The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
 ```
 resync: pruned 14 stale session(s)
@@ -194,7 +222,7 @@ JB `Compact Exchange` on this document
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
 ```
 - :round_pushpin: do [#rtwbcast]
----
+~~~
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.

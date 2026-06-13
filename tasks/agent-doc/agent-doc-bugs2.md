@@ -31,73 +31,20 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-061803.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-080812.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): JB Compact Exchange + Run Agent Doc dispatch failures; JB Run Agent Doc sends the command but does not submit; how do we fix this queue stall; 7 more
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Triage of the queued JB bug reports + #fcc0/#compactdrift/#fccsupwarn — opus-4.8
-
-I'm **not draining this queue with code changes** this cycle — and the reason is itself most of the answer. Triage, with proof:
-
-**0. Recovered this doc's own #compactdrift first.** The finalize initially failed (`snapshot 37156 bytes but visible file 13027`): the JB Compact Exchange had shrunk the working tree to the compacted 13 KB doc but the `typed_component_drift` refusal left it uncommitted (HEAD still 37 KB, snapshot stale). The 13 KB file was structurally intact (Status / compacted Exchange / Queue / Backlog all present), so I adopted it via `agent-doc reset --from-current` → preflight committed it (recovered=true). That live failure **is** #compactdrift.
-
-**1. The reported JB bugs already have committed + pushed fixes.** `HEAD == origin/main == 7bfc82e3` (`git rev-list --left-right --count origin/main...HEAD` → `0 0`); on-disk CLI binary fresh (mtime 02:50, after HEAD 01:37):
-- "Run Agent Doc sends but does not submit" → **#jbclaudesubmit** (`3b71cfeb`). The equityfundingsource console error you pasted is **#qflood2** (`9bc62c6f`, now benign deduped-success). Both pushed.
-- "tsift.md queue struck the next open item after I deleted struck ones" → **#goqueuestall** (`8884587d` + `6d9c4512`).
-- "Compact Exchange uncommitted / Clear Exchange from stale HEAD" → **#compactdrift** (the `typed_component_drift` false-positive — still open, `[clean-session]`; just reproduced above).
-
-Live symptoms = **stale running supervisor / un-reloaded JB cdylib**, not missing fixes — exactly what **#fccsupwarn** is meant to flag. To make the committed fixes live in the JB plugin: `cargo build --release && agent-doc lib-install` (plugin hot-reloads the cdylib by mtime; `cargo install` alone does not refresh the `.so`), then recycle controllers. Operator-drive.
-
-**2. Not a clean tree.** `src/agent-doc` has **5 uncommitted modified files** (`project_config.rs`, `project_controller/rpc.rs`, `start.rs`, `start/decisions.rs`, `start/idle_watch.rs`, +211/-111) — in-flight live-write-path / idle-watch work (#fcc0 territory). All TOP heads — **#fcc0**, **#compactdrift**, **#goqstall2**, **#rtwbcast** — are `[clean-session]` and cannot be safely modified in this dirty, live session; a clean `build+install` would also ship that incomplete work. **Resolve those 5 files (commit or stash) first.**
-
-**3. Why no auto-loop.** The queue heads are pre-materialized `do[#id]` `[clean-session]` items + operator-drive proofs; not agent-drainable here — looping would churn no-op cycles (that *is* **#goqstall2**). Not editing queue state, not auto-looping.
-
-**Recommended order:** (a) commit/stash the 5 in-flight files → clean tree; (b) `cargo build --release && agent-doc lib-install` + recycle so #jbclaudesubmit/#qflood2/#goqueuestall go live, then re-test; (c) from a clean session, do **#fccsupwarn** (agent-drainable, read-only stale-supervisor WARN) first, then #compactdrift / #fcc0 each in its own clean session. Tell me to proceed once the tree is clean and I'll start with #fccsupwarn.
-
-### Re: Re-run — state unchanged, one decision needed to unblock — opus-4.8
-
-Nothing changed since the prior triage, so re-running just re-hits the same wall: the queue head is `do [#fcc0]`, which is `[clean-session]` **and** operator-drive (its only proof is a live-JB 0-dialogs check) — not agent-drainable here, and per `#goqstall2` it doesn't self-defer, so the queue can't advance in this session. I'm not churning another full triage or auto-looping.
-
-**One new datum:** the 5 uncommitted `src/agent-doc` files (`project_config.rs`, `project_controller/rpc.rs`, `start.rs`, `start/decisions.rs`, `start/idle_watch.rs`) **build cleanly** (`cargo build -p agent-doc-orchestration` → Finished). So that in-flight work is coherent, not broken mid-edit — it's safe to either commit or stash to re-establish a clean boundary. That's the gating decision; everything `[clean-session]` (including `#fccsupwarn`, which touches this same start/supervisor code) is blocked behind it.
-
-**To make progress, pick one and tell me:**
-1. **Commit the 5-file WIP** (if it's a finished change you recognize) → I get a clean tree and start `#fccsupwarn` (agent-drainable, read-only stale-supervisor WARN) immediately.
-2. **Stash it** (`git -C src/agent-doc stash`) → same clean-tree start, WIP preserved for you to restore.
-3. **You drive the live items first** — `cargo build --release && agent-doc lib-install` + recycle controllers (makes the already-committed `#jbclaudesubmit`/`#qflood2`/`#goqueuestall` fixes live), then re-test the JB reports; I check the logs.
-
-I can do (1) or (2) and then `#fccsupwarn` in one go if you say which. I won't commit/stash your WIP unprompted (don't want to clobber in-flight intent). Re-invoking the command alone won't change the outcome — the blocker is the dirty clean-session tree, not a missing response.
-
-### Re: #fccsupwarn shipped + supervisor automation live — opus-4.8
-
-Done this turn, all committed + pushed + verified:
-
-**Option 1 + 3:** committed the in-flight **supervisor auto-recycle** WIP (`#suprecyclequeue`/`#ctlrecycle` R3, `0a3565ae`) after verifying it (orchestration 2758 + core 793 green); `lib-install` + `cargo install` + `admin recycle --all-projects` promoted the fresh binary. The `execve` auto-recycle (preserves the live agent child + pane) is now the live "supervisor promotes itself" workflow.
-
-**#fccsupwarn shipped (`c350580a`, pushed; superproject `85477f778`):** preflight (`warnings[].code=supervisor_binary_stale`) + session-check now WARN when the live hosting controller/supervisor serves a stale binary (`controller_binary != current_binary_identity`) → tells the operator to `admin recycle` / `restart-supervisor`. Read-only over controller status, fail-open. Pure helper unit-tested; **`make check` green**; SPEC + plan updated; binary installed (03:39) so the WARN is live.
-
-**On "use the PCP + supervisor automation / build the workflow":** the promote-onto-fresh-binary workflow already exists and is live — `admin recycle` + the shipped `execve` auto-recycle — so nothing new needed building for the restart/promotion; I drove it through that PCP path, not a manual kill.
-
-**Remaining `[clean-session]` items** — tree is clean + binary fresh, so I can drive the agent-doable code directly, each its own fully-verified cycle: **#compactdrift** (structural typed_component_drift discriminator — fixes the compact/commit drift that keeps mangling this very doc, which I had to `reset --from-current` to recover again this turn), **#goqstall2**, then **#fcc0** converge code. Live-JB 0-dialogs (#fcc0) + two-IDE (#rtwbcast) proofs still need a human check. Starting **#compactdrift** next.
-
-Not auto-looping (remaining heads are clean-session/operator-drive; that's #goqstall2).
-
-### Re: #drain-no-defer shipped — deferring a drainable item is now a coded stall — opus-4.8
-
-Built your correction into agent-doc as a product rule (`#drain-no-defer`), per "behavioral fixes are packagable": committed `1789b58a` (submodule, pushed) + `a888e5407` (superproject pointer).
-
-- **SKILL auto-loop (`src/skill.rs`):** during an active queue drain, "this deserves its own focused/clean/fully-verified cycle" is now explicitly a **stall, not closeout**. The agent never defers an agent-drainable queued item; it keeps finalizing + looping, and the **PCP/supervisor `/clear`s + recycles agent context between items** (idle-boundary recycle) so high session-accretion is the supervisor's job, not a reason to stop. High accretion is explicitly **not** in the auto-loop skip list.
-- **Binary heuristic (`session_accretion.rs`):** `restart_or_drain_guidance(queue_active)` — while a queue drains it emits keep-draining / supervisor-`/clear` guidance instead of "Restart cleanly … before continuing." Unit-tested; `make check` green; skill mirror regenerated; `audit-docs` clean; binary built + installed (so the new guidance is live).
-
-Per this rule, the drain continues to **#compactdrift** next — and the mechanism for the context reset between items (supervisor `/clear` + auto-recycle) is now shipped, so the next item runs with fresh context rather than being deferred. The live-JB (#fcc0) and two-IDE (#rtwbcast) proofs still need a human check.
-<!-- agent:boundary:4f3d66bb -->
+- Archived 4 response topic(s): Triage of the queued JB bug reports + #fcc0/#compactdrift/#fccsupwarn; Re-run; #fccsupwarn shipped + supervisor automation live; 1 more
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+<!-- agent:boundary:d32d99e5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :round_pushpin: do [#fcc0]
+- I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.
+- I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Compact Exchange` has a partially uncommitted response.
 - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
 - :round_pushpin: do [#compactdrift]

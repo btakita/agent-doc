@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,68 +32,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260612-232655.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-051239.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Requested loan number; Loan application admin editing; Google Ads API token third-party tool question
+- Archived 2 response topic(s): Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equ...; Why were the emails from the admin pipeline cards removed? Readd the emails.
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore. — gpt-5
-
-> **Queue prompt:**
->
-> Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore.
-
-Created local sample upload fixtures under `src/equityfundingsource-dev/tmp/` for testing.
-
-Borrower samples:
-- `tmp/borrower/borrower-appraisal-report.pdf`
-- `tmp/borrower/borrower-bank-statement.csv`
-- `tmp/borrower/borrower-entity-authorization.txt`
-- `tmp/borrower/borrower-payoff-statement.txt`
-
-Investor samples:
-- `tmp/investor/investor-accreditation-letter.pdf`
-- `tmp/investor/investor-bank-statement.csv`
-- `tmp/investor/investor-tax-k1-summary.csv`
-- `tmp/investor/investor-entity-formation.txt`
-- `tmp/investor/investor-wire-instructions.txt`
-
-I also added `tmp/README.md` describing the fixture set. `src/equityfundingsource-dev/.gitignore` already contains `tmp/`, and I verified Git ignores the new fixture files. I checked MIME detection: the PDFs report as `application/pdf`, the CSV files as `text/csv`, and the text files as `text/plain`, which are accepted by the app upload guard.
-
-### Re: Why were the emails from the admin pipeline cards removed? Readd the emails. — gpt-5
-
-> **Queue prompt:**
->
-> Why were the emails from the admin pipeline cards removed? Readd the emails.
-
-The emails were dropped as an accidental regression during the admin Deal Pipeline card reshaping. The pipeline now has three card shapes — loan, prequalification lead, and incomplete full application — and the compact card UI diverged while adding the incomplete-application funnel. The loan card no longer consistently rendered `borrower_email`, and the lead/application card paths needed their own `email` display.
-
-The current EFS working tree restores those fields:
-
-- Loan cards carry and render `borrower_email`.
-- Lead cards carry and render `email`.
-- Incomplete full application cards carry and render `email`.
-- Pipeline search includes both `borrower_email` and `email`.
-- The application-card detail modal also shows the email.
-
-Relevant paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts tests/admin-dashboard.test.ts` passed: 64 tests.
-- `make check` passed: 565 tests plus browser and worker builds.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this submodule, so local verification is the available proof.
-
-No actionable follow-up items remain for this queue head.
-
-Escalation: no escalated shell permissions were needed. Confidence: high.
-<!-- agent:boundary:a8c33859 -->
+<!-- agent:boundary:c25395b0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The email address is bleeding ![img_7.png](img_7.png) into the next column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=leads&status=new. Please ensure all table views don't have this issue. deploy
 <!-- /agent:queue -->
 
 ## Backlog

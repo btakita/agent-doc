@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -108,9 +108,12 @@ Almost everything for the WebRTC DataChannel transport is already shipped — th
 - **`#12b1` (#lzpub011)** — crates.io publish + GitHub Release. Fully specced; the only blocker is rotating the revoked `cio…` token behind browser/passkey 2FA, which can't run headless. Commit `03582f5` + tag `v0.11.0` are already on origin, so it's two commands once you re-store a fresh token at `passage btak/CARGO_REGISTRY_TOKEN`.
 - **`#xccx` (#lzholons)** — Map Holons integration. Phase 0 is blocked on Steve Melville answering the 7 open questions; the transport + mapping answers determine the Phase 1 adapter shape, so drafting it now would be premature guesswork. Plan ready at `plan-map-holons-integration.md`; unblocks on his answers.
 - **`#57by` (#lzasyncshuttle)** — decision-complete, not awaiting review. The `#shuttleeval` spike already concluded **NO-GO/defer** (Shuttle is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier, and the two #k03k windows are already deterministically covered). Recommend moving it to the **icebox** as a parked "revisit when the async graph grows more concurrency-critical paths" item to keep `agent:review` lean — flagging it for you since it's operator-gated.
+- **Spec/docs**: `SPEC.md` now contrasts the two str0m backends (deterministic `Str0mLoopback` vs networked `Str0mNet`) with the `Str0mNet` lifecycle; `str0m_backend.rs` module doc points at the new module; `Makefile` `test-webrtc` comment updated.
+- **Tests** (`tests/str0m_net.rs`): a **real two-socket round trip over `127.0.0.1`** — real UDP, real DTLS/SCTP handshake, real timers, two driver threads — sends a permission-filtered `Snapshot` offerer→answerer and asserts the unreadable node is dropped. Stable across 5 reruns (~0.08s each).
+- **`src/str0m_net.rs` — `Str0mNet`**: binds a real `UdpSocket`, spawns a driver thread that pumps str0m (`poll_output` → `socket.send_to`; `recv_from` → `handle_input`) over real timers. `offer()` / `answer()` produce the SDP strings; `accept_answer()` + `add_remote_candidate()` / `local_candidate()` carry the trickled-ICE handshake (designed to be fed straight from `SignalingClient`). `channel()` hands back a `Str0mNetChannel` that implements the existing `DataChannel` trait — so `WebRtcSink`/`WebRtcSource` (permission filtering + `IpcMessage` codec) ride on top **unchanged**. Outbound frames sent before the channel opens are buffered and flushed on open; `ChannelClose`/socket death surface `Err`.
 
 Net: review now reflects reality — one actionable item queued (`#lzwebrtcnet`), three correctly parked.
-<!-- agent:boundary:da4b1873 -->
+<!-- agent:boundary:82708a8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,12 +122,14 @@ Net: review now reflects reality — one actionable item queued (`#lzwebrtcnet`)
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#ch47]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ch47] #lzwebrtcnet=[#jpf1 advance] Networked (non-loopback) str0m DataChannel backend — the real "beyond signaling" P2P path. Already shipped: the webrtc abstraction (DataChannel trait), the str0m in-process loopback (webrtc-str0m / Str0mLoopback), the WebSocket backend (websocket / #akp3), and tests + criterion bench (tests/webrtc_transport.rs, benches/webrtc_transport.rs). Remaining gap (named in src/str0m_backend.rs module doc + plan tasks/software/plan-lazily-webrtc-transport.md #webrtc2): drive the existing sans-IO str0m pump loop over a real UDP socket + a background driver thread, with SignalingClient SDP offer/answer + trickled ICE (src/signaling_client.rs, #yxjw relay) replacing the in-memory packet route. Needs live two-peer connectivity, so it cannot be deterministically loopback-tested — gate on a real peer-to-peer round-trip.
+- [ ] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
+- [ ] [#f0fm] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it can't be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 <!-- /agent:backlog -->
 
 ## Review

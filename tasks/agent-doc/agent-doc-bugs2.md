@@ -200,14 +200,29 @@ So your phrase maps to: **context reset every queue turn + a supervisor recycle 
 **Should the PCP do this on every queue turn?** Yes for the **context reset** — that is exactly what shedding the ~318.8k-token history buys you, and the supervisor already owns it at each drain boundary (you don't run `/clear` by hand). **No, not unconditionally for the supervisor recycle** — restarting the process every turn would thrash the agent child and re-pay process startup for no benefit when the binary hasn't changed; it's gated on staleness on purpose. Net: clear-context-every-turn = good and automatic; restart-process-every-turn = only when there's a fresh build to promote.
 
 This is the same pipeline I made deterministic + simulated this session (#clearcontresume): the SimWorld engine now drives `IdleQueueContextResetDecision`, `supervisor_recycle_action`, and `clear_cooldown_resume_ready` end-to-end so the drain-boundary recycle is reproducible offline.
-<!-- agent:boundary:7479a5f1 -->
+
+### Re: recycle + clear deterministic binary logic — already complete, closing the queue item — opus-4.8
+
+> **Queue prompt:**
+>
+> :pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.
+
+
+This directive was completed in the prior cycle; confirming + striking it (no re-work). The recycle + clear *policy* already lived in the binary as pure predicates (#clearcontresume); the gap your "make the engine extension … simulate as much as possible" comment named was the **simulation**, which is now done:
+
+- **SimWorld engine drives the full pipeline end-to-end** via the SAME production decision predicates the live supervisor idle-queue watch uses — `supervisor_recycle_action`, `clear_cooldown_resume_ready`, `idle_queue_drain_decision` (exposed `pub` from `start::decisions`) — instead of reimplementing the policy. `SimCommand::SupervisorIdleQueueTick` mirrors `idle_watch.rs` tick-for-tick; `recycle_supervisor_in_place` models the `execve` recycle (pane preserved, generation advanced).
+- **4 deterministic scenario tests:** full pipeline resume-as-a-step (admin recycle → execve recycle → session clear → settle → cooldown auto-expiry → go-mode drain resume); no-head stays authoritative; deferred-clear blocks resume; debounce resets when a turn interrupts idle. New coverage counters, targeted-test-only commands (seed corpus traces unchanged).
+- **spec + tests + build + install + commit + push** (the `#spec-test-build-install-commit-push` preset): `specs/supervisor.md` updated; `make check` green (incl. medium seed corpus + clippy); `cargo build --release` + `cargo install` + `lib-install` (cdylib refreshed — running controllers promote it on the next `admin recycle --all-projects`); agent-doc submodule **`40b64df0`** + superproject pointer pushed to origin/main.
+
+Nothing left on this item. The remaining queue is `[clean-session]`/operator-verify (`do #fcc0`, `#compactdrift`, the JB bug reports) — go-mode defers those.
+<!-- agent:boundary:99189574 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Could you explain this message in Claude "Opus 4.8 ctx:32% ~/work/btakita/agent-loop main brian@cachyos-x8664  new task? /clear to save 318.8k tokens". Does this mean we should have the PCP/Supervisor run `/clear` (stopping agent-doc session then restarting if in go-mode...please give me a good term for this behavior) after every queue item is complete (queue turn)? How does this compare with the overhead of loading the context, skills, AGENTS.md/CLAUDE.md?~~
-- :pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.
+- ~~:pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.~~
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]
 - I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.

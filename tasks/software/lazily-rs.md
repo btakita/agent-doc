@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -91,7 +91,7 @@ gh release create v0.11.0 --generate-notes
 ```
 
 `#12b1` stays in the backlog as operator-gated. Not auto-looping on it — it's not agent-drainable.
-<!-- agent:boundary:2bc5dcdf -->
+<!-- agent:boundary:046c33e8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,6 +100,7 @@ gh release create v0.11.0 --generate-notes
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

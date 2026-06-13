@@ -105,7 +105,21 @@ Understood — you don't want me asking you to type `/clear`, and you don't want
 - **`/clear` → `agent-doc session clear tasks/agent-doc/agent-doc-bugs2.md`.** That's the supervisor-mediated clear of the *bound harness session* (this Claude agent) — "outside this session," issued through the controller, not a `/clear` you type. I'll run it as the terminal action of this cycle, right after this commits.
 
 Running `session clear` will wipe my context, so this is my last message before the fresh session. After it lands, re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and the clean session can take **#stuckhandoff2 M1** (repro test + fix per `plan-stuck-handoff-hardening.md`, `7d9aeabd1`).
-<!-- agent:boundary:403806fa -->
+
+### Re: recycle + clear should resume the go-mode drain (it's a "step") — opus-4-8
+
+You're right, and the behavior you saw is a real bug — captured as `#clearcontresume` with a plan (`tasks/agent-doc/plan-clear-cooldown-go-drain-resume.md`).
+
+**Root cause (verified in code):** an operator clear (`session clear` / JB `Clear Exchange`, and the deferred-clear delivery) writes a **manual clear cooldown** (`session_actor_cmd.rs:543/772/1262` → `write_clear_cooldown`). That marker has **no TTL and no go-mode auto-resume** — `clear_cooldown_active` stays `true` until an explicit `route::run` ("Run Agent Doc", `route.rs:1713`) or a deferred-clear delivery (`idle_watch.rs:293`) drops it. So the idle-queue watch keeps returning `SkipClearCooldown` (`decisions.rs:93`) and the go-mode drain stalls **forever** until you manually route again. `specs/supervisor.md:448` even documents this as intended ("authoritative ... until cleared by the existing operator path"). That spec line is the bug.
+
+The contrast that proves your point: the supervisor's **own** inter-queue-item context reset (`IdleQueueContextResetDecision::Reset`, `idle_watch.rs:412`) already treats `/clear` as a step — it sends the clear, sets `last_dispatched = None`, and `continue`s, so the next idle tick re-dispatches the head. It just doesn't write the indefinite cooldown. The leak is specifically the **manual** cooldown path bleeding its "stop until operator routes" semantics onto an active go-mode drain.
+
+**Fix direction (in the plan):** when the cooldown is active AND a go-mode `queue_active: true` head is pending AND the cleared pane has settled to a fresh idle prompt, drop the cooldown and resume the drain — the cooldown's only real job is to avoid dispatching *into* the in-flight `/clear`. Keep authoritative-until-operator-route for non-go queues and for an explicitly paused auto-loop. The decision stays pure/testable (new branch threaded through `idle_queue_drain_decision`) plus a SimWorld regression (clear mid go-drain → resumes without an operator route; non-go still requires the route).
+
+Note on the `/loop` side: a `/clear` ends the Claude Code `/loop` conversation, so after a supervisor clear the drain-owner lease holder is gone — resume has to be supervisor-owned (this plan), not a dead loop trying to reclaim it.
+
+I did not auto-loop this cycle (your note is a real user prompt, which preempts the drain). The queue items below (`#fcc0`, `#compactdrift`, etc.) remain queued for the next drain.
+<!-- agent:boundary:f2635b57 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -182,6 +196,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#clearcontresume] [clean-session] Manual clear cooldown indefinitely suppresses an active go-mode queue drain (no TTL, no go-mode auto-resume) — a recycle+clear during a go-mode drain should be a continuation 'step', not a stall. ROOT CAUSE: session clear / JB Clear Exchange writes write_clear_cooldown() (session_actor_cmd.rs:543/772/1262); clear_cooldown_active stays true until an explicit route::run (route.rs:1713) or deferred-clear delivery (idle_watch.rs:293) drops it, so idle_queue_drain_decision returns SkipClearCooldown forever (decisions.rs:93; specs/supervisor.md:448 documents it as intended). FIX: when cooldown + active go-mode queue_active head + settled idle prompt, drop cooldown + resume drain (new pure decision branch + SimWorld regression); keep authoritative-until-operator-route for non-go/paused-loop. Plan: tasks/agent-doc/plan-clear-cooldown-go-drain-resume.md
 - [ ] [#goqstall2] [clean-session] go-mode drain + session-check queue_continuation_required do NOT defer pre-materialized undrainable do[#id] queue heads (clean-session/operator-verify backlog items) or stale console-output queue lines, so a queue populated before #goqueuestall churns no-op cycles instead of self-deferring. Resolve each materialized do[#id] head's backlog tag in the continuation head set + classify non-directive/console-output lines as noise; emit go_queue_skip_undrainable origin=materialized_head + queue_stale_noise_lines diagnostic. CLEAN session (touches live queue-continuation logic). Plan: tasks/agent-doc/plan-go-queue-stall-materialized-heads.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

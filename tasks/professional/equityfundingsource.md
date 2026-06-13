@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -93,7 +93,7 @@ Done. I traced every required document type from the DB catalogs and generated a
 - No app/worker change, so nothing to deploy this cycle.
 
 If you also want a CSV/spreadsheet variant for the K-1 or bank statements (some reviewers prefer those), or a deliberately-oversized/disallowed file to test the rejection path, say so.
-<!-- agent:boundary:c53f544b -->
+<!-- agent:boundary:c7686d5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +101,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard should have a similar needs action component as the admin dashboard. An incomplete application or application that needs some action should be on the borrower dashboard. deploy
 <!-- /agent:queue -->
 
 ## Backlog

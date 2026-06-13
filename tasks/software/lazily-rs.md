@@ -143,7 +143,30 @@ flowchart TB
 **Net:** worth a small spike *if* MAP's host layer actually recomputes derived holon state or drives reactive visualizers — that's exactly what a lazy memoized dependency graph is for. Captured as `#lzmapspike` [recommended] in the backlog (gated on confirming the host layer has derived-state recompute, since both projects are early-stage).
 
 **Sources:** [evomimic/map-holons](https://github.com/evomimic/map-holons) · [MAP Book](https://evomimic.gitbook.io/map-book) · [DAHN visualizers](https://evomimic.gitbook.io/map-book/dahn-human-experience-of-the-map/dahn-visualizers/graph-visualizers) · [Holochain DHT](https://developer.holochain.org/concepts/4_dht/)
-<!-- agent:boundary:a248cb79 -->
+
+### Re: decompose review items into actionable backlog — opus-4-8
+
+> **Queue prompt:**
+>
+> Go through each review item. Add actionable items into the backlog to complete the review items.
+
+
+Went through all three review items. One was already done; the other two are now decomposed into actionable backlog work.
+
+**`#w30b` (#gh-org) — already done → resolved.** The `lazily-hub` GitHub org already exists with **all four repos public** (lazily-rs, lazily-spec, lazily-py, lazily-zig). The review proposed `lazily`/`lazily-reactive`; the actual choice was `lazily-hub`. Nothing left to do, so I `--review-resolve`d it. (If you want a different org name, that's a rename, not a create — say so and I'll queue it.)
+
+**`#jpf1` (#webrtc-data) — kept as the epic; added 3 phases.** The WebRTC *signaling* half already exists (`signaling_client.rs` has offer/answer/ICE); the gap is the DataChannel *transport*:
+- **`#webrtc1`** — design the WebRTC DataChannel `IpcTransport` adapter (RTCPeerConnection + ordered/reliable DataChannel via the existing `SignalingClient`; map `Snapshot`/`Delta` over `IpcSink`/`IpcSource`; teardown/reconnect + `PeerPermissions` filtering).
+- **`#webrtc2`** — implement behind a `webrtc` feature gate (evaluate `webrtc-rs` vs `str0m`).
+- **`#webrtc3`** — loopback integration tests (snapshot sync, delta ordering, permission-filtered routing, reconnect) + Criterion bench vs in-process/socket transports.
+
+**`#57by` (#lzasyncshuttle) — kept gated; added an un-blocked eval.** The Shuttle implementation stays operator-gated (tokio-decoupling cost), but the *decision* is unblocked:
+- **`#shuttleeval`** [recommended] — read-only feasibility spike: scope the `cfg(shuttle)` shim surface over `async_context.rs` (executor / `tokio::sync::watch` / `Arc` / spawn), confirm Shuttle can actually model the two `#k03k` windows, estimate LOC/risk → a go/no-go for `#57by`. No prod change.
+
+**Backlog now (priority order):** `#webrtc1` → `#webrtc2` → `#webrtc3` → `#shuttleeval`. Top item: **`#webrtc1`**.
+
+_Note: `#pw26` (#lzmapspike) drifted into the **icebox** between turns — left it there, a reasonable home for a spike gated on external (MAP) project maturity. The recurring `#ipcdrift` supervisor (stale binary, pid 337083) is still live; `make install` + recycling it remains the durable fix._
+<!-- agent:boundary:363cc45f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,17 +175,16 @@ flowchart TB
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-Please look at Map Holons + DAHN. Can lazily-rs integrate with Map? Would it be advantageous?
-
-our core design specs and implementation plans are here: https://memetic-activation-platform.github.io/map-dev-docs/core/
-[8:30 PM]evomimic: our roadmap is defined here: https://memetic-activation-platform.github.io/map-dev-docs/roadmap/
-[8:30 PM]evomimic: near-term work is being driven by: https://memetic-activation-platform.github.io/map-dev-docs/roadmap/desc-driven-impl-plan/
-[8:32 PM]evomimic: we're targeting end of Q3 (August) to have something we can demo
+- ~~Go through each review item. Add actionable items into the backlog to complete the review items.~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#webrtc1] #jpf1 phase 1 — Design the WebRTC DataChannel IpcTransport adapter: use the existing SignalingClient (offer/answer/ICE already in signaling_client.rs) to establish an RTCPeerConnection plus an ordered reliable DataChannel; map the lazily-ipc transport contract (Snapshot/Delta via IpcSink/IpcSource) onto the channel; define teardown/reconnect plus per-peer PeerPermissions filtering. Plan file at pickup.
+- [ ] [#webrtc2] #jpf1 phase 2 — Implement the WebRTC DataChannel transport behind a webrtc feature gate (evaluate webrtc-rs vs str0m); wire DataChannel to IpcSink/IpcSource carrying Snapshot/Delta; reuse PeerPermissions for per-peer op filtering.
+- [ ] [#webrtc3] #jpf1 phase 3 — Loopback integration tests for the WebRTC transport (two in-process peers: snapshot sync, delta ordering, permission-filtered routing, reconnect after drop) plus Criterion bench vs in-process/socket transports.
+- [ ] [#shuttleeval] [recommended] Feasibility spike for #57by #lzasyncshuttle, read-only: scope the shim surface to make src/async_context.rs generic over tokio/shuttle (executor, tokio::sync::watch, Arc, spawn) under cfg(shuttle); confirm shuttle async plus watch-equivalent can model the two #k03k windows; estimate LOC/risk. Output go/no-go for the operator-gated #57by. No prod change.
 <!-- /agent:backlog -->
 
 ## Review
@@ -170,7 +192,6 @@ our core design specs and implementation plans are here: https://memetic-activat
 <!-- agent:review -->
 - [/] [#57by] #lzasyncshuttle=[recommended, operator-gated] Exhaustive Shuttle interleaving model for the async resolve loop beyond the two known #k03k windows. Requires making src/async_context.rs generic over its concurrency primitives (swap tokio<->shuttle executor + watch + Arc under cfg) the way thread_safe.rs is generic over atomics for Loom — a real architectural change whose main beneficiary is the test harness, verifying an approximation of tokio rather than the real path. BLOCKED on operator approval to take on the tokio-decoupling cost; do only if the async graph grows more concurrency-critical paths. Window 1+2 already deterministically covered by tests/async_resolve_loop.rs.
 - [/] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
-- [/] [#w30b] #gh-org=Create GitHub org (lazily-reactive or lazily) and transfer repos
 <!-- /agent:review -->
 
 ## Icebox

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Done — shipped and deployed. The loan-application Documents step no longer mak
 **Spec + tests:** updated `tests/multi-upload.test.ts` to the per-type-upload spec (moved both loan-app forms into the `FileDropZone` group; assert one zone per type uploading to its own type id; assert the pooled-area/category-picker markers are gone) and fixed the `BoolCheckbox` import assertion in `boolean-checkbox-fields.test.ts`. Full suite green: **589 pass / 0 fail**; client + worker builds clean.
 
 **Commit + push + deploy:** committed `5f5cd57`, pushed to `origin/main`, deployed to https://equityfundingsource.brian-takita.workers.dev (Version `70080d90`). No D1 migrations involved (UI-only).
-<!-- agent:boundary:6c6feae6 -->
+<!-- agent:boundary:82055c9f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Each uploaded file should have an icon of the file type and have a delete x. Document uploads should go into the activity feed so the admin can see uploads. Would it be possible to make the admin interface update via poll or in realtime? Does CF have a way to stream events to open sessions?
 <!-- /agent:queue -->
 
 ## Backlog

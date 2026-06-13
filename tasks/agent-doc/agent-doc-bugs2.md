@@ -35,7 +35,17 @@ queue: start
 Compacted content:
 - Archived 8 response topic(s): do [#rtwbcast]; do [#rtwbcast]; do [#jbcompactcrdt]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:26c47bb9 -->
+
+### Re: JB Compact Exchange + Run Agent Doc dispatch failures — opus-4-8
+
+Captured both as agent-doc bugs. Neither should be fixed from this live IPC session; both are filed for a clean session.
+
+**Bug A — Compact Exchange fails with `typed_component_drift` auto-adopt refusal (`#compactdrift`, new).** The compact did its archival work (148 exchange lines → archive, CRDT refreshed, stale capture discarded) and then refused to finalize: `refusing to auto-adopt committed historical response patchback … HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast]`. This is the **same guard** that blocked `agent-doc commit` at the start of this session. Root cause: the guard keys on the *presence* of a committed `### Re:` marker in HEAD as evidence of out-of-band drift, so it false-positives on the normal post-finalize steady state (HEAD legitimately holds the last response). The fix is to make the discriminator structural — a HEAD response that matches the snapshot's committed baseline is benign; only divergence is real drift; compact should diff against the `pre-compact-<n>` tagged state. Plan: `tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md`.
+
+**Bug B — `Run Agent Doc` on equityfundingsource.md coalesced as exit-1 (`#qflood2`, re #kp5z).** The route repaired a stale busy projection, activated a queue head, then hit `dispatch coalesced … a dispatch for generation 66 is already in flight (#qflood)`. That coalesce is the dedup gate firing because a dispatch for gen 66 was already in flight — the `#kp5z` dual-drain-owner collision (supervisor idle-drain + your manual JB dispatch both targeting gen 66). `#kp5z` is archived done but still repros here, most likely because the live binary predates `ef0810a2` (the fix isn't deployed). Two sub-issues: it shouldn't double-own the dispatch, and a benign coalesce should report deduped-success, not exit-1. (I did **not** touch the equityfundingsource.md session — scope-isolated.)
+
+**Common thread:** the live binary is stale (`predates ef0810a2`). Several of these — the drift guard, the dispatch dedup, the wedged-controller reaper — have newer source that isn't running. `cd src/agent-doc && make install && agent-doc admin recycle --all-projects` (+ `lib-install` for the cdylib) is the highest-leverage next step before re-testing any of them.
+<!-- agent:boundary:8b4702c8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,7 +72,6 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
-- [#rtwbcast]
 <!-- /agent:queue -->
 ###
 <!--
@@ -92,6 +101,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#compactdrift] JB Compact Exchange (and agent-doc commit recovery) fail closed with "refusing to auto-adopt committed historical response patchback: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast]". The auto-adopt guard keys on the PRESENCE of a committed ### Re: response marker in HEAD as drift evidence, so it false-positives on the benign steady state (HEAD already holds the last finalized response). Compact archives 148 lines then refuses to finalize; same guard blocked agent-doc commit at this session start. FIX: make the discriminator structural (HEAD response matching the snapshot committed baseline is benign; only divergence from baseline is real typed_component_drift); compact should compare against the pre-compact tagged state. CLEAN session required (touches the compact/commit drift guard). Verify on a freshly make-installed binary first (live binary predated ef0810a2). Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
+- [ ] [#qflood2] #qflood regression evidence (2026-06-13): JB Run Agent Doc on equityfundingsource.md returned exit-1 "dispatch coalesced ... a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310" after repairing a stale busy projection and activating a queue head. This is the #kp5z dual-drain-owner collision (supervisor idle_queue_watch_drain + operator manual dispatch both target generation 66) surfaced as a hard error. #kp5z is archived done but still repros here, likely because the live binary predates ef0810a2 (fix not deployed). Confirm fix presence after make install + recycle; if it still collides, the coalesce should report success/info (deduped), not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#fcc0] [TOP] Zero JB File Cache Conflict dialogs. Root cause: all document-mutating disk writes (queue consume write.rs:3186, done-id mark 3887, finalize/stream/repair/reset 8683/9488/9836/10240/...) bypass editor IPC; #w42v converged only compact. Fix: extract a shared converge_document_or_disk() (mirror #w42v) and route ALL write sites through it (queue consume + done-id mark first, then finalize/stream/repair/reset), behind the listener-active gate with transport=editor_ipc primary + disk_fallback; plus resolve the #ipcdrift/#stuckhandoff2 wedge that forces fallbacks. Phases #fcc0a-e. CLEAN session required (live write path); 0-dialogs proof is operator-drive live JB. Immediate operator action: agent-doc lib-install to deploy #w42v for compact. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#splitmodswrite] [recommended] Split write.rs (27.7k lines, largest module) test layout. Unlike the clean single-trailing-mod-tests pattern used for route/session_check/git/preflight/sync, write.rs has an irregular layout: module-scope cfg(test) helper fns (around line 12109) PLUS several non-contiguous top-level cfg(test) blocks (mod tests at 15201 closes at 21827, then more cfg(test) blocks to EOF). Needs a bespoke extraction that moves each test block into write/tests.rs (or several files) and updates the FlowCore guard_ budget (currently 91) + any structural guards in tests/test_cli.rs. Verify make check + full workspace 0 failed.
 - [ ] [#rtwbcast] #rtwatch rung 4 — multi-editor CRDT broadcast. STAYS OPEN: execute only from a dedicated CLEAN session, not a live agent-doc IPC session. First concrete phase is #rtwbcast-id: add editor_id to the FFI buffer-report and patch JSON ABI, and key live_buffer_snapshot_path per editor. Then run #rtwbcast-deliver (per-editor broadcast bus), #rtwbcast-merge (per-editor echo suppression using existing CRDT merge primitive + SimWorld Slice 3), and #rtwbcast-verify (operator-driven two-live-IDE convergence). Blockers remain the editor-plugin protocol decision and live two-IDE verification. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md (Rung 4 section).

@@ -629,6 +629,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/write/normalize.rs",
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
@@ -879,8 +880,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // not added anew.
         ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 1,
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 14,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 24,
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 6,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 14,
+        ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
+        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,
         ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 8,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,34 +32,31 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260611-153722.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260611-222217.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do #logsigfp; do #logfixturecov; do #tsinflight
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 
-### Re: upgrade lazily-rs. release + publish — opus-4-8
+### Re: next-steps to fix tsift bugs — opus-4-8
 
-> **Queue prompt:**
->
-> upgrade lazily-rs. release + publish
+No open tsift **code** bugs. The recent sweep is shipped/closed (`#tsbug*` on 2026-06-10; log-compression `#logfam`/`#logchunk`/`#loggate`/`#logsigfp`/`#logfixturecov`; prompt-cache `#pcache-*`; `#tsinflight`), the working tree is clean, there are no TODO/FIXME markers in the source, and local `make check` is green — `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace` exit 0 (49 tests ok, 0 failed).
 
+**One red signal, and it's infrastructure — not code.** The latest CI run for v0.1.69 (`27369227934`) failed, but both jobs (`clippy + test`, `live Convex graph acceptance`) died at the `Cache cargo registry + build` step with zero output from the actual work steps, both gone ~90s in. That's a cache-service/runner abort, not a test or clippy failure — the local suite confirms green. I re-ran the failed jobs; the run is pending.
 
-Shipped two releases this turn.
+**Backlog (priority order):**
+1. `#cicacheguard` (top) — clear the v0.1.69 CI red: the re-run is in flight; if the cache step keeps aborting, harden it so a cache miss cannot fail the suite.
+2. `#tscodereview` [recommended] — a fresh concurrency/edge-case review pass, since meaningful graph-db/log/prompt-cache code has landed since the last bug sweep.
 
-**tsift v0.1.68** (the original `release + publish` — accumulated `## Unreleased` backlog: `#logfam`, `#logchunk`, `#loggate`, `#logsigfp`, `#logfixturecov`, `#tsinflight`, `#x5fw`, `#pcache-*`). Lockstep 0.1.67→0.1.68 across all 23 `Cargo.toml` + workspace dep specs, `Cargo.lock`, `AGENTS.md`/`specs/search-navigation.md` code-nav markers, 15 opencode command `.md`s, `package.json`, and the `VERSIONS.md` cut. `make check` green, installed, committed `0e930d2`, tagged `v0.1.69`'s predecessor `v0.1.68` → pushed.
+**Top of backlog: `#cicacheguard`.**
 
-**tsift v0.1.69 — `upgrade lazily-rs`.** Bumped the `lazily` dependency `0.2`→`0.10` in `tsift-core`, `tsift-graph`, `tsift-index`, `tsift-status`, `tsift-summarize`. tsift already builds/locks against `lazily` 0.10.3 locally (superproject path patch); the published manifests now declare `^0.10` so crates.io consumers resolve the current line instead of the stale `0.2.x`. Verified the `Cargo.lock` entry is registry-sourced with a crates.io checksum (`7006d091…`), so CI builds it `--locked` without the local patch. Lockstep 0.1.68→0.1.69, `VERSIONS.md` `#lazilybump` entry, `make check` green (no failures), `tsift 0.1.69` installed, committed `a435889`, tagged `v0.1.69` → pushed.
-
-**Publish:** both tags trigger `release.yml` (GitHub Release always; crates.io + npm OpenCode-plugin gated on `TSIFT_ENABLE_CRATES_PUBLISH`/`TSIFT_ENABLE_NPM_PUBLISH`, both `true`). Runs: v0.1.68 `27368520287` (verify+builds green, publish pending), v0.1.69 `27369228204` (queued). Not waited on per closeout policy — local verification is the gate and is green.
-
-Note: a mid-cycle queue edit (`upgrade lazily-rs` appended) caused a finalize drift on the v0.1.68 closeout; recovered by stashing the stale CRDT/overlay, restoring clean HEAD, and rebuilding the snapshot. Exchange is large but the queue is active, so kept draining without compacting.
-<!-- agent:boundary:e9958226 -->
+Nothing to spec/test/build/commit in the tsift repo this cycle — no code changed.
+<!-- agent:boundary:7de1ccb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- What are #next-steps to fix tsift bugs?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -68,6 +65,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#cicacheguard] CI run 27369227934 (v0.1.69) failed: both `clippy + test` and `live Convex graph acceptance` jobs died at the `Cache cargo registry + build` step with zero work-step output (~90s, no test/clippy logs) — infra abort, not a code regression (local make check green, clippy -D warnings clean). Re-run triggered. Follow-up: if the cache step keeps aborting, harden it (continue-on-error on actions/cache restore + cold-build fallback) so a cache-service failure cannot fail the suite; confirm the re-run goes green.
+- [ ] [#tscodereview] [recommended] Run a fresh #code-review concurrency/edge-case pass over tsift: the last bug sweep (#tsbugev/#tsbugtok/#tsbuglock/#tsbugcm/#tsbugidx/#tsbugcache) shipped 2026-06-10 and substantial graph-db, log-compression, and prompt-cache code landed since (v0.1.67->0.1.69). Capture root-cause findings to this backlog.
 <!-- /agent:backlog -->
 
 ## Review

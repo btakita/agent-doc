@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,32 +32,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-051239.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-052039.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equ...; Why were the emails from the admin pipeline cards removed? Readd the emails.
+- Archived 1 response topic(s): Email bleeding into next column in pipeline table views
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Email bleeding into next column in pipeline table views — opus-4.8
-
-> **Queue prompt:**
->
-> The email address is bleeding ![img_7.png](img_7.png) into the next column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=leads&status=new. Please ensure all table views don't have this issue. deploy
-
-
-Fixed. The email was a long unbreakable token in a `table-layout:fixed` cell, so it overflowed past the CONTACT column into PROPERTY (visible in img_7.png: `stormrunner06106@gmail.com` spilling over `Thompson, CA`).
-
-**Root cause:** `.tbl td` had no word-breaking rule. With `table-layout:fixed`, any cell content wider than its column overflows the column box instead of wrapping. Long emails/URLs have no natural break points, so they bled across the boundary.
-
-**Fix (shared CSS — covers all table views):** `lib/ui--server--efs/portal.ts` — added `overflow-wrap:anywhere;word-break:break-word;` to `.tbl td` (and `.tbl td a`). Because every admin/portal table uses the shared `.tbl` class, this single change covers leads, full applications, loans, lenders, funded deals, etc. — not just the leads pipeline. Mobile (`white-space:nowrap` horizontal-scroll media query) is unaffected.
-
-**Verified + deployed:**
-- `bun run build:worker` — clean; confirmed `overflow-wrap:anywhere;word-break:break-word;` is in the bundled `dist/worker/index.js`.
-- `bun run deploy:worker` — live at https://equityfundingsource.brian-takita.workers.dev (version `1dc0aab9`).
-- EFS commit `e4875b7`; submodule pointer bumped in superproject (`818eace08`).
-
-Long emails now wrap within the CONTACT column. Hard-refresh the pipeline page to pick up the new CSS hash.
-<!-- agent:boundary:c17cfc62 -->
+<!-- agent:boundary:b1c35f59 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,6 +45,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new, the "Open full application" button in the Application dialog should open a Full Application dialog. The Full Application dialog should have a link to the page. deploy
 <!-- /agent:queue -->
 
 ## Backlog

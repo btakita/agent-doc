@@ -59,16 +59,33 @@ Recovered the session and triaged the queue. **No code changes this cycle** — 
 The prior turn already reached this same conclusion and paused go-mode ("queue exhausted of agent-drainable work … resume from a clean session"). I'm honoring that — **not auto-looping**.
 
 **To make progress, operator action is needed:** run the `[clean-session]` items (`#fcc0` → `#compactdrift` → `#rtwbcast`, each has a plan file) from a **fresh, non-route-owned** session (no live supervisor on this doc), and drive the `[operator-verify]` JB items live so the agent can read ops.log proof.
-<!-- agent:boundary:1cd46692 -->
+
+### Re: Compaction recovery + killed a live #stuckhandoff2 wedge — opus-4.8
+
+This cycle had **no genuine new user prompt** — the only diff was a fresh compaction artifact (archive `…-171403.md`). Recovery + a real wedged-controller kill; **no code changes**.
+
+**1. Compaction stale-snapshot (`#compactdrift`).** Snapshot was stale at the pre-compact size (15666 B) vs the compacted visible file. `reset --from-current --preserve-session` → `commit` reconciled it; preflight's orphaned-response repair re-applied the prior triage response and auto-committed. **HEAD == visible == snapshot == 15622 B, worktree clean.**
+
+**2. Killed a live `#stuckhandoff2` wedge.** `agent-doc admin detect` + `pgrep` found controller **PID 353539** stuck in `--handoff-state preparing` for **6+ minutes**, with its predecessor (4138479) **dead** and it **not** being the authoritative supervisor (that's PID 1073070, gen 339, ready). It was the source of the `live_prompt_drift_after_preflight` (the phantom 17625 B `content_ours` over `ipc.sock`). Killed it per the documented recovery ladder; drift cleared (preflight now reports no content changes). **This is live evidence the `#stuckhandoff2` M1 self-watchdog/suicide-timer is still not in production** — a Preparing controller with a dead predecessor survived 6 min. No new item needed; it strengthens the existing review gate.
+
+**3. No agent-drainable work remains.** Same conclusion as the committed triage: backlog `#compactdrift` / `#rtwbcast` / `#fcc0` are `[clean-session]` (live write-path), review items are `[operator-verify]`. The remaining go-mode queue churn is the **`#qchurn`** bug actively manifesting — untagged free-text operator bug-reports keep `queue_active=true`, so the idle-watch re-injects `queue_trigger=auto` with zero drainable work. **Not auto-looping.**
+
+**Operator action to make progress:** drive the `[clean-session]` items (each has a plan file) from a **fresh, non-route-owned** session; the `#qchurn` fix and queue cleanup both require that clean session (Editing the queue under the live IPC supervisor races and corrupts).
+<!-- agent:boundary:b49e78ce -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#fcc0]~~
 - :round_pushpin: do [#compactdrift]
-- :round_pushpin: do [#rtwbcast]
-- I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.
+---
+The agent-doc binary should auto-kill the orphan
+```
+● Diagnosis confirmed: PID 353539 has been wedged in --handoff-state preparing for 6+ minutes, its predecessor
+  (4138479) is dead, and it is not the current authoritative supervisor (that's PID 1073070, gen=339, ready). It's an
+  orphaned #stuckhandoff2 wedge racing my writes and producing the phantom 17625-byte stale buffer. Per the documented
+  recovery ladder, this orphan is safe to kill (it's not the live supervisor):
+```
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
 ```
@@ -83,6 +100,8 @@ Compacted content:
 - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
 - I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
+- re [#qflood2]: I'm still seeing prompts entered into 
+- :round_pushpin: do [#rtwbcast]
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
@@ -147,6 +166,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#qpresetstrike] [clean-session] Preset-token queue head (a #name from prompt_presets, e.g. #advance-review) is unstrikeable by any agent path: `queue consume` rejects it as id-backed (leading #), while `--done`/`--pending-gate` reject it as not a backlog id, and `finalize` keeps the head — so it wedges queue_active=true and re-serves every /agent-doc invocation. FIX: classify a #-head against prompt_presets AND backlog/icebox before routing; a preset head should strike like a free-text head via consume + the finalize heuristic, while do[#id] heads stay on the --done path. Workaround: strike ~~#name~~ + drop go + reset --from-current --preserve-session + commit. Relates to #qchurn/#goqueuestall. Plan: tasks/agent-doc/plan-preset-queue-head-unstrikeable.md
 - [ ] [#qchurn] [clean-session] go-mode no-op churn: after #goqueuestall tag-defer skips the id-backed [clean-session]/[operator-verify] backlog heads, untagged FREE-TEXT operator bug-report prompts in the ## Queue block still keep queue_active=true and the supervisor idle-watch re-injects queue_trigger=auto each idle boundary -> repeated no-op /agent-doc cycles (no content diff, user_intent_prompt_changes empty, zero drainable work). Halted live 2026-06-13 via admin queue pause (receipt 27, gen 338). FIX: go-mode should treat a queue whose only remaining prompts are non-id free-text reports (no actionable do #id / new user prompt) as not-drainable and stop re-dispatching, same as the undrainable-head skip. Plan: tasks/agent-doc/plan-go-queue-stall.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

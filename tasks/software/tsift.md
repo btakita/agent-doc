@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#mermaid': Include explanatory mermaid diagram(s).
@@ -62,14 +63,38 @@ Fixed. The `#gdbwritelock` advisory lock claimed to cover all graph-db writers, 
 **Verification**: `make check` clean (clippy + full suite, exit 0); tsift-cli lib suite **372 passed, 0 failed** (370 prior + 2 new); `cargo install --path .` replaced `~/.cargo/bin/tsift`. Committed + pushed (`cb5c266`, submodule pointer `221793dd4`). CI run `27460839933` queued for the new commit — recorded pending; closed out on local evidence.
 
 Top of queue next: **#pcacheexplattr**.
-<!-- agent:boundary:f052d459 -->
+
+### Re: do [#pcacheexplattr] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: do [#pcacheexplattr]
+
+
+Fixed. The prompt-cache prefix-drift attribution had a hole: when a provider supplies an **explicit** `stable_prefix_fingerprint` (`stablePrefixFingerprint`/`prefix_fingerprint`/`prefixFingerprint`, `session_cost.rs:3317`), the derived fingerprint material — which folds in the raw `stable_prefix` — is bypassed (`explicit_fingerprint.unwrap_or_else(...)`, `:3346`). So a genuine stable-prefix **content** drift changed nothing tracked and went unattributed; conversely `first_changed_field=stable_prefix_fingerprint` no longer implied a prefix change (the provider could rotate the fingerprint on its own).
+
+Root fix: track the raw `stable_prefix` as its own ordered metadata field, independent of the fingerprint.
+
+- **Metadata** — added `SessionCostPromptCacheMetadata.stable_prefix: Option<String>` (`:69`), populated from the same `stable_prefix`/`stablePrefix`/`cached_prefix`/`promptPrefix` extraction already used to build the derived fingerprint, so it is captured whether or not the fingerprint is explicit.
+- **Attribution order** — `prompt_cache_field_changes` now pushes `stable_prefix` **immediately before** `stable_prefix_fingerprint` (after cache_key/breakpoints/routing_affinity/provider). Because the raw prefix precedes the composite, a real prefix-content drift is named `stable_prefix` (the concrete cause) regardless of explicit-vs-derived fingerprint. The fingerprint is the first changed field only when no tracked sub-field — including the raw prefix — moved, e.g. a provider rotating an explicit fingerprint independently of content.
+
+**Tests** (JSON-driven through `compute`, no struct literals to touch):
+- Renamed the derived-path test → `prompt_cache_drift_attributes_pure_prefix_content_change_to_stable_prefix`: now asserts `first_changed_field == "stable_prefix"` and two ordered changes (`stable_prefix`, then the derived `stable_prefix_fingerprint`) — the more-specific attribution.
+- Added `prompt_cache_drift_attributes_prefix_change_under_explicit_fingerprint`: explicit `stable_prefix_fingerprint` held **constant** across turns while the prefix content drifts — proves the drift is now attributed to `stable_prefix` alone (the only reported change), which was invisible before this fix.
+
+**Spec**: `specs/digests-sessions.md` §4 now lists raw stable-prefix in the attribution metadata, documents the ordering (concrete sub-fields, then raw prefix, then composite fingerprint), and spells out the explicit-fingerprint bypass rationale.
+
+**Verification**: `make check` clean (clippy + full suite, exit 0); 14 `prompt_cache` tests pass including both above. `cargo install --path .` replaced `~/.cargo/bin/tsift`. Committed + pushed (tsift `b58eff6`, superproject pointer `1ee506ff0`). CI run `27461255690` queued for the new commit — recorded pending; closed out on local evidence.
+
+(Registered the new `#advance-review` preset from frontmatter — no action needed this cycle.) Top of queue next: **#tsreviewcleanup**.
+<!-- agent:boundary:e5c49670 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#gdblockcover]~~
-- :pushpin: :round_pushpin: do [#pcacheexplattr]
+- ~~:pushpin: :round_pushpin: do [#pcacheexplattr]~~
 - :pushpin: :round_pushpin: do [#tsreviewcleanup]
 <!-- /agent:queue -->
 <!--
@@ -79,7 +104,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcacheexplattr] prompt-cache: explicit provider fingerprint bypasses #pcacheattr residual attribution (MED sev, HIGH conf). When a provider supplies explicit_fingerprint (stable_prefix_fingerprint/prefixFingerprint, packages/tsift-agent-doc/src/session_cost.rs:3326) the derived fingerprint material is bypassed, so a real stable_prefix CONTENT drift changes nothing tracked and goes unattributed; conversely first_changed_field=stable_prefix_fingerprint no longer implies prefix drift. Fix: track raw stable_prefix as its own ordered metadata field/field-change (before the fingerprint) so prefix-content drift is attributed regardless of explicit-vs-derived fingerprint.
 - [ ] [#tsreviewcleanup] [recommended] three low-sev review cleanups: (1) prompt-cache field_changes double-reports the redundant derived stable_prefix_fingerprint entry whenever a concrete sub-field also changed (session_cost.rs:1810) - suppress unless it is the sole change; (2) breakpoint (xN) aggregation suffix can collide with provider-supplied breakpoint text (session_cost.rs:3461) - carry count structurally or escape; (3) graph-db export live-lock diagnostic (infra.rs:653) is near-dead for the realistic WAL case (snapshot fallback succeeds, recovery gate bails first) - unify wording on the recovery-gate bail or document.
 <!-- /agent:backlog -->
 

@@ -152,14 +152,17 @@ Later phases may refine caller values without changing the field names.
   issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
   tracking requires dispatch proof but only acceptance is observed, it logs
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
-- Codex direct-pane submit gets one bare-`Enter` re-submit (`#jbcodexsubmit`).
-  The Codex TUI composer can leave the routed trigger drafted when the text and
-  its trailing carriage return arrive as a single `send-keys` payload, so when a
-  Codex direct-pane submit times out with the trigger still visible, route sends
-  a separate `Enter` key event and re-polls the acceptance window exactly once,
+- Codex AND Claude direct-pane submit get one bare-`Enter` re-submit
+  (`#jbcodexsubmit` / `#jbclaudesubmit`). Both TUI composers can leave the routed
+  trigger drafted when the text and its trailing carriage return arrive as a
+  single merged `send-keys` payload (`submit_text_for_harness` emits the
+  non-opencode `Enter` suffix inline for both), so when a Codex or Claude
+  direct-pane submit times out with the trigger still visible, route sends a
+  separate `Enter` key event and re-polls the acceptance window exactly once,
   recording `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
-  This is scoped strictly to Codex — claude/opencode submit behavior is
-  unchanged — and never loops on a genuinely stuck pane.
+  This is scoped to the two harnesses that travel the merged text+CR submit path
+  — OpenCode submits via the separate Kitty Return sequence and is unchanged —
+  and never loops on a genuinely stuck pane.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

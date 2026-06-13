@@ -455,7 +455,16 @@ distinct from the one-shot restart auto-trigger:
   head is waiting AND no operator-deferred clear is still pending delivery, the
   watch auto-expires the cooldown marker and resumes the drain. The recycle +
   clear is then a continuation *step*, not a stall. The decision is the pure,
-  unit-tested `decisions::clear_cooldown_resume_ready`.
+  unit-tested `decisions::clear_cooldown_resume_ready`. The full operator recycle
+  + clear pipeline — `admin recycle` (mark recycle at the next idle boundary) →
+  in-place `execve` recycle preserving the live pane → `session clear` (write the
+  cooldown) → settle → cooldown auto-expiry → go-mode drain resume — is also
+  driven end-to-end by the deterministic SimWorld engine
+  (`SimCommand::SupervisorIdleQueueTick`), which calls the SAME production
+  predicates (`supervisor_recycle_action`, `clear_cooldown_resume_ready`,
+  `idle_queue_drain_decision`) the live idle-queue watch uses rather than
+  reimplementing the policy, so the recycle + clear pipeline is simulated offline
+  across its interoperating systems.
 - On `Dispatch` it injects a harness-specific payload through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

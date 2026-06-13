@@ -4,6 +4,20 @@
 //! instead of being interleaved with the supervisor's I/O-bearing run loop. Nothing
 //! here touches `SupervisorShared`, the filesystem, or a live pane — every function is
 //! a total function over its inputs.
+//!
+//! The recycle + clear policy predicates (`clear_cooldown_resume_ready`,
+//! `supervisor_recycle_action`, `idle_queue_drain_decision`) and the
+//! `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` debounce are `pub` so the offline SimWorld
+//! engine can drive the same production decision functions the live supervisor
+//! idle-queue watch uses (`#clearcontresume` recycle + clear pipeline
+//! simulation), rather than reimplementing the policy in the test harness.
+
+/// Consecutive idle-prompt polls a cleared pane must show a fresh harness prompt
+/// before a lingering manual clear cooldown auto-expires and the active go-mode
+/// queue drain resumes (`#clearcontresume`). At `AUTO_TRIGGER_POLL_INTERVAL`
+/// (500ms) this is ~2s of proven idle pane after the `/clear`, so a resumed drain
+/// never injects into an in-flight clear.
+pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
 
 /// Decision for the supervisor idle-queue watch
 /// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
@@ -16,7 +30,7 @@
 /// restart auto-trigger; this watch reuses that idle signal to drain a live
 /// active-queue head on the busy→idle transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IdleQueueDrainDecision {
+pub enum IdleQueueDrainDecision {
     /// Inject the harness-specific drain payload so the next cycle drains the
     /// active queue head.
     Dispatch,
@@ -82,7 +96,7 @@ pub(crate) fn idle_queue_context_reset_decision(
 /// prompt is on screen). `active_head` is the live `queue_active: true` ready
 /// head (`queue_continuation::live_continuation_head`), and `last_dispatched`
 /// is the head this watch last injected a trigger for.
-pub(crate) fn idle_queue_drain_decision(
+pub fn idle_queue_drain_decision(
     clear_cooldown_active: bool,
     prompt_visible: bool,
     turn_active: bool,
@@ -141,7 +155,7 @@ pub(crate) fn idle_queue_drain_decision(
 /// this returns `true`. When there is no active head (a plain operator clear
 /// with no queue), this returns `false` so the cooldown stays
 /// authoritative-until-operator-route, preserving the non-go behavior.
-pub(crate) fn clear_cooldown_resume_ready(
+pub fn clear_cooldown_resume_ready(
     clear_cooldown_active: bool,
     has_active_head: bool,
     prompt_visible: bool,
@@ -161,7 +175,7 @@ pub(crate) fn clear_cooldown_resume_ready(
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SupervisorRecycleAction {
+pub enum SupervisorRecycleAction {
     /// Not stale, or not at a turn boundary — do nothing.
     None,
     /// Stale + at a turn boundary but auto-recycle is off: surface it so the
@@ -189,7 +203,7 @@ pub(crate) enum SupervisorRecycleAction {
 /// point, so we recycle promptly (`RecycleImmediate`); when none is, we keep the
 /// idle-grace debounce (`RecycleDebounced`, applied by the caller via
 /// `recycle_debounce_decision`).
-pub(crate) fn supervisor_recycle_action(
+pub fn supervisor_recycle_action(
     stale: bool,
     auto_recycle: bool,
     turn_boundary: bool,

@@ -12,6 +12,7 @@ impl SimWorld {
             captured_response: None,
             pending_fault: None,
             route: RouteModel::new(),
+            recycle_clear: RecycleClearModel::default(),
             sync: SyncProjection::default(),
             next_prompt: 1,
             coverage: Coverage::default(),
@@ -418,6 +419,24 @@ impl SimWorld {
                 self.sync.focus_doc_move_before_select("requested");
                 self.coverage.sync_move_before_select_focuses += 1;
             }
+            SimCommand::ActivateGoModeQueueHead => {
+                self.recycle_clear.queue_active_head = Some("#govqueuehead".to_string());
+            }
+            SimCommand::MarkSupervisorBinaryStale => {
+                self.recycle_clear.binary_stale = true;
+            }
+            SimCommand::EnableSupervisorAutoRecycle => {
+                self.recycle_clear.auto_recycle = true;
+            }
+            SimCommand::OperatorRecycleMark => {
+                self.recycle_clear.operator_recycle_marked = true;
+            }
+            SimCommand::DeferOperatorClearPending => {
+                self.recycle_clear.deferred_operator_clear_pending = true;
+            }
+            SimCommand::SupervisorIdleQueueTick => {
+                self.supervisor_idle_queue_tick()?;
+            }
         }
         Ok(())
     }
@@ -505,8 +524,139 @@ impl SimWorld {
     pub(crate) fn clear_session_context(&mut self) -> Result<()> {
         self.current_dispatch_pane()?;
         self.route.pending_dispatch = None;
+        // `#clearcontresume`: an operator `session clear` / JB `Clear Exchange`
+        // writes the manual clear cooldown (`queue_continuation::write_clear_cooldown`).
+        // It suppresses passive queue dispatch until the cleared pane settles to a
+        // fresh idle prompt — at which point `clear_cooldown_resume_ready` lets an
+        // active go-mode drain resume as a continuation step. Reset the idle-tick
+        // debounce so the resume counts only polls observed AFTER this clear.
+        self.recycle_clear.clear_cooldown_active = true;
+        self.recycle_clear.clear_cooldown_idle_ticks = 0;
         self.coverage.session_clears += 1;
         Ok(())
+    }
+
+    /// One supervisor idle-queue-watch poll, driving the SAME production decision
+    /// predicates the live `start::idle_watch` loop uses (`#clearcontresume`):
+    /// the clear-cooldown idle-tick debounce + `clear_cooldown_resume_ready`, the
+    /// `supervisor_recycle_action` recycle policy, and `idle_queue_drain_decision`.
+    /// No live pane — `prompt_visible` / `turn_active` are derived from the modeled
+    /// supervisor lifecycle, exactly the offline simulation the operator asked for.
+    pub(crate) fn supervisor_idle_queue_tick(&mut self) -> Result<()> {
+        use agent_doc_orchestration::start::decisions::{
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueDrainDecision, SupervisorRecycleAction,
+            clear_cooldown_resume_ready, idle_queue_drain_decision, supervisor_recycle_action,
+        };
+
+        // The supervisor's idle signal: a dispatch-ready harness prompt is visible
+        // only when the actor is `Ready`; a turn is active while `Busy`/`WaitingInput`.
+        let prompt_visible = matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        let turn_active = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
+        );
+        let has_active_head = self.recycle_clear.queue_active_head.is_some();
+
+        // (1) Clear-cooldown idle-tick accounting — mirrors idle_watch.rs:157-161.
+        if self.recycle_clear.clear_cooldown_active && has_active_head && prompt_visible
+            && !turn_active
+        {
+            self.recycle_clear.clear_cooldown_idle_ticks =
+                self.recycle_clear.clear_cooldown_idle_ticks.saturating_add(1);
+        } else {
+            self.recycle_clear.clear_cooldown_idle_ticks = 0;
+        }
+
+        // (2) Production resume predicate. When it fires the cooldown has served
+        // its only job (don't dispatch into an in-flight `/clear`); drop it so the
+        // go-mode drain resumes as a continuation step.
+        if clear_cooldown_resume_ready(
+            self.recycle_clear.clear_cooldown_active,
+            has_active_head,
+            prompt_visible,
+            turn_active,
+            self.recycle_clear.deferred_operator_clear_pending,
+            self.recycle_clear.clear_cooldown_idle_ticks,
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+        ) {
+            self.recycle_clear.clear_cooldown_active = false;
+            self.recycle_clear.clear_cooldown_idle_ticks = 0;
+            self.recycle_clear.last_dispatched = None;
+            self.coverage.clear_cooldown_resumes += 1;
+            // Production `continue`s (idle_watch.rs:204) so the normal drain
+            // decision dispatches the head on the NEXT tick with the cooldown
+            // already cleared. Return early to model that re-evaluation boundary.
+            return Ok(());
+        }
+
+        // (3) Recycle policy. The operator `admin recycle` mark forces a recycle at
+        // the next idle boundary regardless of staleness; the auto path uses the
+        // production `supervisor_recycle_action` predicate (stale binary + opt-in).
+        let turn_boundary = prompt_visible && !turn_active;
+        let head_pending = has_active_head;
+        let recycle_action = supervisor_recycle_action(
+            self.recycle_clear.binary_stale,
+            self.recycle_clear.auto_recycle,
+            turn_boundary,
+            head_pending,
+        );
+        // RecycleImmediate fires at once (the next-queue-item boundary bypasses the
+        // grace debounce); RecycleDebounced fires after the idle-grace elapses, which
+        // we model as satisfied on this tick for determinism. Detect/None never recycle.
+        let auto_recycle_now = matches!(
+            recycle_action,
+            SupervisorRecycleAction::RecycleImmediate | SupervisorRecycleAction::RecycleDebounced
+        );
+        if turn_boundary && (self.recycle_clear.operator_recycle_marked || auto_recycle_now) {
+            self.recycle_supervisor_in_place();
+            self.recycle_clear.operator_recycle_marked = false;
+            // The in-place execve promoted the freshly-installed binary.
+            self.recycle_clear.binary_stale = false;
+            self.coverage.supervisor_recycles += 1;
+        }
+
+        // (4) Drain decision. After the cooldown clears, the normal go-mode drain
+        // dispatches the waiting head (recompute prompt visibility — a recycle this
+        // tick keeps the pane Ready).
+        let prompt_visible_now =
+            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        let turn_active_now = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
+        );
+        let head = self.recycle_clear.queue_active_head.clone();
+        let drain = idle_queue_drain_decision(
+            self.recycle_clear.clear_cooldown_active,
+            prompt_visible_now,
+            turn_active_now,
+            false, // self_driving_loop_active — supervisor owns this drain in the model
+            head.as_deref(),
+            self.recycle_clear.last_dispatched.as_deref(),
+        );
+        if matches!(drain, IdleQueueDrainDecision::Dispatch) {
+            self.recycle_clear.last_dispatched = head;
+            self.coverage.go_drain_dispatches += 1;
+        }
+        Ok(())
+    }
+
+    /// Recycle the supervisor in place onto a fresh binary (`#ctlrecycle` R3:
+    /// `execve_preserve_child`). Unlike `bind_route_owner` (a brand-new pane), an
+    /// in-place recycle PRESERVES the live pane and session and only advances the
+    /// generation, leaving a fresh dispatch-ready idle prompt. The preserved-pane
+    /// invariant is what distinguishes a recycle from a cold rebind.
+    fn recycle_supervisor_in_place(&mut self) {
+        let preserved_pane = self.route.durable.pane_id.clone();
+        let preserved_session = self.route.durable.session_id.clone();
+        let generation = self.route.durable.generation + 1;
+        self.route.durable = ActorState {
+            generation,
+            session_id: preserved_session,
+            pane_id: preserved_pane,
+            lifecycle: SupervisorLifecycle::Ready,
+        };
+        self.route.projection = self.route.durable.clone();
+        self.route.supervisor_lease_generation = Some(generation);
     }
 
     pub(crate) fn restart_supervisor(

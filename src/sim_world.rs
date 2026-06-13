@@ -167,6 +167,24 @@ enum SimCommand {
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
     SyncFocusStashedMoveBeforeSelect,
+    /// `#clearcontresume` recycle + clear pipeline. Driven only by targeted
+    /// tests, not the random generator, so the seed corpus traces are unchanged.
+    ///
+    /// A go-mode `queue_active: true` head is waiting to drain.
+    ActivateGoModeQueueHead,
+    /// A later `cargo install` made the supervisor's launch binary stale.
+    MarkSupervisorBinaryStale,
+    /// `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` opt-in is enabled.
+    EnableSupervisorAutoRecycle,
+    /// Operator `admin recycle --all-projects`: mark this supervisor to recycle
+    /// at the next idle boundary.
+    OperatorRecycleMark,
+    /// An operator-deferred clear is still pending delivery.
+    DeferOperatorClearPending,
+    /// One supervisor idle-queue-watch poll. Drives the production cooldown
+    /// resume, recycle, and drain decision predicates exactly as `idle_watch.rs`
+    /// does, with no live pane.
+    SupervisorIdleQueueTick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,6 +443,41 @@ impl RouteModel {
     }
 }
 
+/// Models the operator **recycle + clear pipeline** (`#clearcontresume`) so the
+/// SimWorld engine can drive the SAME production decision predicates the live
+/// supervisor idle-queue watch uses — `clear_cooldown_resume_ready` and
+/// `supervisor_recycle_action` in `agent_doc_orchestration::start::decisions` —
+/// instead of reimplementing the policy in the test harness. The operator's
+/// pipeline is `admin recycle --all-projects` (mark recycle at next idle
+/// boundary) → `session clear` (write the manual clear cooldown) → the cleared
+/// pane settles to a fresh idle prompt → the cooldown auto-expires and the
+/// go-mode queue drain resumes as a continuation *step* (not a stall).
+#[derive(Debug, Clone, Default)]
+struct RecycleClearModel {
+    /// Manual clear cooldown is active: an operator `session clear` /
+    /// JB `Clear Exchange` / delivered deferred clear wrote the marker
+    /// (`queue_continuation::write_clear_cooldown`).
+    clear_cooldown_active: bool,
+    /// Consecutive idle-prompt polls observed since the clear settled, mirroring
+    /// `idle_watch.rs`'s `clear_cooldown_idle_ticks` debounce counter.
+    clear_cooldown_idle_ticks: u32,
+    /// An operator-deferred clear is still pending delivery. That path owns its
+    /// own resume, so the cooldown auto-expiry defers to it.
+    deferred_operator_clear_pending: bool,
+    /// A go-mode `queue_active: true` head is waiting to drain.
+    queue_active_head: Option<String>,
+    /// The operator marked this supervisor to recycle at the next idle boundary
+    /// (`admin recycle --all-projects`).
+    operator_recycle_marked: bool,
+    /// The supervisor's launch binary is stale (a later `cargo install`), so the
+    /// auto-recycle predicate can fire at a turn boundary.
+    binary_stale: bool,
+    /// Auto-recycle opt-in (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).
+    auto_recycle: bool,
+    /// The head the idle-queue watch last injected a trigger for (drain dedup).
+    last_dispatched: Option<String>,
+}
+
 #[derive(Debug, Default)]
 struct Coverage {
     unresolved_prompt_blocks: usize,
@@ -488,6 +541,17 @@ struct Coverage {
     commits: usize,
     post_commit_worktree_checks: usize,
     sync_move_before_select_focuses: usize,
+    /// `#clearcontresume`: a lingering manual clear cooldown auto-expired and the
+    /// active go-mode queue drain resumed via the production
+    /// `clear_cooldown_resume_ready` predicate.
+    clear_cooldown_resumes: usize,
+    /// The supervisor recycled in place onto a fresh binary at an idle boundary
+    /// (operator `admin recycle` or the `supervisor_recycle_action` predicate),
+    /// preserving the live pane via `execve`.
+    supervisor_recycles: usize,
+    /// A go-mode queue head was dispatched by the idle-queue drain decision after
+    /// the recycle + clear settled.
+    go_drain_dispatches: usize,
 }
 
 impl Coverage {
@@ -611,6 +675,9 @@ impl Coverage {
         self.commits += other.commits;
         self.post_commit_worktree_checks += other.post_commit_worktree_checks;
         self.sync_move_before_select_focuses += other.sync_move_before_select_focuses;
+        self.clear_cooldown_resumes += other.clear_cooldown_resumes;
+        self.supervisor_recycles += other.supervisor_recycles;
+        self.go_drain_dispatches += other.go_drain_dispatches;
     }
 }
 
@@ -624,6 +691,7 @@ struct SimWorld {
     captured_response: Option<String>,
     pending_fault: Option<FaultPoint>,
     route: RouteModel,
+    recycle_clear: RecycleClearModel,
     sync: SyncProjection,
     next_prompt: usize,
     coverage: Coverage,
@@ -1833,6 +1901,166 @@ fn qflood2_in_flight_coalesce_is_deduped_success_not_a_dispatch_failure() {
     assert_eq!(
         world.coverage.route_dispatch_coalesced, 1,
         "the pause is a block, not a coalesce"
+    );
+}
+
+#[test]
+fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
+    // `#clearcontresume`: the full operator recycle + clear pipeline, driven by the
+    // SAME production decision predicates the live supervisor idle-queue watch uses
+    // (`supervisor_recycle_action`, `clear_cooldown_resume_ready`,
+    // `idle_queue_drain_decision`). The recycle + clear is a continuation *step*: a
+    // go-mode drain resumes on its own without an operator route.
+    let mut world = SimWorld::new(2_026);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // `admin recycle --all-projects` marks recycle at the next idle boundary; a later
+    // `cargo install` made the binary stale with auto-recycle opted in.
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+    world.apply(SimCommand::OperatorRecycleMark).unwrap();
+
+    // First idle tick: the idle boundary recycles in place onto the fresh binary,
+    // PRESERVING the live pane (execve) and advancing the generation. No head is
+    // waiting yet, so the recycle does not dispatch.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "recycle advances the generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "recycle preserves the live pane via execve (not a cold rebind)"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "recycle promoted the freshly-installed binary"
+    );
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "no head was waiting at the recycle boundary"
+    );
+
+    // A go-mode head is now waiting; the operator `session clear` writes the manual
+    // clear cooldown before any idle poll observes the head.
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+    assert!(world.recycle_clear.clear_cooldown_active);
+
+    // The cleared pane must settle for CLEAR_COOLDOWN_RESUME_IDLE_TICKS consecutive
+    // idle polls before the cooldown auto-expires — earlier ticks must NOT resume.
+    for tick in 1..4 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert!(
+            world.recycle_clear.clear_cooldown_active,
+            "cooldown must hold at settle tick {tick}"
+        );
+        assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+        assert_eq!(world.coverage.go_drain_dispatches, 0);
+    }
+
+    // 4th settled idle tick: the cooldown auto-expires (resume re-evaluates next tick,
+    // so no dispatch yet).
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert!(
+        !world.recycle_clear.clear_cooldown_active,
+        "cooldown auto-expired after the settle debounce"
+    );
+    assert_eq!(world.coverage.clear_cooldown_resumes, 1);
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "the resume tick re-evaluates; it does not dispatch into the just-cleared pane"
+    );
+
+    // Next tick: the normal go-mode drain dispatches the waiting head — the recycle +
+    // clear resumed the drain as a step, with no operator route.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 1,
+        "the go-mode drain resumes after the recycle + clear settles"
+    );
+
+    // A stuck head is not re-fired every tick (drain dedup).
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn clear_cooldown_without_active_head_stays_authoritative() {
+    // A plain operator clear with NO active go-mode head keeps the cooldown
+    // authoritative-until-operator-route: the non-go behavior must be preserved.
+    let mut world = SimWorld::new(2_027);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+    assert!(world.recycle_clear.clear_cooldown_active);
+
+    for _ in 0..8 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    assert!(
+        world.recycle_clear.clear_cooldown_active,
+        "no active head → cooldown stays authoritative (non-go behavior preserved)"
+    );
+    assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+    assert_eq!(world.coverage.go_drain_dispatches, 0);
+}
+
+#[test]
+fn clear_cooldown_deferred_operator_clear_blocks_resume() {
+    // When an operator-deferred clear is still pending delivery, that path owns its
+    // own resume — the cooldown auto-expiry must defer to it even with a live head.
+    let mut world = SimWorld::new(2_028);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::DeferOperatorClearPending).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+
+    for _ in 0..8 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    assert!(
+        world.recycle_clear.clear_cooldown_active,
+        "a pending deferred operator clear blocks the auto-resume"
+    );
+    assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+}
+
+#[test]
+fn clear_cooldown_resume_debounce_resets_when_a_turn_interrupts_idle() {
+    // The settle debounce is consecutive: a turn becoming active mid-settle resets the
+    // idle-tick count, so a resumed drain never injects into an in-flight turn.
+    let mut world = SimWorld::new(2_029);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+
+    // Two settle ticks, then a turn interrupts (Busy), resetting the debounce.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+    assert!(world.recycle_clear.clear_cooldown_active);
+
+    // Back to idle: must settle for the full threshold again from zero.
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    for _ in 0..3 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert!(world.recycle_clear.clear_cooldown_active);
+    }
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.clear_cooldown_resumes, 1,
+        "the debounce restarts from zero after the interrupting turn"
     );
 }
 

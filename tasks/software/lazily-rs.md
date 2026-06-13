@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,37 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): ongoing plan document for Map Holons integration; do [#akp3]; do [#97xn]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:42cd2603 -->
+
+### Re: release + publish — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+Released **lazily v0.11.0** to git; crates.io upload is blocked on a revoked token (operator-gated).
+
+**Context:** v0.10.3 was the last release tag, but 7 commits landed since — WebRTC + WebSocket DataChannel IPC transports, the multi-channel reactive bridge hub (#97xn), deterministic async resolve-loop coverage, and lazily-spec IPC conformance CI. New public API → minor bump. (The preflight `#45rh` semantic match is a false positive — that was the older effect-system release.)
+
+**Done this cycle:**
+- Verified green: `make check` (full matrix incl. loom) exit 0 locally **and** CI success on the exact HEAD `f9e0ffa`.
+- Bumped `Cargo.toml` / `Cargo.lock` / `BENCHMARKS.md` → `0.11.0`.
+- `cargo publish --dry-run` packaged cleanly (57 files).
+- Committed `chore: release v0.11.0`, tagged `v0.11.0`, pushed both to `origin` (`lazily-hub/lazily-rs`).
+- Bumped the superproject submodule pointer (`3715f7cc6`).
+
+**Blocked — crates.io publish + GitHub Release (`#12b1` / #lzpub011, operator-drive):**
+`cargo publish` returns `403 authentication failed`. Both the env `CARGO_REGISTRY_TOKEN` and `passage btak/CARGO_REGISTRY_TOKEN` are the same expired `cio…` token. This needs a token rotation behind browser/passkey 2FA — I can't do that headless. Once you store a fresh token at `passage btak/CARGO_REGISTRY_TOKEN`, finishing is one command from `src/lazily-rs`:
+
+```
+CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify
+gh release create v0.11.0 --generate-notes
+```
+
+The tag and release commit are already on origin, so publish proceeds from the exact tagged tree.
+
+**Note (not changed):** `Cargo.toml` `repository` still points to `github.com/btakita/lazily-rs` while the live remote is `lazily-hub/lazily-rs` — pre-existing across all prior releases, left as-is to avoid scope creep mid-release.
+<!-- agent:boundary:e1e5fe94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,12 +78,12 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 <!-- /agent:backlog -->
 
 ## Review

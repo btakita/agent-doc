@@ -95,7 +95,17 @@ Done with the recycle; `/clear` is yours to run (I can't trigger Claude Code's b
 So the live wedge is cleared and the supervisors will promote the fresh binary at their next idle boundary (graceful `execve`, preserving the pane + agent child).
 
 **Next: run `/clear` yourself**, then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in the fresh context. That gives the genuinely clean session needed to fix **#stuckhandoff2 M1** — I'll write the deterministic repro test (drive a launched-`Preparing` serve loop to the watchdog branch, assert a `stale_preparing_controller_self_reaped` within threshold) and the fix there, per the reopening in `plan-stuck-handoff-hardening.md` (`7d9aeabd1`). Not auto-looping — this was your direct prompt and `/clear` is the intended next step.
-<!-- agent:boundary:10976736 -->
+I want you to run `admin recycle --all-projects` and `/clear`. Outside this session of course...via the PCP + Supervisor.
+
+### Re: "outside this session, via the PCP + Supervisor" — correcting my approach — opus-4.8
+
+Understood — you don't want me asking you to type `/clear`, and you don't want the recycle as a one-off in my shell. Both should run through the PCP + Supervisor path. Mapping it:
+
+- **recycle → already via the PCP.** `admin recycle --all-projects` doesn't kill anything inline — it marks the controllers to recycle at their next idle boundary, and the PCP/supervisor does the graceful `execve` itself. So that half was already supervisor-driven (gen 1061 stable, orphans gone).
+- **`/clear` → `agent-doc session clear tasks/agent-doc/agent-doc-bugs2.md`.** That's the supervisor-mediated clear of the *bound harness session* (this Claude agent) — "outside this session," issued through the controller, not a `/clear` you type. I'll run it as the terminal action of this cycle, right after this commits.
+
+Running `session clear` will wipe my context, so this is my last message before the fresh session. After it lands, re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and the clean session can take **#stuckhandoff2 M1** (repro test + fix per `plan-stuck-handoff-hardening.md`, `7d9aeabd1`).
+<!-- agent:boundary:403806fa -->
 <!-- /agent:exchange -->
 
 ## Queue

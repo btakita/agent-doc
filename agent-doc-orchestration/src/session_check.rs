@@ -2229,6 +2229,135 @@ fn no_response_active_queue_head_fails_on_reap_only_unconsumed_head() {
     }
 }
 #[test]
+fn no_response_active_queue_head_skips_operator_verify_deferred_head() {
+    // #goqueuestall: a reap-only/no-response closeout whose only remaining
+    // runnable head is `[operator-verify]` (never agent-drainable) is NOT a
+    // silent-stall — the head is deferred by design, so the guard must stay quiet
+    // instead of perpetually re-INTERRUPTing an undrainable queue.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let committed = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nAnswered.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#qflood2] [operator-verify] live drive only\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#qflood2]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+    crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+
+    assert!(
+        matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+        "an operator-verify deferred head must not trip the no-response active-head guard"
+    );
+}
+#[test]
+fn no_response_active_queue_head_skips_clean_session_head_under_live_ipc() {
+    // #goqueuestall: a `[clean-session]` head is deferred only under a live
+    // editor-IPC listener. Without a listener it is drainable (must INTERRUPT);
+    // with one it is deferred exactly like operator-verify (must stay quiet).
+    // Builds the deferred set the same way `queue_continuation` does
+    // (`is_listener_active`).
+    let tmp = tempfile::TempDir::new().unwrap();
+    let committed = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nAnswered.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#cleanhead] [clean-session] needs a quiet session\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#cleanhead]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+    crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+
+    // Without a live listener the clean-session head is drainable → still INTERRUPT.
+    match inspect(&doc).unwrap() {
+        SessionCheckStatus::Interrupted(message) => {
+            assert!(message.contains("#cleanhead"), "{message}");
+            assert!(
+                message.contains("committed without an assistant response body"),
+                "{message}"
+            );
+        }
+        other => panic!("expected interrupt for drainable clean-session head, got {other:?}"),
+    }
+
+    // Start a live editor-IPC listener for the project root, then the same
+    // clean-session head becomes deferred and the guard must stay quiet.
+    let root = tmp.path().to_path_buf();
+    let root_clone = root.clone();
+    let server = std::thread::spawn(move || {
+        crate::ipc_socket::start_listener(&root_clone, |_msg| {
+            Some(serde_json::json!({"type": "ack"}).to_string())
+        })
+        .ok();
+    });
+    // Wait until the listener is provably active before asserting.
+    for _ in 0..50 {
+        if crate::ipc_socket::is_listener_active(&root) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        crate::ipc_socket::is_listener_active(&root),
+        "listener should be active for the project root"
+    );
+    assert!(
+        matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+        "a clean-session deferred head under a live IPC listener must not interrupt"
+    );
+
+    let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+    drop(server);
+}
+#[test]
+fn no_response_active_queue_head_still_fires_on_drainable_head() {
+    // #goqueuestall regression guard: a genuinely drainable (plain, untagged)
+    // head with no response must STILL INTERRUPT — the deferral exclusion must not
+    // swallow real unanswered queue work.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let committed = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nAnswered.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#splitmodswrite] plain drainable head\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#splitmodswrite]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+    crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+
+    match inspect(&doc).unwrap() {
+        SessionCheckStatus::Interrupted(message) => {
+            assert!(message.contains("#splitmodswrite"), "{message}");
+            assert!(
+                message.contains("committed without an assistant response body"),
+                "{message}"
+            );
+        }
+        other => panic!("expected interrupt for drainable head, got {other:?}"),
+    }
+}
+#[test]
 fn reaped_queue_head_without_response_fails_on_silent_loss() {
     // #compact-reap-no-response-record: a maintenance/compaction reap can
     // remove a `do #id` head from agent:backlog AND strike it from the queue

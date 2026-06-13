@@ -152,7 +152,11 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
 /// current session type (`#goqueuestall`): `[operator-verify]` items always, plus
 /// `[clean-session]` items when a live editor-IPC listener is active for `file`.
 /// Used to compute queue continuation over the drainable head set only.
-fn deferred_backlog_ids(file: &Path, content: &str) -> std::collections::HashSet<String> {
+///
+/// `pub(crate)` so `session_check`'s queue-head guards reuse the SAME deferred set
+/// (`#goqueuestall`): a deferred head must not trip the "runnable head remained /
+/// no-response reap-only closeout" guards, exactly as it is excluded here.
+pub(crate) fn deferred_backlog_ids(file: &Path, content: &str) -> std::collections::HashSet<String> {
     let live_ipc = crate::snapshot::find_project_root(file)
         .or_else(|| file.parent().map(std::path::Path::to_path_buf))
         .map(|root| crate::ipc_socket::is_listener_active(&root))
@@ -161,7 +165,9 @@ fn deferred_backlog_ids(file: &Path, content: &str) -> std::collections::HashSet
 }
 
 /// Pure core of [`deferred_backlog_ids`] — testable without a live socket.
-fn deferred_backlog_ids_with_ipc(
+/// `pub(crate)` so `session_check` guard tests can build the deferred set from a
+/// document string without a live editor-IPC socket (`#goqueuestall`).
+pub(crate) fn deferred_backlog_ids_with_ipc(
     content: &str,
     live_ipc: bool,
 ) -> std::collections::HashSet<String> {

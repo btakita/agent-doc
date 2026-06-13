@@ -308,7 +308,26 @@ Missing was the case the operator asked about: a **non-dogfooding document whose
 **What the new test proves:** stale binary + opt-in (no operator mark) → first idle tick `supervisor_recycle_action` fires on its own (`supervisor_recycles == 1`, generation advances, live pane preserved via execve, binary promoted fresh); then `session clear` → cooldown holds through the settle debounce (and the already-fresh supervisor does **not** recycle again) → cooldown auto-expires (`clear_cooldown_resumes == 1`) → next tick drains the go-mode head (`go_drain_dispatches == 1`). So the opt-in alone is sufficient to drive the full recycle/clear/drain pipeline for any document — the dogfooding repo is just one configuration.
 
 **Verification:** `make check` green — 4412 tests pass, 238 skipped, clippy clean. Test-only change (no binary behavior change this cycle). (Exchange is large at ~255 lines / 12 sections, but the queue is active so not stalling to compact.)
-<!-- agent:boundary:95b2862d -->
+
+### Re: go-queue drain — undrainable cycle + stale-binary rebuild — opus-4-8
+
+No new operator prompt this cycle (`user_intent_prompt_changes` empty); this is a pure go-queue drain, and **every remaining head is agent-undrainable**, so nothing was executed against the queue:
+
+- **operator-verify** (`do #c2b6`, `#aazp`, `#4myd`) — need a live editor + real recycle; cannot be agent-done.
+- **clean-session** (`#qdedup`, `#clearexchstale`, `#qpresetstrike`, `#qchurn`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#mdastquote/#0kjc`) — touch the live write/parser/route path; can't run under the live IPC supervisor. Preflight deferred 12 such heads (`#goqueuestall`).
+- **free-text reports** (tsift.md strike bug, JB Compact Exchange bail, efs `#qflood` dispatch coalesce, markdown-AST tags-in-quotes, recyclerestart stall) — already captured as `#qpresetstrike` / `#c2b6` / `#qflood2` / `#0kjc` / `#recyclerestart`. No new capture needed.
+
+This is the `#qchurn` shape: undrainable heads + already-captured free-text reports keep `queue_active=true`, so a stale supervisor idle-watch re-injects `queue_trigger=auto` with zero drainable work. **Not auto-looping.**
+
+**Root cause unblocked this cycle:** the live supervisor (pid 1368698) and the installed binary/cdylib predated source `256623a6`, producing the `#fcc0`/`#ipcdrift` File Cache Conflict dialogs and blocking the operator-verify items (which require "a freshly make-install-ed agent-doc"). Ran `make install` in `src/agent-doc` → release build 0.34.0, `~/.cargo/bin/agent-doc` replaced, cdylib `libagent_doc-0.34.0.so` relinked. **The running controllers still serve the prior binary until promoted.**
+
+**Operator next steps (in order):**
+1. `agent-doc admin recycle --all-projects` (or restart the session) to promote the fresh binary — this also brings the `#goqueuestall`/`#qchurn` defer fixes into the live supervisor so it stops churning.
+2. Drive the operator-verify items against a live editor: `#c2b6` (JB Compact Exchange re-verify), `#aazp` + `#4myd` (suprecyclestall recycle — check ops.log for `supervisor_binary_stale_self_recycled`).
+3. Run the clean-session backlog (`#fcc0`, `#qdedup`, etc.) in a freshly-restarted CLEAN session, one per restart.
+
+I am pausing the queue (IPC-safe, reversible) so the stale supervisor stops re-dispatching no-op cycles until you recycle/restart.
+<!-- agent:boundary:da69781b -->
 <!-- /agent:exchange -->
 
 ## Queue

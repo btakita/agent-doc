@@ -215,7 +215,25 @@ Per your "abstraction now, concrete later" call, shipped the transport **structu
 **`#jpf1` is now functionally complete** at the abstraction level — design (`#webrtc1`), transport (`#webrtc2`), tests+bench (`#webrtc3`) all shipped. Remaining: `#webrtcbackend` (the deferred concrete webrtc-rs/str0m backend) and `#shuttleeval`.
 
 **Still not auto-looping.** The `#ipcdrift` supervisor (pid 337083, stale pre-`7bfc82e3` binary) is *still live* and corrupted this finalize too (recovered via hand-rebuild). `make install` in `src/agent-doc` + recycling it remains the durable fix before further managed cycles.
-<!-- agent:boundary:7e1bae85 -->
+
+### Re: do #shuttleeval — Shuttle feasibility → NO-GO — opus-4-8
+
+Read-only spike done. **Recommendation: NO-GO on `#57by` for now** — keep it gated/deferred. Findings (written to `tasks/software/plan-lazily-async-loom.md`):
+
+**Can Shuttle model the async resolve loop?** Technically yes — Shuttle (awslabs/shuttle) ships its own async executor (≈ `futures::executor`), so unlike Loom it *can* drive `async`/`await`. But three findings sink it at current scope:
+
+1. **Randomized, not exhaustive.** Shuttle uses a randomized (PCT) scheduler — a passing run does **not** prove correctness, unlike Loom's exhaustive search. So a "Shuttle model" is controlled-randomized coverage, *not* the exhaustive proof the item's framing implied.
+2. **Large shim surface in the hot path.** `async_context.rs` (1748 LoC) has **~140 production concurrency-primitive references** to `cfg(shuttle)`-swap: ~46 `Mutex` locks (parking_lot → `shuttle::sync`, different guard API), ~53 `Arc`, ~43 atomics, + 4 `tokio::spawn` → `shuttle::future::spawn`.
+3. **No tokio `watch` equivalent.** The `#k03k` notifier is `tokio::sync::watch`; Shuttle has none, so it must be **reimplemented on shuttle primitives** — the model then verifies an *approximation* of the notifier, not the real `tokio::watch` path.
+
+**Cost/value:** ~300–600 LoC of cfg-swaps + a custom notifier + spawn abstraction in the core async hot path, reduced fidelity, randomized-not-exhaustive — against **low marginal value**: both `#k03k` windows are *already* deterministically covered (window 1 via the `#ytp5` seam, window 2 via gated supersede) and `async_stress.rs` covers the broader space. Revisit only if the async graph grows materially more concurrency-critical paths; a cheaper interim is `tokio::test(start_paused)` for specific interleavings, not a full Shuttle port.
+
+`#57by` annotated with this conclusion and kept gated. **Only `#webrtcbackend` (the deferred concrete WebRTC backend) remains** in the queue.
+
+**Not auto-looping.** The supervisor (pid 337083) is now actively degraded — last finalize hit `IPC ack timeout (6s)` repeatedly and `IPC listener degraded`. `make install` in `src/agent-doc` + recycling it is now urgent before `#webrtcbackend`.
+
+**Sources:** [awslabs/shuttle](https://github.com/awslabs/shuttle) · [shuttle docs](https://docs.rs/shuttle)
+<!-- agent:boundary:8341f02e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,13 +253,12 @@ Per your "abstraction now, concrete later" call, shipped the transport **structu
 
 <!-- agent:backlog queue -->
 - [ ] [#webrtcbackend] [recommended] #jpf1 follow-up — wire a concrete DataChannel backend (webrtc-rs stable default, or str0m sans-IO): RTCPeerConnection via SignalingClient SDP/ICE, ordered reliable DataChannel, async-to-sync mpsc bridge feeding WebRtcSink/Source, teardown/reconnect. Behind an additive opt-in feature so the ~100-crate stack stays optional. Plan: tasks/software/plan-lazily-webrtc-transport.md
-- [ ] [#shuttleeval] [recommended] Feasibility spike for #57by #lzasyncshuttle, read-only: scope the shim surface to make src/async_context.rs generic over tokio/shuttle (executor, tokio::sync::watch, Arc, spawn) under cfg(shuttle); confirm shuttle async plus watch-equivalent can model the two #k03k windows; estimate LOC/risk. Output go/no-go for the operator-gated #57by. No prod change.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#57by] #lzasyncshuttle=[recommended, operator-gated] Exhaustive Shuttle interleaving model for the async resolve loop beyond the two known #k03k windows. Requires making src/async_context.rs generic over its concurrency primitives (swap tokio<->shuttle executor + watch + Arc under cfg) the way thread_safe.rs is generic over atomics for Loom — a real architectural change whose main beneficiary is the test harness, verifying an approximation of tokio rather than the real path. BLOCKED on operator approval to take on the tokio-decoupling cost; do only if the async graph grows more concurrency-critical paths. Window 1+2 already deterministically covered by tests/async_resolve_loop.rs.
+- [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.
 - [/] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 <!-- /agent:review -->
 

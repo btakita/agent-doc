@@ -47,7 +47,22 @@ CI green (run `27460096312`), so the #tscodereview batch has settled. Ran a focu
 - **prompt-cache — 1 REAL GAP (HIGH conf), see `#pcacheexplattr`.** Explicit provider fingerprints bypass the #pcacheattr residual invariant: a genuine `stable_prefix` content drift changes nothing tracked and goes unattributed. `#pcacheregtrunc` math and breakpoint edges verified correct.
 
 Top of backlog: **#gdblockcover**. (Session recovered from a stale pre-compaction CRDT overlay mid-cycle; committed via force-disk. Exchange stays compact.)
-<!-- agent:boundary:d3df04b3 -->
+
+### Re: do [#gdblockcover] — opus-4-8
+
+Fixed. The `#gdbwritelock` advisory lock claimed to cover all graph-db writers, but two mutating paths bypassed it and raced a concurrent refresh holding the lock — the exact `database is locked` / VACUUM-vs-WAL collision the lock exists to prevent. Both now take `crate::acquire_graph_db_write_lock` so every mutating writer serializes through the same lock.
+
+- **`compact --apply`** (`cmd_graph_db_compact`, `commands/infra.rs`) — its DELETE + `wal_checkpoint(TRUNCATE)` + `VACUUM` ran unguarded. `VACUUM` cannot proceed while another writer holds an open WAL transaction; wrapped the `if apply { … }` block in the lock.
+- **`memory finding-add` upsert** (`add_authored_node_to_graph`, `commands/memory.rs`) — the authored-node `upsert_projection` write raced a refresh's WAL transaction; wrapped before the store open.
+
+**Regression coverage** (deterministic, no timing flakiness post-fix): each test holds the lock externally, spawns the operation in a thread, asserts it is `!is_finished()` while the lock is held (parked in the acquire loop — before the fix it ran unguarded and would already be done), then releases the lock and asserts the join succeeds. `graph_db_compact_apply_blocks_on_held_write_lock` (lib.rs) and `finding_add_blocks_on_held_graph_db_write_lock` (memory.rs).
+
+**Spec**: `specs/graph.md` now lists `compact --apply` and `memory finding-add` as lock-covered writers and notes `compact --apply` runs its `VACUUM` under the write lock.
+
+**Verification**: `make check` clean (clippy + full suite, exit 0); tsift-cli lib suite **372 passed, 0 failed** (370 prior + 2 new); `cargo install --path .` replaced `~/.cargo/bin/tsift`. Committed + pushed (`cb5c266`, submodule pointer `221793dd4`). CI run `27460839933` queued for the new commit — recorded pending; closed out on local evidence.
+
+Top of queue next: **#pcacheexplattr**.
+<!-- agent:boundary:1350387e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -56,7 +71,6 @@ Top of backlog: **#gdblockcover**. (Session recovered from a stale pre-compactio
 - :round_pushpin: do [#gdblockcover]
 - :round_pushpin: do [#pcacheexplattr]
 - :round_pushpin: do [#tsreviewcleanup]
-- ~~do [#tsreview2]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -65,7 +79,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gdblockcover] graph-db advisory write lock does not cover all writers (root-cause concurrency, HIGH conf, med-high sev). #gdbwritelock claims the lock covers all writer callers but two paths bypass acquire_graph_db_write_lock: (1) compact --apply issues DELETE+wal_checkpoint(TRUNCATE)+VACUUM at packages/tsift-cli/src/commands/infra.rs:1133 -> packages/tsift-sqlite/src/lib.rs:2025; (2) memory upsert_projection write at packages/tsift-cli/src/commands/memory.rs:976. Both race a concurrent graph-db refresh that holds the lock -> the exact database-is-locked / VACUUM-vs-WAL collision the lock was added to prevent. Fix: wrap both call sites in crate::acquire_graph_db_write_lock(&graph_db) + add concurrent regression coverage.
 - [ ] [#pcacheexplattr] prompt-cache: explicit provider fingerprint bypasses #pcacheattr residual attribution (MED sev, HIGH conf). When a provider supplies explicit_fingerprint (stable_prefix_fingerprint/prefixFingerprint, packages/tsift-agent-doc/src/session_cost.rs:3326) the derived fingerprint material is bypassed, so a real stable_prefix CONTENT drift changes nothing tracked and goes unattributed; conversely first_changed_field=stable_prefix_fingerprint no longer implies prefix drift. Fix: track raw stable_prefix as its own ordered metadata field/field-change (before the fingerprint) so prefix-content drift is attributed regardless of explicit-vs-derived fingerprint.
 - [ ] [#tsreviewcleanup] [recommended] three low-sev review cleanups: (1) prompt-cache field_changes double-reports the redundant derived stable_prefix_fingerprint entry whenever a concrete sub-field also changed (session_cost.rs:1810) - suppress unless it is the sole change; (2) breakpoint (xN) aggregation suffix can collide with provider-supplied breakpoint text (session_cost.rs:3461) - carry count structurally or escape; (3) graph-db export live-lock diagnostic (infra.rs:653) is near-dead for the realistic WAL case (snapshot fallback succeeds, recovery gate bails first) - unify wording on the recovery-gate bail or document.
 <!-- /agent:backlog -->

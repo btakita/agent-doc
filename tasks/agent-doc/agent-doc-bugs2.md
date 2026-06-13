@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -164,7 +164,19 @@ That hot-reloads the plugin's `.so` by mtime — `Compact Exchange` then converg
 **The systematic fix (`#fcc0`, phased):** extract the `#w42v` converge-or-disk-fallback into one shared `converge_document_or_disk()` and route **all** the disk-write sites through it (queue consume + done-id mark first — highest frequency — then finalize/stream/repair/reset), plus resolve the `#ipcdrift`/`#stuckhandoff2` wedge so IPC stops failing into the fallback. This is FlowCore Phase 3 ("IPC, stream, direct write, finalize, and repair all use the same terminal-state guard; converge editor/disk/snapshot"). Must run from a clean session — editing it from a live IPC session is what keeps corrupting these very closeouts; the "0 dialogs" proof is a live JB check (operator-drive).
 
 This response itself finalized via `--force-disk` because that wedge is active right now (it's why the prior finalize CRDT-merged a stray queue line and aborted on a head mismatch). Halting the auto-loop — `#fcc0` and `[#rtwbcast]` are both clean-session/operator-drive.
-<!-- agent:boundary:ea3afbbd -->
+
+### Re: document reverted to a stale state + JB dispatch blocked by queue_paused — opus-4-8
+
+Root-caused and fixed the stale-revert. The corruption source was a **wedged `controller serve … --handoff-state preparing` process (pid 2383464)** — the `#stuckhandoff2`/`#ipcdrift` class. It survived your `admin recycle --all-projects` (recycle didn't reap it: orphaned + mid-handoff) and kept replaying a stale ~10KB buffer over `ipc.sock`, re-mangling the doc back to a 0-heading stub after every restore. I killed it; the worktree now holds at HEAD (24KB, 7 responses) and is no longer reverting.
+
+I also quarantined the corrupted CRDT overlay (`.agent-doc/crdt/<hash>.overlay.yrs`, 48KB) plus the stale cycle-state and capture sidecars (moved to `.agent-doc/_quarantine-*/`) so the rebuilt snapshot/CRDT no longer replay the mangled content.
+
+**Queue resumed** (receipt 23) — your JB `Run Agent Doc` dispatch is unblocked. The pause (receipt 21, last cycle) was the right call while the corruption source was unknown/active; now that the wedged controller is gone, the block is lifted.
+
+One caveat unchanged by this fix: the active queue heads `#fcc0` (Zero JB File Cache Conflict) and `#rtwbcast` (multi-editor CRDT broadcast) are still **clean-session/operator-drive** — they should be driven from a dedicated session without a live editor IPC attached, not auto-looped here. `#splitmodswrite` is a doable refactor but heavy. The durable fix for the wedged-preparing-controller class itself is backlog `#stuckhandoff2` (M1 controller self-watchdog/suicide-timer on `Preparing` + M3 orphan proc-scan reaper) — that's what stops `admin recycle` from leaving these zombies behind.
+
+Also still pending: the installed binary predates source commit `ef0810a2`, so this live session runs pre-`ef0810a2` code — `cd src/agent-doc && make install` (+ `lib-install` / restart) to pick up current behavior.
+<!-- agent:boundary:2b46992c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -172,9 +184,7 @@ This response itself finalized via `--force-disk` because that wedge is active r
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Continue splitting up large modules. Functionality + tests.~~
 - ~~re [#jbcompactcrdt]: Please make it possible for agent-doc to dog food this.~~
-- I'm getting JB `File Cache Conflict` dialogs. Please fix. We should have 0 `File Cache Conflict` dialogs.
 - ~~[#jbcompactcrdt]~~
-- [#rtwbcast]
 - ~~:pushpin: do [#splitmods2]~~
 <!-- /agent:queue -->
 ###

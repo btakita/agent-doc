@@ -121,6 +121,38 @@ the fallback.
     discriminator leaves a legitimate carried-forward superset untouched (the deliberate
     invariant). The old manual `git checkout HEAD -- FILE` recovery is now automatic.
 
+- **#fcc0f** ✅ DONE (code) — **Non-`write.rs` document writes.** The `#fcc0a`
+  inventory was scoped to `write.rs` `atomic_write(file, …)` sites and never
+  inventoried the `std::fs::write(file, …)` document writes in the *other*
+  orchestration modules, which bypassed the converger entirely and fired the
+  dialog whenever the buffer was dirty. Audited every such site and routed the
+  genuine component/frontmatter mutations through a new unguarded converge gate
+  `converge_or_disk_write(file, current, target, source)` (in `write/converge.rs`,
+  next to `converge_document_or_disk`; same `try_editor_converge` primary, but a
+  **plain** `std::fs::write` fallback so the no-listener path stays byte-identical
+  to the prior bare write — strictly a no-op without a live IDE, a fix with one):
+  - `pending_cmd.rs` — all 23 `agent:pending`/`agent:review` operator-CLI ops
+    (`add`/`done`/`gate`/`ungate`/`edit`/`clear`/`reorder`/`reap`/`review-*`/…),
+    source `pending_write`.
+  - `dedupe.rs` — `dedupe` command, source `dedupe`.
+  - `preflight/maintenance.rs` — per-cycle pending maintenance write (source
+    `pending_maintenance`; baseline = the original on-disk `content`, and the
+    post-write reap verification reads `current_content` not disk, so no
+    read-after-write race) and the optverify gate-flip write (source
+    `optverify_resolve`).
+  - `cycle_state.rs` — the per-cycle `agent_doc_pipeline:` frontmatter mirror /
+    clear (sources `pipeline_mirror` / `pipeline_clear`); `try_editor_converge`
+    already converges frontmatter-only deltas.
+  - Deliberately left direct (audited): `maintenance.rs` queue-halt write (already
+    editor-aware via `converge_live_buffer_queue_shape`), the closeout/`git.rs`
+    HEAD-restore recovery paths (already editor-first / `emit_postcommit_worktree_check`),
+    and `claim.rs` scaffold writes (the document is freshly scaffolded, not yet an
+    open dirty buffer). New unit test
+    `converge_or_disk_write_falls_back_to_plain_disk_without_listener` +
+    FlowCore `reason=` budget for `write/converge.rs` bumped 8→9 (the added token
+    is a test-assertion literal, no new production reason). `make check` green
+    (4367 passed, 0 failed).
+
 ## Status (2026-06-12)
 
 `#fcc0a`/`#fcc0b`/`#fcc0c`/`#fcc0d` are all committed and pushed (agent-doc
@@ -133,7 +165,7 @@ clean. Binaries rebuilt (`cargo install` + `cargo build --release`) and cdylib
 refreshed (`agent-doc lib-install`) — running controllers still serve the prior
 build until `agent-doc admin recycle --all-projects` / session restart.
 
-**All `#fcc0` code phases (`#fcc0a`–`#fcc0e`) are complete.** `#fcc0e` landed in full
+**All `#fcc0` code phases (`#fcc0a`–`#fcc0f`) are complete.** `#fcc0e` landed in full
 after the operator `go` + live Phase-0 re-baseline (2026-06-12): `#stuckhandoff2`
 M1–M5, the `#ipcdrift` claimed-patches/generation-fence/read-only-demotion machinery,
 the `#fcc0` converger ↔ de-wedge integration (`c7054e00`), the M2 worktree-write gate

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,7 +63,7 @@ They live in `src/equityfundingsource-dev/tmp/`, split by audience. They're synt
 When you click upload in the borrower application document flow or the lender accreditation flow, browse to the matching folder above. They're tiny (under 1 KB each) and exist only to exercise the upload/validation paths, not to look like real documents.
 
 If you want a richer or more realistic set (or want them checked into the repo / a seed script so they survive a fresh clone), say the word and I'll generate them.
-<!-- agent:boundary:2b28ed08 -->
+<!-- agent:boundary:d0433e07 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,6 +71,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please look at all required documents for the Deal Pipeline and Investor Pipeline. Please make sample documents in a valid format that I can use to upload to Loan Applications and Investor Applications and any other form that requires documents.
 <!-- /agent:queue -->
 
 ## Backlog

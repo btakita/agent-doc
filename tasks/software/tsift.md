@@ -119,7 +119,29 @@ Done. graph-db refresh/write and snapshot-import relied only on SQLite `busy_tim
 - **Commit + push:** tsift `d755b45` → `origin/main`; superproject pointer `6f0c3feb0`. CI triggered (pending; local gate green).
 
 Next in queue: `#pcacheregtrunc`.
-<!-- agent:boundary:922e7eca -->
+
+### Re: do #pcacheregtrunc — opus-4-8
+
+> **Queue prompt:**
+>
+> [#pcacheregtrunc]
+
+
+Done. The effectiveness gate counted `read_create_regression` from the display-truncated (`truncate(6)`) diagnostics vec, and the session-level regression was pushed **last** — so a long degraded session with 6+ per-turn ratio-drop/creation-spike diagnostics truncated the regression away and silently passed `maximum_read_create_regressions: 0` when it genuinely regressed.
+
+Fix in `packages/tsift-agent-doc/src/session_cost.rs`:
+- **Gate counts from the raw signal:** a shared `prompt_cache_read_create_regression(cached, creation)` helper computes the regression directly from token totals, so `build_prompt_cache_effectiveness_report` no longer depends on the truncated display vec.
+- **Display preserves it too:** `derive_prompt_cache_diagnostics` reserves a slot for the session-level regression before truncating per-turn diagnostics, so the human-visible list can't silently drop it either.
+
+- **Tests:** `read_create_regression_survives_diagnostics_truncation` (8 creation-spike turns + overall regression → regression survives the 6-cap). Existing prompt-cache + real-session fixture gates stay green.
+- **Spec:** noted the raw-signal count in `specs/digests-sessions.md`.
+
+**Caught a masked regression:** this cycle's `make check` surfaced a clippy `-D warnings` failure in last cycle's `#gdbwritelock` code (a redundant `fs4::FileExt` import in the Drop impl — `unlock` resolves via std's inherent `File::unlock`). The prior cycle's RTK-wrapped `make check` had **masked the non-zero exit**. Fixed it here and verified with a comprehensive error grep (not just test-result lines). `make check` now genuinely green; release+install rebuilt.
+
+- **Commit + push:** tsift `c942737` → `origin/main`; superproject pointer `8e4017c12`. CI triggered (pending; local gate green).
+
+Next in queue: `#loggatefidelity`.
+<!-- agent:boundary:e42e41c7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -127,7 +149,7 @@ Next in queue: `#pcacheregtrunc`.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#pcacheattr]~~
 - ~~[#gdbwritelock]~~
-- [#pcacheregtrunc]
+- ~~[#pcacheregtrunc]~~
 - [#loggatefidelity]
 - [#gdbwalcheckpoint]
 - [#logfoldname]
@@ -140,7 +162,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#pcacheregtrunc] prompt-cache read_create_regression gate false-negative: derive_prompt_cache_diagnostics pushes the session-level regression LAST (session_cost.rs:1649) then truncate(6) (:1668), and the effectiveness fixture gate counts regressions from the truncated vec (:682-688). A long degraded session with 6+ per-turn ratio-drop/creation-spike diagnostics truncates the regression away, so maximum_read_create_regressions:0 passes when the session genuinely regressed. Count from the raw signal pre-truncation (or push session-level regressions first). HIGH conf, med sev (#tscodereview).
 - [ ] [#loggatefidelity] log-digest token-savings gate is structurally always-passing for large logs (log_digest.rs:265-322): savings ~= 1 - capped_digest/raw, digest is cap-bounded (12 signals/8 families) while raw grows unbounded, so savings -> 100% regardless of how much signal dropped past the caps; only required_signals substring checks guard fidelity and cannot express all-N-failures-survived. Add a distinct-error / dropped-past-cap coverage assertion. HIGH conf, med sev (#tscodereview).
 - [ ] [#gdbwalcheckpoint] graph-db swallows WAL checkpoint failures: after a successful projection write, tsift-sqlite/src/lib.rs:1042-1046 does `let _ = ...wal_checkpoint(TRUNCATE)`. Concurrent readers block TRUNCATE (SQLITE_BUSY is normal), the error is discarded, -wal grows unbounded across refreshes, and a later snapshot-export/import trips fail_if_unsafe_sidecars (live -wal). Log/warn on checkpoint failure (surface in phase_timings/warnings) + consider PASSIVE fallback. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#logfoldname] [recommended] log-digest templatize_line <name> over-fold (log_digest.rs:872-878) rewrites the plain token before a v-prefixed version to <name> without checking the cargo `<Verb> <crate> v<ver>` shape, so `Downgrading serde from v1.0.0` and `Updating tokio to v2.0.0` both fold to `... <name> <ver>`, losing the from/to distinction. Restrict the fold to the cargo-progress shape. HIGH conf, low-med sev (#tscodereview).

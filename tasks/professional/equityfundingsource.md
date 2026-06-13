@@ -65,7 +65,26 @@ Gaps to close for **full consumer-ESIGN** confidence (queued as an actionable it
 - **Jurisdiction:** CA hard-money lending carries its own disclosure obligations. **Have EFS counsel review before launch sign-off** — I can implement whatever they require, but the compliance determination should come from them, not me.
 
 Bottom line: the mechanism is sound for intent + attribution; the main compliance work is the consumer disclosure layer and signed-content retention. Nothing was code-changed or pushed this cycle (analysis only); both recommendations are now in the backlog.
-<!-- agent:boundary:d35346f7 -->
+
+### Re: Ongoing doc + draft email to Judith re: e-sign legal requirements — opus-4-8
+
+> **Queue prompt:**
+>
+> Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.
+
+
+Created the ongoing document: **`tasks/professional/equityfundingsource/esign-legal-compliance.md`** (committed `a9d43d858`). It's a living tracking doc for the borrower-application e-signature compliance, with three parts:
+
+1. **Where the e-signature stands today** — the engineering assessment from the prior cycle (intent to sign, ESIGN/UETA consent, association with the record, audit trail via IP/UA/timestamp).
+2. **Open items before launch sign-off** — consumer disclosures (ESIGN §101(c)), signed-content retention (snapshot/hash), distinct consent timestamp, CA hard-money specifics (e.g. RE 885), and the printed-name handling — cross-linked to backlog `#fxsv` and `#gz9h`.
+3. **A draft email to Judith** — short, per her tone (she's busy; keep it brief, not pushy). It tells her the e-sign step is built to ESIGN/UETA standards, recommends her **attorney review** the disclosures before launch, and offers to prepare a summary the lawyer can work from. It does not send anything — it's a draft she/you can edit and send when ready.
+
+I kept the email deliberately short and put the detail in the tracking doc so the lawyer-facing summary lives somewhere durable rather than in an inbox.
+
+**Scope note on "push":** I committed the new doc to the agent-loop superproject locally (`a9d43d858`). I did **not** push the superproject — it has unrelated in-flight submodule changes from other sessions, so a push would sweep those in. Say the word and I'll push, or push it yourself when the tree is clean. (The deployable EFS code from the earlier cycles is already on `origin/main` of the EFS submodule.)
+
+Next in the queue: `do #gz9h` (soft printed-name match), `do #fxsv` (ESIGN/UETA hardening), `do #xn77` (realtime/poll admin updates) — I'll take those one per cycle as the queue drains.
+<!-- agent:boundary:233615c2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +92,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.
+- ~~Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.~~
 - do [#gz9h]
 - do [#fxsv]
 - do [#xn77]

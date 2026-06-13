@@ -653,6 +653,28 @@ pub fn converge_document_or_disk(
     atomic_write_if_current_pub(file, target, current, source)
 }
 
+/// `#fcc0`: converge-or-**plain**-disk gate for the component-mutating CLI write
+/// sites that historically wrote straight to disk with a bare `std::fs::write`
+/// (the `agent:pending` / `agent:review` operator ops, `dedupe`, preflight
+/// `run_pending_maintenance`, the `agent_doc_pipeline:` frontmatter mirror). When
+/// a JB editor listener is active it converges `target` through the editor IPC
+/// (component/frontmatter `op:replace` — no `File Cache Conflict` dialog);
+/// otherwise it falls back to the SAME plain disk write those sites already did,
+/// so with no live IDE the behavior is byte-identical to before this gate.
+///
+/// Unlike [`converge_document_or_disk`], the disk fallback here is an unguarded
+/// `std::fs::write` rather than the visible-buffer-proof guarded write — these
+/// sites are CLI document mutations that must not newly fail when no editor is
+/// attached. `current` is the expected current on-disk content the editor delta
+/// is computed against; `source` labels the `ops.log` `<source>_writeback` line.
+pub fn converge_or_disk_write(file: &Path, current: &str, target: &str, source: &str) -> Result<()> {
+    if try_editor_converge(file, target, current, source)? {
+        return Ok(());
+    }
+    std::fs::write(file, target)
+        .with_context(|| format!("{source}: failed to write {}", file.display()))
+}
+
 pub(crate) fn live_prompt_drift_convergence_patches(
     file_content: &str,
     snapshot: &str,
@@ -908,6 +930,36 @@ mod core_tests {
                 && log.contains("transport=disk_fallback")
                 && log.contains("reason=no_listener"),
             "a no-listener queue consume must record the source-labelled disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn converge_or_disk_write_falls_back_to_plain_disk_without_listener() {
+        // `#fcc0`: the unguarded converge-or-disk gate (used by the pending/review,
+        // dedupe, preflight-maintenance, and pipeline-mirror write sites) must, with
+        // no live JB listener, land the target via a plain disk write and record the
+        // source-labelled disk fallback — never silently skip the write.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        converge_or_disk_write(&doc, &source, &target, "pending_write").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "with no listener the converger must write the target to disk"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("pending_write_writeback")
+                && log.contains("transport=disk_fallback")
+                && log.contains("reason=no_listener"),
+            "a no-listener plain converge must record the source-labelled disk fallback:\n{log}"
         );
     }
     #[test]

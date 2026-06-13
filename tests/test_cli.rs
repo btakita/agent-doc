@@ -895,7 +895,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 8,
+        // +1 (`reason=no_listener` test-assertion literal): #fcc0 added the
+        // `converge_or_disk_write_falls_back_to_plain_disk_without_listener` unit
+        // test asserting the source-labelled disk fallback. The new production
+        // `converge_or_disk_write` gate reuses `try_editor_converge`'s existing
+        // `reason=` lines and adds no new production reason token.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 9,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

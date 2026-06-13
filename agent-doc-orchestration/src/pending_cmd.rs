@@ -209,7 +209,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     let _ = id;
     Ok(())
 }
@@ -226,7 +226,7 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
         let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
         let canonical = canonicalize_component_content(file, &new_content);
         let new_doc = comp.replace_content(&full_content, &canonical);
-        std::fs::write(file, &new_doc)?;
+        crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
         ids.push(id);
     }
     ids.reverse();
@@ -244,7 +244,7 @@ fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result
     let (new_content, id) = pending::op_add_at(existing, item, &doc_id, false, position)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(id)
 }
 
@@ -468,7 +468,7 @@ pub fn backfill(file: &Path) -> Result<()> {
         return Ok(());
     }
     let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -489,7 +489,7 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     let new_content = pending::op_done(existing, id)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -533,7 +533,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
         .context("document has no review component after insertion")?;
     let new_doc =
         review_comp.replace_content(&new_doc, &canonicalize_component_content(file, &new_review));
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -547,7 +547,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<String> {
     let (new_content, id) = pending::op_add(existing, item, &doc_id, true)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(id)
 }
 
@@ -560,7 +560,7 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let new_content = pending::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -585,7 +585,7 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     eprintln!(
         "[pending] review-remove: removed {} entr{} for #{}",
         removed.len(),
@@ -623,7 +623,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
     let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed)
         .context("failed to archive resolved review item(s) to agent:done")?
         .unwrap_or(new_doc);
-    std::fs::write(file, &archived)?;
+    crate::write::converge_or_disk_write(file, &full_content, &archived, "pending_write")?;
     eprintln!(
         "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
         removed.len(),
@@ -643,7 +643,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         let new_content = pending::op_ungate(existing, id)?;
         let canonical = canonicalize_component_content(file, &new_content);
         let new_doc = comp.replace_content(&full_content, &canonical);
-        std::fs::write(file, &new_doc)?;
+        crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
         return Ok(());
     };
     let review_body = review_comp.content(&full_content);
@@ -655,7 +655,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
             let new_content = pending::op_ungate(existing, id)?;
             let canonical = canonicalize_component_content(file, &new_content);
             let new_doc = comp.replace_content(&full_content, &canonical);
-            std::fs::write(file, &new_doc)?;
+            crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
             return Ok(());
         }
     };
@@ -681,7 +681,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         &new_doc,
         &canonicalize_component_content(file, &new_backlog),
     );
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -696,7 +696,7 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -707,7 +707,7 @@ pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let new_content = pending::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -717,7 +717,7 @@ pub fn clear(file: &Path) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_clear(existing)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -728,7 +728,7 @@ pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
     let new_content = pending::op_reorder(existing, ids)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -760,7 +760,7 @@ pub fn reap(file: &Path) -> Result<()> {
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)? {
         new_doc = reconciled;
     }
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     if changed {
         eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");
     }
@@ -804,7 +804,7 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
 
     let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     Ok(())
 }
 
@@ -829,7 +829,7 @@ pub fn prune(file: &Path) -> Result<()> {
     let removed = lines.len() - new_lines.len();
     let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     eprintln!("[pending] pruned {} completed items", removed);
     Ok(())
 }
@@ -850,7 +850,7 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     eprintln!(
         "[pending] resolved {} [/{}] item(s): {}",
         resolved.len(),
@@ -870,7 +870,7 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     let new_content = pending::op_set_gate_type(existing, id, gate_type)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
     Ok(())
 }
@@ -888,7 +888,7 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
     let new_content = pending::op_set_gate_verify(existing, id, spec, set_at)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    std::fs::write(file, &new_doc)?;
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
     eprintln!(
         "[pending] set verify predicate on [#{}] (set_at={})",
         id, set_at

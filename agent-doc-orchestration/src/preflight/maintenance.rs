@@ -309,8 +309,13 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
     //    only diverged the snapshot (gate/edit/review-add) is still committed
     //    rather than stranded (#pending-gate-snapshot-desync).
     if mutated {
-        std::fs::write(file, &current_content)
-            .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
+        // `#fcc0`: converge the reconciled document through the editor IPC when a
+        // live JB listener is active so per-cycle pending maintenance never raises a
+        // `File Cache Conflict`; `content` is the pre-maintenance on-disk baseline.
+        // Falls back to the same plain disk write otherwise. The post-write reap
+        // verification below reads `current_content` (not disk), so converging here
+        // introduces no read-after-write race.
+        crate::write::converge_or_disk_write(file, &content, &current_content, "pending_maintenance")?;
     }
     if (mutated || snapshot_mutated)
         && let Some(snap_content) = &snapshot_content
@@ -767,8 +772,9 @@ pub(crate) fn run_gate_verify(file: &Path, autoverify: bool) -> Result<Vec<GateV
             new_body = crate::pending::op_done(&new_body, id)?;
         }
         let new_content = review.replace_content(&content, &new_body);
-        std::fs::write(file, &new_content)
-            .with_context(|| format!("failed to write {} after optverify", file.display()))?;
+        // `#fcc0`: converge the gate flip through the editor IPC when a live JB
+        // listener is active (no `File Cache Conflict`); plain disk write otherwise.
+        crate::write::converge_or_disk_write(file, &content, &new_content, "optverify_resolve")?;
         // Keep the snapshot in lockstep so the upcoming commit stages the flip.
         if let Some(snap) = snapshot::load(file)?
             && let Ok(snap_comps) = crate::component::parse(&snap)

@@ -923,7 +923,10 @@ pub(crate) fn mirror_pipeline_frontmatter(file: &Path, state: &CycleState) {
         let content = std::fs::read_to_string(file)?;
         let updated = crate::frontmatter::splice_pipeline_block(&content, &state.to_pipeline())?;
         if updated != content {
-            std::fs::write(file, updated)?;
+            // `#fcc0`: converge the frontmatter mirror through the editor IPC when a
+            // live JB listener is active so the post-response mirror write never
+            // raises a `File Cache Conflict`; plain disk write otherwise.
+            crate::write::converge_or_disk_write(file, &content, &updated, "pipeline_mirror")?;
         }
         Ok(())
     })() {
@@ -947,7 +950,10 @@ fn clear_pipeline_frontmatter(file: &Path) {
         }
         let updated = crate::frontmatter::splice_pipeline_block(&content, &Default::default())?;
         if updated != content {
-            std::fs::write(file, updated)?;
+            // `#fcc0`: converge the frontmatter clear through the editor IPC when a
+            // live JB listener is active (no `File Cache Conflict`); plain disk
+            // write otherwise.
+            crate::write::converge_or_disk_write(file, &content, &updated, "pipeline_clear")?;
         }
         Ok(())
     })() {

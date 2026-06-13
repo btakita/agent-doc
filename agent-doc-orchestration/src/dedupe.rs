@@ -32,7 +32,10 @@ pub fn run(file: &Path) -> Result<()> {
     }
 
     let removed = content.len() - result.len();
-    std::fs::write(file, &result).with_context(|| format!("failed to write {}", file.display()))?;
+    // `#fcc0`: converge through the editor IPC when a live JB listener is active so
+    // dedup never raises a `File Cache Conflict`; falls back to the same plain disk
+    // write otherwise.
+    crate::write::converge_or_disk_write(file, &content, &result, "dedupe")?;
 
     // Update snapshot to match
     crate::snapshot::save(file, &result)?;

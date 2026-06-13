@@ -55,6 +55,9 @@ Recovered the session and triaged the queue. **No code changes this cycle** — 
 - Backlog `#fcc0`, `#compactdrift`, `#rtwbcast` are all `[clean-session]` (live write-path / multi-editor work that must NOT run under live IPC).
 - Review `#qflood2`, `#efscodexsubmit`, `#stuckhandoff2`, `#qt32`, `#2v7b` are `[operator-verify]` / code-complete-awaiting-live-JB-drive.
 - The queue prompts are operator bug *reports/repros* (some left in deliberately, e.g. the "prompt removed then came back" demo), not fresh actionable agent work.
+3. **`#clearexchstale`** — JB `Clear Exchange` clears the exchange but content comes back from a stale HEAD/snapshot (same session: a deleted+retyped prompt also revived). Same disk-vs-buffer convergence family as `#fcc0` — a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear doesn't advance the durable merge base. Plan: route clear through `converge_document_or_disk` + advance merge base + gate redeliver on fresh editor-buffer proof (`#dvre`/`#eprf`). → `plan-jb-clear-exchange-stale-head-revival.md`
+2. **`#qdedup`** — between-queue-turn trigger enqueue must de-duplicate. The garbled `/clear /agent-doc <FILE>/agent-doc <FILE>` is successive between-turn enqueues concatenated without dedup. Plan: compose the next trigger as a deduped **set** (one `/clear`, one `/agent-doc <FILE>`), gate it strictly to the inter-turn boundary (never inject mid-turn — respect the drain-claim lease), deliver once with a `between_turn_enqueue deduped=N` proof line. Distinct from `#qflood2` (coalesce exit-1) and `#qchurn` (no-op churn). → `plan-between-turn-trigger-dedup.md`
+1. **`#recyclerestart`** — PCP/Supervisor recycle does not restart the agent session (`img_21.png`); JB `Sync Tmux Layout` after `tmux kill-pane` surfaced `Sync deferred: another tmux layout sync is already running`. I grounded this: the string is `SyncLayoutAction.kt:33` (the plugin-local sync guard), and `editors/jetbrains/SPEC.md:49` **already mandates** bounding every plugin-spawned sync subprocess and releasing the guard on timeout so the IDE never gets stuck reporting that exact message. So the live symptom is the guard held by a stalled/slow sync that isn't bounded/released. Plan also covers your "pane management should be independent of in-pane init" ask. → `plan-pcp-recycle-no-restart-sync-block.md`
 
 The prior turn already reached this same conclusion and paused go-mode ("queue exhausted of agent-drainable work … resume from a clean session"). I'm honoring that — **not auto-looping**.
 
@@ -71,36 +74,28 @@ This cycle had **no genuine new user prompt** — the only diff was a fresh comp
 **3. No agent-drainable work remains.** Same conclusion as the committed triage: backlog `#compactdrift` / `#rtwbcast` / `#fcc0` are `[clean-session]` (live write-path), review items are `[operator-verify]`. The remaining go-mode queue churn is the **`#qchurn`** bug actively manifesting — untagged free-text operator bug-reports keep `queue_active=true`, so the idle-watch re-injects `queue_trigger=auto` with zero drainable work. **Not auto-looping.**
 
 **Operator action to make progress:** drive the `[clean-session]` items (each has a plan file) from a **fresh, non-route-owned** session; the `#qchurn` fix and queue cleanup both require that clean session (Editing the queue under the live IPC supervisor races and corrupts).
-<!-- agent:boundary:b49e78ce -->
+<!-- agent:boundary:a486d928 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- re [#qflood2]: I'm still seeing prompts entered into the agent during an active turn. It should stop the running agent-doc queue drain once a queue turn is complete, then insert the commands into the inactive agent (between queue turns). The turn ended with `/clear /agent-doc tasks/agent-doc/agent-doc-bugs2.md/agent-doc tasks/agent-doc/agent-doc-bugs2.md` due to the accumulating instructions. Please follow the plan to enqueue unique (de-duplicated...only one `/clear` allowed, only one `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` allowed) instructions. These must land once as part of the PCP/Supervisor between queue turn stage.
+- :pushpin: The PCP/Superivsor recycle does not restart the agent session. ![img_21.png](img_21.png). After I ran `tmux kill-pane`, then JB `Sync Tmux Layout`...a dialog `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.` appeared. Why was the sync blocked? The syncs should be fast. Are they blocking on something? If there is some in-pane initialization needed, the tmux pane management should be independent. So opening, moving tmux panes should not block on the task happening within the tmux pane. Of course some operations need to block on the in-pane activity, such as waiting for the supervisor to complete before it self-closes.
 - :round_pushpin: do [#compactdrift]
----
-The agent-doc binary should auto-kill the orphan
-```
-● Diagnosis confirmed: PID 353539 has been wedged in --handoff-state preparing for 6+ minutes, its predecessor
-  (4138479) is dead, and it is not the current authoritative supervisor (that's PID 1073070, gen=339, ready). It's an
-  orphaned #stuckhandoff2 wedge racing my writes and producing the phantom 17625-byte stale buffer. Per the documented
-  recovery ladder, this orphan is safe to kill (it's not the live supervisor):
-```
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
 ```
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-171403.md`*
-
 Compacted content:
 ❯ - Archived 1 response topic(s): Post-compaction recovery + no agent-drainable work remains
 ❯ - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
 <!-- agent:boundary:9dec9035-a893-4e69-ba6b-1fd5f1bf7abb -->
 ```
 ---
-- :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
-- I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
+:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
+- :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
-- re [#qflood2]: I'm still seeing prompts entered into 
 - :round_pushpin: do [#rtwbcast]
 ---
 :pushpin: In tsift.md, I had a queue:
@@ -118,7 +113,7 @@ Compacted content:
 I then manually deleted the strikethrough items...but then agent-doc struck through the next open item
 ```
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~[#loggatefidelity]~
+- ~~[#loggatefidelity]~~
 - [#gdbwalcheckpoint]
 - [#logfoldname]
 - [#pcachebp]
@@ -166,6 +161,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running` (SyncLayoutAction.kt:33). Operator: syncs should be fast + tmux pane management independent of in-pane init. ROOT: plugin-local sync guard held by a stalled/slow sync not bounded/released per SPEC.md:49; recycle promotes binary but may not restart/clear the harness session. FIX: bound+release sync guard on killed/recycling pane (sync_guard_released proof), decouple layout geometry from in-pane readiness, prove recycle restarts/clears session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
+- [ ] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
+- [ ] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md
 - [ ] [#qpresetstrike] [clean-session] Preset-token queue head (a #name from prompt_presets, e.g. #advance-review) is unstrikeable by any agent path: `queue consume` rejects it as id-backed (leading #), while `--done`/`--pending-gate` reject it as not a backlog id, and `finalize` keeps the head — so it wedges queue_active=true and re-serves every /agent-doc invocation. FIX: classify a #-head against prompt_presets AND backlog/icebox before routing; a preset head should strike like a free-text head via consume + the finalize heuristic, while do[#id] heads stay on the --done path. Workaround: strike ~~#name~~ + drop go + reset --from-current --preserve-session + commit. Relates to #qchurn/#goqueuestall. Plan: tasks/agent-doc/plan-preset-queue-head-unstrikeable.md
 - [ ] [#qchurn] [clean-session] go-mode no-op churn: after #goqueuestall tag-defer skips the id-backed [clean-session]/[operator-verify] backlog heads, untagged FREE-TEXT operator bug-report prompts in the ## Queue block still keep queue_active=true and the supervisor idle-watch re-injects queue_trigger=auto each idle boundary -> repeated no-op /agent-doc cycles (no content diff, user_intent_prompt_changes empty, zero drainable work). Halted live 2026-06-13 via admin queue pause (receipt 27, gen 338). FIX: go-mode should treat a queue whose only remaining prompts are non-id free-text reports (no actionable do #id / new user prompt) as not-drainable and stop re-dispatching, same as the undrainable-head skip. Plan: tasks/agent-doc/plan-go-queue-stall.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md

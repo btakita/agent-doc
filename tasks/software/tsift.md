@@ -81,14 +81,31 @@ Changes in `packages/tsift-digest/src/log_digest.rs`:
 - **Commit + push:** tsift `2ee2009` → `origin/main`; superproject pointer `9c5245ebe`. CI triggered (pending; local gate green).
 
 Next in queue: `#pcacheattr`.
-<!-- agent:boundary:c0656053 -->
+
+### Re: do #pcacheattr — opus-4-8
+
+> **Queue prompt:**
+>
+> [#pcacheattr]
+
+
+Done. Fixed prompt-cache drift attribution: `first_changed_field` always reported `stable_prefix_fingerprint` because the **derived** composite fingerprint (a hash of provider + cache_key + stable_prefix + breakpoints) was pushed first in `prompt_cache_field_changes` — so any sub-field change flipped it and it always won attribution, never naming the real cause.
+
+Fix in `packages/tsift-agent-doc/src/session_cost.rs`: order the concrete sub-fields (`cache_key`, `breakpoints`, `routing_affinity`, `provider`) **ahead of** the composite fingerprint. Now `first_changed_field` (and the scorecard's `suspected_invalidation_cause`) name the specific changed input; the fingerprint is only reported as first-changed when no tracked sub-field moved — i.e. the stable-prefix **content** itself drifted, which is the correct residual attribution.
+
+- **Tests:** rewrote the weak everything-changes test into a focused single-field case (only `cache_key` varies → attributed to `cache_key`, unchanged fields absent from `field_changes`) plus a new prefix-only case (only prefix content drifts → attributed to `stable_prefix_fingerprint`). Updated the `session_cost_reports_prompt_cache_invalidation_diagnostics` integration test that had the same everything-changes weakness.
+- **Spec:** documented the attribution ordering in `specs/digests-sessions.md`.
+- **Verify:** `make check` green (clippy `-D warnings`, full suite); release+install rebuilt.
+- **Commit + push:** tsift `636e561` → `origin/main`; superproject pointer `d89ba5f12`. CI triggered (pending; local gate green).
+
+Next in queue: `#gdbwritelock`.
+<!-- agent:boundary:6e51f400 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#logfoldloss]~~
-- [#pcacheattr]
+- ~~[#pcacheattr]~~
 - [#gdbwritelock]
 - [#pcacheregtrunc]
 - [#loggatefidelity]
@@ -103,7 +120,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#pcacheattr] prompt-cache drift attribution wrong on default path: the derived composite fingerprint (packages/tsift-agent-doc/src/session_cost.rs:3283-3294, hashes provider+cache_key+stable_prefix+breakpoints) is pushed FIRST in prompt_cache_field_changes (:1770-1801), so first_changed_field is ALWAYS stable_prefix_fingerprint and never names the real cause (cache_key/breakpoints/routing/provider). The lone attribution test changes everything at once so it cannot catch this. Push concrete sub-fields before the derived fingerprint (or exclude it unless explicit). HIGH conf, med-high sev (#tscodereview).
 - [ ] [#gdbwritelock] graph-db write/refresh (tsift-cli/src/lib.rs:14037, tsift-sqlite/src/lib.rs:833) and snapshot-import rename (tsift-cli/src/commands/infra.rs:752-785) take NO cross-process lock; they rely only on SQLite busy_timeout(5s). Snapshot-import exists->sidecar-check->rename->rename races a concurrent `graph-db refresh` (TOCTOU -> graph.db corruption/lost refresh); parallel refreshes spuriously fail `database is locked` past 5s. Apply the existing index.lock/try_lock_exclusive discipline (tsift-index/src/index.rs:1565) to graph.db writes + the import rename window; map VACUUM-INTO lock error (infra.rs:650) to the live-lock diagnostic. med-high conf, HIGH sev (#tscodereview).
 - [ ] [#pcacheregtrunc] prompt-cache read_create_regression gate false-negative: derive_prompt_cache_diagnostics pushes the session-level regression LAST (session_cost.rs:1649) then truncate(6) (:1668), and the effectiveness fixture gate counts regressions from the truncated vec (:682-688). A long degraded session with 6+ per-turn ratio-drop/creation-spike diagnostics truncates the regression away, so maximum_read_create_regressions:0 passes when the session genuinely regressed. Count from the raw signal pre-truncation (or push session-level regressions first). HIGH conf, med sev (#tscodereview).
 - [ ] [#loggatefidelity] log-digest token-savings gate is structurally always-passing for large logs (log_digest.rs:265-322): savings ~= 1 - capped_digest/raw, digest is cap-bounded (12 signals/8 families) while raw grows unbounded, so savings -> 100% regardless of how much signal dropped past the caps; only required_signals substring checks guard fidelity and cannot express all-N-failures-survived. Add a distinct-error / dropped-past-cap coverage assertion. HIGH conf, med sev (#tscodereview).

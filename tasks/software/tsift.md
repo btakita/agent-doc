@@ -42,6 +42,11 @@ Compacted content:
 
 ### Re: #bugs-observed + improve prompt caching — opus-4-8
 
+> **Queue prompt:**
+>
+> :round_pushpin: do [#avbq]
+
+
 Added 4 prioritized backlog items.
 
 **Observed bug (top priority, #1td4):** the v0.1.70 `Release` run (`27473681731`) **failed at crates.io with `403 authentication failed`** — `CARGO_REGISTRY_TOKEN` is expired/invalid. The other jobs succeeded: GitHub release `v0.1.70` is live, the OpenCode npm plugin published via OIDC, all platform builds passed. So the tag + commit are pushed and the GitHub/npm artifacts shipped, **but no crate was published to crates.io**. Root-fix: migrate the crates.io publish job in `release.yml` to OIDC trusted publishing (mirror the npm OIDC job) so there is no long-lived token to expire. Re-publishing is operator-gated — the trusted publisher must be registered on crates.io (or the token rotated) before a re-run; I did not retry the failed publish.
@@ -63,15 +68,15 @@ Added 4 prioritized backlog items.
 - New `remediation: String` on `SessionCostPromptCachePrefixDrift`, populated from the attributed `first_changed_field` via `prompt_cache_prefix_drift_remediation`:
 
 No tsift code changed this turn (backlog capture only). Top of backlog: **#1td4**.
-<!-- agent:boundary:27128d78 -->
+<!-- agent:boundary:ec2f3bf2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#1td4]~~
-- :round_pushpin: do [#0g7c]
-- :round_pushpin: do [#avbq]
+- ~~:round_pushpin: do [#0g7c]~~
+- ~~:round_pushpin: do [#avbq]~~
 - :round_pushpin: do [#wwm1]
 - #bugs-observed
 - Add backlog items for tsift to improve prompt caching?
@@ -83,7 +88,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#avbq] Track prompt-cache effectiveness across sessions: persist per-session cached_input_ratio / net_cached_input_tokens / read_create_regressions so cross-run regressions are detectable (today the gate is per-fixture / per-transcript only).
 - [ ] [#wwm1] Surface prompt-cache effectiveness + top prefix-drift attribution inline in session-review --next-context / context-pack output (packages/tsift-agent-doc/src/session_cost.rs build_prompt_cache_effectiveness_report), so caching health shows without running the fixture command. [recommended]
 <!-- /agent:backlog -->
 

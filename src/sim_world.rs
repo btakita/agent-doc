@@ -2124,6 +2124,111 @@ fn non_dogfood_document_clears_and_drains_without_auto_recycle() {
 }
 
 #[test]
+fn non_dogfood_document_auto_recycles_and_drains_from_opt_in_alone() {
+    // `#simworld` / `#suprecyclecfg`: the COMPLEMENT of
+    // `non_dogfood_document_clears_and_drains_without_auto_recycle`. A non-dogfooding
+    // document whose project (or frontmatter) DID opt into
+    // `agent_doc_supervisor_auto_recycle` must perform BOTH the auto-recycle AND the
+    // auto-clear + go-mode drain steps, driven purely by the opt-in — with NO operator
+    // `admin recycle` mark. This proves the per-document/per-project opt-in alone (the
+    // resolution rung added in `resolve_supervisor_auto_recycle`) is sufficient to drive
+    // the full recycle/clear/drain pipeline for any document, not just the dogfooding
+    // repo and not requiring a manual `admin recycle --all-projects`. Mirrors
+    // `recycle_clear_pipeline_resumes_go_mode_drain_as_a_step` but replaces the
+    // `OperatorRecycleMark` with the auto path (stale binary + opt-in → the production
+    // `supervisor_recycle_action` predicate fires on its own).
+    let mut world = SimWorld::new(7_312);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // The supervisor binary is stale (a later `cargo install`) and this document opted
+    // into auto-recycle — but the operator never ran `admin recycle`. The opt-in alone
+    // must drive the recycle.
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+
+    // First idle tick: stale + opt-in + turn boundary → `supervisor_recycle_action`
+    // returns Recycle (no operator mark needed). The in-place `execve` promotes the
+    // fresh binary, preserves the live pane, and advances the generation. No head is
+    // waiting yet, so the recycle does not dispatch.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "the opt-in alone drives the auto-recycle — no operator `admin recycle` mark"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "recycle advances the generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "recycle preserves the live pane via execve (not a cold rebind)"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "recycle promoted the freshly-installed binary"
+    );
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "no head was waiting at the recycle boundary"
+    );
+
+    // A go-mode head is now waiting; the operator `session clear` (or the watch's
+    // deferred clear) writes the manual clear cooldown before any idle poll observes it.
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+    assert!(world.recycle_clear.clear_cooldown_active);
+
+    // Settle debounce: the cooldown holds for CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+    // consecutive idle polls. The binary is already fresh, so NO further recycle fires.
+    for tick in 1..4 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert!(
+            world.recycle_clear.clear_cooldown_active,
+            "cooldown must hold at settle tick {tick}"
+        );
+        assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+        assert_eq!(world.coverage.go_drain_dispatches, 0);
+        assert_eq!(
+            world.coverage.supervisor_recycles, 1,
+            "a freshly-recycled supervisor does not recycle again"
+        );
+    }
+
+    // 4th settled idle tick: the auto-CLEAR step completes (cooldown auto-expires).
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert!(
+        !world.recycle_clear.clear_cooldown_active,
+        "cooldown auto-expired after the settle debounce — the clear step ran"
+    );
+    assert_eq!(world.coverage.clear_cooldown_resumes, 1);
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "the resume tick re-evaluates; it does not dispatch into the just-cleared pane"
+    );
+
+    // Next tick: the go-mode drain dispatches the waiting head — recycle + clear + drain
+    // all resumed as steps, driven by the auto-recycle opt-in with no operator route.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 1,
+        "the non-dogfooding doc drains its go-mode queue after the opt-in recycle + clear"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycle_failures, 0,
+        "the in-place recycle succeeded"
+    );
+
+    // A stuck head is not re-fired every tick (drain dedup).
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
 fn failed_reexec_recycle_keeps_session_alive_and_does_not_retry() {
     // `#suprecyclestall`: a stale binary opted into auto-recycle, but the in-place
     // `execve` fails (no candidate binary launches). The watch must NOT

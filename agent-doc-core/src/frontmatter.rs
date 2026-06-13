@@ -521,6 +521,21 @@ pub struct Frontmatter {
         rename = "agent_doc_clear_threshold"
     )]
     pub clear_threshold: Option<u8>,
+    /// Explicit per-document opt-in/opt-out for supervisor auto-recycle
+    /// (`#ctlrecycle` R3 / `#suprecyclequeue`). When the route-owned supervisor
+    /// detects it is running a stale binary at an idle / inter-queue-item
+    /// boundary, `true` lets it `execve` hot-reload onto the freshly-installed
+    /// build (preserving the live agent child + pane); `false` force-disables
+    /// that swap so a stale supervisor only logs `supervisor_binary_stale_detected`.
+    /// Resolution: env `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`, then this frontmatter
+    /// value, then the project config `agent_doc_supervisor_auto_recycle`, then
+    /// the built-in default of OFF.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_supervisor_auto_recycle"
+    )]
+    pub supervisor_auto_recycle: Option<bool>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -1899,6 +1914,7 @@ mod tests {
             queue_context_reset: None,
             gate_autoverify: None,
             clear_threshold: None,
+            supervisor_auto_recycle: None,
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,

@@ -1073,12 +1073,18 @@ pub(crate) fn recycle_idle_grace() -> Duration {
 ///
 /// The env var `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` is an explicit operator override:
 /// truthy (`1`/`true`/`yes`/`on`) force-enables, falsey (`0`/`false`/`no`/`off`)
-/// force-disables. When it is unset or unrecognized, the project-config opt-in
-/// (`agent_doc_supervisor_auto_recycle` in `.agent-doc/config.toml`) decides; absent
-/// there too, the default is OFF (the `execve` hot-reload is high blast-radius, so a
-/// stale supervisor only logs `supervisor_binary_stale_detected` until a project or
-/// operator opts in). Pure so the precedence is unit-testable.
-pub(crate) fn resolve_supervisor_auto_recycle(env: Option<&str>, project: Option<bool>) -> bool {
+/// force-disables. When it is unset or unrecognized, a per-document frontmatter
+/// opt-in/opt-out (`agent_doc_supervisor_auto_recycle`) decides; absent there, the
+/// project-config opt-in (`agent_doc_supervisor_auto_recycle` in
+/// `.agent-doc/config.toml`) decides; absent everywhere, the default is OFF (the
+/// `execve` hot-reload is high blast-radius, so a stale supervisor only logs
+/// `supervisor_binary_stale_detected` until a project, document, or operator opts
+/// in). Pure so the precedence is unit-testable.
+pub(crate) fn resolve_supervisor_auto_recycle(
+    env: Option<&str>,
+    frontmatter: Option<bool>,
+    project: Option<bool>,
+) -> bool {
     if let Some(raw) = env {
         match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => return true,
@@ -1086,16 +1092,21 @@ pub(crate) fn resolve_supervisor_auto_recycle(env: Option<&str>, project: Option
             _ => {}
         }
     }
-    project.unwrap_or(false)
+    frontmatter.or(project).unwrap_or(false)
 }
 
 /// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
-/// supervisor hosting `doc`? Reads the env override plus the document's project config
-/// and resolves via [`resolve_supervisor_auto_recycle`]. Default OFF.
+/// supervisor hosting `doc`? Reads the env override, the document's frontmatter, and
+/// its project config, then resolves via [`resolve_supervisor_auto_recycle`]. Default OFF.
 pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
+    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
+        crate::frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm.supervisor_auto_recycle)
+    });
     let project = crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
-    resolve_supervisor_auto_recycle(env.as_deref(), project)
+    resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
 /// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
@@ -4155,21 +4166,24 @@ mod tests {
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {
         use super::resolve_supervisor_auto_recycle as r;
-        // `#suprecyclequeue` precedence: env override wins over project config.
-        // Env truthy force-enables regardless of project config.
-        assert!(r(Some("1"), Some(false)));
-        assert!(r(Some("true"), None));
-        assert!(r(Some(" ON "), Some(false)));
-        // Env falsey force-disables regardless of project config opt-in.
-        assert!(!r(Some("0"), Some(true)));
-        assert!(!r(Some("off"), Some(true)));
-        // Env unset / unrecognized → project config decides.
-        assert!(r(None, Some(true)));
-        assert!(!r(None, Some(false)));
-        assert!(r(Some("garbage"), Some(true)));
+        // `#suprecyclequeue` precedence: env > frontmatter > project config > default.
+        // Env truthy force-enables regardless of frontmatter / project config.
+        assert!(r(Some("1"), Some(false), Some(false)));
+        assert!(r(Some("true"), None, None));
+        assert!(r(Some(" ON "), Some(false), Some(false)));
+        // Env falsey force-disables regardless of frontmatter / project opt-in.
+        assert!(!r(Some("0"), Some(true), Some(true)));
+        assert!(!r(Some("off"), Some(true), Some(true)));
+        // Env unset / unrecognized → frontmatter decides over project config.
+        assert!(r(None, Some(true), Some(false)));
+        assert!(!r(None, Some(false), Some(true)));
+        assert!(r(Some("garbage"), Some(true), Some(false)));
+        // Frontmatter absent → project config decides.
+        assert!(r(None, None, Some(true)));
+        assert!(!r(None, None, Some(false)));
         // Nothing set anywhere → default OFF.
-        assert!(!r(None, None));
-        assert!(!r(Some(""), None));
+        assert!(!r(None, None, None));
+        assert!(!r(Some(""), None, None));
     }
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {

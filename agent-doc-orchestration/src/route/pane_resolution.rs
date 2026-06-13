@@ -175,7 +175,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                     },
                 ),
             );
-            let _authorization = authorize_controller_dispatch(
+            match authorize_controller_dispatch(
                 file,
                 session_id,
                 file_path,
@@ -187,7 +187,17 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                     harness.binary,
                     reason.replace(' ', "_")
                 ),
-            )?;
+            )? {
+                RouteDispatchAuthorization::CoalescedDeduped { detail } => {
+                    return Ok(route_dispatch_deduped_pane(
+                        file,
+                        "dispatch_only_reopen",
+                        dispatch_pane.clone(),
+                        &detail,
+                    ));
+                }
+                RouteDispatchAuthorization::Authorized => {}
+            }
             rescue_target(dispatch_pane.as_str());
             return dispatch_only_reopen_existing_pane(
                 tmux,

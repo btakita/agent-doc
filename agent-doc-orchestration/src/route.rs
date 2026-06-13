@@ -3676,7 +3676,7 @@ fn route_via_authoritative_actor(
                 dispatch_pane,
                 harness.binary
             );
-            let _authorization = authorize_controller_dispatch(
+            match authorize_controller_dispatch(
                 file,
                 session_id,
                 file_path,
@@ -3687,7 +3687,17 @@ fn route_via_authoritative_actor(
                     actor_state.as_str(),
                     harness.binary
                 ),
-            )?;
+            )? {
+                RouteDispatchAuthorization::CoalescedDeduped { detail } => {
+                    return Ok(route_dispatch_deduped_pane(
+                        file,
+                        "managed_reopen",
+                        dispatch_pane.clone(),
+                        &detail,
+                    ));
+                }
+                RouteDispatchAuthorization::Authorized => {}
+            }
             let dispatch_start = dispatch_via_supervisor_ipc(
                 tmux,
                 file,
@@ -3762,7 +3772,7 @@ fn route_via_authoritative_actor(
                         queued.prompt_text
                     })
             };
-            let _authorization = authorize_controller_dispatch(
+            match authorize_controller_dispatch(
                 file,
                 session_id,
                 file_path,
@@ -3773,7 +3783,17 @@ fn route_via_authoritative_actor(
                     actor_state.as_str(),
                     harness.binary
                 ),
-            )?;
+            )? {
+                RouteDispatchAuthorization::CoalescedDeduped { detail } => {
+                    return Ok(route_dispatch_deduped_pane(
+                        file,
+                        "dispatch_only_reopen",
+                        dispatch_pane.clone(),
+                        &detail,
+                    ));
+                }
+                RouteDispatchAuthorization::Authorized => {}
+            }
             dispatch_only_send_reopen(
                 tmux,
                 file,
@@ -3799,7 +3819,7 @@ fn route_via_authoritative_actor(
             Ok(dispatch_pane)
         }
         AuthoritativeActorDispatchAction::ManagedSupervisorIpc => {
-            let _authorization = authorize_controller_dispatch(
+            match authorize_controller_dispatch(
                 file,
                 session_id,
                 file_path,
@@ -3810,7 +3830,17 @@ fn route_via_authoritative_actor(
                     actor_state.as_str(),
                     harness.binary
                 ),
-            )?;
+            )? {
+                RouteDispatchAuthorization::CoalescedDeduped { detail } => {
+                    return Ok(route_dispatch_deduped_pane(
+                        file,
+                        "managed_reopen",
+                        dispatch_pane.clone(),
+                        &detail,
+                    ));
+                }
+                RouteDispatchAuthorization::Authorized => {}
+            }
             let dispatch_start = dispatch_via_supervisor_ipc(
                 tmux,
                 file,

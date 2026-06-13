@@ -736,7 +736,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 4,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 9,
-        ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 1,
+        // +1 (`reason=in_flight_coalesce`): #qflood2 `route_dispatch_deduped_pane`
+        // logs the benign in-flight dedup before returning deduped-success without a
+        // re-send. Routed through the `RouteDispatchAuthorization::CoalescedDeduped`
+        // outcome so every dispatch site handles the coalesce at compile time.
+        ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 4,
         ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 2,

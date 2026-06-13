@@ -370,6 +370,15 @@ the dispatch actor and produce receipts.
   add a `queue_backpressure` row before any external input is sent. When a
   document is draining and the actor is not ready, dispatch must return
   `failed_stage=actor_busy_draining` through the same receipt/backpressure path.
+- A redundant in-flight re-dispatch (an identical dispatch for the same cycle is
+  already accepted and unconsumed) is coalesced: the controller records the
+  `coalesced_in_flight` receipt and suppresses the re-send so the routed trigger is
+  never piled into the busy pane. Because the requested work is already in flight,
+  this is a benign dedup, not a failure — route callers must recognise the coalesce
+  (it carries the stable `failed_stage=coalesced_in_flight` marker across the IPC
+  boundary), skip the re-send, and report deduped-success on the already-running
+  dispatch pane rather than surfacing an exit-1 to the operator (`#qflood2`). An
+  explicit operator dispatch is never coalesced.
 
 ## Migration gates
 

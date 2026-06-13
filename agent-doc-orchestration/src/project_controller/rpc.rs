@@ -350,6 +350,21 @@ pub fn dispatch_should_coalesce_in_flight(in_flight_same_cycle: bool, operator_d
     in_flight_same_cycle && !operator_driven
 }
 
+/// Stable machine marker embedded in the `handle_dispatch` coalesce bail so callers
+/// across the IPC boundary (where the controller error is only a string) can
+/// recognise a benign in-flight dedup and report deduped-success instead of an
+/// exit-1 failure. The marker survives `request_controller`'s `project controller
+/// command \`dispatch\` failed: …` wrapping and the test/`test-support` direct path.
+pub const DISPATCH_COALESCED_IN_FLIGHT_MARKER: &str = "failed_stage=coalesced_in_flight";
+
+/// `#qflood2`: classify whether a failed dispatch is the benign in-flight coalesce.
+/// A coalesce means an identical dispatch for this cycle is already in flight, so the
+/// requested work is happening — the caller should skip a redundant re-send (never
+/// reintroduce the flood) yet report success rather than surfacing exit-1.
+pub fn dispatch_error_is_coalesced(message: &str) -> bool {
+    message.contains(DISPATCH_COALESCED_IN_FLIGHT_MARKER)
+}
+
 pub fn authorize_dispatch(
     project_root: &Path,
     request: DispatchRequest,
@@ -2435,9 +2450,10 @@ pub(crate) fn handle_dispatch(
                 ),
             );
             anyhow::bail!(
-                "dispatch coalesced for {}: a dispatch for generation {} is already in flight (#qflood); receipt_id={}",
+                "dispatch coalesced for {}: a dispatch for generation {} is already in flight (#qflood); {} receipt_id={}",
                 file.display(),
                 record.generation,
+                DISPATCH_COALESCED_IN_FLIGHT_MARKER,
                 receipt.receipt_id
             );
         }
@@ -3824,6 +3840,21 @@ mod tests {
         assert!(!dispatch_should_coalesce_in_flight(false, true));
     }
     #[test]
+    fn qflood2_coalesce_marker_survives_ipc_wrapping() {
+        // The route caller only sees the controller error as a string across IPC,
+        // wrapped by `request_controller`. The benign-coalesce classifier must still
+        // recognise it through that wrapping (the same pattern #ctlstalebin uses).
+        let wrapped = format!(
+            "project controller command `dispatch` failed: dispatch coalesced for x: a dispatch for generation 66 is already in flight (#qflood); {} receipt_id=3310",
+            DISPATCH_COALESCED_IN_FLIGHT_MARKER
+        );
+        assert!(dispatch_error_is_coalesced(&wrapped));
+        // A real failure (e.g. a paused queue) must NOT be swallowed as success.
+        assert!(!dispatch_error_is_coalesced(
+            "project controller command `dispatch` failed: dispatch blocked for x: failed_stage=queue_paused"
+        ));
+    }
+    #[test]
     fn qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -3881,6 +3912,17 @@ mod tests {
         assert!(
             format!("{err:#}").contains("coalesced"),
             "a redundant in-flight re-dispatch must coalesce: {err:#}"
+        );
+        // `#qflood2`: the coalesce bail must carry the stable machine marker so route
+        // callers can recognise the benign dedup across the IPC boundary and report
+        // deduped-success instead of an exit-1 failure.
+        assert!(
+            dispatch_error_is_coalesced(&format!("{err:#}")),
+            "a coalesce bail must be classifiable as deduped-success: {err:#}"
+        );
+        assert!(
+            !dispatch_error_is_coalesced("dispatch blocked for x: failed_stage=queue_paused"),
+            "an unrelated dispatch failure must NOT classify as a benign coalesce"
         );
         let coalesced: i64 = conn
             .query_row(

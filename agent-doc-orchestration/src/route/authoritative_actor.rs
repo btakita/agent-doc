@@ -302,6 +302,19 @@ pub(crate) fn current_generation_ready_prompt_proven(
         && target.actor_state() == crate::session_actor::ActorState::Ready
 }
 
+/// Outcome of a route-side controller dispatch authorization.
+///
+/// `#qflood2`: a benign in-flight coalesce (an identical dispatch for this cycle is
+/// already in flight) must NOT re-send the routed trigger — re-sending is the flood.
+/// It is also not a failure: the requested work is already happening. Modeling this
+/// as a distinct variant forces every dispatch site to handle the deduped case at
+/// compile time, so no send path can accidentally fire on a coalesce and a coalesce
+/// can never surface as an exit-1 to the operator.
+pub(crate) enum RouteDispatchAuthorization {
+    Authorized,
+    CoalescedDeduped { detail: String },
+}
+
 pub(crate) fn authorize_controller_dispatch(
     file: &Path,
     session_id: &str,
@@ -309,9 +322,9 @@ pub(crate) fn authorize_controller_dispatch(
     actor: &AuthoritativeActorDispatchTarget,
     command_kind: &str,
     diagnostic_payload: &str,
-) -> Result<crate::project_controller::DispatchAuthorization> {
+) -> Result<RouteDispatchAuthorization> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    crate::project_controller::authorize_dispatch(
+    match crate::project_controller::authorize_dispatch(
         &base_dir,
         crate::project_controller::DispatchRequest {
             file: file.to_path_buf(),
@@ -321,7 +334,36 @@ pub(crate) fn authorize_controller_dispatch(
             command_kind: command_kind.to_string(),
             diagnostic_payload: diagnostic_payload.to_string(),
         },
-    )
+    ) {
+        Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
+        Err(err) if crate::project_controller::dispatch_error_is_coalesced(&err.to_string()) => {
+            Ok(RouteDispatchAuthorization::CoalescedDeduped {
+                detail: err.to_string(),
+            })
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Shared deduped-success handler for every route dispatch site: log the dedup and
+/// hand back the already-running dispatch pane without re-sending the trigger.
+pub(crate) fn route_dispatch_deduped_pane(
+    file: &Path,
+    command_kind: &str,
+    dispatch_pane: String,
+    detail: &str,
+) -> String {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_deduped file={} pane={} command_kind={} reason=in_flight_coalesce detail={}",
+            file.display(),
+            dispatch_pane,
+            command_kind,
+            detail.chars().take(160).collect::<String>(),
+        ),
+    );
+    dispatch_pane
 }
 
 pub(crate) fn load_authoritative_actor_dispatch_target(

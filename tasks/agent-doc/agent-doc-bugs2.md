@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
@@ -81,7 +82,16 @@ Done this turn, all committed + pushed + verified:
 **Remaining `[clean-session]` items** — tree is clean + binary fresh, so I can drive the agent-doable code directly, each its own fully-verified cycle: **#compactdrift** (structural typed_component_drift discriminator — fixes the compact/commit drift that keeps mangling this very doc, which I had to `reset --from-current` to recover again this turn), **#goqstall2**, then **#fcc0** converge code. Live-JB 0-dialogs (#fcc0) + two-IDE (#rtwbcast) proofs still need a human check. Starting **#compactdrift** next.
 
 Not auto-looping (remaining heads are clean-session/operator-drive; that's #goqstall2).
-<!-- agent:boundary:55337155 -->
+
+### Re: #drain-no-defer shipped — deferring a drainable item is now a coded stall — opus-4.8
+
+Built your correction into agent-doc as a product rule (`#drain-no-defer`), per "behavioral fixes are packagable": committed `1789b58a` (submodule, pushed) + `a888e5407` (superproject pointer).
+
+- **SKILL auto-loop (`src/skill.rs`):** during an active queue drain, "this deserves its own focused/clean/fully-verified cycle" is now explicitly a **stall, not closeout**. The agent never defers an agent-drainable queued item; it keeps finalizing + looping, and the **PCP/supervisor `/clear`s + recycles agent context between items** (idle-boundary recycle) so high session-accretion is the supervisor's job, not a reason to stop. High accretion is explicitly **not** in the auto-loop skip list.
+- **Binary heuristic (`session_accretion.rs`):** `restart_or_drain_guidance(queue_active)` — while a queue drains it emits keep-draining / supervisor-`/clear` guidance instead of "Restart cleanly … before continuing." Unit-tested; `make check` green; skill mirror regenerated; `audit-docs` clean; binary built + installed (so the new guidance is live).
+
+Per this rule, the drain continues to **#compactdrift** next — and the mechanism for the context reset between items (supervisor `/clear` + auto-recycle) is now shipped, so the next item runs with fresh context rather than being deferred. The live-JB (#fcc0) and two-IDE (#rtwbcast) proofs still need a human check.
+<!-- agent:boundary:4f3d66bb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -127,7 +137,6 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
-- :pushpin: do [#fccsupwarn]
 <!-- /agent:queue -->
 ###
 <!--

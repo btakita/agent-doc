@@ -192,28 +192,40 @@ agent-doc admin recycle --all-projects
 (or restart the IDE session). Until then pid 1368698 keeps serving pre-`aafa6510` code.
 
 This also unblocks the queue: preflight skipped **11 agent-undrainable heads** (`[clean-session]` / `[operator-verify]`, `#goqueuestall`) — those `do [#…]` items genuinely can't be agent-completed under a live, drifting IPC supervisor. The recycle gives them the clean session they need. I'm **not** auto-looping this drain (it's been 9 no-op closeouts in 15 cycles — pure churn against the stale supervisor); the recycle is the actual fix, not another drain pass. The individual captured bugs (`#clearexchstale`, `#fcc0`, `#qpresetstrike`, `#qchurn`, `#c2b6` compact re-verify) stay tracked in the backlog/plan files.
-<!-- agent:boundary:125b7c39 -->
+
+### Re: stale supervisor is the live churn source — restart to unblock — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
+
+
+No new actionable prompt this cycle — the only diff was striking the `~~~done` Compact-Exchange item (queue bookkeeping) plus line-shifted `do [#aazp]` / `[#recyclerestart]` entries. **No code changes; status + the one operator action that unblocks everything.**
+
+**Confirmed root of the ongoing churn (not a new bug).** The route-owned supervisor on this doc is **pid 1368698, started 15:05:36**, but the installed binary was rebuilt at **15:52** (`agent-doc 0.34.0`) — so the live host is **~47 min stale**. A stale supervisor is exactly what produces the recurring File Cache Conflict / IPC-drift dialogs, and by `#recyclerestart` the broken recycle **cannot deploy its own fix** (`execve` hot-reload ENOENTs after the atomic `cargo install`, falls back to continue-on-stale). It will keep churning until restarted.
+
+**Nothing is agent-drainable in this live-IPC session** (same standing conclusion as the last several cycles):
+- Backlog `#fcc0` / `#recyclerestart` / `#qdedup` / `#clearexchstale` / `#qpresetstrike` / `#qchurn` / `#rtwbcast` / `#pushpinaccum` are all `[clean-session]` — live write/sync-path changes whose build→install→recycle step **races this active supervisor**. Each already has a plan file.
+- Review `#qflood2` / `#efscodexsubmit` / `#stuckhandoff2` / `#qt32` / `#2v7b` are `[operator-verify]` — code-complete, awaiting a live JB drive so I can read the ops.log proof.
+- The `:pushpin:` queue heads are operator bug *reports/repros*, already captured as the backlog/review items above — they are the `#qchurn` manifestation keeping `queue_active=true` with zero drainable work.
+
+**One operator action unblocks both the churn and the clean-session backlog:** restart this doc's supervisor so it runs 0.34.0 —
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+— then either drive the `[operator-verify]` JB items live (so I check the logs), or re-invoke `/agent-doc` from that **fresh, non-route-owned** session so I can implement the `[clean-session]` fixes without racing a live host. **Not auto-looping** (would be `#qchurn` no-op churn).
+<!-- agent:boundary:fb8de721 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-:pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
-```
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-171403.md`*
-Compacted content:
-❯ - Archived 1 response topic(s): Post-compaction recovery + no agent-drainable work remains
-❯ - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-&gt;!-- agent:boundary:9dec9035-a893-4e69-ba6b-1fd5f1bf7abb --&lt;
-```
-~~~
-- :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
+- ~~:pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?~~
 - :pushpin: `:pushpin:` annotation are accumulating in the wrong place. I corrected `:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?` above.
 - :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
-- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
-- :round_pushpin: do [#c2b6]
+- :pushpin: :round_pushpin: do [#c2b6]
+- :pushpin: :round_pushpin: do [#aazp]
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
@@ -249,14 +261,14 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
-- :round_pushpin: do [#aazp]
-- :round_pushpin: do [#4myd]
-- :round_pushpin: do [#qdedup]
-- :round_pushpin: do [#clearexchstale]
-- :round_pushpin: do [#qpresetstrike]
-- :round_pushpin: do [#qchurn]
-- :round_pushpin: do [#fcc0]
-- :round_pushpin: do [#rtwbcast]
+- :pushpin: :round_pushpin: do [#4myd]
+- :pushpin: :round_pushpin: do [#qdedup]
+- :pushpin: :round_pushpin: do [#clearexchstale]
+- :pushpin: :round_pushpin: do [#qpresetstrike]
+- :pushpin: :round_pushpin: do [#qchurn]
+- :pushpin: :round_pushpin: do [#fcc0]
+- :pushpin: :round_pushpin: do [#rtwbcast]
+- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 - Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 <!-- /agent:queue -->
 ###

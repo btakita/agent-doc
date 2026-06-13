@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,13 +71,29 @@ So: nothing added to the tsift backlog for this item — no tsift-scoped observe
 3. Force-move the `v0.1.70` tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC and publishes.
 2. `gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true`.
 1. Register a Trusted Publisher on crates.io for each of the 23 tsift crates (repo `btakita/tsift`, workflow `release.yml`, no environment): `tsift-core`, `tsift-md-ast`, `tsift-graph`, `tsift-sqlite`, `tsift-algorithms`, `tsift-resolution`, `tsift-cache`, `tsift-tokensave`, `tsift-libsql`, `tsift-index`, `tsift-summarize`, `tsift-quality`, `tsift-agent-doc`, `tsift-digest`, `tsift-search`, `tsift-status`, `tsift-session`, `tsift-memory`, `tsift-memgraphrag`, `tsift-surrealdb`, `tsift-cli`, `tsift`, `tsift-sim-world`.
-<!-- agent:boundary:4fabceda -->
+
+### Re: #advance-review — opus-4-8
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+Went through `agent:review`. There is exactly one item, and it is already advanced to the agent ceiling — no new backlog item is warranted:
+
+- **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and on origin/main** (fe4144b -> f29f7a2; `rust-lang/crates-io-auth-action@v1`, `id-token: write`, no `CARGO_REGISTRY_TOKEN`). Its actionable continuation **already exists in the backlog as [#vmax]** — register the Trusted Publisher for all 23 crates, set `TSIFT_ENABLE_CRATES_PUBLISH=true`, re-tag `v0.1.70` to verify OIDC publish. Those steps require a crates.io account + browser 2FA, which an agent cannot perform, so #vmax is correctly `[operator-verify]` and #1td4 stays `[/]` gated until the operator completes registration.
+
+**Net:** nothing new to add. The review item is already paired with its actionable backlog item; the only thing left is operator-gated crates.io registration — adding another item would just duplicate #vmax. #1td4 stays gated; #vmax stays the operator handle.
+
+This empties the `#advance-review` drain; #vmax is `[operator-verify]` so go-mode defers it (queue has no remaining agent-drainable head).
+<!-- agent:boundary:c0b0ac40 -->
+- **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and on origin/main** (fe4144b -> f29f7a2; `rust-lang/crates-io-auth-action@v1`, `id-token: write`, no `CARGO_REGISTRY_TOKEN`). Its actionable continuation **already exists in the backlog as [#vmax]** — register the Trusted Publisher for all 23 crates, set `TSIFT_ENABLE_CRATES_PUBLISH=true`, re-tag `v0.1.70` to verify OIDC publish. Those steps require a crates.io account + browser 2FA, which an agent cannot perform, so #vmax is correctly `[operator-verify]` and #1td4 stays `[/]` gated until the operator completes registration.
+<!-- agent:boundary:368e14d9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- #advance-review
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

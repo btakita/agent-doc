@@ -102,7 +102,26 @@ Done — implemented, tested, committed + pushed (EFS `428b980`; not deployed �
 **Files:** `sections_repo.ts` (shared `normalize_name_`/`names_match_` + setter/reader columns), `borrower/applications/routes.ts` (both sign handlers), `borrower/full_application.tsx` (mismatch confirm UI), migration `0063`, +6 tests in `tests/esign-name-match.test.ts`. Full suite **606 pass / 0 fail**; builds clean.
 
 Queue continues: next up `do #fxsv` (ESIGN/UETA hardening), then `do #xn77` (realtime/poll admin updates).
-<!-- agent:boundary:29a8081a -->
+
+### Re: do #fxsv — ESIGN/UETA hardening — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#fxsv]
+
+
+Done — all three parts implemented, tested, committed + pushed (EFS `a869545`; not deployed). Migration ships with the code, so it goes live on the next deploy.
+
+**1. Consumer disclosures before consent (ESIGN §101(c)).** The Review & E-Sign step now has an "Electronic record & signature disclosure" panel above the consent checkbox covering the three required elements: system requirements, the right to a paper copy at no charge, and the right to withdraw consent. The consent label now reads "I have read the disclosure above and consent…". The wording is a standard first pass — **EFS counsel should finalize it** (per the earlier recommendation).
+
+**2. Tamper-evident snapshot of what was signed.** At signing, both sign routes serialize the full application content (all sections except the signature block) into deterministic JSON (recursively sorted keys) and compute its SHA-256. The snapshot JSON + hash are stored on the signature row, so EFS can later prove exactly what the borrower agreed to — not just that they signed.
+
+**3. Distinct consent timestamp.** The client records when the consent box was checked and sends it; the server stores `consent_at` separately from `signed_at` (falling back to signing time if absent).
+
+**Schema:** migration `0064` adds `consent_at`, `signed_content_hash`, `signed_content_json` to `application_signatures`. **Files:** `sections_repo.ts` (setter/reader columns), `routes.ts` (`stable_json_` + `signed_content_snapshot_` helpers, both sign handlers), `full_application.tsx` (disclosure panel + consent-time capture), migration `0064`, +4 tests in `tests/esign-hardening.test.ts`. Full suite **610 pass / 0 fail**; builds clean.
+
+Queue continues: last item `do #xn77` (realtime/poll admin updates).
+<!-- agent:boundary:f12e7a83 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,14 +131,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.~~
 - ~~do [#gz9h]~~
-- do [#fxsv]
+- ~~do [#fxsv]~~
 - do [#xn77]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#fxsv] [recommended] Review & E-Sign ESIGN/UETA hardening: (1) show consumer e-sign disclosures before consent per ESIGN 101(c) — hardware/software requirements, right to a paper copy, right to withdraw consent; (2) capture a tamper-evident snapshot/hash of the exact application content signed (prove what was agreed to), stored with the signature row; (3) record the consent timestamp distinctly from signed_at. Have EFS counsel review for CA hard-money disclosure requirements before launch sign-off (not legal advice).
 - [ ] [#xn77] [recommended] Realtime/poll admin updates: refresh admin application/pipeline views on document uploads + status changes without manual reload. Cheapest first: poll list/detail APIs every ~15-30s with ETag/If-None-Match. CF push options: Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (EFS already runs the BorrowerChatRoom DO) fanning an 'application:<id> changed' event to open admin sessions via EventSource/WebSocket. Start polling, upgrade to SSE/DO if latency matters.
 <!-- /agent:backlog -->
 

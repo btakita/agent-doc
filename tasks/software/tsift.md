@@ -60,14 +60,34 @@ All token-anchored so passing summaries (`test result: ok ... 0 failed`, `0 fail
 - **Commit + push:** tsift `2c68310` → `origin/main`; superproject pointer `fcec59f8e`. CI run triggered (pending; local verification is the gate and is green).
 
 Next in queue: `#logfoldloss`.
-<!-- agent:boundary:951ac48e -->
+
+### Re: do #logfoldloss — opus-4-8
+
+> **Queue prompt:**
+>
+> [#logfoldloss]
+
+
+Done. Fixed the case where semantically distinct failures templatize identically (e.g. per-test `FAILED tests/test_<n>.py - assert <n> == <n>`) and fold into one line-family shown with only first/last samples — while distinct error signals past `MAX_SIGNALS=12` were dropped — so real failures vanished from the digest body.
+
+Changes in `packages/tsift-digest/src/log_digest.rs`:
+- **`error_variants`** on each line-family — counts the folded variants that classified as an error, so the hidden distinct-error count survives past first/last sampling (new JSON field, omitted when zero).
+- **Error-bearing families rank first** before the `MAX_LINE_FAMILIES` cap, so a failure family is never truncated in favor of benign progress noise.
+- **Error signals rank ahead of warnings** before the `MAX_SIGNALS` cap, so a high-occurrence warning can't crowd a distinct error out of the digest.
+- **`digest_signal_text`** names the count (`family x20 (20 distinct errors): ...`), so it survives into the token-savings projection consumers and the gate read.
+
+- **Spec:** updated the line-family paragraph in `specs/digests-sessions.md`.
+- **Tests:** `line_family_surfaces_distinct_error_count_when_failures_fold` (20 distinct failures → `error_variants=20`, signal total countable, raw artifact recommended) + `error_signals_are_not_crowded_out_by_high_occurrence_warnings`. All pass; `make check` green; release+install rebuilt.
+- **Commit + push:** tsift `2ee2009` → `origin/main`; superproject pointer `9c5245ebe`. CI triggered (pending; local gate green).
+
+Next in queue: `#pcacheattr`.
+<!-- agent:boundary:c0656053 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#logclassfn]~~
-- [#logfoldloss]
+- ~~[#logfoldloss]~~
 - [#pcacheattr]
 - [#gdbwritelock]
 - [#pcacheregtrunc]
@@ -83,7 +103,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logfoldloss] log-digest line-family folding (log_digest.rs:846-881) collapses semantically-distinct error lines into one template (first/last sample only) and MAX_SIGNALS=12 (:508) drops the rest, so 8+ distinct failures vanish from the digest body even when a raw-log artifact is attached. Exempt error-classified lines from folding or surface a distinct-error count/sample. HIGH conf, med-high sev (#tscodereview).
 - [ ] [#pcacheattr] prompt-cache drift attribution wrong on default path: the derived composite fingerprint (packages/tsift-agent-doc/src/session_cost.rs:3283-3294, hashes provider+cache_key+stable_prefix+breakpoints) is pushed FIRST in prompt_cache_field_changes (:1770-1801), so first_changed_field is ALWAYS stable_prefix_fingerprint and never names the real cause (cache_key/breakpoints/routing/provider). The lone attribution test changes everything at once so it cannot catch this. Push concrete sub-fields before the derived fingerprint (or exclude it unless explicit). HIGH conf, med-high sev (#tscodereview).
 - [ ] [#gdbwritelock] graph-db write/refresh (tsift-cli/src/lib.rs:14037, tsift-sqlite/src/lib.rs:833) and snapshot-import rename (tsift-cli/src/commands/infra.rs:752-785) take NO cross-process lock; they rely only on SQLite busy_timeout(5s). Snapshot-import exists->sidecar-check->rename->rename races a concurrent `graph-db refresh` (TOCTOU -> graph.db corruption/lost refresh); parallel refreshes spuriously fail `database is locked` past 5s. Apply the existing index.lock/try_lock_exclusive discipline (tsift-index/src/index.rs:1565) to graph.db writes + the import rename window; map VACUUM-INTO lock error (infra.rs:650) to the live-lock diagnostic. med-high conf, HIGH sev (#tscodereview).
 - [ ] [#pcacheregtrunc] prompt-cache read_create_regression gate false-negative: derive_prompt_cache_diagnostics pushes the session-level regression LAST (session_cost.rs:1649) then truncate(6) (:1668), and the effectiveness fixture gate counts regressions from the truncated vec (:682-688). A long degraded session with 6+ per-turn ratio-drop/creation-spike diagnostics truncates the regression away, so maximum_read_create_regressions:0 passes when the session genuinely regressed. Count from the raw signal pre-truncation (or push session-level regressions first). HIGH conf, med sev (#tscodereview).

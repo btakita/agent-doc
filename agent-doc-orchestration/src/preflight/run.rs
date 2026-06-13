@@ -42,6 +42,21 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
     }
+    // #fccsupwarn: read-only WARN when the live controller/supervisor hosting this
+    // document is serving a STALE agent-doc binary (a newer build is installed but the
+    // long-running process hasn't been recycled). Surfaces the silent failure mode
+    // instead of leaving the operator to re-file File-Cache-Conflict dialogs. Fail-open
+    // — any status/stat error yields no warning and never blocks the cycle.
+    if let Some(message) = crate::project_controller::stale_supervisor_warning_for_doc(file) {
+        let warning = PreflightWarning {
+            code: "supervisor_binary_stale".to_string(),
+            message,
+            document_agent: None,
+            active_harness: None,
+        };
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
+    }
 
     if initial_frontmatter.codex_network_access.is_some()
         && canonical_harness_name(&active_harness).as_deref() != Some("codex")

@@ -947,6 +947,49 @@ pub(crate) fn process_binary_is_stale(recorded: Option<&ControllerBinaryIdentity
     }
 }
 
+/// `#fccsupwarn` — read-only operator WARN message when the LIVE controller/supervisor
+/// hosting this document is serving a stale agent-doc binary (a fresh `cargo install`
+/// hasn't been picked up). Pure over a [`ControllerStatus`] so it is unit-testable and
+/// has no IO; the caller (preflight / session-check) loads the status and surfaces the
+/// message. Returns `None` for an inactive controller (nothing is hosting), a status
+/// with no recorded launch identity, or a fresh binary — so the warning only fires for
+/// the exact "already-running supervisor uses the OLD binary until restarted" churn
+/// class that silently produces `#fcc0` / `#ipcdrift` File Cache Conflict dialogs.
+pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Option<String> {
+    if !status.active {
+        return None;
+    }
+    if !process_binary_is_stale(status.controller_binary.as_ref()) {
+        return None;
+    }
+    let pid = status
+        .pid
+        .map(|pid| format!(" (pid {pid})"))
+        .unwrap_or_default();
+    let launched = status
+        .controller_binary
+        .as_ref()
+        .map(|id| format!(" launched as {}", id.version))
+        .unwrap_or_default();
+    Some(format!(
+        "the live session controller/supervisor{pid}{launched} is running a STALE agent-doc binary \
+         (a newer build is installed) — restart it so the latest fixes take effect: \
+         `agent-doc admin recycle` (recycles at the next idle boundary) or \
+         `agent-doc session restart-supervisor <FILE>`. A stale supervisor silently keeps \
+         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift)."
+    ))
+}
+
+/// `#fccsupwarn` — IO wrapper over [`supervisor_stale_warning_message`]: resolve the
+/// live controller hosting `file` and return the stale-binary warning message if it is
+/// serving a stale build. Fail-open — a missing project root, an unreachable controller,
+/// or any stat error yields `None` so the read-only check can never block a cycle.
+pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
+    let project_root = crate::snapshot::find_project_root(file)?;
+    let status = status(&project_root).ok()?;
+    supervisor_stale_warning_message(&status)
+}
+
 /// `#ctlrecycle` — idle grace before a stale/recycle-requested process actually
 /// recycles. A process must observe "wants-recycle AND idle" continuously for this
 /// long so a brief lull between queue items never triggers a recycle. Override with
@@ -3381,6 +3424,44 @@ mod tests {
         assert_eq!(attempt.proof_scope.as_deref(), Some("accepted_only"));
         assert!(!attempt.dispatch_start_proven);
     }
+    #[test]
+    fn supervisor_stale_warning_message_fires_only_for_active_stale_host() {
+        // #fccsupwarn — the read-only WARN must fire exactly for a live controller
+        // running a stale binary, and stay silent otherwise (fail-open).
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        let response = handle_request(
+            &(serde_json::json!({ "command": "status" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let mut status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        // Fresh, active controller — no warning.
+        assert!(status.active);
+        assert!(supervisor_stale_warning_message(&status).is_none());
+
+        // Stale launch identity on an active host → warning fires with the recycle hint.
+        let mut stale = current_binary_identity().unwrap();
+        stale.len = stale.len.wrapping_add(1);
+        status.controller_binary = Some(stale);
+        let msg = supervisor_stale_warning_message(&status)
+            .expect("an active host on a stale binary must warn");
+        assert!(msg.contains("STALE"), "message: {msg}");
+        assert!(msg.contains("admin recycle"), "message: {msg}");
+
+        // Inactive controller (nothing hosting) → no warning even if stale.
+        status.active = false;
+        assert!(supervisor_stale_warning_message(&status).is_none());
+
+        // Active but no recorded launch identity → fail-open, no warning.
+        status.active = true;
+        status.controller_binary = None;
+        assert!(supervisor_stale_warning_message(&status).is_none());
+    }
+
     #[test]
     fn controller_status_reports_single_process_control_plane_runtime() {
         let dir = tempfile::TempDir::new().unwrap();

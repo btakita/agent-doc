@@ -434,6 +434,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
     }
+    // #fccsupwarn: surface a stale hosting controller/supervisor at closeout too, so a
+    // drifted post-commit cycle points the operator at a recycle instead of re-filing a
+    // File-Cache-Conflict dialog. Fail-open — any status/stat error yields no warning.
+    if let Some(message) = crate::project_controller::stale_supervisor_warning_for_doc(file) {
+        report
+            .warnings
+            .push(format!("[session-check] WARNING: {message}"));
+    }
     Ok(report)
 }
 

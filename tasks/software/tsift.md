@@ -37,13 +37,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 11 response topic(s): do #logclassfn; do #logfoldloss; do #pcacheattr; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c8ca7a35 -->
+
+### Re: do [#tsreview2] — follow-up #code-review of the #tscodereview interactions — opus-4-8
+
+CI green (run `27460096312`), so the #tscodereview batch has settled. Ran a focused interaction/concurrency review across the three changed surface groups via three parallel reviewers (each verifying against the actual code). #tsreview2 done; actionable findings queued in priority order as `#gdblockcover` → `#pcacheexplattr` → `#tsreviewcleanup`.
+
+- **log-digest (classification + folding + fidelity gate) — CLEAN.** Family `error_variants` keys on normalized text, signal groups on raw text, and normalized is a pure function of raw → family count ≤ signal count always, so a fold can never hide an error from the gate. Errors sort rank-0 before the cap; `dropped` math is exact. No bug.
+- **graph-db — 2 REAL BUGS (HIGH conf), see `#gdblockcover`.** The #gdbwritelock advisory lock does NOT cover all writers despite its "covers all writer callers" claim: `compact --apply` (DELETE + wal_checkpoint(TRUNCATE) + VACUUM, infra.rs:1133→lib.rs:2025) and `memory upsert_projection` (memory.rs:976) both bypass it and race a refresh that holds it — exactly the database-is-locked / VACUUM-vs-WAL collision the lock was meant to prevent. Verified clean: RAII lock release on all error paths, no deadlock ordering, WAL-checkpoint reporting correct.
+- **prompt-cache — 1 REAL GAP (HIGH conf), see `#pcacheexplattr`.** Explicit provider fingerprints bypass the #pcacheattr residual invariant: a genuine `stable_prefix` content drift changes nothing tracked and goes unattributed. `#pcacheregtrunc` math and breakpoint edges verified correct.
+
+Top of backlog: **#gdblockcover**. (Session recovered from a stale pre-compaction CRDT overlay mid-cycle; committed via force-disk. Exchange stays compact.)
+<!-- agent:boundary:d3df04b3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#tsreview2]
+- :round_pushpin: do [#gdblockcover]
+- :round_pushpin: do [#pcacheexplattr]
+- :round_pushpin: do [#tsreviewcleanup]
+- ~~do [#tsreview2]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

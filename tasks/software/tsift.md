@@ -232,7 +232,26 @@ The `#tscodereview` batch is fully shipped — all 9 verified findings are fixed
 2. `#tsreview2` [recommended] — a follow-up review pass once the batch settles, focused on interactions between the surfaces this sweep changed.
 
 **Top of backlog: `#gdbexportlockdiag`.**
-<!-- agent:boundary:be03a8b9 -->
+
+### Re: do #gdbexportlockdiag — opus-4-8
+
+> **Queue prompt:**
+>
+> [#gdbexportlockdiag]
+
+
+Done. graph-db snapshot-export surfaced the raw SQLite `database is locked` when a concurrent refresh / snapshot-import held an exclusive lock, instead of the actionable live-lock diagnostic the write-lock path already emits.
+
+Root cause was broader than the original note: the lock surfaces from **two** sites in `graph_db_snapshot_clean_export_copy` (packages/tsift-cli/src/commands/infra.rs), not just the `VACUUM INTO` at ~650 — an exclusive lock also blocks the read-only resilient **open** that precedes it. The fix maps locked-db errors from **both** sites.
+
+- **Fix:** a `map_live_lock` closure detects the locked-database condition via `substrate::error_mentions_locked_db` and rewrites it to `"graph-db snapshot-export could not read <db>: a concurrent graph-db refresh or snapshot-import is in progress (database is locked); wait for it to finish before retrying the export"`. Non-lock errors keep their original `opening graph db ...` / `creating clean graph-db export copy ...` context. This is diagnostic-quality only — export is read-only and already fail-closed, so no corruption window.
+- **Tests:** `graph_db_snapshot_clean_export_maps_database_locked_to_live_lock_diagnostic` holds a plain `BEGIN EXCLUSIVE` lock (no recovery sidecar, so it clears the recovery fail-closed gate and reaches the lock-bearing path) and asserts the actionable diagnostic + retry guidance + that the generic VACUUM context does **not** leak. Made `graph_db_snapshot_clean_export_copy` `pub(crate)` for the focused unit test.
+- **Spec:** updated the snapshot-export paragraph in `specs/graph.md`.
+- **Verify:** `make check` green (clippy `-D warnings`, full suite, 57 ok blocks); release `cargo install --path .` rebuilt the `tsift` binary (0.1.69).
+- **Commit + push:** tsift `1fc031a` → `origin/main`; superproject pointer `dc198313e`. CI run `27460096312` queued (local gate is the green evidence).
+
+Next in queue: `#tsreview2`.
+<!-- agent:boundary:04efd374 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,8 +264,7 @@ https://github.com/chopratejas/headroom
 
 ## Backlog
 
-<!-- agent:backlog priority -->
-- [ ] [#gdbexportlockdiag] Map the graph-db snapshot-export VACUUM INTO database-is-locked error (packages/tsift-cli/src/commands/infra.rs ~650) to the same actionable live-lock diagnostic used elsewhere in graph-db, instead of surfacing the raw SQLite error. Loose end scoped out of #gdbwritelock (export is read-only and already fail-closed, so this is diagnostic-quality only). Add a test.
+<!-- agent:backlog priority queue -->
 - [ ] [#tsreview2] [recommended] Run a follow-up #code-review pass once the #tscodereview batch settles on CI, focused on interactions between the changed surfaces: log-digest error classification + line-family folding + fidelity gate; prompt-cache attribution + breakpoint identity; graph-db write lock + WAL-checkpoint reporting. Capture findings here.
 <!-- /agent:backlog -->
 

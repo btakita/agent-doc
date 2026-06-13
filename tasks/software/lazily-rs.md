@@ -83,7 +83,7 @@ Done. Shipped a concrete WebSocket backend behind an additive `websocket` featur
 **CI gap also closed:** the whole WebRTC/WebSocket transport family was *not* wired into `make check` or CI. Added `test-webrtc` (`webrtc-str0m`) + `test-websocket` targets and matching CI steps, so the str0m backend (#webrtcbackend) and this backend are now both covered. Local `make check` green; clippy/fmt clean (only the two pre-existing `ipc.rs` dead-code warnings remain).
 
 Next in the queue: `do [#97xn]` (the multi-channel bridge hub) — that one consumes both transports.
-<!-- agent:boundary:2c29b5dc -->
+<!-- agent:boundary:85bc91a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,13 +101,13 @@ Next in the queue: `do [#97xn]` (the multi-channel bridge hub) — that one cons
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [ ] [#97xn] #lzmuxbridge=[recommended] Multi-channel reactive bridge hub: fan one reactive graph across heterogeneous IpcSink/IpcSource attachments (WebRTC + WebSocket + in-process IPC) at once. Re-derive per-peer filtered deltas through the graph-apply authority — do NOT relay raw frames — to preserve PeerPermissions default-deny. Plan: tasks/software/plan-lazily-multichannel-bridge.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.
 - [/] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 <!-- /agent:review -->

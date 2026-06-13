@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,138 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-074303.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-084343.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Replace the single upload area with one per form type; File-type icons, delete buttons, upload activity feed, and realtime updates
+- Archived 6 response topic(s): Review & E-Sign; Ongoing doc + draft email to Judith re: e-sign legal requirements; do #gz9h; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Review & E-Sign — printed-name validation + legal compliance — opus-4-8
-
-> **Queue prompt:**
->
-> In the Review & E-Sign step ![img_10.png](img_10.png), should we validate the printed name is the same as the borrower's account name? Is this Review & E-Sign compliant with legal requirements for a proper signature for the borrower application?
-
-
-Good questions. I reviewed the current Review & E-Sign step (`portal/borrower/full_application.tsx` step 6) and the server-side signature capture (`borrower/applications/routes.ts`). This is an assessment with recommendations — I queued the concrete follow-ups as backlog items rather than implement a name-check this cycle, because both questions need a product/legal decision first (details below). Not legal advice.
-
-**What the flow captures today (solid foundation):** an explicit ESIGN/UETA consent checkbox, typed initials, printed name, `signed_at` timestamp, `client_ip`, and `user_agent`, plus acknowledgement + credit/background authorization text. That covers the core e-signature elements: intent to sign, consent, attribution, and an audit trail.
-
-**1. Should we validate printed name == borrower's account name?**
-Recommend **a soft check, not a hard block** — and compare against the **application's legal name** (`personal.first_name + last_name`), not the account display name:
-- A hard equality block would lock out legitimate signers: nicknames/name changes, typos in the account profile, co-borrowers signing, and entity/trust applicants (an LLC's authorized signer won't match the borrower name).
-- Better UX: normalize both (lowercase, collapse whitespace/punctuation) and on mismatch show a **non-blocking confirmation** ("This doesn't match the name on your application — confirm it's correct?"). Let them proceed after confirming.
-- Either way, **record the match/mismatch and the compared values in the signature audit row** — that's more useful for fraud review than a blunt block. Queued as an actionable item.
-
-**2. Is this Review & E-Sign legally compliant for a borrower application?**
-It's a **reasonable, good-faith ESIGN Act (15 USC 7001) / UETA e-signature** — it has the four things courts look for: intent to sign (explicit "E-sign application" action), consent to transact electronically, association of the signature with the record (linked to the application id), and an attribution/audit trail (IP, UA, timestamp, authenticated user). For many purposes that holds up.
-
-Gaps to close for **full consumer-ESIGN** confidence (queued as an actionable item):
-- **Consumer disclosures (ESIGN §101(c)):** before consent, consumers should be shown hardware/software requirements, the right to a paper copy, and the right to withdraw consent. The current checkbox asserts consent but doesn't present these disclosures.
-- **Retain what was signed:** store a tamper-evident snapshot or hash of the exact application content at signing, so EFS can later prove *what* the borrower agreed to — not just that they signed.
-- **Distinct consent timestamp** vs. `signed_at`.
-- **Jurisdiction:** CA hard-money lending carries its own disclosure obligations. **Have EFS counsel review before launch sign-off** — I can implement whatever they require, but the compliance determination should come from them, not me.
-
-Bottom line: the mechanism is sound for intent + attribution; the main compliance work is the consumer disclosure layer and signed-content retention. Nothing was code-changed or pushed this cycle (analysis only); both recommendations are now in the backlog.
-
-### Re: Ongoing doc + draft email to Judith re: e-sign legal requirements — opus-4-8
-
-> **Queue prompt:**
->
-> Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.
-
-
-Created the ongoing document: **`tasks/professional/equityfundingsource/esign-legal-compliance.md`** (committed `a9d43d858`). It's a living tracking doc for the borrower-application e-signature compliance, with three parts:
-
-1. **Where the e-signature stands today** — the engineering assessment from the prior cycle (intent to sign, ESIGN/UETA consent, association with the record, audit trail via IP/UA/timestamp).
-2. **Open items before launch sign-off** — consumer disclosures (ESIGN §101(c)), signed-content retention (snapshot/hash), distinct consent timestamp, CA hard-money specifics (e.g. RE 885), and the printed-name handling — cross-linked to backlog `#fxsv` and `#gz9h`.
-3. **A draft email to Judith** — short, per her tone (she's busy; keep it brief, not pushy). It tells her the e-sign step is built to ESIGN/UETA standards, recommends her **attorney review** the disclosures before launch, and offers to prepare a summary the lawyer can work from. It does not send anything — it's a draft she/you can edit and send when ready.
-
-I kept the email deliberately short and put the detail in the tracking doc so the lawyer-facing summary lives somewhere durable rather than in an inbox.
-
-**Scope note on "push":** I committed the new doc to the agent-loop superproject locally (`a9d43d858`). I did **not** push the superproject — it has unrelated in-flight submodule changes from other sessions, so a push would sweep those in. Say the word and I'll push, or push it yourself when the tree is clean. (The deployable EFS code from the earlier cycles is already on `origin/main` of the EFS submodule.)
-
-Next in the queue: `do #gz9h` (soft printed-name match), `do #fxsv` (ESIGN/UETA hardening), `do #xn77` (realtime/poll admin updates) — I'll take those one per cycle as the queue drains.
-
-### Re: do #gz9h — soft printed-name match on the e-signature — opus-4-8
-
-> **Queue prompt:**
->
-> do [#gz9h]
-
-
-Done — implemented, tested, committed + pushed (EFS `428b980`; not deployed — no `deploy` in the preset). Migration ships, so this goes live on the next deploy (the deploy step runs D1 migrations before the worker).
-
-**Behavior:** when the borrower types their printed name in Review & E-Sign, it's compared to the legal name on the application (`personal.first_name + last_name`), normalized case/space/punctuation-insensitively. On a mismatch the form shows a **non-blocking amber confirmation** — "this doesn't match the name on your application (X); that's fine if you're a co-borrower, signing for an entity/trust, or your name changed — confirm below" — with a checkbox. Signing proceeds once they confirm or correct it. It **never hard-blocks** (per the recommendation: co-borrowers, trusts/LLCs, and name changes are legitimate).
-
-**Audit trail:** the match result and the compared legal name are recorded on the signature row via two new columns — `name_match` (1/0/NULL) and `name_match_expected` — added in migration `0063`. Both the borrower and broker sign routes compute and store it. NULL means "not evaluated" (legacy rows or no legal name on file).
-
-**Files:** `sections_repo.ts` (shared `normalize_name_`/`names_match_` + setter/reader columns), `borrower/applications/routes.ts` (both sign handlers), `borrower/full_application.tsx` (mismatch confirm UI), migration `0063`, +6 tests in `tests/esign-name-match.test.ts`. Full suite **606 pass / 0 fail**; builds clean.
-
-Queue continues: next up `do #fxsv` (ESIGN/UETA hardening), then `do #xn77` (realtime/poll admin updates).
-
-### Re: do #fxsv — ESIGN/UETA hardening — opus-4-8
-
-> **Queue prompt:**
->
-> do [#fxsv]
-
-
-Done — all three parts implemented, tested, committed + pushed (EFS `a869545`; not deployed). Migration ships with the code, so it goes live on the next deploy.
-
-**1. Consumer disclosures before consent (ESIGN §101(c)).** The Review & E-Sign step now has an "Electronic record & signature disclosure" panel above the consent checkbox covering the three required elements: system requirements, the right to a paper copy at no charge, and the right to withdraw consent. The consent label now reads "I have read the disclosure above and consent…". The wording is a standard first pass — **EFS counsel should finalize it** (per the earlier recommendation).
-
-**2. Tamper-evident snapshot of what was signed.** At signing, both sign routes serialize the full application content (all sections except the signature block) into deterministic JSON (recursively sorted keys) and compute its SHA-256. The snapshot JSON + hash are stored on the signature row, so EFS can later prove exactly what the borrower agreed to — not just that they signed.
-
-**3. Distinct consent timestamp.** The client records when the consent box was checked and sends it; the server stores `consent_at` separately from `signed_at` (falling back to signing time if absent).
-
-**Schema:** migration `0064` adds `consent_at`, `signed_content_hash`, `signed_content_json` to `application_signatures`. **Files:** `sections_repo.ts` (setter/reader columns), `routes.ts` (`stable_json_` + `signed_content_snapshot_` helpers, both sign handlers), `full_application.tsx` (disclosure panel + consent-time capture), migration `0064`, +4 tests in `tests/esign-hardening.test.ts`. Full suite **610 pass / 0 fail**; builds clean.
-
-Queue continues: last item `do #xn77` (realtime/poll admin updates).
-
-### Re: do #xn77 — live admin updates (polling) — opus-4-8
-
-> **Queue prompt:**
->
-> do [#xn77]
-
-
-Done — implemented the recommended polling first step, tested, committed + pushed (EFS `6064e2f`). This is the last queue item, so the go-queue is now drained.
-
-**What it does:** admin views now refresh on their own — new document uploads and status changes appear without a manual reload.
-- New reusable **`use_poll_`** hook (`portal/shared/ui.tsx`): runs a refresh callback every 20s, **pauses while the browser tab is hidden** (no wasted fetches), clears its interval on unmount, and uses a ref so a changing callback doesn't reset the timer.
-- **Full-applications list + detail** (`admin/full_applications.tsx`): polls quietly — the open application detail refreshes if one is open, otherwise the list — using quiet refresh variants so there's no spinner flicker.
-- **Loan pipeline board** (`admin/pipeline.tsx`): polls the board, but **skips while a drag or save is in flight** so it never disrupts an in-progress move.
-
-**Why polling and not push:** per the earlier recommendation, polling-with-quiet-refresh is the cheap, zero-infrastructure first step. If latency ever matters, the upgrade path is Cloudflare **SSE** (one-way) or a **Durable Object broadcast** (EFS already runs the `BorrowerChatRoom` DO) — that remains documented as future work rather than built now. I did not add ETag/`If-None-Match` yet; at admin scale the full refetch every 20s is fine, and ETag is a later optimization.
-
-**Files:** `shared/ui.tsx` (`use_poll_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +4 tests in `tests/admin-poll-refresh.test.ts`. Full suite **614 pass / 0 fail**; builds clean.
-
-**Queue drained.** All four items done: ongoing e-sign legal doc + Judith draft email, `#gz9h` (soft printed-name match), `#fxsv` (ESIGN/UETA hardening), `#xn77` (admin polling). The e-sign code (migrations 0063/0064) ships on the next deploy; the consumer-disclosure wording still wants EFS counsel's review per the tracking doc.
-
-### Re: do #7djh — realtime push for admin views — opus-4-8
-
-> **Queue prompt:**
->
-> do [#7djh]
-
-
-Done — upgraded the admin live-updates from polling to a **Cloudflare Durable Object push**, tested, committed + pushed (EFS `4c97beb`; not deployed). Migration ships with the code.
-
-**Architecture (DO broadcast, the option that actually fans out across requests):** a plain Worker can't push to *other* sessions, so cross-request fan-out needs a coordination point. Added an **`AdminEventsRoom` Durable Object** — a single hub instance admin browsers connect to over WebSocket at `GET /api/admin/events/ws` (behind the existing `/api/admin/*` auth). Mutation routes fan a small event to the hub via `notify_admin_event_` (best-effort, fire-and-forget, falls open when the binding is absent):
-- **admin:** document upload/delete, status change, approve, application delete
-- **borrower/broker:** document upload/delete, application submit
-
-The hub broadcasts to every connected admin, so views refresh on a **push** (sub-second) instead of waiting for the 20s poll.
-
-**Client:** new `use_admin_events_` hook opens the socket, refreshes on each pushed event, **auto-reconnects** on drop, and keeps a **polling heartbeat as a safety net** (60s while the socket is live, 20s when it isn't — so it degrades gracefully to the prior polling behavior if the DO/WS is unavailable). `full_applications` (list + detail) and the `pipeline` board now use it; the pipeline still skips refresh mid drag/save.
-
-**Infra:** `wrangler.toml` binds `ADMIN_EVENTS_ROOM` + adds migration `v2_admin_events_room`; `worker.ts` exports the DO class (confirmed in the bundle). **ETag/If-None-Match: intentionally skipped** — with push, polling is now an infrequent fallback heartbeat, so the 304-optimization isn't worth the complexity.
-
-**Files:** `admin/events/realtime.ts` (DO + `notify_admin_event_` + WS handler), `admin/routes.ts`, `admin/applications/index.ts`, `borrower/applications/routes.ts`, `worker.ts`, `wrangler.toml`, `shared/ui.tsx` (`use_admin_events_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +7 tests. Full suite **621 pass / 0 fail**; builds clean.
-
-**Queue drained.** This was the last item. Note: deploying this needs `make deploy` (it applies the DO migration + the earlier e-sign migrations 0063/0064 before the Worker goes live).
-<!-- agent:boundary:3260c792 -->
+<!-- agent:boundary:43c68081 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

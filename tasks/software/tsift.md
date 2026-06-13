@@ -37,13 +37,36 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): do #cicacheguard; do #tscodereview
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:57a19537 -->
+
+### Re: do #logclassfn — opus-4-8
+
+> **Queue prompt:**
+>
+> [#logclassfn]
+
+
+Done. Fixed `classify_generic_signal` (packages/tsift-digest/src/log_digest.rs) to catch the canonical terminal-failure lines that carry no `error:`/panic prefix and are often the **only** failure line in a transcript:
+
+- cargo libtest `test result: FAILED`
+- test-runner counts — pytest `1 failed, 3 passed`, jest `Tests: 2 failed` (anchored to a **non-zero** `<n> failed` token)
+- GNU make `*** [..] Error N` (anchored on the make `*** ` sigil + error marker)
+- `Segmentation fault` / `core dumped`
+- Rust assertion panics — `assertion failed:` and the `` assertion `left == right` failed `` form
+
+All token-anchored so passing summaries (`test result: ok ... 0 failed`, `0 failed`) and prose (`the build failed to ...`) are **not** misclassified — this preserves the existing session-digest `0 failed`/`test result: ok` non-failure invariant.
+
+- **Spec:** updated `specs/digests-sessions.md` classifier paragraph.
+- **Tests:** added `classifies_test_runner_and_build_failure_summaries` (positive) + `failure_summary_classification_is_token_anchored` (false-positive guard), and a `cargo-test-failure-summary` fixture-gate case (required `test result: FAILED` survives; forbidden `30 passed` proves the passing summary isn't flagged). All pass; `make check` green; release+install rebuilt (tsift 0.1.69).
+- **Commit + push:** tsift `2c68310` → `origin/main`; superproject pointer `fcec59f8e`. CI run triggered (pending; local verification is the gate and is green).
+
+Next in queue: `#logfoldloss`.
+<!-- agent:boundary:951ac48e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#logclassfn]
+- ~~[#logclassfn]~~
 - [#logfoldloss]
 - [#pcacheattr]
 - [#gdbwritelock]
@@ -60,7 +83,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#logclassfn] log-digest classify_generic_signal (packages/tsift-digest/src/log_digest.rs:1021-1048) misses canonical terminal-failure lines: `test result: FAILED`, pytest `N failed` summary, `make: *** [..] Error 1`, `Segmentation fault (core dumped)`, Rust `assertion ... failed`. These are often the ONLY failure line in a transcript, so the digest silently drops the failure (verified each -> signals=[]). Add token-anchored rules + required/forbidden fixtures. HIGH conf/sev (#tscodereview).
 - [ ] [#logfoldloss] log-digest line-family folding (log_digest.rs:846-881) collapses semantically-distinct error lines into one template (first/last sample only) and MAX_SIGNALS=12 (:508) drops the rest, so 8+ distinct failures vanish from the digest body even when a raw-log artifact is attached. Exempt error-classified lines from folding or surface a distinct-error count/sample. HIGH conf, med-high sev (#tscodereview).
 - [ ] [#pcacheattr] prompt-cache drift attribution wrong on default path: the derived composite fingerprint (packages/tsift-agent-doc/src/session_cost.rs:3283-3294, hashes provider+cache_key+stable_prefix+breakpoints) is pushed FIRST in prompt_cache_field_changes (:1770-1801), so first_changed_field is ALWAYS stable_prefix_fingerprint and never names the real cause (cache_key/breakpoints/routing/provider). The lone attribution test changes everything at once so it cannot catch this. Push concrete sub-fields before the derived fingerprint (or exclude it unless explicit). HIGH conf, med-high sev (#tscodereview).
 - [ ] [#gdbwritelock] graph-db write/refresh (tsift-cli/src/lib.rs:14037, tsift-sqlite/src/lib.rs:833) and snapshot-import rename (tsift-cli/src/commands/infra.rs:752-785) take NO cross-process lock; they rely only on SQLite busy_timeout(5s). Snapshot-import exists->sidecar-check->rename->rename races a concurrent `graph-db refresh` (TOCTOU -> graph.db corruption/lost refresh); parallel refreshes spuriously fail `database is locked` past 5s. Apply the existing index.lock/try_lock_exclusive discipline (tsift-index/src/index.rs:1565) to graph.db writes + the import rename window; map VACUUM-INTO lock error (infra.rs:650) to the live-lock diagnostic. med-high conf, HIGH sev (#tscodereview).

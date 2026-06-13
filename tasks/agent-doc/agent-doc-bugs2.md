@@ -130,15 +130,30 @@ Fixed in agent-doc submodule `aafa6510` (pushed to origin/main; `cargo install` 
 **Tests:** unit (`build_reexec_candidates`: ordering, deleted-exe exclusion, dedup, never-empty) + SimWorld (`failed_reexec_recycle_keeps_session_alive_and_does_not_retry`: pane/generation preserved, binary stays stale, no per-tick re-spam). `make check` green; latest CI run `27473458084` was green pre-push.
 
 **One thing only you can do (queued as `[operator-verify]`):** the *currently running* supervisors are still the OLD binary — the broken recycle can't deploy its own fix. Restart a stale session (`agent-doc session restart-supervisor <FILE> --force`) so it runs `aafa6510`, then drive a recycle and confirm the new `candidates=[...]` log + non-stalling fallback. Note: exchange is large (~80 lines), but the go-queue is active so I'm not pausing to compact.
-<!-- agent:boundary:ed1e909a -->
+
+### Re: do [#compactdrift] — compact drift guard already fixed + tested — opus-4.8
+
+`#compactdrift` is code-complete and committed — no new code this cycle, this is verification + closeout.
+
+**State of the fix (agent-doc `bca26cfd`, submodule tree clean).** The end-to-end investigation recorded in `plan-compact-typed-component-drift-false-positive.md` confirmed the `typed_component_drift` auto-adopt false-positive **does not reproduce on current source** for the benign class. The `commit_with_outcome` bail in `git.rs` ("refusing to auto-adopt committed historical response patchback … out-of-band typed_component_drift mutation") only fires when there is a CONCURRENT non-exchange drift with `file != snapshot` — i.e. a wedged `--handoff-state preparing` controller writing stale `content_ours` over `ipc.sock`. A clean exchange-only compaction never satisfies that branch (`has_non_exchange_component_drift_scoped` skips exchange), and the `#nm1x` turn-scope intersection closed the remaining benign cases.
+
+**Regression coverage committed** (`bca26cfd`, +182 lines in `git.rs`):
+- `commit_allows_clean_exchange_only_compaction` — HEAD holds a finalized response, post-compact snapshot+file archive it, status/backlog preserved, so commit adopts the compacted doc (no bail).
+- `commit_recovers_stale_pre_compact_snapshot_without_wedge` — the reported "snapshot stale at pre-compact size vs compacted visible file" recovery shape, no concurrent wedge, so it recovers without failing closed.
+- Genuine out-of-band drift still fails closed (`commit_fails_closed_when_committed_historical_response_mutates_status`, unchanged, green).
+
+Verified this cycle: `cargo test -p agent-doc-orchestration --lib commit_` gives **108 passed, 0 failed**.
+
+**Residual is #stuckhandoff2, not this guard.** The live repro required the wedged Preparing controller; blocking a wedged stale write is conservative-correct, not a false-positive. The M1 self-watchdog suicide-timer for that wedge is now in source.
+
+**Closeout.** Marking `#compactdrift` done — code is complete, committed, and tested. The only remaining step is the operator-drive live JB `Compact Exchange` re-verify on a freshly `make install`ed binary (the installed cdylib currently predates `aafa6510`), filed as `#c2b6` `[operator-verify]`. Per your "no more gates" directive I'm closing this rather than adding a review gate.
+<!-- agent:boundary:36e88e68 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: The last recycle stalled again `❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────` + `  Opus 4.8 ctx:16% ~[agent-doc] supervisor execve hot-reload failed (No such file or directory (os error 2)); falling back to clean exit so the next launch uses the new build`. Make sure the recycle is cross-platform (Linux, OSX, Windows). Issue still happening after the last recycle. Please add logging in the Supervisor/PCP to detect issues.~~
-- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
-- :round_pushpin: do [#compactdrift]
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
 ```
@@ -152,7 +167,7 @@ Compacted content:
 :pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
 - :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
-- :round_pushpin: do [#rtwbcast]
+- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
@@ -217,6 +232,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
@@ -224,7 +240,6 @@ What are #next-steps to fix bugs?
 - [ ] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md
 - [ ] [#qpresetstrike] [clean-session] Preset-token queue head (a #name from prompt_presets, e.g. #advance-review) is unstrikeable by any agent path: `queue consume` rejects it as id-backed (leading #), while `--done`/`--pending-gate` reject it as not a backlog id, and `finalize` keeps the head — so it wedges queue_active=true and re-serves every /agent-doc invocation. FIX: classify a #-head against prompt_presets AND backlog/icebox before routing; a preset head should strike like a free-text head via consume + the finalize heuristic, while do[#id] heads stay on the --done path. Workaround: strike ~~#name~~ + drop go + reset --from-current --preserve-session + commit. Relates to #qchurn/#goqueuestall. Plan: tasks/agent-doc/plan-preset-queue-head-unstrikeable.md
 - [ ] [#qchurn] [clean-session] go-mode no-op churn: after #goqueuestall tag-defer skips the id-backed [clean-session]/[operator-verify] backlog heads, untagged FREE-TEXT operator bug-report prompts in the ## Queue block still keep queue_active=true and the supervisor idle-watch re-injects queue_trigger=auto each idle boundary -> repeated no-op /agent-doc cycles (no content diff, user_intent_prompt_changes empty, zero drainable work). Halted live 2026-06-13 via admin queue pause (receipt 27, gen 338). FIX: go-mode should treat a queue whose only remaining prompts are non-id free-text reports (no actionable do #id / new user prompt) as not-drainable and stop re-dispatching, same as the undrainable-head skip. Plan: tasks/agent-doc/plan-go-queue-stall.md
-- [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:backlog -->

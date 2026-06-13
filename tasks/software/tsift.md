@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,37 +34,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-163354.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-173413.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #bugs-observed; do [#cargoidxcov]
+- Archived 1 response topic(s): release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: release + publish — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish
-
-
-Released **tsift v0.1.70** (was v0.1.69, which is published; 15 commits had accumulated past it at the same version, so this is a real bump, not a tag-move).
-
-**Version bump** (mirrors the prior `chore: release` pattern, 43 files):
-- Root + all 22 member `Cargo.toml` `0.1.69 → 0.1.70` (package versions + inter-crate dep specs), `Cargo.lock` regenerated via `cargo update -p tsift --precise 0.1.70`.
-- Version markers: `AGENTS.md`, `specs/search-navigation.md` (`tsift:code-navigation v=`), all `packages/opencode-tsift/commands/*.md`, `package.json`.
-- `VERSIONS.md` 0.1.70 entry covering the shipped work: `#cargoidxcov` (on-demand per-package cargo index), prompt-cache fidelity (`#pcachebp`/`#pcacheregtrunc`/`#pcacheattr` + raw stable_prefix), graph-db write safety (`#gdbwritelock`/`#gdblockcover`/`#gdbexportlockdiag`/`#gdbwalcheckpoint`), log-digest fidelity (`#logfoldname`/`#loggatefidelity`/`#logfoldloss`/`#logclassfn`), `#cicacheguard`.
-
-**Verify / build / install:** `make check` green (clippy + full workspace suite + opencode plugin), no `test result: FAILED`. `cargo install --path .` → `tsift 0.1.70` live in `~/.cargo/bin`.
-
-**Commit / push / release:** `chore: release v0.1.70` (`7aa2561`) + tag `v0.1.70` pushed to `origin/main`. The `Release` workflow (run `27473681731`) is in progress — it publishes crates.io (lockstep crate list), the GitHub Release, and PyPI via `pypi.yml` on release-published. Not gating on `gh run watch` per closeout convention; the publish completes autonomously.
-
-Note: the agent-loop superproject `src/tsift` submodule pointer now lags the released commit — left for the superproject's own cycle (session-scope discipline), not committed here.
-<!-- agent:boundary:55e7f329 -->
+<!-- agent:boundary:9688162a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- #bugs-observed
+- Add backlog items for tsift to improve prompt caching?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -182,7 +182,7 @@ _Note: `#pw26` (#lzmapspike) drifted into the **icebox** between turns — left 
 **Stopping the auto-drain here (not continuing to `#webrtc2`–`#shuttleeval`).** Two reasons: (1) `#webrtc2` is a heavy implementation cycle (pulls in the `webrtc-rs` dependency tree + a new `webrtc_transport.rs` + long compile) that deserves a clean, focused session; (2) the `#ipcdrift` supervisor self-race is *still* corrupting every finalize this session (this one included — recovered via hand-rebuild). Please **`make install` in `src/agent-doc` + recycle the route-owned supervisor (pid 337083)** before driving `#webrtc2`; auto-draining a multi-cycle implementation queue through the corruption is not safe.
 
 _(Good news: the `#dh3k` CI run finished **green** — the conformance-vs-canonical-spec step and the async/resolve-loop steps all passed.)_
-<!-- agent:boundary:5671695a -->
+<!-- agent:boundary:c420ac0c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -192,6 +192,9 @@ _(Good news: the `#dh3k` CI run finished **green** — the conformance-vs-canoni
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Go through each review item. Add actionable items into the backlog to complete the review items.~~
+- do [#webrtc2]
+- do [#webrtc3]
+- do [#shuttleeval]
 <!-- /agent:queue -->
 
 ## Backlog

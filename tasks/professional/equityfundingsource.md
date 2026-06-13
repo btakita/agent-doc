@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -93,7 +93,34 @@ Done. I traced every required document type from the DB catalogs and generated a
 - No app/worker change, so nothing to deploy this cycle.
 
 If you also want a CSV/spreadsheet variant for the K-1 or bank statements (some reviewers prefer those), or a deliberately-oversized/disallowed file to test the rejection path, say so.
-<!-- agent:boundary:c7686d5f -->
+
+### Re: Borrower dashboard "Needs action" component — opus-4.8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard should have a similar needs action component as the admin dashboard. An incomplete application or application that needs some action should be on the borrower dashboard. deploy
+
+
+Done and deployed. The borrower dashboard now has a **"Needs action"** panel that mirrors the admin dashboard's attention card and surfaces both incomplete applications and items needing action.
+
+**What I found:** the borrower dashboard already had a small "Needs attention" card, but it only listed loans missing documents — **incomplete (draft) applications weren't surfaced at all** (the dashboard data only read the `loans` table, never `full_applications`).
+
+**Changes:**
+- **Backend** (`borrower/dashboard/index.ts`): added a query for the borrower's own **draft** full applications (`full_applications WHERE borrower_user_id = ? AND status = 'draft'`) and returns them as `incomplete_applications` plus an `incomplete` count.
+- **Frontend** (`borrower/dashboard.tsx`): renamed the card to **"Needs action"** and rebuilt it as a unified, prioritized list:
+  1. **Finish your loan application** — one per incomplete draft, linking to `/portal-borrower/new-application?application_id=<id>` to complete + submit it (shown first, since nothing progresses until it's done).
+  2. **Documents needed** — submitted applications still missing required docs (existing behavior, preserved).
+  - Shows the top 2 with a count badge and a "Show N more" expander, same pattern as before.
+
+So an incomplete application — or any application needing action — now appears on the borrower dashboard, like the admin side.
+
+**Verified + deployed:**
+- `bun test` — **576 pass / 0 fail** (added `#borrower-needs-action` coverage for the panel + the draft-application API; updated the e2e source assertions for the rebuilt component).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `0482680d`).
+- EFS commit `a7372df`; submodule bump `b950f9eb1`.
+
+Hard-refresh `/portal-borrower/dashboard` to see it (it only appears when there's an incomplete application or a docs-needed item).
+<!-- agent:boundary:1b263bbc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +128,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard should have a similar needs action component as the admin dashboard. An incomplete application or application that needs some action should be on the borrower dashboard. deploy
 <!-- /agent:queue -->
 
 ## Backlog

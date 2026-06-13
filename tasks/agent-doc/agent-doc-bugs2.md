@@ -152,14 +152,38 @@ Done — added + shipped a deterministic SimWorld test for the `#qflood2` dedupe
 **Verification.** `make check` = **4382 passed, 0 failed** (+1 from this test), clippy clean, CI green. Test-only change — no rebuild/install (production behavior unchanged).
 
 This rounds out `#qflood2` coverage: unit tests (marker survives IPC wrapping; real failures not swallowed) + SimWorld (deduped-success vs real block). The review item stays gated on your live multi-process verify only. Queue remains paused (`#goqstall2`); nothing else actionable for this live session.
-<!-- agent:boundary:efc499ad -->
+
+### Re: still getting JB File Cache Conflict dialogs — opus-4-8
+
+I found why, and it's **deployment, not code**: the `#fcc0` fix is complete and installed, but the supervisor *running this document* is stale. Hard evidence from live process timestamps:
+
+| Process | Started | Status |
+|---|---|---|
+| agent-doc binary + `libagent_doc-0.34.0.so` | **01:20** install | Fresh — has every `#fcc0a–f` + `#ipcdrift` de-wedge fix |
+| Superproject controller (PID 617249) | 01:39 | ✅ recycled, fresh |
+| **This doc's supervisor** `start --route-owned …agent-doc-bugs2.md` (PID 136222) | **01:00** | ❌ **stale — 20 min older than the install** |
+
+The dialogs come from PID **136222**: it predates the install, so it still runs the old pre-`#fcc0` write path and does stale-buffer disk-fallback writes under your IDE → `File Cache Conflict`. This session proves it live — every finalize logs `live_prompt_drift_after_preflight → snapshot from content_ours → postcommit_worktree_check match=false`, which is exactly that stale supervisor's buffer racing the fresh CLI finalize. Supervisor self-recycle (`#ctlrecycle` R3) is opt-in (default **off**), so it never promoted itself.
+
+**The fix (yours — I can't do it from inside the session it hosts):** restart this document's agent-doc supervisor so it respawns on 0.34.0. Any one of:
+- JB: **stop** `Run Agent Doc` for this doc, then **re-run** it; or
+- `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`; or
+- restart the IDE / tmux session.
+
+I can't safely kill PID 136222 myself — it hosts this live pane; killing it from within would drop the session. After the restart, the new supervisor converges writes through editor IPC (no disk fallback) and the dialogs stop. That restart is also the `#fcc0` "0 dialogs" live proof.
+
+**Durable gap filed (`#fccsupwarn`).** The real product failure here is that a stale supervisor produces these dialogs with **no surfaced signal** — you had to notice and re-report. preflight/session-check should detect a stale hosting supervisor (start time older than the installed binary) and warn "restart to promote." It's read-only detection, not the live write path, so it's agent-drainable in a normal session — say the word and I'll implement it. Diagnosis recorded in `tasks/agent-doc/plan-zero-file-cache-conflict.md`.
+
+`#fcc0` itself stays code-complete; this was never missing code, just a stale process.
+<!-- agent:boundary:1ef40fe9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Add simworld tests for #qflood2~~
 ---
-The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
+:pushpin: The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
 ```
 resync: pruned 14 stale session(s)
 [route] target tmux session: 0
@@ -169,11 +193,11 @@ JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
 ```
-- ~~:round_pushpin: do [#splitmodswrite]~~
 - :round_pushpin: do [#rtwbcast]
 ---
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]
+- :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
 JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
@@ -215,6 +239,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#fccsupwarn] preflight/session-check should WARN when the hosting in-process supervisor's binary is STALE (its start time precedes the installed binary mtime, or its recorded launch/controller_binary identity differs) so the operator is told to restart — currently a stale supervisor silently keeps producing #fcc0/#ipcdrift File Cache Conflict dialogs with NO surfaced signal (operator must re-file). Read-only detection, NOT the live write path; agent-drainable. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md (Live diagnosis section).
 - [ ] [#goqstall2] [clean-session] go-mode drain + session-check queue_continuation_required do NOT defer pre-materialized undrainable do[#id] queue heads (clean-session/operator-verify backlog items) or stale console-output queue lines, so a queue populated before #goqueuestall churns no-op cycles instead of self-deferring. Resolve each materialized do[#id] head's backlog tag in the continuation head set + classify non-directive/console-output lines as noise; emit go_queue_skip_undrainable origin=materialized_head + queue_stale_noise_lines diagnostic. CLEAN session (touches live queue-continuation logic). Plan: tasks/agent-doc/plan-go-queue-stall-materialized-heads.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

@@ -152,3 +152,47 @@ concurrent tests' sentinels). The shared `stale_preparing_controller_threshold()
 healthy young handoff (including one a recycle just launched). Coverage:
 `recycle_reaps_aged_orphaned_preparing_controller` (project-scoped sentinel, threshold
 env-overridden to 1s). `make check` green.
+
+## REOPENED — 2026-06-13 (M1 self-watchdog is dead in production)
+
+**#stuckhandoff2 is NOT actually complete.** Live-repro this session: a controller wedged
+in `--handoff-state preparing` (pid `2434403`, gen 1060) survived **13.5 minutes** and had
+to be `pkill`ed by hand. Binary install at `03:57:27`; that controller started `03:57:41`
+(14s AFTER install) — so it ran the **fresh M1-equipped binary**, ruling out the "stale
+running binary" explanation.
+
+**Evidence (superproject `.agent-doc/logs/ops.log`):**
+- `stale_preparing_controller_self_reaped` (M1 self-watchdog, `caller=self_watchdog`):
+  **ZERO occurrences, ever.**
+- `orphaned_preparing_controller_reaped_cross_project … caller=gc`: fires **repeatedly**
+  (pids 401211, 1151060, 1324526, 1663915, 2011236, 2214912, …) at ages **442–1286s**,
+  all `threshold_secs=45`.
+
+So orphaned `Preparing` controllers are cleaned up **only** by the slow external gc/M5
+sweep — at 7–21 minutes, not 45s — which is exactly the external-reaper-tick dependency
+the plan claimed M1 eliminated. M1 (`controller_self_watchdog_should_suicide` /
+`controller_self_watchdog_suicide`, `serve_with_options` `WouldBlock` branch) is present,
+unit-tested as a pure predicate, and reached by the handoff-replacement launch path
+(`write_bootstrap_with_options` stamps `handoff_started_at` when launched `Preparing`), yet
+the suicide **never triggers at runtime**.
+
+**Root cause NOT yet pinned** (investigated read-only; not fixed — deliberately deferred a
+speculative edit to clean-session live-write-path code in a corrupting live session).
+Narrowed hypotheses for the next clean-session cycle, with a deterministic repro:
+1. The orphaned replacement's serve loop never reaches the `WouldBlock` idle branch (so the
+   watchdog poll never runs) — e.g. blocked earlier (`ControllerRuntime::new` →
+   `recover_controller_after_restart`), or `listener.accept()` not returning `WouldBlock`
+   as expected for a non-blocking listener that owns a handoff-specific socket.
+2. The in-memory `handoff_state` is flipped off `Preparing`/`Promoted` (e.g. a partial
+   `promote_handoff`) so `preparing_controller_is_stale` returns false, while the frozen
+   `/proc` cmdline still reads `--handoff-state preparing` (which is what gc/M5 keys off) —
+   i.e. M1 (in-memory truth) and M5 (cmdline) disagree about the same process.
+3. The watchdog deadline is computed once at loop entry and the orphan's poll cadence /
+   should_stop wiring prevents the branch from being evaluated after 45s.
+
+**Next-cycle task (clean session):** add a deterministic test that drives a launched-Preparing
+controller's serve loop to the watchdog branch and asserts a `stale_preparing_controller_self_reaped`
+within threshold; then fix whichever of (1)–(3) holds. Until M1 actually fires, the wedge
+window is gc-cadence (minutes), not 45s. (Could not be re-filed into `agent:backlog` this
+session — the doc's fenced `<!-- agent:queue -->` examples break the granular-write parser,
+`#lintfence`.)

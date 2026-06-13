@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -57,7 +57,7 @@ Compacted content:
 **Disclosure — you're right.** There is no "Legal and disclosure language" on the funded-deals page; that line in the approval list didn't point to anything real on that page. The actual disclosure in the product is the **Electronic record & signature (ESIGN/UETA) disclosure** on the borrower full-application / document-uploads flow (`full_application.tsx` — the "Electronic record & signature disclosure" expander plus the consent checkbox). That's the legal/disclosure text worth a review. I corrected review #jnzs to point at it. Want me to pull the exact disclosure copy out for you/Judith to read, or route it to a specific reviewer?
 
 **Verification:** full EFS suite green (626 pass / 0 fail), build + worker build OK.
-<!-- agent:boundary:01245a01 -->
+<!-- agent:boundary:ea551540 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,6 +65,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- "I've descoped the borrower-message email round-trip — no outbound notification when a borrower messages, no inbound email-reply-into-chat, no admin-reply email." Why did you conflate not sending an email to Judith + Robert with not notify the borrower with an email? Bring this back please. You seem confused.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -75,6 +76,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, and lien-position wording before invoicing or launch sign-off. The funded-deals page carries no standalone legal/disclosure text; the disclosure needing legal review is the ESIGN/UETA Electronic record and signature disclosure on the borrower full-application/document-uploads flow (full_application.tsx). Funded-deals copy was reframed as real closed deals and shipped.
 - [/] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,7 +60,40 @@ Investor samples:
 - `tmp/investor/investor-wire-instructions.txt`
 
 I also added `tmp/README.md` describing the fixture set. `src/equityfundingsource-dev/.gitignore` already contains `tmp/`, and I verified Git ignores the new fixture files. I checked MIME detection: the PDFs report as `application/pdf`, the CSV files as `text/csv`, and the text files as `text/plain`, which are accepted by the app upload guard.
-<!-- agent:boundary:da15208a -->
+
+### Re: Why were the emails from the admin pipeline cards removed? Readd the emails. — gpt-5
+
+> **Queue prompt:**
+>
+> Why were the emails from the admin pipeline cards removed? Readd the emails.
+
+The emails were dropped as an accidental regression during the admin Deal Pipeline card reshaping. The pipeline now has three card shapes — loan, prequalification lead, and incomplete full application — and the compact card UI diverged while adding the incomplete-application funnel. The loan card no longer consistently rendered `borrower_email`, and the lead/application card paths needed their own `email` display.
+
+The current EFS working tree restores those fields:
+
+- Loan cards carry and render `borrower_email`.
+- Lead cards carry and render `email`.
+- Incomplete full application cards carry and render `email`.
+- Pipeline search includes both `borrower_email` and `email`.
+- The application-card detail modal also shows the email.
+
+Relevant paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/dashboard/index.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/admin-dashboard.test.ts` passed: 64 tests.
+- `make check` passed: 565 tests plus browser and worker builds.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this submodule, so local verification is the available proof.
+
+No actionable follow-up items remain for this queue head.
+
+Escalation: no escalated shell permissions were needed. Confidence: high.
+<!-- agent:boundary:a8c33859 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +101,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The Accessories - Shopping - 18/5 ads is costing money and not converting. Please assess and reduce budget if it is a loser.
 <!-- /agent:queue -->
 
 ## Backlog

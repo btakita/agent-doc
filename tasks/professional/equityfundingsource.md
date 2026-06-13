@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -120,7 +120,21 @@ Deployed. The live worker now runs the Print-button bundle (EFS `d7622a7`).
 - Verified: `GET /` returns HTTP 200.
 
 No source changed this cycle — the Print-button work was already committed and built last cycle, so there was nothing new to spec/test/commit; this turn just shipped it. The full-application Print button (renders all 7 steps into the DOM, then `window.print()`) is now live on the borrower new-application page.
-<!-- agent:boundary:7f0bfafb -->
+
+### Re: Print button on the Review & e-sign disclosure — opus-4-8
+
+> **Queue prompt:**
+>
+> Please add a Print button to the "Review & e-sign" disclosure at https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a. deploy
+
+
+Added a **Print** button to the borrower wizard's **Review & e-sign** step (the only Print control had been in the topbar). Borrowers can now print the full application straight from the disclosure step before signing.
+
+- `lib/ui--browser--efs/portal/borrower/full_application.tsx` — added a Print button to the step-6 actions row, reusing the existing render-all-steps print flag (`set_printing(true)`); it sits in the print-hidden `.form-actions` row so it stays off the printout itself.
+- `tests/full-application-print-button.test.ts` — new case asserting the Review & e-sign step exposes its own Print control ahead of the E-sign button.
+
+Verification: `bun test` green (643 pass / 0 fail), `bun run build:worker` clean, deployed to Cloudflare (version `b2afe09c`, live at https://equityfundingsource.brian-takita.workers.dev). Committed EFS submodule `a959e12`.
+<!-- agent:boundary:a7565743 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +142,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please add a Print button to the "Review & e-sign" disclosure at https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a. deploy
 <!-- /agent:queue -->
 
 ## Backlog

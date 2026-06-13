@@ -180,12 +180,33 @@ Done, and pushed. The resume policy already lived in the binary as pure predicat
 - 4 deterministic scenario tests: full pipeline resume-as-a-step; no-head stays authoritative; deferred-clear blocks resume; debounce resets when a turn interrupts idle. `specs/supervisor.md` updated.
 
 `make check` green (incl. medium seed corpus + clippy). Built `--release` + `cargo install` + `lib-install` (cdylib refreshed; running controllers promote it on the next `admin recycle --all-projects`). agent-doc submodule `40b64df0` pushed to origin/main; superproject pointer bumped + pushed this cycle.
-<!-- agent:boundary:dd86adc2 -->
+
+### Re: a name for the per-queue-turn "PCP clears + restarts the agent" behavior — opus-4.8
+
+> **Queue prompt:**
+>
+> :pushpin: Could you explain this message in Claude "Opus 4.8 ctx:32% ~/work/btakita/agent-loop main brian@cachyos-x8664  new task? /clear to save 318.8k tokens". Does this mean we should have the PCP/Supervisor run `/clear` (stopping agent-doc session then restarting if in go-mode...please give me a good term for this behavior) after every queue item is complete (queue turn)? How does this compare with the overhead of loading the context, skills, AGENTS.md/CLAUDE.md?
+
+
+(Restored your refined prompt — a wedged `--handoff-state preparing` controller, pid 3913621, dropped your queue edit during a `content_ours` merge; I killed it. The substantive `/clear`-cadence + overhead trade-off is in my section above; this answers the two parts that edit added.)
+
+**A good term for the behavior.** What you described — "PCP/Supervisor runs `/clear`, stopping the agent-doc session then restarting it (in go-mode) after every queue item (queue turn)" — is best called a **per-turn context recycle** (umbrella term). It composes two distinct mechanisms the code already names separately, and it's worth keeping them distinct because they have different costs and triggers:
+
+- **Context reset** — the `/clear` itself: drop the conversation, keep the *same* agent process. Code: `IdleQueueContextResetDecision::Reset` in `start::decisions`. Cheap; this is the token-economy half.
+- **Supervisor recycle** — restart the agent-doc supervisor onto a fresh binary via `execve`, preserving the live pane + agent child. Code: `supervisor_recycle_action` / `execve_preserve_child`. This is the "stopping then restarting" half, and it only fires when the binary is stale (a new `cargo install`) or the operator marks it.
+
+So your phrase maps to: **context reset every queue turn + a supervisor recycle when the binary changed**, both fired at the **drain boundary** (the idle point between queue items). If you want one operator-facing label, I'd use **"drain-boundary recycle"** (or "queue-turn recycle"); when you need to be precise about which half, use "context reset" vs "supervisor recycle."
+
+**Should the PCP do this on every queue turn?** Yes for the **context reset** — that is exactly what shedding the ~318.8k-token history buys you, and the supervisor already owns it at each drain boundary (you don't run `/clear` by hand). **No, not unconditionally for the supervisor recycle** — restarting the process every turn would thrash the agent child and re-pay process startup for no benefit when the binary hasn't changed; it's gated on staleness on purpose. Net: clear-context-every-turn = good and automatic; restart-process-every-turn = only when there's a fresh build to promote.
+
+This is the same pipeline I made deterministic + simulated this session (#clearcontresume): the SimWorld engine now drives `IdleQueueContextResetDecision`, `supervisor_recycle_action`, and `clear_cooldown_resume_ready` end-to-end so the drain-boundary recycle is reproducible offline.
+<!-- agent:boundary:7479a5f1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Could you explain this message in Claude "Opus 4.8 ctx:32% ~/work/btakita/agent-loop main brian@cachyos-x8664  new task? /clear to save 318.8k tokens". Does this mean we should have the PCP/Supervisor run `/clear` (stopping agent-doc session then restarting if in go-mode...please give me a good term for this behavior) after every queue item is complete (queue turn)? How does this compare with the overhead of loading the context, skills, AGENTS.md/CLAUDE.md?~~
 - :pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]

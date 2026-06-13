@@ -6617,6 +6617,188 @@ fn commit_blocks_committed_historical_patchback_that_mutates_status() {
         "ops log should record the blocked historical patchback:\n{log}"
     );
 }
+// #compactdrift — a clean exchange-only compaction (responses archived, every
+// NON-exchange component preserved) must NOT trip the committed-historical
+// `typed_component_drift` / out-of-band patchback guard. HEAD legitimately still
+// holds the last finalized `### Re:` response(s); the post-compact snapshot/file
+// archived them. With no non-exchange drift this is the benign steady state, so
+// `commit` must adopt the compacted document instead of failing closed with
+// "refusing to auto-adopt committed historical response patchback".
+#[test]
+fn commit_allows_clean_exchange_only_compaction() {
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+    Command::new("git")
+        .current_dir(root)
+        .args(["init"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "test@example.com"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test"])
+        .output()
+        .unwrap();
+
+    let doc = root.join("session.md");
+    // HEAD: pre-compact committed state with a finalized response carrying the
+    // exact `### Re: do [#rtwbcast]` marker the live repro reported, plus a stable
+    // status + backlog (non-exchange components).
+    let pre_compact = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "rtwbcast landed.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: older — gpt-5\n\n",
+        "Earlier work.\n\n",
+        "do #rtwbcast. spec-test-build-install-commit-push\n",
+        "### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8\n\n",
+        "Implemented the broadcast rung.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#follow] keep an eye on convergence\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, pre_compact).unwrap();
+    crate::snapshot::save(&doc, pre_compact).unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["add", "session.md"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "finalized rtwbcast", "--no-verify"])
+        .output()
+        .unwrap();
+
+    // Post-compact document: exchange archived to a Session Summary, status +
+    // backlog preserved exactly. Snapshot + working tree both hold this (the
+    // normal post-archival state after compact refreshes the snapshot).
+    let post_compact = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "rtwbcast landed.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Session Summary\n\n",
+        "Archived 2 response topic(s) to .agent-doc/archives/session-20260613.md\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#follow] keep an eye on convergence\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, post_compact).unwrap();
+    crate::snapshot::save(&doc, post_compact).unwrap();
+
+    commit(&doc).expect("clean exchange-only compaction must not fail closed");
+
+    let head_doc = show_head(&doc).unwrap().unwrap();
+    assert!(
+        head_doc.contains("### Session Summary"),
+        "HEAD should hold the compacted document after commit:\n{head_doc}"
+    );
+    assert!(
+        !head_doc.contains("### Re: do [#rtwbcast]"),
+        "the archived response must not remain in HEAD after compaction:\n{head_doc}"
+    );
+}
+// #compactdrift — the recovery shape: compact archived the exchange and refreshed
+// the working tree, but the snapshot was left STALE at the pre-compact size (the
+// reported "snapshot stale at pre-compact size vs the compacted visible file").
+// With no concurrent wedged write and no non-exchange drift, `agent-doc commit`
+// recovery must adopt the compacted file rather than fail closed on the historical
+// `### Re:` marker.
+#[test]
+fn commit_recovers_stale_pre_compact_snapshot_without_wedge() {
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+    Command::new("git")
+        .current_dir(root)
+        .args(["init"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "test@example.com"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test"])
+        .output()
+        .unwrap();
+
+    let doc = root.join("session.md");
+    let pre_compact = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "rtwbcast landed.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: older — gpt-5\n\n",
+        "Earlier work.\n\n",
+        "do #rtwbcast. spec-test-build-install-commit-push\n",
+        "### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8\n\n",
+        "Implemented the broadcast rung.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    // HEAD is still the pre-compact committed state (compact's own commit failed).
+    fs::write(&doc, pre_compact).unwrap();
+    crate::snapshot::save(&doc, pre_compact).unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["add", "session.md"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "finalized rtwbcast", "--no-verify"])
+        .output()
+        .unwrap();
+
+    // Working tree = compacted; snapshot left STALE at the pre-compact bytes.
+    let post_compact = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "rtwbcast landed.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Session Summary\n\n",
+        "Archived 2 response topic(s) to .agent-doc/archives/session-20260613.md\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, post_compact).unwrap();
+    // snapshot intentionally NOT refreshed — still pre_compact.
+
+    let result = commit(&doc);
+    assert!(
+        result.is_ok(),
+        "stale-pre-compact-snapshot recovery must not fail closed: {:?}",
+        result.err().map(|e| e.to_string())
+    );
+}
 #[test]
 fn relative_to_strips_prefix_for_normal_paths() {
     let root = Path::new("/home/user/project");

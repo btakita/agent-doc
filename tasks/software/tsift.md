@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,18 +39,36 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): #bugs-observed + improve prompt caching; do [#avbq]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:fdb60f6c -->
+
+### Re: #bugs-observed — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Add backlog items for tsift to improve prompt caching?
+
+
+> **Queue prompt:**
+>
+> :pushpin: #bugs-observed
+
+
+
+No new **tsift** bugs this session — tsift itself (search, session-review, context-pack, build/install) behaved correctly. The prompt-caching backlog it spawned earlier (#0g7c remediation, #avbq cross-run persistence, #wwm1 inline surfacing) is now fully shipped and pushed (tsift `f29f7a2`).
+
+Note for the record: #wwm1's `### Re:` response section was lost from this document when a compaction ran mid-closeout (archive `…-183544.md`) between the `--done` strike and `finalize`; the **code** shipped fine (f29f7a2, backlog marked done), only the in-doc narrative was dropped. That is an **agent-doc** workflow bug, not a tsift bug:
+
+- **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
+- **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
+
+So: nothing added to the tsift backlog for this item — no tsift-scoped observed bug to capture (`no-pending-capture`).
+- **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
+- **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
+<!-- agent:boundary:f63735b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#1td4]~~
-- ~~:round_pushpin: do [#0g7c]~~
-- ~~:round_pushpin: do [#avbq]~~
-- ~~:round_pushpin: do [#wwm1]~~
-- :pushpin: #bugs-observed
-- :pushpin: Add backlog items for tsift to improve prompt caching?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

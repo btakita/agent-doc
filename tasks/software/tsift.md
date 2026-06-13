@@ -251,12 +251,13 @@ Root cause was broader than the original note: the lock surfaces from **two** si
 - **Commit + push:** tsift `1fc031a` → `origin/main`; superproject pointer `dc198313e`. CI run `27460096312` queued (local gate is the green evidence).
 
 Next in queue: `#tsreview2`.
-<!-- agent:boundary:04efd374 -->
+<!-- agent:boundary:4998a202 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#tsreview2]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

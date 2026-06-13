@@ -229,12 +229,35 @@ You chose "defer #fcc0 to a clean session, but automate the entire thing." The c
 **What this does NOT do (honestly):** it does not auto-execute `[clean-session]` code work in an auto-provisioned clean session — that would need a headless/quiesced-IPC execution path, a much larger change with real risk to the live write path. What it DOES do is stop the churn so the deferred heads sit quietly until you run them in a clean session, with no manual pause needed. The residual question/directive-phrased bug reports (the `?`-ending and "Fix and add …" lines) stay drainable by design — auto-classifying those as noise risks dropping a real prompt; they're already triaged to #fcc0/#compactdrift/#2v7b and you can strike them.
 
 **To activate it live:** the running supervisor still serves the pre-`1395846c` binary, so I'm promoting the fresh build via `admin recycle --all-projects` (your preferred PCP path) right after this commit. Once recycled, the idle drain self-defers the remaining undrainable/noise heads. #fcc0 / #compactdrift / #stuckhandoff2 M1 remain for a genuinely clean session.
-<!-- agent:boundary:0a0520ce -->
+
+### Re: "auto-provisioned clean session to save tokens on almost every queue turn" — already built; enabled it — opus-4.8
+
+> **Queue prompt:**
+>
+> :pushpin: Is seems like we actually want "auto-provisioned clean session" to save tokens on almost every queue turn...indicated from Claude's message to use `/clear` to save tokens.
+
+
+Good news: the token-saving auto-clean-session is **already built** (`#s760c`); it was just default-off. I enabled it this turn — no new code.
+
+**What it is (`agent_doc_queue_context_reset` + `#s760c`):** during the supervisor's idle-queue auto-drain, between queue items the watch reads the **live harness transcript ctx%** (the exact number behind Claude's `ctx:32%` / `/clear to save 318.8k tokens` footer — not document size) and fires a tracked `/clear` once ctx% crosses `agent_doc_clear_threshold`. The next item then runs in a freshly-cleared agent. It logs `[s760] clear-decision …` to `ops.log`, and fail-safes: unknown ctx% never clears, and it never fires into an in-flight `/clear`.
+
+**What I changed — enabled it project-wide (`.agent-doc/config.toml`, race-free):**
+```
+agent_doc_queue_context_reset = true
+agent_doc_clear_threshold = 15
+```
+Threshold **15%** is deliberately aggressive to match "almost every queue turn": once a turn pushes ctx past 15%, the supervisor clears before the next item. Raise it to clear less often; a per-document `agent_doc_clear_threshold:` in frontmatter overrides the project value. I used config rather than this doc's frontmatter because the live editor IPC buffer was actively truncating the session doc on every edit this turn (the #fcc0/#stuckhandoff2 instability) — config is the race-free seam.
+
+**Honest token math:** clearing every turn pays a fixed reload (system prompt + CLAUDE.md + SKILL.md + memory index ≈ tens of K) per clear. That's a net win whenever a turn accumulates more than the reload — which substantial queue work easily does (you saw 318.8k). For a queue of tiny turns it can cost more than it saves; that's why it's threshold-gated rather than literally every turn, and why 15% (not 0) is the floor.
+
+**Two caveats:** (1) it fires during the **supervisor's** auto-drain, not when you hand-invoke `/agent-doc` each turn (a manual re-invoke keeps the same conversation — which is why this session's ctx grew). (2) This is the *token-saving* clean session (same process, `/clear` between items); it is NOT the *clean session for `[clean-session]` code work* (#fcc0's live-write-path refactor) — that's a separate, harder problem.
+<!-- agent:boundary:be4a3e9e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Is seems like we actually want "auto-provisioned clean session" to save tokens on almost every queue turn...indicated from Claude's message to use `/clear` to save tokens.~~
 - ~~:pushpin: Could you explain this message in Claude "Opus 4.8 ctx:32% ~/work/btakita/agent-loop main brian@cachyos-x8664  new task? /clear to save 318.8k tokens". Does this mean we should have the PCP/Supervisor run `/clear` (stopping agent-doc session then restarting if in go-mode...please give me a good term for this behavior) after every queue item is complete (queue turn)? How does this compare with the overhead of loading the context, skills, AGENTS.md/CLAUDE.md?~~
 - ~~:pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.~~
 - :round_pushpin: do [#fcc0]

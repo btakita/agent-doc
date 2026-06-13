@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -60,7 +60,7 @@ Investor samples:
 - `tmp/investor/investor-wire-instructions.txt`
 
 I also added `tmp/README.md` describing the fixture set. `src/equityfundingsource-dev/.gitignore` already contains `tmp/`, and I verified Git ignores the new fixture files. I checked MIME detection: the PDFs report as `application/pdf`, the CSV files as `text/csv`, and the text files as `text/plain`, which are accepted by the app upload guard.
-<!-- agent:boundary:b5e7b163 -->
+<!-- agent:boundary:da15208a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,6 +68,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The Accessories - Shopping - 18/5 ads is costing money and not converting. Please assess and reduce budget if it is a loser.
 <!-- /agent:queue -->
 
 ## Backlog

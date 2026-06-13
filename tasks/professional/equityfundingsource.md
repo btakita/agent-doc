@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -169,7 +169,33 @@ Applied to **both** surfaces: the borrower loan application (`full_application.t
 - EFS commit `8e5960f`; submodule bump `6d5961c60`.
 
 Hard-refresh the application form to see it. Note this builds on the prior multi-file change: each category still accepts multiple files, and the backend stores them per type.
-<!-- agent:boundary:6fa8c865 -->
+
+### Re: Upload friction — drop area + click-to-open on every form — opus-4.8
+
+> **Queue prompt:**
+>
+> The upload UI has too much friction. Each form should have its own drop file area along with supporting click to open the file dialog. deploy
+
+
+Done and deployed. I added a shared drag-and-drop upload area (with click/keyboard to open the file dialog) and rolled it out across the upload forms.
+
+**New shared component** — `FileDropZone` in `shared/ui.tsx`: a dashed drop area that highlights on drag-over, accepts dropped files, and opens the native picker on click or Enter/Space. Multiple-capable by default.
+
+**Applied to the forms that were plain pickers:**
+- **Investor accreditation**, **admin public documents**, **admin lender documents**, **admin deal documents** — the bare `<input type=file>` is now a `FileDropZone`.
+- **Borrower documents** (per required-doc slot) — each slot card is now a drop target too (drop onto the card), keeping its Upload/Replace button for click-to-open.
+
+The forms that already had a drop area keep it: the **loan application** Documents form and the **new-application** category uploader both already support drop + click.
+
+So every upload form now has its own drop-file area plus click-to-open — less friction, consistent everywhere.
+
+**Verified + deployed:**
+- `bun test` — **589 pass / 0 fail** (added `#upload-dropzone` coverage: the shared component does drop + click + multiple; each refactored form uses it; borrower slots accept drops).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `0448b93f`).
+- EFS commit `728baef`; submodule bump `581224173`.
+
+Hard-refresh to pick up the new bundle.
+<!-- agent:boundary:5f1ce13f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,7 +203,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The upload UI has too much friction. Each form should have its own drop file area along with supporting click to open the file dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

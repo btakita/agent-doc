@@ -122,7 +122,22 @@ Did the agent-doable half of `#qflood2`: a benign in-flight dispatch coalesce no
 **Verification.** Full workspace was green last cycle (`make check` = 4381 passed, 0 failed) and write.rs is unchanged since the splitmods commits, so the "make check + full workspace 0 failed" gate the item asked for is satisfied by the already-committed split.
 
 Marking `#splitmodswrite` done. Queue now: `#rtwbcast` (clean-session, multi-editor CRDT broadcast — operator-drive) is the next head; the remaining backlog is the `[clean-session]`/`[operator-verify]` set that defers under live IPC.
-<!-- agent:boundary:43e21266 -->
+
+### Re: queue exhausted of drainable work — paused the go-mode drain — opus-4-8
+
+The go-mode queue has no agent-drainable work left, so I paused it (controller-mediated, IPC-safe — `admin queue pause … --observed-generation 336`, receipt 25) to stop the no-op churn. I did **not** edit the queue directly (that races the live IPC supervisor).
+
+**Why it can't keep draining here.** This session already drained its real work — `#qflood2` (fixed, shipped `9bc62c6f`) and `#splitmodswrite` (closed as already-done via splitmods3/4). Every remaining queue head is undrainable in a live IPC session:
+
+- `do [#rtwbcast]` — `[clean-session]` + operator-drive live two-IDE verify.
+- `do [#fcc0]`, `do [#compactdrift]` — `[clean-session]` (touch the live write/dispatch path).
+- The `JB Run Agent Doc … does not submit` line — `#2v7b`, code-complete last session (`3b71cfeb`), gated operator-verify.
+- The efs `dispatch coalesced (#qflood)` block and the `JB Compact Exchange` error block — **stale pasted console output** that is evidence for already-resolved items, not directives.
+
+**Root-cause gap captured (`#goqstall2`, backlog).** `#goqueuestall` only defers undrainable heads at the *backlog→queue sync* boundary. Heads that were **already materialized** in the `## Queue` block before that fix — pre-existing `do [#clean-session-id]` lines and pasted console-output blocks — are still counted as drainable continuation work, so `queue_continuation_required` stays `true` and the queue churns instead of self-deferring. The durable fix is to resolve each materialized `do [#id]` head's backlog tag in the continuation set and classify non-directive console lines as noise, emitting `go_queue_skip_undrainable origin=materialized_head`. Filed with plan `tasks/agent-doc/plan-go-queue-stall-materialized-heads.md`; tagged `[clean-session]` because it edits the live queue-continuation logic.
+
+**To resume productively:** from a **clean (non-IPC) session**, drive `#goqstall2` (durable defer) and/or the `[clean-session]` items (`#fcc0`, `#rtwbcast`, `#compactdrift`), and clear the stale console-output lines from the `## Queue` block. `agent-doc admin queue resume` re-enables the drain when you're ready. Nothing actionable for this live session remains.
+<!-- agent:boundary:646495bc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -191,6 +206,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#goqstall2] [clean-session] go-mode drain + session-check queue_continuation_required do NOT defer pre-materialized undrainable do[#id] queue heads (clean-session/operator-verify backlog items) or stale console-output queue lines, so a queue populated before #goqueuestall churns no-op cycles instead of self-deferring. Resolve each materialized do[#id] head's backlog tag in the continuation head set + classify non-directive/console-output lines as noise; emit go_queue_skip_undrainable origin=materialized_head + queue_stale_noise_lines diagnostic. CLEAN session (touches live queue-continuation logic). Plan: tasks/agent-doc/plan-go-queue-stall-materialized-heads.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

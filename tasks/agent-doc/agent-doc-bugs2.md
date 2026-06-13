@@ -249,7 +249,28 @@ The recycle/clear pipeline is already **document-identity-agnostic** in producti
 Verified: new test + recycle/clear/qflood2 suites green, `make check` clean (exit 0), CI green. Committed to the agent-doc submodule (`5ccf1354`) and pushed; superproject pointer bumped.
 
 To make a specific non-dogfooding project actually *recycle* (not just clear/drain) on a stale binary, set `agent_doc_supervisor_auto_recycle = true` in that project's `.agent-doc/config.toml` — but that's a per-project opt-in to do from within that project's own session, not from this dogfooding doc.
-<!-- agent:boundary:fa8ed552 -->
+
+### Re: Make auto-recycle opt-in by default — how do I opt in/out? — opus-4-8
+
+Good news: **auto-recycle is already opt-in by default.** No product change is needed. The supervisor image-swap (`#suprecyclequeue` / `#ctlrecycle`) only runs when something explicitly turns it on. The resolution function (`resolve_supervisor_auto_recycle`, `project_controller/rpc.rs:1095`) is **OFF when nothing is set anywhere** — that's unit-asserted (`r(None, None) == false`).
+
+The only reason *this* repo auto-recycles is that **agent-loop opts in on purpose** — `.agent-doc/config.toml:7` has `supervisor_auto_recycle = true` (with a comment explaining it's the dog-fooding setting so rebuilds get picked up without a manual `restart-supervisor`).
+
+**How to opt in / opt out** — three surfaces, in precedence order (env wins, then frontmatter, then project config; default OFF):
+
+1. **Env var (highest priority, force on/off):** `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`
+   - opt **in**: `1` / `true` / `yes` / `on`
+   - opt **out**: `0` / `false` / `no` / `off`
+   - unset or unrecognized → falls through to config below.
+2. **Per-document frontmatter** (`agent_doc_supervisor_auto_recycle:` or the `supervisor_auto_recycle:` alias) — `true` / `false`.
+3. **Project default** in `.agent-doc/config.toml` (`supervisor_auto_recycle = true|false`). Absent = OFF.
+
+So, concretely:
+- **To stop this repo from auto-recycling:** set `supervisor_auto_recycle = false` in `.agent-doc/config.toml:7` (or delete the line — absent is OFF). For a one-off without editing config, launch the session with `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=0`.
+- **To opt a different repo in:** add `supervisor_auto_recycle = true` to its `.agent-doc/config.toml`, or export `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1`.
+
+Note: this controls **auto-recycle** (supervisor swapping onto a freshly-installed binary at an idle/queue boundary). It is *separate* from **auto-clear** (`/clear` between queue items), which is governed by `agent_doc_clear_threshold` (this repo sets `15` at `.agent-doc/config.toml:15`; built-in default is `50`, and unknown ctx% never clears). If you also want auto-clear to be off, that's a different knob.
+<!-- agent:boundary:851902d4 -->
 <!-- /agent:exchange -->
 
 ## Queue

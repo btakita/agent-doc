@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -70,7 +70,22 @@ Both done, committed, and pushed. Full EFS suite green (631 pass / 0 fail), buil
 **#xcvginbound — inbound email→chat (EFS `d8e6320`).** Replaced the 501 scaffold at `POST /api/email/inbound` with a real, authenticated handler. Two-factor sender auth: (1) the configured inbound provider must present a shared secret (`X-Inbound-Secret`; **fails closed when no secret is set**, so unauthenticated mail can never inject), and (2) the `from` address must resolve to an `admin` user. Authenticated replies append as an admin chat message via `borrower_chat_message_create_admin_`, claim thread ownership, and notify the borrower — same path as a portal admin reply. This is the #xcvg *code* half; outbound borrower notification stays config-gated on the verified sending domain (#f4rq).
 
 Net: #vd8s/#67v2/#zwws phase 4/#7a4d now have a live TMO data mirror + visibility behind them; the borrower message round-trip's inbound leg is built and waiting only on inbound-routing config (`MESSAGE_EMAIL_INBOUND_ENABLED` + `MESSAGE_EMAIL_INBOUND_SECRET` + provider webhook).
-<!-- agent:boundary:1e27de88 -->
+
+### Re: Step 7 "Review & Sign" reverts to Step 6 on refresh — opus-4-8
+
+> **Queue prompt:**
+>
+> On https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a, the Step 6 Documents is complete by me clicking "Save & Continue" and then the Step 7 is complete by me clicking "Save & Continue", which takes me to Step 7 "Review & Sign". But when I refresh, I go back to Step 6. deploy
+
+
+Fixed and deployed (EFS `ca63ddf`, worker version `1e9b13fe`).
+
+**Root cause.** The borrower full-application wizard never persisted which step you were on — on load it *reconstructed* the resume step purely from how complete each section's data was (`resume_step_from_sections_`). That heuristic can't tell the **Documents** step (index 5) from **Review & sign** (index 6): both have all field steps complete, and the Documents step has no required-field gate. So its last line returned `signature.esign_consent ? 6 : 5` — i.e. it could only land you on Review & sign *after* you e-signed. Refreshing while sitting on Review & sign (not yet signed) always recomputed to 5 = Step 6 Documents.
+
+**Fix.** Persist the furthest step you actually reached per application (`localStorage`, keyed by application id) and use it via a new pure `resolve_resume_step_` to disambiguate **only** the Documents↔Review tail. The completeness heuristic stays authoritative for the field-entry steps (0–4), so a stale stored value can never push you forward past genuinely incomplete earlier data; only forward progress is recorded.
+
+**Verification.** Added `tests/full-application-resume-step.test.ts` (8 cases: tail disambiguation, no-push-past-incomplete, clamp, heuristic fallback). Full suite green — 639 tests, 0 fail — then `build` + `build:worker` + `deploy:worker` succeeded. Note: this is a per-browser resume (localStorage); a different browser/device still falls back to the completeness heuristic.
+<!-- agent:boundary:665a4378 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +93,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- On https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a, the Step 6 Documents is complete by me clicking "Save & Continue" and then the Step 7 is complete by me clicking "Save & Continue", which takes me to Step 7 "Review & Sign". But when I refresh, I go back to Step 6. deploy
 <!-- /agent:queue -->
 
 ## Backlog

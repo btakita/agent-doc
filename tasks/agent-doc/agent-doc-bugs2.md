@@ -14,6 +14,7 @@ prompt_presets:
   '#follow-up-backlog': Any follow-up items to place in the backlog?
   '#mermaid': Include explanatory mermaid diagram(s).
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
@@ -84,14 +85,37 @@ This cycle had **no genuine new user prompt** — the only diff was a fresh comp
 **3. No agent-drainable work remains.** Same conclusion as the committed triage: backlog `#compactdrift` / `#rtwbcast` / `#fcc0` are `[clean-session]` (live write-path), review items are `[operator-verify]`. The remaining go-mode queue churn is the **`#qchurn`** bug actively manifesting — untagged free-text operator bug-reports keep `queue_active=true`, so the idle-watch re-injects `queue_trigger=auto` with zero drainable work. **Not auto-looping.**
 
 **Operator action to make progress:** drive the `[clean-session]` items (each has a plan file) from a **fresh, non-route-owned** session; the `#qchurn` fix and queue cleanup both require that clean session (Editing the queue under the live IPC supervisor races and corrupts).
-<!-- agent:boundary:31998e4c -->
+
+### Re: hot-reload stalling + recycle doesn't restart + Sync deferred — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The hot reload + stalling ![img_22.png](img_22.png). The PCP/Superivsor recycle does not restart the agent session. The entire tmux pane is hanging. ![img_21.png](img_21.png). After I ran `tmux kill-pane`, then JB `Sync Tmux Layout`...a dialog `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.` appeared. Why was the sync blocked? The syncs should be fast. Are they blocking on something? If there is some in-pane initialization needed, the tmux pane management should be independent. So opening, moving tmux panes should not block on the task happening within the tmux pane. Of course some operations need to block on the in-pane activity, such as waiting for the supervisor to complete before it self-closes. Strengthen Simworld tests.
+
+
+`img_22.png` is the missing piece — it shows the actual failure, and the two symptoms are one chain, not two bugs. **This is `[clean-session]` work (`#recyclerestart`), so I diagnosed read-only and recorded the confirmed root cause in `tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md`; I did not implement under the live supervisor.**
+
+**1. Hot reload fails → recycle is a self-terminate, not a restart (img_21 / img_22).** Both screenshots log:
+`supervisor execve hot-reload failed (No such file or directory (os error 2)); falling back to clean exit`. Then the pane either dies (`Pane is dead (status 0)`) or the harness child is left hung (`Cultivating… still thinking`).
+
+Root cause is in `supervisor_perform_reexec` (`agent-doc-orchestration/src/start.rs:1717`): the recycle re-execs `std::env::current_exe()`. But `make install` / `cargo install` replaces the binary atomically (build temp → `rename()` over the target), which **unlinks the inode the running supervisor holds**. On Linux `current_exe()` reads `/proc/self/exe`, which now points at the deleted inode and comes back with a trailing ` (deleted)` suffix → `cmd.exec()` ENOENTs (os error 2). The `Err` arm then does bare `std::process::exit(0)`. The "next launch uses the new build" comment assumes *something* relaunches the supervisor — in a tmux-hosted pane nothing does, so the agent session just ends (dead pane) or is left wedged. That is exactly your "recycle does not restart the agent session" and "the entire tmux pane is hanging."
+
+Fix (deferred to a clean session): exec the **canonical freshly-installed path** the staleness detector already knows (`preflight.rs:898` resolves the `~/.cargo/bin` target) instead of `current_exe()` — or strip a trailing ` (deleted)` and re-canonicalize/re-stat before exec — and make the fallback arm a real cold relaunch/clear of the harness child in the same pane, not bare `exit(0)`.
+
+**2. "Sync deferred: another tmux layout sync is already running" is downstream of #1 — not an independent slow sync.** The defer message fires when `agent_doc_sync_try_lock()` returns false. That guard is an **in-process** `AtomicBool SYNC_LOCKED` in the loaded cdylib (`src/ffi.rs:78`), and `SyncLayoutAction` holds it across the *entire* `agent-doc sync` subprocess (spawned on a worker thread, released only in `finally`, `SyncLayoutAction.kt:331`), bounded by the 30s `SYNC_PROCESS_TIMEOUT_MS`. When the pane from #1 is wedged, an in-flight `agent-doc sync` blocks on it, so `SYNC_LOCKED` stays held and your next manual click defers.
+
+So to your question — "are they blocking on something?" — yes: the layout-geometry sync is coupled to in-pane/binary readiness, and a wedged supervisor pane keeps the guard held. Your instinct is right: tmux geometry sync should be independent of in-pane init. The CLI lock path already reaps stale orphaned `.agent-doc/sync.lock` owners (`sync.rs` `is_stale_orphaned_sync_lock_owner`), but the plugin's in-process `try_lock` fails fast on contention without that recovery and without decoupling geometry from readiness.
+
+Fix (same clean session): hold `SYNC_LOCKED` only across the fast geometry reconcile, run pane readiness/recovery separately, and let a newer sync generation supersede an in-flight stale one instead of warn-and-skip. Fixing #1 also removes the usual cause of the held guard.
+
+Both are captured under `#recyclerestart` (`[clean-session]`) with the plan updated — left for a clean session per the live-supervisor gate.
+<!-- agent:boundary:990c0d61 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~re [#qflood2]: I'm still seeing prompts entered into the agent during an active turn. It should stop the running agent-doc queue drain once a queue turn is complete, then insert the commands into the inactive agent (between queue turns). The turn ended with `/clear /agent-doc tasks/agent-doc/agent-doc-bugs2.md/agent-doc tasks/agent-doc/agent-doc-bugs2.md` due to the accumulating instructions. Please follow the plan to enqueue unique (de-duplicated...only one `/clear` allowed, only one `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` allowed) instructions. These must land once as part of the PCP/Supervisor between queue turn stage.~~
-- :pushpin: The PCP/Superivsor recycle does not restart the agent session. ![img_21.png](img_21.png). After I ran `tmux kill-pane`, then JB `Sync Tmux Layout`...a dialog `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.` appeared. Why was the sync blocked? The syncs should be fast. Are they blocking on something? If there is some in-pane initialization needed, the tmux pane management should be independent. So opening, moving tmux panes should not block on the task happening within the tmux pane. Of course some operations need to block on the in-pane activity, such as waiting for the supervisor to complete before it self-closes.
+- ~~:pushpin: The hot reload + stalling ![img_22.png](img_22.png). The PCP/Superivsor recycle does not restart the agent session. The entire tmux pane is hanging. ![img_21.png](img_21.png). After I ran `tmux kill-pane`, then JB `Sync Tmux Layout`...a dialog `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.` appeared. Why was the sync blocked? The syncs should be fast. Are they blocking on something? If there is some in-pane initialization needed, the tmux pane management should be independent. So opening, moving tmux panes should not block on the task happening within the tmux pane. Of course some operations need to block on the in-pane activity, such as waiting for the supervisor to complete before it self-closes. Strengthen Simworld tests.~~
 - :round_pushpin: do [#compactdrift]
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt

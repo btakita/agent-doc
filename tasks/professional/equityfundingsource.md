@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -133,7 +133,7 @@ Refactored the row rendering into a shared `ActivityTimeline` component reused b
 - EFS commit `c264f91`; submodule bump `fb5c79ae3`.
 
 Hard-refresh to pick up the new bundle. (Session note: the exchange is getting long — 8 cycles in 30 min — but I'm keeping the queue draining per the no-stall rule; compact when you're ready with `/agent-doc compact`.)
-<!-- agent:boundary:649999db -->
+<!-- agent:boundary:d42106d8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,6 +141,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The Full Application dialog on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new should match the full design and behavior of https://equityfundingsource.brian-takita.workers.dev/portal-admin/loan-applications/48b67fd8-31a9-4cdf-a59b-c9c192da2026. That means Activity history should be to the right of the Application progress. All the sections should be present in both. The components should probably be unified. Do the same for all dialog + page combos. All elements and behavior in the full pages should be in the dialogs. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

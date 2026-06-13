@@ -121,6 +121,13 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
         .iter()
         .find_map(|entry| match entry {
             crate::queue::QueueEntry::Prompt(prompt) => {
+                // #goqstall2: a bulleted free-text line that is not an actionable
+                // drain target (a pasted bug-report observation / stale console
+                // evidence with no `#id`, directive, or question) is inert noise —
+                // skip it like a deferred head so it does not churn no-op closeouts.
+                if !is_drainable_queue_head(&prompt.text) {
+                    return None;
+                }
                 let id = extract_head_id(&prompt.text);
                 let deferred = id
                     .as_deref()
@@ -251,6 +258,116 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
     }
     let head = crate::queue::first_prompt(&activation.entries_after)?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
+}
+
+/// Recognized actionable directive verbs for go-mode drainability classification
+/// (`#goqstall2`). Word-matched anywhere in a normalized head — conservative in the
+/// SAFE direction: a head that looks even loosely directive stays drainable; only a
+/// bare observation with no directive and no question is demoted to inert noise.
+const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
+    "do", "fix", "run", "build", "install", "commit", "push", "implement", "add",
+    "update", "investigate", "create", "make", "remove", "delete", "refactor",
+    "review", "explain", "drive", "resume", "continue", "check", "verify", "write",
+    "test", "debug", "diagnose", "merge", "publish", "release", "bump", "document",
+    "rebase", "revert", "rename", "move", "split", "extract", "wire", "land", "ship",
+    "draft", "summarize", "answer", "respond", "apply", "enable", "disable", "gate",
+];
+
+/// Strip a queue head's leading list bullet, emoji-shortcode tokens
+/// (`:pushpin:` / `:round_pushpin:`), and leading emoji glyphs / stray punctuation
+/// so the classifier sees the actionable text. Keeps `#` and `[` (an `#id` / `[#id]`
+/// can lead the line).
+fn normalize_queue_head_text(text: &str) -> String {
+    let mut s = text.trim();
+    if let Some(rest) = s.strip_prefix('-') {
+        s = rest.trim_start();
+    }
+    // Strip leading `:shortcode:` emoji tokens (e.g. `:pushpin:`), repeatedly.
+    loop {
+        s = s.trim_start();
+        if let Some(after_colon) = s.strip_prefix(':')
+            && let Some(end) = after_colon.find(':')
+        {
+            let token = &after_colon[..end];
+            if !token.is_empty()
+                && token
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                s = &after_colon[end + 1..];
+                continue;
+            }
+        }
+        break;
+    }
+    // Strip leading emoji glyphs / stray punctuation, but keep `#`/`[` so an id can
+    // lead and `/` so a slash command (`/model sonnet`) stays recognizable.
+    s.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '[' && c != '/')
+        .trim()
+        .to_string()
+}
+
+/// Whether a queue `Prompt` head is auto-drainable in go-mode (`#goqstall2`).
+///
+/// A pre-materialized `## Queue` block can carry bulleted free-text lines that are
+/// not actionable drain targets — pasted bug-report observations or stale console
+/// evidence the agent already triaged into backlog items. Those churn no-op
+/// closeouts because the continuation walk treats every `Prompt` as a ready head.
+///
+/// A head is drainable iff it carries a `#id` / `[#id]` (the
+/// `[clean-session]`/`[operator-verify]` defer is applied separately by id), ends
+/// with a question mark, or contains a recognized imperative directive verb.
+/// Everything else (a bare observation) is inert **noise**: excluded from the
+/// continuation head set and surfaced as `queue_stale_noise_lines`, never
+/// auto-deleted (the live IPC supervisor races on direct queue edits).
+pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
+    if extract_head_id(text).is_some() {
+        return true;
+    }
+    let normalized = normalize_queue_head_text(text);
+    if normalized.is_empty() {
+        return false;
+    }
+    // A harness slash command (`/clear`, `/model sonnet`, `/code-review`) is a
+    // drainable command head, submitted to the owner pane — not prose noise.
+    if crate::queue_command::is_slash_command(&normalized) {
+        return true;
+    }
+    if normalized.trim_end().ends_with('?') {
+        return true;
+    }
+    let lowered = normalized.to_ascii_lowercase();
+    lowered
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|word| QUEUE_DIRECTIVE_VERBS.contains(&word))
+}
+
+/// Count of active queue `Prompt` heads that are non-drainable **noise**
+/// (`#goqstall2`): not a `#id` head, not a directive, not a question. Used by
+/// `session-check` to surface a `queue_stale_noise_lines=N` diagnostic so the
+/// operator can clear pasted bug-report / console-evidence lines that would
+/// otherwise churn the go-mode drain.
+pub fn queue_stale_noise_lines(file: &Path) -> usize {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return 0;
+    };
+    let Ok(components) = crate::component::parse(&content) else {
+        return 0;
+    };
+    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
+        return 0;
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = crate::queue::parse(body) else {
+        return 0;
+    };
+    entries
+        .iter()
+        .filter(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => !is_drainable_queue_head(&prompt.text),
+            _ => false,
+        })
+        .count()
 }
 
 /// Extract the backlog `#id` from a queue prompt like `do [#id] ...` or `#id ...`.
@@ -844,6 +961,73 @@ mod tests {
             Some("bare-id")
         );
         assert_eq!(extract_head_id("no id here"), None);
+    }
+
+    #[test]
+    fn is_drainable_queue_head_classifies_directive_vs_noise() {
+        // #goqstall2: `#id` heads, directives, and questions are drainable.
+        assert!(is_drainable_queue_head(":round_pushpin: do [#fcc0]"));
+        assert!(is_drainable_queue_head("- :pushpin: Fix the submit bug"));
+        assert!(is_drainable_queue_head(
+            "JB Run Agent Doc ... does not submit. Fix and add Simworld regression tests."
+        ));
+        assert!(is_drainable_queue_head(
+            "JB Clear Exchange ... the content came back...from a stale HEAD?"
+        ));
+        assert!(is_drainable_queue_head("#bare-id continue the drain"));
+        // Harness slash commands are drainable command heads, not prose noise.
+        assert!(is_drainable_queue_head("- /model sonnet"));
+        assert!(is_drainable_queue_head(":pushpin: /clear"));
+
+        // Bare bug-report observations with no directive and no question → noise.
+        assert!(!is_drainable_queue_head(
+            "- I'm still seeing JB `File Cache Conflict` dialogs. There should be 0."
+        ));
+        assert!(!is_drainable_queue_head(
+            ":pushpin: JB `Compact Exchange` has a partially uncommitted response."
+        ));
+        assert!(!is_drainable_queue_head("- "));
+        assert!(!is_drainable_queue_head(":pushpin:"));
+    }
+
+    #[test]
+    fn detect_skips_noise_head_and_lands_on_drainable_directive() {
+        // #goqstall2: a bare bug-report observation ahead of a real directive must
+        // not be served as the continuation head — the drain lands on the directive.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &[
+                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
+                "Fix the submit bug and add coverage",
+            ],
+            true,
+            true,
+        );
+        let continuation = detect(&doc).unwrap().expect("a drainable head remains");
+        assert_eq!(continuation.head_prompt, "Fix the submit bug and add coverage");
+        assert_eq!(queue_stale_noise_lines(&doc), 1);
+    }
+
+    #[test]
+    fn detect_quiesces_when_only_noise_heads_remain() {
+        // #goqstall2: a queue of only bare bug-report observations is NOT a stall —
+        // continuation is not required and the lines are counted as stale noise.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &[
+                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
+                "JB Compact Exchange has a partially uncommitted response.",
+            ],
+            true,
+            true,
+        );
+        assert!(
+            detect(&doc).unwrap().is_none(),
+            "only-noise queue must not require continuation"
+        );
+        assert_eq!(queue_stale_noise_lines(&doc), 2);
     }
 
     #[test]

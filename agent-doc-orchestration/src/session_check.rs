@@ -187,14 +187,21 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
                 let deferred = crate::queue_continuation::deferred_head_count(file);
-                if deferred > 0 {
+                // #goqstall2: pre-materialized bulleted free-text lines that are not
+                // actionable drain targets (pasted bug-report observations / stale
+                // console evidence) are inert noise — counted so the idle queue reads
+                // as "deferred + N stale lines to clear", not a silent stall. Never
+                // auto-deleted (the live IPC supervisor races on direct queue edits).
+                let noise = crate::queue_continuation::queue_stale_noise_lines(file);
+                if deferred > 0 || noise > 0 {
                     println!(
-                        "queue_continuation_required=false queue_deferred_heads={}",
-                        deferred
+                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={}",
+                        deferred, noise
                     );
                     eprintln!(
-                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify) — drain from a clean session ({}; #goqueuestall).",
+                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify), {} stale noise line(s) — drain deferred heads from a clean session and clear the noise lines ({}; #goqueuestall/#goqstall2).",
                         deferred,
+                        noise,
                         file.display()
                     );
                 } else {

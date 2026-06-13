@@ -327,7 +327,20 @@ This is the `#qchurn` shape: undrainable heads + already-captured free-text repo
 3. Run the clean-session backlog (`#fcc0`, `#qdedup`, etc.) in a freshly-restarted CLEAN session, one per restart.
 
 I am pausing the queue (IPC-safe, reversible) so the stale supervisor stops re-dispatching no-op cycles until you recycle/restart.
-<!-- agent:boundary:da69781b -->
+### Re: do [#c2b6] — churn loop, not new work — opus-4-8
+
+`do [#c2b6]` is **operator-verify** and cannot be agent-completed — it stays open intentionally (no `--done`). Nothing has changed since the prior `### Re: go-queue drain` cycle — this is the same `#qchurn`/`#goqueuestall` loop: the stale host supervisor (pid 1368698, the parent of this very Claude session) re-injected the same undrainable head with `queue_trigger=auto`.
+
+- **Code is already done + committed** — `#compactdrift` shipped at agent-doc `bca26cfd`, 108 `commit_` tests green. `#c2b6` is only the **live JB Compact Exchange re-verify**, which needs a live editor + operator drive.
+- **Why it keeps re-serving:** supervisor 1368698 predates the installed 0.34.0 binary/cdylib, so it never picked up the `#goqueuestall` defer fix and keeps re-dispatching the `[operator-verify]` head. The previous cycle's `make install` replaced `~/.cargo/bin/agent-doc` + the cdylib, but **running controllers serve the old binary until promoted**.
+
+**I paused the queue** (IPC-safe controller path, receipt 38 / control_receipt 3) to stop the no-op re-dispatch until you recycle. **Not auto-looping.**
+
+**Operator action (only this resolves the churn):**
+1. `agent-doc admin recycle --all-projects` (or restart the session) — promotes the fresh 0.34.0 binary into the live supervisor and brings the defer fix online so it stops churning. I can't run this myself: it would restart the supervisor that hosts this session (and `#aazp`/`#4myd` make the recycle proof operator-drive anyway).
+2. Then drive the live re-verify for `#c2b6`: run **JB Compact Exchange** on a doc whose HEAD holds a finalized `### Re:` response and confirm it compacts **without** the `refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift` bail (the exact failure still pasted at queue line ~366).
+3. While restarted, batch the operator-verify recycle proof (`#aazp`/`#4myd`) and the clean-session backlog one-per-restart.
+<!-- agent:boundary:6c45f5cb -->
 <!-- /agent:exchange -->
 
 ## Queue

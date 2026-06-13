@@ -248,7 +248,7 @@ Done — and it's a **real, end-to-end-tested** backend, not just compiling. str
 A **networked** (non-loopback) backend reuses the same pump loop with a UDP socket + a driver thread instead of the in-memory route — out of scope here (needs live connectivity), noted in the module + plan.
 
 **`#jpf1` is now fully complete** — design (`#webrtc1`), abstraction (`#webrtc2`), tests+bench (`#webrtc3`), and a real concrete str0m backend (`#webrtcbackend`). **The queue is drained.** Open items: only gated review `#57by` (Shuttle, NO-GO) and `#jpf1` (epic, now satisfiable). The recurring `#ipcdrift` supervisor (pid 337083) is still degraded — recycling it (`make install` + restart) remains the standing recommendation.
-<!-- agent:boundary:0cb86687 -->
+<!-- agent:boundary:beb7631b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -261,7 +261,7 @@ A **networked** (non-loopback) backend reuses the same pump loop with a UDP sock
 - ~~do [#webrtc2]~~
 - ~~do [#webrtc3]~~
 - ~~do [#shuttleeval]~~
-- do [#webrtcbackend]
+- ~~do [#webrtcbackend]~~
 <!-- /agent:queue -->
 
 ## Backlog

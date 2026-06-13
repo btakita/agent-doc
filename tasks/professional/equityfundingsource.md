@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -145,7 +145,7 @@ I intentionally left the **image** fields single-file — the deal hero image an
 - EFS commit `fc4447f`; submodule bump `933d5eb7b`.
 
 Hard-refresh to pick up the new bundle. (`tsc` still flags two pre-existing non-strict lines in `admin/documents.tsx` — a `confirm_` string arg and a json `value:unknown` — neither touched by this change; esbuild builds clean and the suite is green.)
-<!-- agent:boundary:9e8f078a -->
+<!-- agent:boundary:6107b757 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,6 +153,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The loan application still has "Replace file" buttons ![img_8.png](img_8.png). These should be a multi-file upload form. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -625,6 +625,10 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-orchestration/src/session_check/partial_staging.rs",
+        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -819,7 +823,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `session_check/tests.rs` (large-module split). The 65 removed `guard_`
         // occurrences were test-assertion literals, not production hot-path
         // guards; only production `guard_` tokens are budgeted here now.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 85,
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 65,
+        ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
+        ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => 6,
+        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
+        ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 1,

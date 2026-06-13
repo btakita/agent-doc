@@ -154,13 +154,38 @@ Done — `#clearcontresume` is implemented in the binary and marked `[x]`. Per y
 **Why pure-function + unit tests rather than a SimWorld scenario:** SimWorld's `clear_session_context` is a 4-line stub that doesn't model the cooldown marker or idle-tick accounting, so a faithful end-to-end scenario would be a large engine extension. The deterministic seam is the decision function, which is fully unit-tested including the tick sequence.
 
 **To make it live:** I built `--release` + `cargo install`, but the *running* supervisor (pid 2585424) is still on the old binary — it picks up the fix at its next turn-boundary auto-recycle, or immediately via `agent-doc admin recycle`. Once recycled, a recycle+clear during an active go-mode drain will resume on its own (watch ops.log for `idle_queue_watch_clear_cooldown_resumed`).
-<!-- agent:boundary:d248d6c1 -->
+
+### Re: what "ctx:32% … /clear to save 318.8k tokens" means + should we /clear per queue turn — opus-4.8
+
+**What the status line is telling you.** `ctx:32%` = this conversation currently fills 32% of the model's context window. `/clear to save 318.8k tokens` = Claude Code is estimating that ~318.8k tokens of *accumulated conversation history* would be dropped if you `/clear` and start fresh. The reason that number matters: every turn re-sends the entire conversation so far as input. A long session pays for its whole history on *each* new turn, so cost (and time-to-first-token) grow with conversation length. The "new task?" hint is Claude Code guessing you may be starting unrelated work where that history is dead weight.
+
+**Should you `/clear` after every queue item?** Conceptually yes — but you should NOT do it by hand, and agent-doc already does it for you. In go-mode the **supervisor owns the `/clear` between queue items**: its idle-boundary recycle resets context and the drain re-dispatches the next item to a freshly-cleared agent. The skill is explicit — "You keep finalizing + looping; the supervisor owns the `/clear`." Manually clearing per turn would race that and break the `/loop` drain-owner lease. This is exactly the recycle + clear pipeline we just made deterministic (#clearcontresume) — the clear is a *step*, not a stall.
+
+**Clear savings vs. reload overhead (the real trade-off):**
+- **Cost of NOT clearing:** each turn re-sends the full ~318.8k-token history. Prompt caching softens the re-billing (cached input ≈ 10% price) but only inside the ~5-minute cache TTL; a cold turn pays full freight, and large context also slows every response. Over a long drain the resend cost compounds.
+- **Cost of clearing:** a fresh session reloads a *bounded, fixed* prelude — system prompt + this repo's CLAUDE.md/CLAUDE.local.md + the memory index + the agent-doc SKILL.md + the SessionStart context index. That's tens of K tokens, paid once per clear and largely cache-warmed over the next few turns. Skills/runbooks load lazily, so you only re-pay for what the next item actually touches.
+- **Break-even:** clear when the history you'd keep dragging forward (hundreds of K) dwarfs the fixed reload (tens of K) **and** the next item doesn't depend on the current conversation's reasoning. The agent-doc drain fits that perfectly — queue items are mostly independent, so shedding the exchange for a small reload is a clear net win. That is why the supervisor clears between items.
+- **When clearing loses:** mid-task, or when the next item needs context you just built — clearing then forces re-derivation that costs more than the resend you saved. The supervisor only clears at item boundaries for that reason.
+
+Bottom line: leave `/clear` to the supervisor's recycle+clear (now deterministic and, as of this turn, simulated end-to-end); don't run it per turn yourself.
+
+(Session note: exchange is at 126 lines / 7 response sections — queue is active so I'm not stalling to compact, just flagging it.)
+
+### Re: recycle + clear as deterministic binary logic — engine extension landed — opus-4.8
+
+Done, and pushed. The resume policy already lived in the binary as pure predicates (#clearcontresume), so the gap your "why not make the engine extension? I want to simulate as much as possible" comment named was the **simulation**: SimWorld's `clear_session_context` was a 4-line stub modeling none of the pipeline. I extended the SimWorld engine to drive the **full operator recycle + clear pipeline end-to-end** — `admin recycle` (mark recycle at next idle boundary) → in-place `execve` recycle preserving the live pane → `session clear` (write the cooldown) → idle settle → cooldown auto-expiry → go-mode drain resume — by calling the **same production decision predicates** the live supervisor idle-queue watch uses, not a reimplementation:
+
+- Exposed `decisions::{clear_cooldown_resume_ready, supervisor_recycle_action, idle_queue_drain_decision, …, CLEAR_COOLDOWN_RESUME_IDLE_TICKS}` as `pub` (`pub mod decisions`) so the offline engine exercises production policy directly.
+- New `RecycleClearModel` state + 6 targeted SimCommands (NOT in the random generator, so seed corpus traces are unchanged). `supervisor_idle_queue_tick` mirrors `idle_watch.rs` tick-for-tick (cooldown debounce, resume + continue-equivalent early return, recycle, drain). `recycle_supervisor_in_place` preserves pane+session and advances generation (distinct from a cold rebind).
+- 4 deterministic scenario tests: full pipeline resume-as-a-step; no-head stays authoritative; deferred-clear blocks resume; debounce resets when a turn interrupts idle. `specs/supervisor.md` updated.
+
+`make check` green (incl. medium seed corpus + clippy). Built `--release` + `cargo install` + `lib-install` (cdylib refreshed; running controllers promote it on the next `admin recycle --all-projects`). agent-doc submodule `40b64df0` pushed to origin/main; superproject pointer bumped + pushed this cycle.
+<!-- agent:boundary:dd86adc2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:pushpin: You should have restarted the queue after your recycle + clear...because that was the previous turn's behavior. You should have a continuation of the previous turn behavior...with the recycle + clear being a "step".~~
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :pushpin: Make the recycle + clear deterministic binary logic (Rust code). I believe you can have much more of this pipeline in the deterministic binary logic.
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]

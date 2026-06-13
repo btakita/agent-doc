@@ -37,13 +37,31 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): next-steps to fix tsift bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:74442335 -->
+
+### Re: do #cicacheguard — opus-4-8
+
+> **Queue prompt:**
+>
+> [#cicacheguard]
+
+
+Done. The v0.1.69 CI re-run I triggered last cycle went **green** (`27369227934` is now `[ok]`) — confirming that red was a transient cache-service abort, not code.
+
+Then I hardened the step so it can't fail the suite again: both `actions/cache@v4` steps in `.github/workflows/ci.yml` (the `clippy + test` and `live Convex graph acceptance` jobs) now carry `continue-on-error: true`. A cache-*service* outage (as opposed to a normal cache miss) now falls through to a cold build instead of aborting the job.
+
+- **Spec/tests:** N/A — a GitHub Actions YAML resilience tweak with no Rust surface to unit-test; rationale documented inline in the workflow.
+- **Verify:** YAML validated, `make check` green (clippy `-D warnings` clean, 49 tests ok, 0 failed).
+- **Build/install:** skipped — no Rust code changed, so the binary is unchanged.
+- **Commit + push:** tsift `96b42c4` pushed to `origin/main`; superproject pointer bumped (`cd6d56632`).
+
+Next in the `go` queue: `#tscodereview`.
+<!-- agent:boundary:912d16c7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#cicacheguard]
+- ~~[#cicacheguard]~~
 - [#tscodereview]
 <!-- /agent:queue -->
 <!--
@@ -53,7 +71,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#cicacheguard] CI run 27369227934 (v0.1.69) failed: both `clippy + test` and `live Convex graph acceptance` jobs died at the `Cache cargo registry + build` step with zero work-step output (~90s, no test/clippy logs) — infra abort, not a code regression (local make check green, clippy -D warnings clean). Re-run triggered. Follow-up: if the cache step keeps aborting, harden it (continue-on-error on actions/cache restore + cold-build fallback) so a cache-service failure cannot fail the suite; confirm the re-run goes green.
 - [ ] [#tscodereview] [recommended] Run a fresh #code-review concurrency/edge-case pass over tsift: the last bug sweep (#tsbugev/#tsbugtok/#tsbuglock/#tsbugcm/#tsbugidx/#tsbugcache) shipped 2026-06-10 and substantial graph-db, log-compression, and prompt-cache code landed since (v0.1.67->0.1.69). Capture root-cause findings to this backlog.
 <!-- /agent:backlog -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -85,7 +85,7 @@ Fixed and deployed (EFS `ca63ddf`, worker version `1e9b13fe`).
 **Fix.** Persist the furthest step you actually reached per application (`localStorage`, keyed by application id) and use it via a new pure `resolve_resume_step_` to disambiguate **only** the Documents↔Review tail. The completeness heuristic stays authoritative for the field-entry steps (0–4), so a stale stored value can never push you forward past genuinely incomplete earlier data; only forward progress is recorded.
 
 **Verification.** Added `tests/full-application-resume-step.test.ts` (8 cases: tail disambiguation, no-push-past-incomplete, clamp, heuristic fallback). Full suite green — 639 tests, 0 fail — then `build` + `build:worker` + `deploy:worker` succeeded. Note: this is a per-browser resume (localStorage); a different browser/device still falls back to the completeness heuristic.
-<!-- agent:boundary:665a4378 -->
+<!-- agent:boundary:52c84444 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,6 +93,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please add a Print button to https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7aa
 <!-- /agent:queue -->
 
 ## Backlog

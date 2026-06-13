@@ -96,6 +96,11 @@ gh release create v0.11.0 --generate-notes
 
 > **Queue prompt:**
 >
+> :round_pushpin: do [#h6qb]
+
+
+> **Queue prompt:**
+>
 > :pushpin: #advance-review
 
 
@@ -113,7 +118,7 @@ Almost everything for the WebRTC DataChannel transport is already shipped — th
 - **`src/str0m_net.rs` — `Str0mNet`**: binds a real `UdpSocket`, spawns a driver thread that pumps str0m (`poll_output` → `socket.send_to`; `recv_from` → `handle_input`) over real timers. `offer()` / `answer()` produce the SDP strings; `accept_answer()` + `add_remote_candidate()` / `local_candidate()` carry the trickled-ICE handshake (designed to be fed straight from `SignalingClient`). `channel()` hands back a `Str0mNetChannel` that implements the existing `DataChannel` trait — so `WebRtcSink`/`WebRtcSource` (permission filtering + `IpcMessage` codec) ride on top **unchanged**. Outbound frames sent before the channel opens are buffered and flushed on open; `ChannelClose`/socket death surface `Err`.
 
 Net: review now reflects reality — one actionable item queued (`#lzwebrtcnet`), three correctly parked.
-<!-- agent:boundary:82708a8b -->
+<!-- agent:boundary:60a39098 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,19 +127,20 @@ Net: review now reflects reality — one actionable item queued (`#lzwebrtcnet`)
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#ch47]
+- ~~:round_pushpin: do [#h6qb]~~
+- ~~:round_pushpin: do [#f0fm]~~
+- ~~do [#ch47]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
-- [ ] [#f0fm] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it can't be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.

@@ -147,7 +147,19 @@ Verified this cycle: `cargo test -p agent-doc-orchestration --lib commit_` gives
 **Residual is #stuckhandoff2, not this guard.** The live repro required the wedged Preparing controller; blocking a wedged stale write is conservative-correct, not a false-positive. The M1 self-watchdog suicide-timer for that wedge is now in source.
 
 **Closeout.** Marking `#compactdrift` done — code is complete, committed, and tested. The only remaining step is the operator-drive live JB `Compact Exchange` re-verify on a freshly `make install`ed binary (the installed cdylib currently predates `aafa6510`), filed as `#c2b6` `[operator-verify]`. Per your "no more gates" directive I'm closing this rather than adding a review gate.
-<!-- agent:boundary:93058a44 -->
+
+### Re: JB Compact Exchange leaves an uncommitted summary that's parsed as a prompt — opus-4-8
+
+Confirmed — and it **reproduced live in this very cycle**. This preflight's `plan` classified four of the `❯ *Compacted. Content archived to …*` summary lines (plus the `<!-- agent:boundary:9dec9035 -->` marker) as `prompt_targets`. That is exactly the bug: the compaction archive-summary is being read as a new user prompt.
+
+**Mechanism.** JB `Compact Exchange` writes the archive-summary block (`❯ *Compacted. Content archived to …*` → `Compacted content:` → `❯ - Archived N response topic(s)…` → `agent:boundary` marker) as a *partially-uncommitted buffer delta*. Because those lines lead with `❯` (the console prompt glyph, which mimics a markdown blockquote) and embed `### Session Summary` / `### Re:`-shaped structure, the next preflight/plan prompt scanner sees prompt-bearing structure and classifies them as `prompt_targets` — spawning a spurious response cycle. It is the same disk-vs-buffer convergence family as `#clearexchstale` / `#compactdrift` / `#fcc0`: compact does not fully converge+commit its own write, so the leftover delta is re-interpreted as input.
+
+**Fix class (clean-session, not done here):** (1) compact must route its archive-summary write through `converge_document_or_disk` + advance the durable merge base so the summary lands as *committed* exchange, never an uncommitted delta; and (2) the prompt scanner must exclude a compaction-archive summary block — identifiable structurally by the `*Compacted. Content archived to …*` + `agent:boundary` signature — from `prompt_targets`. I'm leaving this for a clean session: it's a live write-path change and the current host supervisor is a stale build (below), so implementing under it would race.
+
+**The churn root cause is the stale supervisor.** Preflight flags two staleness warnings this cycle: the route-owned host supervisor (pid `1368698`) started before the current binary, and the installed `~/.cargo/bin` cdylib predates source commit `aafa6510`. That stale build is what keeps producing the File Cache Conflict / compaction-drift dialogs you're filing — the fixes already on `origin/main` are not live. The durable action (operator-drive): run `make install` in `src/agent-doc` to refresh the binary + cdylib, then `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force` so the live host picks up `aafa6510`+. The JB plugin hot-reloads the new cdylib by mtime.
+
+**Not auto-looping.** The rest of the queue is the `#qchurn` no-op pattern — free-text bug reports plus 10 `[clean-session]`/`[operator-verify]` `do #id` heads that preflight already skipped as agent-undrainable under live IPC. There is no agent-drainable work behind this filing, so I'm responding and stopping rather than spinning no-op cycles. The compaction-prompt-echo bug is captured here in prose (the doc's fenced `agent:queue` markers from the tsift.md illustration block granular `--pending-add`); fold it into the `#clearexchstale`/`#fcc0` clean-session batch when you next run one.
+<!-- agent:boundary:6191dc61 -->
 <!-- /agent:exchange -->
 
 ## Queue

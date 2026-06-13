@@ -182,7 +182,22 @@ _Note: `#pw26` (#lzmapspike) drifted into the **icebox** between turns — left 
 **Stopping the auto-drain here (not continuing to `#webrtc2`–`#shuttleeval`).** Two reasons: (1) `#webrtc2` is a heavy implementation cycle (pulls in the `webrtc-rs` dependency tree + a new `webrtc_transport.rs` + long compile) that deserves a clean, focused session; (2) the `#ipcdrift` supervisor self-race is *still* corrupting every finalize this session (this one included — recovered via hand-rebuild). Please **`make install` in `src/agent-doc` + recycle the route-owned supervisor (pid 337083)** before driving `#webrtc2`; auto-draining a multi-cycle implementation queue through the corruption is not safe.
 
 _(Good news: the `#dh3k` CI run finished **green** — the conformance-vs-canonical-spec step and the async/resolve-loop steps all passed.)_
-<!-- agent:boundary:c420ac0c -->
+
+### Re: do #webrtc2 — WebRTC transport abstraction layer — opus-4-8
+
+Per your "abstraction now, concrete later" call, shipped the transport **structure** — dependency-light, fully testable, no 100-crate WebRTC stack pulled in. `src/webrtc_transport.rs` (behind a new `webrtc = ["ipc", "dep:serde_json"]` feature):
+
+- **`DataChannel` trait** — the minimal ordered/reliable byte-frame surface a concrete webrtc-rs/str0m backend must implement (`send_frame`/`try_recv_frame`/`is_open`). Non-blocking, so it satisfies the *synchronous* `IpcSink`/`IpcSource` contracts.
+- **`WebRtcSink`** (`IpcSink`) — filters every outbound `Snapshot`/`Delta` via `filter_readable` for the remote peer **before** serialize+send, so a peer never receives state it can't read.
+- **`WebRtcSource`** (`IpcSource`) — decodes verbatim; inbound write-permission enforcement stays in the graph-apply layer (separation of concerns — documented).
+- **`InMemoryDataChannel::pair()`** — deterministic in-process loopback so `#webrtc3` can test snapshot sync / delta ordering / permission routing / reconnect with **no network or WebRTC dep**.
+
+**Verification:** `cargo build --features webrtc` pulls only **11 crates** (goal met); 2 lib tests pass (loopback round-trip + permission filter; closed-channel → `Closed`); `cargo test --features webrtc` green; `clippy --all-targets --all-features -D warnings` clean; fmt clean. Pushed: lazily-rs `2495018..eca86cd`, superproject pointer `badc7dd2e..db59faf7e`.
+
+**Backlog:** `#webrtc3` (loopback tests + bench, now points at `InMemoryDataChannel`) → **`#webrtcbackend`** [recommended, new] (wire the concrete webrtc-rs/str0m backend behind an additive opt-in feature — the deferred heavy half) → `#shuttleeval`.
+
+**Still stopping the auto-drain.** `#webrtc3` is a clean next cycle (it can fully reuse the in-memory loopback), but the `#ipcdrift` supervisor (pid 337083, stale pre-`7bfc82e3` binary) is *still* live and corrupted this finalize too — recovered via hand-rebuild. Please **`make install` in `src/agent-doc` + recycle the route-owned supervisor** before continuing; I'm not auto-looping through the corruption.
+<!-- agent:boundary:12c35479 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -200,8 +215,8 @@ _(Good news: the `#dh3k` CI run finished **green** — the conformance-vs-canoni
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#webrtc2] #jpf1 phase 2 — Implement the WebRTC DataChannel transport (WebRtcTransport/Sink/Source) per tasks/software/plan-lazily-webrtc-transport.md behind a webrtc feature gate (default crate: webrtc-rs; str0m noted as sans-IO alt); bridge sync IpcSink/IpcSource to async DataChannel via mpsc; reuse SignalingClient for SDP/ICE and PeerPermissions/filter_readable for per-peer filtering.
-- [ ] [#webrtc3] #jpf1 phase 3 — Loopback integration tests for the WebRTC transport (two in-process peers: snapshot sync, delta ordering, permission-filtered routing, reconnect after drop) plus Criterion bench vs in-process/socket transports.
+- [ ] [#webrtc3] #jpf1 phase 3 — Loopback integration tests via InMemoryDataChannel::pair() (snapshot sync, delta ordering, permission-filtered routing, reconnect via close()) plus a Criterion bench of WebRtcSink/Source codec+filter overhead vs the in-process/socket transports.
+- [ ] [#webrtcbackend] [recommended] #jpf1 follow-up — wire a concrete DataChannel backend (webrtc-rs stable default, or str0m sans-IO): RTCPeerConnection via SignalingClient SDP/ICE, ordered reliable DataChannel, async-to-sync mpsc bridge feeding WebRtcSink/Source, teardown/reconnect. Behind an additive opt-in feature so the ~100-crate stack stays optional. Plan: tasks/software/plan-lazily-webrtc-transport.md
 - [ ] [#shuttleeval] [recommended] Feasibility spike for #57by #lzasyncshuttle, read-only: scope the shim surface to make src/async_context.rs generic over tokio/shuttle (executor, tokio::sync::watch, Arc, spawn) under cfg(shuttle); confirm shuttle async plus watch-equivalent can model the two #k03k windows; estimate LOC/risk. Output go/no-go for the operator-gated #57by. No prod change.
 <!-- /agent:backlog -->
 

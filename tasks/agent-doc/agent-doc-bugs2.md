@@ -63,7 +63,26 @@ I found and fixed the live root cause of your headline bug this cycle, and triag
 **4. Why no auto-loop / no code.** The queue head `do [#fcc0]` and the other `do[#id]` heads were correctly skipped as agent-undrainable (clean-session under live IPC / operator-verify) — go-mode behaved. The remaining items are bug reports, all tracked. Looping or forcing clean-session code here would churn no-op cycles and risk re-corrupting the buffer (which it just did, twice).
 
 **To make progress, operator-drive:** (a) `cargo build --release && agent-doc lib-install` + `admin recycle --all-projects` so the committed #jbclaudesubmit/#qflood2/#goqueuestall fixes go live in JB, then re-test #fcc0 and #2v7b and I'll check the logs; (b) tell me to take **#stuckhandoff2 M1+M3** (the durable orphan-reaper I just had to run by hand) in its own clean session — the submodule is clean now, so it's unblocked.
-<!-- agent:boundary:aedcf2c5 -->
+
+### Re: "continue" → took #stuckhandoff2, and it is NOT actually complete (M1 self-watchdog is dead in production) — opus-4.8
+
+I took the #stuckhandoff2 work you greenlit (submodule is clean, blocker resolved). Investigating it overturned the plan's "complete" claim — with hard telemetry.
+
+**What the plan claims:** M1 (controller self-watchdog suicide-timer) makes every `Preparing` controller self-terminate at the 45s threshold "with no dependency on an external reaper tick." M1–M5 all landed; "#stuckhandoff2 is complete."
+
+**What production actually shows:**
+- The wedged controller I killed this cycle (pid 2434403, gen 1060) survived **13.5 minutes**. The binary was installed `03:57:27`; that controller started `03:57:41` — 14s *after* install, so it ran the **fresh M1 binary**. Not a stale-binary artifact.
+- `.agent-doc/logs/ops.log`: `stale_preparing_controller_self_reaped` (M1, `caller=self_watchdog`) — **zero occurrences, ever.**
+- `orphaned_preparing_controller_reaped_cross_project … caller=gc` — fires **repeatedly** (pids 401211, 1151060, 1324526, 1663915, 2011236, 2214912, …) at ages **442–1286s**, threshold 45s.
+
+**Conclusion:** M1 never fires at runtime. Orphaned `Preparing` controllers are cleaned up *only* by the slow external gc/M5 sweep — at 7–21 minutes, not 45s — i.e. exactly the external-reaper dependency the plan said M1 removed. M1 is present, unit-tested as a pure predicate, and reached by the launch path (`write_bootstrap_with_options` stamps `handoff_started_at`), yet the suicide never triggers. This **reopens #stuckhandoff2 (M1)**.
+
+**I did NOT ship a fix.** I read-only-investigated and narrowed it to three hypotheses (serve loop never hits the `WouldBlock` watchdog branch / in-memory state flipped off `Preparing` while the `/proc` cmdline M5 keys on stays `preparing` / poll-cadence wiring), but I have not pinned the exact mechanism. Shipping a speculative edit to clean-session live-write-path serve-loop code — in a session that already corrupted twice this cycle, without a deterministic repro — would violate both the clean-session rule and precommit-testing discipline.
+
+**Recorded** in `tasks/agent-doc/plan-stuck-handoff-hardening.md` (committed `7d9aeabd1`): the evidence, the three hypotheses, and a concrete next-cycle task — a deterministic test that drives a launched-`Preparing` controller's serve loop to the watchdog branch and asserts a self-reap within threshold, then fix whichever hypothesis holds. (Could not file this into `agent:backlog` — the doc's fenced `&lt;!-- agent:queue --&gt;` examples still break the granular-write parser, `#lintfence`.)
+
+**Recommended next step:** give me a genuinely clean session (no live route-owned supervisor for this doc) and I'll write the repro test + fix M1 there. In the meantime the wedge window is gc-cadence (minutes); `admin recycle --all-projects` clears current orphans on demand.
+<!-- agent:boundary:43254d6e -->
 <!-- /agent:exchange -->
 
 ## Queue

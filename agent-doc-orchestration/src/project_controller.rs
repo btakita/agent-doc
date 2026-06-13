@@ -4435,6 +4435,55 @@ agent:queue\n\
         let _ = sentinel.kill();
         let _ = sentinel.wait();
     }
+    #[test]
+    fn recycle_reaps_aged_orphaned_preparing_controller() {
+        // #stuckhandoff2: `admin recycle` must process-scan-reap a wedged `Preparing`
+        // orphan in the root, not merely re-exec the authoritative controller (which
+        // an orphan — invisible to the project socket — would survive). With no live
+        // controller listening, the recycle RPC no-ops but the project-scoped orphan
+        // reap must still fire (`caller=recycle`), so a recycle no longer leaves the
+        // zombie behind for M1's later self-watchdog tick to clear.
+        let _env = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var(STALE_PREPARING_CONTROLLER_SECS_ENV, "1") };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(cmdline_has_preparing_handoff(pid));
+
+        // Age strictly past the 1s threshold. Start age is whole seconds (/proc dir
+        // mtime), and the reaper keeps when `age <= threshold`, so a ~1.1s-old
+        // process floors to age=1 and is kept; sleep past 2s so age=2 > 1 ⇒ reaped.
+        std::thread::sleep(Duration::from_millis(2200));
+
+        // No authoritative controller listens on the project socket ⇒ recycle RPC
+        // no-ops (Ok(false)); the orphan reap still runs.
+        let recycled = recycle_controller(dir.path()).unwrap();
+        assert!(!recycled, "no authoritative controller answered the recycle");
+
+        // The aged orphan is our child; poll try_wait for its termination.
+        let start = Instant::now();
+        let mut exit = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            match sentinel.try_wait().unwrap() {
+                Some(status) => {
+                    exit = Some(status);
+                    break;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let status = exit.expect("aged preparing orphan must be reaped by recycle");
+        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+        assert!(ops_log.contains("caller=recycle"));
+
+        unsafe { std::env::remove_var(STALE_PREPARING_CONTROLLER_SECS_ENV) };
+    }
     // ---- #qflood: in-flight dispatch coalescing decision ----
     // ---- M2 (#stuckhandoff2): non-Stable controller refuses dispatch ----
     #[test]

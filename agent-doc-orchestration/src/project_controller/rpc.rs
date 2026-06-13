@@ -1106,11 +1106,28 @@ pub(crate) fn shutdown_stale_controller(project_root: &Path) {
 /// controller was reached, `Ok(false)` when none is running (nothing to recycle).
 /// Never launches a controller — connect-only, so it is a no-op on a clean project.
 pub fn recycle_controller(project_root: &Path) -> Result<bool> {
-    if connect(project_root).is_err() {
-        return Ok(false);
-    }
-    let response = request(project_root, "recycle")?;
-    Ok(response.contains("\"ok\":true"))
+    // The `recycle` RPC re-execs only the *authoritative* controller reachable over
+    // the project socket. Capture its result but DON'T early-return — the orphan
+    // reap below must run even when no authoritative controller answers (an orphaned
+    // `Preparing` zombie can be the only process in this root, invisible to the
+    // socket recycle).
+    let result = if connect(project_root).is_ok() {
+        request(project_root, "recycle").map(|response| response.contains("\"ok\":true"))
+    } else {
+        Ok(false)
+    };
+    // #stuckhandoff2: process-scan reap orphaned `Preparing` zombies in this root so
+    // `admin recycle` clears the wedged-preparing class immediately instead of
+    // relying on M1's later self-watchdog tick or the next gc/connect. The shared
+    // threshold spares a healthy young handoff (including one a recycle just
+    // launched). Runs regardless of the recycle RPC outcome.
+    let _ = reap_orphaned_preparing_controllers_for_caller(
+        project_root,
+        stale_preparing_controller_threshold(),
+        false,
+        "recycle",
+    );
+    result
 }
 
 /// `#ctlrecycle` R2 — recycle the active controller in EVERY project root that has a
@@ -1145,6 +1162,11 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
             _ => skipped += 1,
         }
     }
+    // #stuckhandoff2: orphan reaping is project-scoped inside `recycle_controller`,
+    // and `roots` above already includes every root with a `controller serve
+    // --handoff-state preparing` process (the orphan's own cmdline matches), so each
+    // wedged-preparing orphan's root gets a `recycle_controller` call that reaps it —
+    // no separate cross-project sweep needed here (gc still runs that on its tick).
     Ok((recycled, skipped))
 }
 

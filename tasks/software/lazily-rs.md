@@ -69,7 +69,24 @@ gh release create v0.11.0 --generate-notes
 The tag and release commit are already on origin, so publish proceeds from the exact tagged tree.
 
 **Note (not changed):** `Cargo.toml` `repository` still points to `github.com/btakita/lazily-rs` while the live remote is `lazily-hub/lazily-rs` — pre-existing across all prior releases, left as-is to avoid scope creep mid-release.
-<!-- agent:boundary:e1e5fe94 -->
+
+### Re: do [#12b1] — still 403, operator-gated — opus-4-8
+
+Re-verified the crates.io publish this cycle — still **blocked**, unchanged from last cycle.
+
+**Checked just now:**
+- `passage btak/CARGO_REGISTRY_TOKEN` → token present.
+- `CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify` (from `src/lazily-rs`) → packaged 57 files cleanly, upload rejected: **`403 Forbidden: authentication failed`**. Same revoked `cio…` token as before; it has not been rotated yet.
+
+This is operator-drive and cannot be done headless — the rotation needs browser/passkey 2FA. Everything else is already on origin (`chore: release v0.11.0` = `03582f5`, tag `v0.11.0`, submodule pointer bumped), so once a fresh token lands it's two commands from `src/lazily-rs`:
+
+```
+CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify
+gh release create v0.11.0 --generate-notes
+```
+
+`#12b1` stays in the backlog as operator-gated. Not auto-looping on it — it's not agent-drainable.
+<!-- agent:boundary:69f31c39 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,12 +94,12 @@ The tag and release commit are already on origin, so publish proceeds from the e
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog queue -->
+<!-- agent:backlog priority queue -->
 - [ ] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 <!-- /agent:backlog -->
 

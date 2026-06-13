@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -169,7 +169,7 @@ Applied to **both** surfaces: the borrower loan application (`full_application.t
 - EFS commit `8e5960f`; submodule bump `6d5961c60`.
 
 Hard-refresh the application form to see it. Note this builds on the prior multi-file change: each category still accepts multiple files, and the backend stores them per type.
-<!-- agent:boundary:56b2ec9a -->
+<!-- agent:boundary:6fa8c865 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,6 +177,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The upload UI has too much friction. Each form should have its own drop file area along with supporting click to open the file dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

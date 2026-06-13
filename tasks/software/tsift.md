@@ -62,15 +62,15 @@ Fixed. The `#gdbwritelock` advisory lock claimed to cover all graph-db writers, 
 **Verification**: `make check` clean (clippy + full suite, exit 0); tsift-cli lib suite **372 passed, 0 failed** (370 prior + 2 new); `cargo install --path .` replaced `~/.cargo/bin/tsift`. Committed + pushed (`cb5c266`, submodule pointer `221793dd4`). CI run `27460839933` queued for the new commit — recorded pending; closed out on local evidence.
 
 Top of queue next: **#pcacheexplattr**.
-<!-- agent:boundary:1350387e -->
+<!-- agent:boundary:f052d459 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#gdblockcover]
-- :round_pushpin: do [#pcacheexplattr]
-- :round_pushpin: do [#tsreviewcleanup]
+- ~~:round_pushpin: do [#gdblockcover]~~
+- :pushpin: :round_pushpin: do [#pcacheexplattr]
+- :pushpin: :round_pushpin: do [#tsreviewcleanup]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

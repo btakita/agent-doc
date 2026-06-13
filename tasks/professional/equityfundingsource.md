@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,7 +134,7 @@ Added a **Print** button to the borrower wizard's **Review & e-sign** step (the 
 - `tests/full-application-print-button.test.ts` — new case asserting the Review & e-sign step exposes its own Print control ahead of the E-sign button.
 
 Verification: `bun test` green (643 pass / 0 fail), `bun run build:worker` clean, deployed to Cloudflare (version `b2afe09c`, live at https://equityfundingsource.brian-takita.workers.dev). Committed EFS submodule `a959e12`.
-<!-- agent:boundary:a7565743 -->
+<!-- agent:boundary:325cc236 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +142,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The "Review & E-sign" Print button should be in the upper-right corner ![img_11.png](img_11.png). The Print button should only print the "Acknowledgement and agreement" with "Electronic record & signature disclosure". deploy
 <!-- /agent:queue -->
 
 ## Backlog

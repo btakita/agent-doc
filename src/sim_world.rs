@@ -1786,6 +1786,57 @@ fn qflood_operator_dispatch_is_not_coalesced_in_flight() {
 }
 
 #[test]
+fn qflood2_in_flight_coalesce_is_deduped_success_not_a_dispatch_failure() {
+    // #qflood2: the #qflood in-flight coalesce SUPPRESSES the redundant re-send, but
+    // it must report DEDUPED-SUCCESS — not a dispatch failure. This is the
+    // deterministic analogue of the live route path translating the controller's
+    // `coalesced_in_flight` bail into Ok(deduped pane) instead of an exit-1, while a
+    // genuinely blocked dispatch (paused queue) still fails closed (the live
+    // `dispatch_error_is_coalesced` classifier must not swallow a real `queue_paused`).
+    let mut world = SimWorld::new(2_207);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // First dispatch accepted + in flight.
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+
+    // Redundant in-flight AUTO re-dispatch ⇒ coalesced. It returns Ok (deduped
+    // success): no second trigger piled into the pane AND no failure/backpressure
+    // recorded — a coalesce is success, not a suppressed error.
+    let coalesced = world.apply(SimCommand::DispatchRoutePrompt);
+    assert!(
+        coalesced.is_ok(),
+        "a benign in-flight coalesce must report deduped-success, not error: {coalesced:?}"
+    );
+    assert_eq!(world.coverage.route_dispatch_coalesced, 1);
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "coalesce must not pile a second trigger into the pane"
+    );
+    assert_eq!(
+        world.coverage.queue_paused_dispatch_blocks, 0,
+        "a coalesce is deduped-success, not a queue block"
+    );
+    assert_eq!(
+        world.coverage.queue_backpressure_events, 0,
+        "a coalesce must not record a backpressure failure event"
+    );
+
+    // Contrast: a genuinely paused queue is NOT a benign coalesce — it must fail
+    // closed and record a block, not be reported as deduped-success.
+    world.apply(SimCommand::AdminPauseQueue).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.queue_paused_dispatch_blocks, 1,
+        "a real queue_paused dispatch must record a block, not deduped-success"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_coalesced, 1,
+        "the pause is a block, not a coalesce"
+    );
+}
+
+#[test]
 fn route_sim_blocks_starting_actor_that_closes_before_ready_prompt() {
     let mut world = SimWorld::new(2_007);
     world.apply(SimCommand::BindRouteOwner).unwrap();

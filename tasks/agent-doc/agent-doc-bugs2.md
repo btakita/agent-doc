@@ -31,13 +31,18 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-163702.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-171403.md`*
 
 Compacted content:
-❯ - Archived 13 response topic(s): Triage of the queued JB bug reports + the live "prompt removed then came back" root cause; "continue" → took #stuckhandoff2, and it is NOT actually complete (M1 self-watchdog is dead in production); run `admin recycle --all-projects` and `/clear`; 10 more
-❯ - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+❯ - Archived 1 response topic(s): Post-compaction recovery + no agent-drainable work remains
+❯ - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
 
 ### Re: Post-compaction recovery + no agent-drainable work remains — opus-4.8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#fcc0]
+
 
 Recovered the session and triaged the queue. **No code changes this cycle** — this is recovery + status only.
 
@@ -50,24 +55,31 @@ Recovered the session and triaged the queue. **No code changes this cycle** — 
 - Backlog `#fcc0`, `#compactdrift`, `#rtwbcast` are all `[clean-session]` (live write-path / multi-editor work that must NOT run under live IPC).
 - Review `#qflood2`, `#efscodexsubmit`, `#stuckhandoff2`, `#qt32`, `#2v7b` are `[operator-verify]` / code-complete-awaiting-live-JB-drive.
 - The queue prompts are operator bug *reports/repros* (some left in deliberately, e.g. the "prompt removed then came back" demo), not fresh actionable agent work.
-- PID 1075224 maps the **pre-fix** binary, so its stale-buffer / disk-fallback writes still raise `File Cache Conflict` — exactly the failure mode the plan's "Live diagnosis" section predicted. It can't be killed from inside this session (it's my parent process), so I haven't touched it.
-- The fixed binary + cdylib were installed **12:21** (`~/.cargo/bin/agent-doc`, `libagent_doc.so`).
-- This session's document host is route-owned supervisor **PID 1075224**, started **02:13** today.
 
 The prior turn already reached this same conclusion and paused go-mode ("queue exhausted of agent-drainable work … resume from a clean session"). I'm honoring that — **not auto-looping**.
 
 **To make progress, operator action is needed:** run the `[clean-session]` items (`#fcc0` → `#compactdrift` → `#rtwbcast`, each has a plan file) from a **fresh, non-route-owned** session (no live supervisor on this doc), and drive the `[operator-verify]` JB items live so the agent can read ops.log proof.
-<!-- agent:boundary:29be5559 -->
+<!-- agent:boundary:1cd46692 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :round_pushpin: do [#fcc0]
+- ~~:round_pushpin: do [#fcc0]~~
 - :round_pushpin: do [#compactdrift]
 - :round_pushpin: do [#rtwbcast]
 - I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.
-- :pushpin: JB `Compact Exchange` has a partially uncommitted response.
+---
+:pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
+```
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-171403.md`*
+
+Compacted content:
+❯ - Archived 1 response topic(s): Post-compaction recovery + no agent-drainable work remains
+❯ - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+<!-- agent:boundary:9dec9035-a893-4e69-ba6b-1fd5f1bf7abb -->
+```
+---
 - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
 - I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.

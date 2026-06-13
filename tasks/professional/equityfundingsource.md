@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,47 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-155938.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-164802.md`*
 
 Compacted content:
-- Archived 7 response topic(s): do [#qakx-impl]; do [#vd8s-dragwire]; do [#67v2-kanban]; 4 more
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db...
-
-### Re: emails, TMO webhooks, funded-deals copy, disclosure — opus-4-8
-
-> **Queue prompt:**
->
-> Let's not send the emails. You & I need to be in better sync. Since TMO does not have webhooks or any streaming APIs in their docs, let's assume they don't provide the functionality. Let's use your mitigation recommendations instead. We can save the TMO support email for later. Re: the Judith email. The https://equityfundingsource.brian-takita.workers.dev/funded-deals page was scraped from EFS's existing website, so these are real deals they have closed. The "Sample transactions funded through Equity Funding Source" should change to reflect the fact that these are previous deals. Judith wants to put better deals on this page and her team can change the deals from the admin portal. The "Legal and disclosure language." does not point to anything. I thought we were talking about the disclosure on the Borrower document uploads page. Is that correct?
-
-
-**On the emails (borrower portal):** Agreed, not sending them. I've descoped the borrower-message email round-trip — no outbound notification when a borrower messages, no inbound email-reply-into-chat, no admin-reply email. Borrower secure messages stay in-app (the admin owner already shipped, EFS c3c1d6c); activity surfaces through in-portal notifications per the earlier mitigation approach, with no Resend/SMTP dependency. Review #xcvg updated.
-
-**TMO webhooks:** Treating them as unavailable, as you said. TMO's docs show no webhook or streaming API, so we won't wait on push — we'll use the tightened-polling sync mitigation instead. The six-question TMO support email I drafted for Robert to forward is parked for later, not sent. Review #dzmm updated.
-
-**Funded-deals page — copy + admin editing:**
-- **Copy fixed and shipped** (EFS `2b15eff`, pushed). The page no longer calls these "sample transactions." The hero now reads *"Real private real estate transactions Equity Funding Source has funded and closed…"*, the eyebrow is *"Closed transactions"* (was "Portfolio sample"), and the JSON-LD + page meta description match. A test locks the new framing.
-- **Judith's team can already edit these from the admin portal today — no new work needed.** Funded deals are D1-backed with full admin CRUD (`/api/admin/funded-deals` GET/POST/PUT/DELETE) plus a management UI in the admin portal, and the public `/funded-deals` page renders the D1 *visible* deals (falling back to the static seed only if the table is empty). So when her team adds, edits, reorders, or hides deals in the admin portal, the public page reflects them. They can swap in better deals whenever they like.
-
-**Disclosure — you're right.** There is no "Legal and disclosure language" on the funded-deals page; that line in the approval list didn't point to anything real on that page. The actual disclosure in the product is the **Electronic record & signature (ESIGN/UETA) disclosure** on the borrower full-application / document-uploads flow (`full_application.tsx` — the "Electronic record & signature disclosure" expander plus the consent checkbox). That's the legal/disclosure text worth a review. I corrected review #jnzs to point at it. Want me to pull the exact disclosure copy out for you/Judith to read, or route it to a specific reviewer?
-
-**Verification:** full EFS suite green (626 pass / 0 fail), build + worker build OK.
-
-### Re: borrower notification emails — you're right, I conflated two things — opus-4-8
-
-> **Queue prompt:**
->
-> "I've descoped the borrower-message email round-trip — no outbound notification when a borrower messages, no inbound email-reply-into-chat, no admin-reply email." Why did you conflate not sending an email to Judith + Robert with not notify the borrower with an email? Bring this back please. You seem confused.
-
-
-You're right, my mistake. I collapsed two separate things into one:
-
-- **Emails to Judith + Robert** (operator/comms): this is what "let's not send the emails" meant. The TMO support email to Robert is deferred (#dzmm), and I won't blast the Judith approval email — we sync directly instead.
-- **Borrower-facing notification emails** (the #xcvg round-trip): I wrongly killed these too. That is not what you asked, and I've brought it back.
-
-#xcvg is restored in the review list with its full original scope: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower email when an admin replies. It stays gated on a verified Resend EFS sending domain (#f4rq) and Google Workspace SMTP (#m6ch/#p40t) — same gating as before. The borrower secure-message admin owner already shipped; this is the email layer on top of it.
-
-Net: borrower notification emails are back in scope under #xcvg. Only the outbound operator emails to Judith and Robert are being held.
-<!-- agent:boundary:b52f28ce -->
+- Archived 2 response topic(s): emails, TMO webhooks, funded-deals copy, disclosure; borrower notification emails
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+<!-- agent:boundary:58501bcb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

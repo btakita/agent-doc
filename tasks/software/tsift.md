@@ -141,19 +141,37 @@ Fix in `packages/tsift-agent-doc/src/session_cost.rs`:
 - **Commit + push:** tsift `c942737` → `origin/main`; superproject pointer `8e4017c12`. CI triggered (pending; local gate green).
 
 Next in queue: `#loggatefidelity`.
-<!-- agent:boundary:e42e41c7 -->
+
+### Re: do #loggatefidelity — opus-4-8
+
+> **Queue prompt:**
+>
+> [#loggatefidelity]
+
+
+Done. The log-digest token-savings gate was structurally always-passing for large logs: savings ≈ `1 - capped_digest/raw`, and the digest is cap-bounded (12 signals / 8 families) while raw grows unbounded, so savings → ~100% no matter how many distinct failures were dropped past the caps. Only `required_signals` substring checks guarded fidelity, and they can't express "all N failures survived".
+
+Fix in `packages/tsift-digest/src/log_digest.rs`:
+- **Expose `error_signal_groups`** on the report — distinct error-severity signal groups counted **pre-cap**.
+- **New per-case gate `maximum_dropped_error_signals`** (default 0): the gate compares total distinct errors against the inline errors the digest actually surfaces (`dropped_error_signals = error_signal_groups − shown`) and fails closed when distinct failures vanish past the cap without being acknowledged. The raw-log artifact still carries the dropped errors; a case can raise the bound to acknowledge expected overflow.
+
+- **Tests:** `fixture_gate_flags_distinct_errors_dropped_past_the_cap` (20 distinct errors → gate fails at default 0, passes when acknowledged). Existing JSON fixture gate (all cases ≤12 distinct errors) stays green.
+- **Spec:** documented the fidelity guard in `specs/digests-sessions.md`.
+- **Verify:** `make check` green (comprehensive error grep, not just test-result lines); release+install rebuilt.
+- **Commit + push:** tsift `d4ee76e` → `origin/main`; superproject pointer `a5ddf0398`. CI triggered (pending; local gate green).
+
+Next in queue: `#gdbwalcheckpoint`.
+<!-- agent:boundary:cbd11e86 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#pcacheattr]~~
-- ~~[#gdbwritelock]~~
-- ~~[#pcacheregtrunc]~~
-- [#loggatefidelity]
+- ~~[#loggatefidelity]~~
 - [#gdbwalcheckpoint]
 - [#logfoldname]
 - [#pcachebp]
+- What are #next-steps for fixing bugs?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -162,7 +180,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#loggatefidelity] log-digest token-savings gate is structurally always-passing for large logs (log_digest.rs:265-322): savings ~= 1 - capped_digest/raw, digest is cap-bounded (12 signals/8 families) while raw grows unbounded, so savings -> 100% regardless of how much signal dropped past the caps; only required_signals substring checks guard fidelity and cannot express all-N-failures-survived. Add a distinct-error / dropped-past-cap coverage assertion. HIGH conf, med sev (#tscodereview).
 - [ ] [#gdbwalcheckpoint] graph-db swallows WAL checkpoint failures: after a successful projection write, tsift-sqlite/src/lib.rs:1042-1046 does `let _ = ...wal_checkpoint(TRUNCATE)`. Concurrent readers block TRUNCATE (SQLITE_BUSY is normal), the error is discarded, -wal grows unbounded across refreshes, and a later snapshot-export/import trips fail_if_unsafe_sidecars (live -wal). Log/warn on checkpoint failure (surface in phase_timings/warnings) + consider PASSIVE fallback. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#logfoldname] [recommended] log-digest templatize_line <name> over-fold (log_digest.rs:872-878) rewrites the plain token before a v-prefixed version to <name> without checking the cargo `<Verb> <crate> v<ver>` shape, so `Downgrading serde from v1.0.0` and `Updating tokio to v2.0.0` both fold to `... <name> <ver>`, losing the from/to distinction. Restrict the fold to the cargo-progress shape. HIGH conf, low-med sev (#tscodereview).
 - [ ] [#pcachebp] [recommended] prompt-cache breakpoint identity includes the JSON array index (session_cost.rs:3368-3372 via path content[N]), so inserting a non-cached content block ahead of the cached one (e.g. a leading thinking/text block) shifts content[0]->content[1] and reports false breakpoints/fingerprint drift though the cache boundary did not move. Make breakpoint identity position-independent (key by type:ephemeral + count, drop array indices). med conf, low-med sev (#tscodereview).

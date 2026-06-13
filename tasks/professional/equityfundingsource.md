@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -120,7 +120,32 @@ So an incomplete application — or any application needing action — now appea
 - EFS commit `a7372df`; submodule bump `b950f9eb1`.
 
 Hard-refresh `/portal-borrower/dashboard` to see it (it only appears when there's an incomplete application or a docs-needed item).
-<!-- agent:boundary:400bbf25 -->
+
+### Re: All document upload fields allow multiple uploads — opus-4.8
+
+> **Queue prompt:**
+>
+> All document upload fields should allow multiple uploads. deploy
+
+
+Done and deployed. Every document upload field now accepts multiple files (the OS picker allows multi-select, and the handlers upload all selected files).
+
+**8 upload fields updated:**
+- **Borrower required-doc slots** (`documents.tsx`, grid + list) — backend already accepts a `files` array, so all selected files go up in one request.
+- **Borrower new-application uploader** (`doc_uploader.tsx`) — this is a "choose file → pick its category" flow, so multi-select now **queues** the files and walks you through one category at a time (drop or file-picker).
+- **Borrower full application** + **admin full-application detail** (`full_application.tsx`, `full_application_detail.tsx`) — per-type slots upload every selected file.
+- **Investor accreditation** (`accreditation.tsx`) — attach several supporting documents at once under the chosen verification type.
+- **Admin public documents** (`documents.tsx`), **lender documents** (`lender_documents.tsx`), **deal documents** (`deal_documents.tsx`) — multi-select uploads each file (single-name field still applies when you pick one).
+
+I intentionally left the **image** fields single-file — the deal hero image and public-content image (`PortalFileInput`) are single-image pickers, not document collections.
+
+**Verified + deployed:**
+- `bun test` — **586 pass / 0 fail** (added `#multi-upload` coverage asserting every document field is `multiple` and its handler iterates all files).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `45c271fd`).
+- EFS commit `fc4447f`; submodule bump `933d5eb7b`.
+
+Hard-refresh to pick up the new bundle. (`tsc` still flags two pre-existing non-strict lines in `admin/documents.tsx` — a `confirm_` string arg and a json `value:unknown` — neither touched by this change; esbuild builds clean and the suite is green.)
+<!-- agent:boundary:9e8f078a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +153,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- All document upload fields should allow multiple uploads. deploy
 <!-- /agent:queue -->
 
 ## Backlog

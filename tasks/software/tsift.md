@@ -52,7 +52,7 @@ Added 4 prioritized backlog items.
 - `#wwm1` [recommended] — surface caching health + top drift attribution inline in `session-review --next-context` / `context-pack` so it shows without running the fixture command.
 
 No tsift code changed this turn (backlog capture only). Top of backlog: **#1td4**.
-<!-- agent:boundary:0035ad7c -->
+<!-- agent:boundary:d05da004 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -68,7 +68,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#1td4] Release infra: migrate the crates.io publish job in .github/workflows/release.yml to OIDC trusted publishing (mirror the OpenCode npm OIDC job) to root-fix CARGO_REGISTRY_TOKEN expiry. v0.1.70 Release run 27473681731 failed at crates.io with 403 authentication failed (GitHub release + npm OIDC succeeded); tag/commit are pushed but no crate published. Operator must register the trusted publisher on crates.io; until then crates.io publish stays blocked.
 - [ ] [#0g7c] Emit actionable remediation from derive_prompt_cache_prefix_drift: when drift is attributed to a concrete changed field, suggest the fix (stabilize / move the volatile field below the cache breakpoint) in the report, not just the diagnosis.
 - [ ] [#avbq] Track prompt-cache effectiveness across sessions: persist per-session cached_input_ratio / net_cached_input_tokens / read_create_regressions so cross-run regressions are detectable (today the gate is per-fixture / per-transcript only).
 - [ ] [#wwm1] Surface prompt-cache effectiveness + top prefix-drift attribution inline in session-review --next-context / context-pack output (packages/tsift-agent-doc/src/session_cost.rs build_prompt_cache_effectiveness_report), so caching health shows without running the fixture command. [recommended]
@@ -77,6 +76,7 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
+- [/] [#1td4] Release infra: migrate the crates.io publish job in .github/workflows/release.yml to OIDC trusted publishing (mirror the OpenCode npm OIDC job) to root-fix CARGO_REGISTRY_TOKEN expiry. v0.1.70 Release run 27473681731 failed at crates.io with 403 authentication failed (GitHub release + npm OIDC succeeded); tag/commit are pushed but no crate published. Operator must register the trusted publisher on crates.io; until then crates.io publish stays blocked.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

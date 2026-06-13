@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -85,7 +85,27 @@ Fixed and deployed (EFS `ca63ddf`, worker version `1e9b13fe`).
 **Fix.** Persist the furthest step you actually reached per application (`localStorage`, keyed by application id) and use it via a new pure `resolve_resume_step_` to disambiguate **only** the Documents↔Review tail. The completeness heuristic stays authoritative for the field-entry steps (0–4), so a stale stored value can never push you forward past genuinely incomplete earlier data; only forward progress is recorded.
 
 **Verification.** Added `tests/full-application-resume-step.test.ts` (8 cases: tail disambiguation, no-push-past-incomplete, clamp, heuristic fallback). Full suite green — 639 tests, 0 fail — then `build` + `build:worker` + `deploy:worker` succeeded. Note: this is a per-browser resume (localStorage); a different browser/device still falls back to the completeness heuristic.
-<!-- agent:boundary:52c84444 -->
+
+### Re: Print button on the borrower new-application page — opus-4-8
+
+> **Queue prompt:**
+>
+> Please add a Print button to https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7aa
+
+
+Done — committed in EFS `d7622a7`.
+
+A Print button already existed in the wizard topbar (uncommitted from a prior cycle), but it called `window.print()` directly. Because the new-application form is a step-gated wizard, only the *currently visible* step is in the DOM — so that button would have printed a single step, not the application.
+
+Fixed it to print the **full** application:
+- The button now sets a `printing` flag; an effect renders every step into the DOM, then opens the print dialog and resets the flag (on `afterprint`, with a synchronous fallback).
+- Each step gate (`{(printing || step === N) && …}`, steps 0–6) now also fires while printing.
+- Existing print CSS in `portal.ts` already hides the sidebar/nav, stepper, form-actions, and buttons, so the printout is just the application content.
+
+Verification: full suite green — **642 pass / 0 fail**; `build` + `build:worker` clean. Updated `tests/full-application-print-button.test.ts` to assert the full-application wiring (button → `set_printing(true)`, all 7 step gates render while printing).
+
+Not yet deployed — the change is committed and built but the live worker at `equityfundingsource.brian-takita.workers.dev` still runs the old bundle. Say the word and I'll run `deploy:worker`.
+<!-- agent:boundary:1b78e7dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +113,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please add a Print button to https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7aa
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -112,7 +112,7 @@ Done and deployed. The Activity history card now sits **beside** Application Pro
 Hard-refresh to pick up the new bundle.
 
 Heads-up (not blocking, outside this session's scope): preflight flagged a stale `agent-doc` install — the local binary/cdylib predate source commit `7bfc82e3`, so tmux/JetBrains sessions may run older agent-doc code. Run `make install` in `src/agent-doc` when you want to refresh it.
-<!-- agent:boundary:6901e53c -->
+<!-- agent:boundary:a07ff237 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,6 +120,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Activity history should have a scrollbar and it's height constrained. Perhaps we should also have a dialog to view the entire history with more vertical space. deploy
 <!-- /agent:queue -->
 
 ## Backlog

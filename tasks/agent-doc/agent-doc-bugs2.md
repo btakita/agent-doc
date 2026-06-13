@@ -109,13 +109,35 @@ So to your question — "are they blocking on something?" — yes: the layout-ge
 Fix (same clean session): hold `SYNC_LOCKED` only across the fast geometry reconcile, run pane readiness/recovery separately, and let a newer sync generation supersede an in-flight stale one instead of warn-and-skip. Fixing #1 also removes the usual cause of the held guard.
 
 Both are captured under `#recyclerestart` (`[clean-session]`) with the plan updated — left for a clean session per the live-supervisor gate.
-<!-- agent:boundary:990c0d61 -->
+
+### Re: recycle execve hot-reload fails (`os error 2`) + stalls the pane — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The last recycle stalled again `❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────` + `  Opus 4.8 ctx:16% ~[agent-doc] supervisor execve hot-reload failed (No such file or directory (os error 2)); falling back to clean exit so the next launch uses the new build`. Make sure the recycle is cross-platform (Linux, OSX, Windows). Issue still happening after the last recycle. Please add logging in the Supervisor/PCP to detect issues.
+
+
+Fixed in agent-doc submodule `aafa6510` (pushed to origin/main; `cargo install` + `cargo build --release` both done so `~/.cargo/bin` and `target/release` are fresh).
+
+**Two distinct bugs were in play:**
+
+1. **The stall (root cause of the hang).** On a failed self-`execve`, the supervisor called `std::process::exit(0)`. There is no relaunch wrapper, so exiting orphaned the live harness child and left the tmux pane hung — that's the "recycle stalled" you saw. The fallback now **never exits**: it logs full diagnostics, disables further recycle attempts for that supervisor, shows a one-time pane hint (`restart this session to pick up the new build`), and **keeps running on the current binary**. A bad recycle can no longer hang the session.
+
+2. **The `os error 2` itself.** I reproduced the standard `cargo install` atomic-replace case in isolation and the *current* resolver already recovers correctly (Linux `/proc/self/exe` reads back ` (deleted)`; the resolver skips it and follows argv0 + `PATH` to the fresh on-disk binary; the child re-exec'd fine). So the recurring live failures are **not** the standard case — they are most likely **old pre-fix supervisors** (your live host pid `1368698` is itself flagged as a stale build started before the current binary) and/or a launch path the resolver can't recover. The old logging couldn't tell us which — every failure was a bare `os error 2`.
+
+**Logging added (your explicit ask).** `supervisor_perform_reexec` now walks an ordered **candidate ladder** — `resolved_fresh_binary` then launchable `current_exe` then bare-name `PATH` lookup — and on failure records the attempted path **and errno per candidate**, so the next occurrence pinpoints exactly which path failed and why. The pre-attempt log line records `current_exe` and the full candidate list. This covers Linux (deleted inode), macOS (launchable `current_exe`, no `(deleted)` suffix), and PATH-only installs.
+
+**Tests:** unit (`build_reexec_candidates`: ordering, deleted-exe exclusion, dedup, never-empty) + SimWorld (`failed_reexec_recycle_keeps_session_alive_and_does_not_retry`: pane/generation preserved, binary stays stale, no per-tick re-spam). `make check` green; latest CI run `27473458084` was green pre-push.
+
+**One thing only you can do (queued as `[operator-verify]`):** the *currently running* supervisors are still the OLD binary — the broken recycle can't deploy its own fix. Restart a stale session (`agent-doc session restart-supervisor <FILE> --force`) so it runs `aafa6510`, then drive a recycle and confirm the new `candidates=[...]` log + non-stalling fallback. Note: exchange is large (~80 lines), but the go-queue is active so I'm not pausing to compact.
+<!-- agent:boundary:44a9a114 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: The hot reload + stalling ![img_22.png](img_22.png). The PCP/Superivsor recycle does not restart the agent session. The entire tmux pane is hanging. ![img_21.png](img_21.png). After I ran `tmux kill-pane`, then JB `Sync Tmux Layout`...a dialog `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.` appeared. Why was the sync blocked? The syncs should be fast. Are they blocking on something? If there is some in-pane initialization needed, the tmux pane management should be independent. So opening, moving tmux panes should not block on the task happening within the tmux pane. Of course some operations need to block on the in-pane activity, such as waiting for the supervisor to complete before it self-closes. Strengthen Simworld tests.~~
+- ~~:pushpin: The last recycle stalled again `❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────` + `  Opus 4.8 ctx:16% ~[agent-doc] supervisor execve hot-reload failed (No such file or directory (os error 2)); falling back to clean exit so the next launch uses the new build`. Make sure the recycle is cross-platform (Linux, OSX, Windows). Issue still happening after the last recycle. Please add logging in the Supervisor/PCP to detect issues.~~
+- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 - :round_pushpin: do [#compactdrift]
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
@@ -195,6 +217,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [ ] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md

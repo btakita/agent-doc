@@ -572,11 +572,12 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    // session_check's `#[cfg(test)] mod tests` was extracted into
-    // `session_check/tests.rs` (large-module split); the inspection helpers and
-    // their process-global lock usage live there now.
+    // session_check was decomposed into functional submodules (#splitmods4); its
+    // integration-style tests + shared inspection helpers were bundled back inline
+    // into `session_check.rs`'s own `#[cfg(test)] mod tests` (the helpers shadow
+    // core fn names like `inspect`, so they stay in the core test mod).
     let session_check_tests = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/tests.rs"),
+        manifest_dir.join("agent-doc-orchestration/src/session_check.rs"),
     )
     .unwrap();
     assert!(
@@ -622,6 +623,8 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/src/session_check/response_guards.rs",
+        "agent-doc-orchestration/src/session_check/detect.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
@@ -812,7 +815,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `session_check/tests.rs` (large-module split). The 65 removed `guard_`
         // occurrences were test-assertion literals, not production hot-path
         // guards; only production `guard_` tokens are budgeted here now.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 31,
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 87,
+        ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,
+        ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 1,
         // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
         // #recguard-wedge-escape head-consumed reset path (substring `guard_`
         // comes from the module name `recguard_wedge`, not a new flow guard).

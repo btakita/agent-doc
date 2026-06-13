@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,33 @@ committed
 Compacted content:
 - Archived 5 response topic(s): "Open full application" should open a Full Application dialog with a page link; Add Decision / Feedback report / Sent feedback + Activity history to the Full Application dialog; Move Activity History to the right of Application Progress; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:778c2123 -->
+
+### Re: Where are the sample upload documents? — opus-4.8
+
+> **Queue prompt:**
+>
+> Where are the sample documents that I can upload for the borrower applications and the lender acreditation?
+
+
+They live in `src/equityfundingsource-dev/tmp/`, split by audience. They're synthetic, safe-for-testing fixtures (documented in `tmp/README.md`) using only extensions allowed by `app/equityfundingsource/lib/security/upload_guard.ts`. Note: `tmp/` is **gitignored** — these are local-only on this machine, not in the repo.
+
+**Borrower application uploads** — `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/borrower/`
+- `borrower-appraisal-report.pdf`
+- `borrower-bank-statement.csv`
+- `borrower-entity-authorization.txt`
+- `borrower-payoff-statement.txt`
+
+**Lender / investor accreditation uploads** — `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/investor/`
+- `investor-accreditation-letter.pdf`
+- `investor-bank-statement.csv`
+- `investor-tax-k1-summary.csv`
+- `investor-entity-formation.txt`
+- `investor-wire-instructions.txt`
+
+When you click upload in the borrower application document flow or the lender accreditation flow, browse to the matching folder above. They're tiny (under 1 KB each) and exist only to exercise the upload/validation paths, not to look like real documents.
+
+If you want a richer or more realistic set (or want them checked into the repo / a seed script so they survive a fresh clone), say the word and I'll generate them.
+<!-- agent:boundary:2b28ed08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +71,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Where are the sample documents that I can upload for the borrower applications and the lender acreditation?
 <!-- /agent:queue -->
 
 ## Backlog

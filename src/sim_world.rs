@@ -174,6 +174,11 @@ enum SimCommand {
     ActivateGoModeQueueHead,
     /// A later `cargo install` made the supervisor's launch binary stale.
     MarkSupervisorBinaryStale,
+    /// `#suprecyclestall`: the next in-place `execve` recycle will fail to launch
+    /// any candidate binary (e.g. an old pre-fix launch path). The watch must fall
+    /// back to continuing on the current binary, never `process::exit` (which would
+    /// orphan the child and hang the pane).
+    MarkReexecWillFail,
     /// `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` opt-in is enabled.
     EnableSupervisorAutoRecycle,
     /// Operator `admin recycle --all-projects`: mark this supervisor to recycle
@@ -481,6 +486,14 @@ struct RecycleClearModel {
     binary_stale: bool,
     /// Auto-recycle opt-in (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).
     auto_recycle: bool,
+    /// `#suprecyclestall`: the next in-place `execve` recycle will fail (e.g. a
+    /// launch path that no longer resolves, an old pre-fix supervisor). Models the
+    /// `supervisor_perform_reexec` Err path.
+    reexec_will_fail: bool,
+    /// `#suprecyclestall`: a self-`execve` recycle already failed, so the watch
+    /// disabled further recycle attempts and keeps running on the current binary
+    /// (mirrors idle_watch.rs's `reexec_recycle_disabled`).
+    recycle_disabled: bool,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
     /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
@@ -566,6 +579,9 @@ struct Coverage {
     /// (operator `admin recycle` or the `supervisor_recycle_action` predicate),
     /// preserving the live pane via `execve`.
     supervisor_recycles: usize,
+    /// `#suprecyclestall`: a self-`execve` recycle failed and the watch fell back to
+    /// continuing on the current binary (never `process::exit`, so the pane survives).
+    supervisor_recycle_failures: usize,
     /// A go-mode queue head was dispatched by the idle-queue drain decision after
     /// the recycle + clear settled.
     go_drain_dispatches: usize,
@@ -701,6 +717,7 @@ impl Coverage {
         self.sync_move_before_select_focuses += other.sync_move_before_select_focuses;
         self.clear_cooldown_resumes += other.clear_cooldown_resumes;
         self.supervisor_recycles += other.supervisor_recycles;
+        self.supervisor_recycle_failures += other.supervisor_recycle_failures;
         self.go_drain_dispatches += other.go_drain_dispatches;
         self.drain_settle_skips += other.drain_settle_skips;
         self.drain_dedup_skips += other.drain_dedup_skips;
@@ -2015,6 +2032,60 @@ fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
     // A stuck head is not re-fired every tick (drain dedup).
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn failed_reexec_recycle_keeps_session_alive_and_does_not_retry() {
+    // `#suprecyclestall`: a stale binary opted into auto-recycle, but the in-place
+    // `execve` fails (no candidate binary launches). The watch must NOT
+    // `process::exit` — that orphaned the live child and hung the tmux pane.
+    // Instead it logs, disables further recycle attempts, and keeps running on the
+    // current binary; the operator restarts deliberately.
+    let mut world = SimWorld::new(2_026);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+    world.apply(SimCommand::MarkReexecWillFail).unwrap();
+
+    // Idle boundary: the recycle is attempted and fails.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycle_failures, 1,
+        "the failed execve recycle is recorded"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycles, 0,
+        "no successful in-place recycle happened"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "the session/pane survives a failed recycle (no process::exit)"
+    );
+    assert_eq!(
+        world.route.durable.generation, gen_before,
+        "a failed recycle does not advance the generation"
+    );
+    assert!(
+        matches!(world.route.durable.lifecycle, SupervisorLifecycle::Ready),
+        "the supervisor keeps running on its current binary"
+    );
+    assert!(
+        world.recycle_clear.binary_stale,
+        "the binary is still stale — only an operator restart promotes the new build"
+    );
+
+    // Subsequent idle boundaries do NOT re-attempt the hopeless recycle.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycle_failures, 1,
+        "recycle is disabled after the first failure — no per-tick re-spam"
+    );
 }
 
 #[test]

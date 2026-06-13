@@ -993,7 +993,13 @@ pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
     })
 }
 
-fn current_agent_doc_binary() -> Result<PathBuf> {
+/// Resolve the freshly-installed launchable agent-doc binary path. Prefers a
+/// launchable `current_exe`, but explicitly skips a missing/`(deleted)` mapped
+/// inode (the post-`cargo install` state) and falls back to argv0 + `PATH` so the
+/// returned path is the build on disk. Also used by `#suprecycleexe` so the
+/// supervisor self-`execve` targets the fresh binary instead of `/proc/self/exe`,
+/// which is marked `(deleted)` exactly when the recycle fires.
+pub(crate) fn current_agent_doc_binary() -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
     resolve_agent_doc_binary_from_env(
         std::env::current_exe().ok(),
@@ -2772,6 +2778,33 @@ mod tests {
 
         let resolved = resolve_agent_doc_binary_from_env(
             Some(dir.path().join("deleted-agent-doc")),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, path_bin);
+    }
+    #[test]
+    fn controller_binary_resolution_skips_deleted_proc_self_exe_suffix() {
+        // `#suprecycleexe` — the supervisor self-`execve` recycle fires PRECISELY
+        // when a fresh binary replaced the running one, so on Linux `current_exe()`
+        // (read from `/proc/self/exe`) returns the old inode's path with a literal
+        // ` (deleted)` suffix. That path is not launchable; resolution must skip it
+        // and fall back to the fresh `PATH` binary instead of returning the deleted
+        // path (which `exec` rejects with ENOENT / "os error 2").
+        let dir = tempfile::TempDir::new().unwrap();
+        let path_bin_dir = dir.path().join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&path_bin, "fresh").unwrap();
+
+        let deleted_exe = dir.path().join("agent-doc (deleted)");
+        assert!(!deleted_exe.exists());
+
+        let resolved = resolve_agent_doc_binary_from_env(
+            Some(deleted_exe),
             Some(OsString::from("agent-doc")),
             Some(path_bin_dir.into_os_string()),
             dir.path(),

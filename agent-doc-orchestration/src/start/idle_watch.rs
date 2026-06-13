@@ -81,6 +81,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let recycle_grace = crate::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
+            // `#suprecyclestall` — set once a self-`execve` recycle has failed so we
+            // do not re-attempt a hopeless hot-reload (which orphans the child / hangs
+            // the pane) on every later idle boundary. The supervisor keeps running on
+            // its current binary until the operator restarts it.
+            let mut reexec_recycle_disabled = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -301,11 +306,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         "[agent-doc] supervisor is running a prior agent-doc binary; restart this session (or set AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1) to pick up the new build"
                     );
                 }
-                let do_recycle = match recycle_action {
-                    SupervisorRecycleAction::RecycleImmediate => true,
-                    SupervisorRecycleAction::RecycleDebounced => recycle_debounced,
-                    _ => false,
-                };
+                let do_recycle = !reexec_recycle_disabled
+                    && match recycle_action {
+                        SupervisorRecycleAction::RecycleImmediate => true,
+                        SupervisorRecycleAction::RecycleDebounced => recycle_debounced,
+                        _ => false,
+                    };
                 if do_recycle {
                     // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE via
                     // `execve`, preserving the live harness child + tmux pane. Falls
@@ -318,14 +324,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     };
                     #[cfg(unix)]
                     {
+                        // Pre-attempt provenance so a recurring recycle failure is
+                        // diagnosable even if the exec wedges: record the launch
+                        // identity, current_exe, and the ordered candidate ladder
+                        // the exec will walk.
+                        let candidate_notes = supervisor_reexec_candidates()
+                            .iter()
+                            .map(|(path, note)| format!("{note}={}", path.display()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         log_event(
                             &mut session_log,
                             &format!(
-                                "supervisor_binary_stale_self_recycled via=execve_preserve_child boundary={} pane={} child_pid={} master_fd={}",
+                                "supervisor_binary_stale_self_recycled via=execve_preserve_child boundary={} pane={} child_pid={} master_fd={} current_exe={:?} candidates=[{candidate_notes}]",
                                 recycle_boundary,
                                 shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                 shared.child_pid.load(Ordering::Relaxed),
                                 shared.master_fd.load(Ordering::Relaxed),
+                                std::env::current_exe().ok(),
                             ),
                         );
                         eprintln!(
@@ -334,16 +350,46 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
                             Err(err) => {
+                                // `#suprecyclestall` — a failed execve must NOT kill
+                                // the session. Previously we `process::exit(0)` here,
+                                // which orphaned the live harness child and hung the
+                                // tmux pane (no relaunch exists). Instead log the full
+                                // per-candidate diagnostics, disable further recycle
+                                // attempts for this supervisor (so we don't re-spam a
+                                // hopeless execve every idle boundary), surface a
+                                // one-time operator hint, and keep running on the
+                                // current binary. The operator restarts deliberately
+                                // to pick up the new build.
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "supervisor_reexec_failed fallback=process_exit error={err}"
+                                        "supervisor_reexec_failed fallback=continue_current_binary recycle_disabled=true error={err}"
+                                    ),
+                                );
+                                crate::ops_log::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_reexec_failed file={} pane={} boundary={} fallback=continue_current_binary error={:?}",
+                                        path.display(),
+                                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                        recycle_boundary,
+                                        err.to_string(),
                                     ),
                                 );
                                 eprintln!(
-                                    "[agent-doc] supervisor execve hot-reload failed ({err}); falling back to clean exit so the next launch uses the new build"
+                                    "[agent-doc] supervisor execve hot-reload failed ({err}); continuing on the current binary — restart this session to pick up the new build"
                                 );
-                                std::process::exit(0);
+                                if let Some(pane) = shared.inject_pane.as_deref() {
+                                    let _ = std::process::Command::new("tmux")
+                                        .args([
+                                            "display-message",
+                                            "-t",
+                                            pane,
+                                            "agent-doc: binary hot-reload failed; restart this session to pick up the new build",
+                                        ])
+                                        .status();
+                                }
+                                reexec_recycle_disabled = true;
                             }
                         }
                     }

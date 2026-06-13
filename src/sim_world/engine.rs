@@ -425,6 +425,9 @@ impl SimWorld {
             SimCommand::MarkSupervisorBinaryStale => {
                 self.recycle_clear.binary_stale = true;
             }
+            SimCommand::MarkReexecWillFail => {
+                self.recycle_clear.reexec_will_fail = true;
+            }
             SimCommand::EnableSupervisorAutoRecycle => {
                 self.recycle_clear.auto_recycle = true;
             }
@@ -632,12 +635,27 @@ impl SimWorld {
             recycle_action,
             SupervisorRecycleAction::RecycleImmediate | SupervisorRecycleAction::RecycleDebounced
         );
-        if turn_boundary && (self.recycle_clear.operator_recycle_marked || auto_recycle_now) {
-            self.recycle_supervisor_in_place();
+        // `#suprecyclestall`: once a self-`execve` recycle has failed the watch
+        // disables further attempts and runs on the current binary, so a hopeless
+        // recycle is not re-tried every idle boundary.
+        if turn_boundary
+            && !self.recycle_clear.recycle_disabled
+            && (self.recycle_clear.operator_recycle_marked || auto_recycle_now)
+        {
             self.recycle_clear.operator_recycle_marked = false;
-            // The in-place execve promoted the freshly-installed binary.
-            self.recycle_clear.binary_stale = false;
-            self.coverage.supervisor_recycles += 1;
+            if self.recycle_clear.reexec_will_fail {
+                // `supervisor_perform_reexec` returned Err. The watch logs, surfaces
+                // a one-time hint, disables further recycles, and KEEPS RUNNING — it
+                // never `process::exit`s, so the pane/generation are untouched and the
+                // binary stays stale (the operator restarts to pick up the new build).
+                self.recycle_clear.recycle_disabled = true;
+                self.coverage.supervisor_recycle_failures += 1;
+            } else {
+                self.recycle_supervisor_in_place();
+                // The in-place execve promoted the freshly-installed binary.
+                self.recycle_clear.binary_stale = false;
+                self.coverage.supervisor_recycles += 1;
+            }
         }
 
         // (4) Drain decision. After the cooldown clears, the normal go-mode drain

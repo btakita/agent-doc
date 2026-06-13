@@ -1685,6 +1685,60 @@ fn live_transcript_context_pct(
 /// `exec` itself failed). On success it never returns. The caller falls back to a
 /// clean `process::exit(0)` so a recycle still happens (the child restarts) rather
 /// than wedging on the stale binary.
+/// Ordered, de-duplicated candidate binary paths the supervisor self-`execve` may
+/// target, each tagged with a short diagnostic note. `exec` tries them in order and
+/// the first one it accepts wins; the rest exist so a single unresolvable path (an
+/// old pre-fix launch path, a `(deleted)` `current_exe`, a `PATH`-only install)
+/// cannot doom the whole recycle. The notes are surfaced in the failure log so a
+/// recurring ENOENT is diagnosable instead of a bare "os error 2".
+#[cfg(unix)]
+fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
+    // 2. `current_exe()` is only a usable candidate when it is still a launchable
+    //    file. macOS keeps a launchable `current_exe()` path after the binary is
+    //    replaced (no `(deleted)` suffix); Linux reports a deleted inode that
+    //    `exec` rejects with ENOENT, so it is dropped here.
+    let current_exe = std::env::current_exe().ok();
+    let current_exe_launchable = current_exe
+        .as_ref()
+        .map(|path| {
+            std::fs::metadata(path)
+                .map(|metadata| metadata.is_file())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    // 1. The freshly-installed launchable binary (skips a `(deleted)` current_exe,
+    //    follows argv0 + `PATH` to the on-disk build).
+    let resolved_fresh = crate::project_controller::current_agent_doc_binary().ok();
+    build_reexec_candidates(resolved_fresh, current_exe, current_exe_launchable)
+}
+
+/// Pure candidate-ladder builder (env gathered by [`supervisor_reexec_candidates`]).
+/// Ordered, de-duplicated, always ending with the bare-name `PATH` fallback so the
+/// list is never empty.
+#[cfg(unix)]
+fn build_reexec_candidates(
+    resolved_fresh: Option<PathBuf>,
+    current_exe: Option<PathBuf>,
+    current_exe_launchable: bool,
+) -> Vec<(PathBuf, &'static str)> {
+    let mut out: Vec<(PathBuf, &'static str)> = Vec::new();
+    let mut push = |path: PathBuf, note: &'static str| {
+        if !out.iter().any(|(existing, _)| existing == &path) {
+            out.push((path, note));
+        }
+    };
+    if let Some(path) = resolved_fresh {
+        push(path, "resolved_fresh_binary");
+    }
+    if current_exe_launchable && let Some(path) = current_exe {
+        push(path, "current_exe");
+    }
+    // Bare `agent-doc` → OS `PATH` lookup at exec time. Last-resort fallback so a
+    // `PATH`-only install still recycles even if argv0/`current_exe` are gone.
+    push(PathBuf::from("agent-doc"), "path_lookup_agent_doc");
+    out
+}
+
 #[cfg(unix)]
 fn supervisor_perform_reexec(
     shared: &SupervisorShared,
@@ -1714,19 +1768,42 @@ fn supervisor_perform_reexec(
         unsafe { libc::close(inherited) };
         return Err(err);
     }
-    let exe = std::env::current_exe()?;
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let state = ReexecState {
         child_pid,
         master_fd: inherited,
     };
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args(argv);
-    for (key, value) in state.to_env() {
-        cmd.env(key, value);
+    // Try every candidate in order. `exec()` replaces the current process image and
+    // only returns on failure, so a returning call means this candidate could not
+    // launch — record the path + errno and fall through to the next. Re-using the
+    // same inherited (CLOEXEC-cleared) fd across attempts is safe: a failed `exec`
+    // never closed it.
+    let candidates = supervisor_reexec_candidates();
+    let mut attempts: Vec<String> = Vec::with_capacity(candidates.len());
+    for (exe, note) in &candidates {
+        let exists_before = std::fs::metadata(exe)
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false);
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(&argv);
+        for (key, value) in state.to_env() {
+            cmd.env(key, value);
+        }
+        let err = cmd.exec();
+        attempts.push(format!(
+            "{note} path={} exists_before={exists_before} errno={:?} ({err})",
+            exe.display(),
+            err.raw_os_error(),
+        ));
     }
-    // `exec()` replaces the current process image; it only returns on failure.
-    Err(cmd.exec())
+    // Every candidate failed; the inherited fd is still ours — close it so the
+    // clean-exit fallback (or continued run on the current image) does not leak it.
+    unsafe { libc::close(inherited) };
+    Err(std::io::Error::other(format!(
+        "reexec: all {} candidate(s) failed: [{}]",
+        candidates.len(),
+        attempts.join("; "),
+    )))
 }
 
 fn spawn_managed_capability_proof_thread(
@@ -2620,6 +2697,62 @@ use crate::project_config;
 use crate::sessions::IsolatedTmux;
 use std::collections::HashMap;
 use tempfile::TempDir;
+#[cfg(unix)]
+#[test]
+fn reexec_candidates_prefer_fresh_then_current_exe_then_path() {
+    let fresh = PathBuf::from("/fresh/agent-doc");
+    let current = PathBuf::from("/proc/self/exe-current");
+    let candidates =
+        build_reexec_candidates(Some(fresh.clone()), Some(current.clone()), true);
+    let paths: Vec<_> = candidates.iter().map(|(p, _)| p.clone()).collect();
+    assert_eq!(
+        paths,
+        vec![fresh, current, PathBuf::from("agent-doc")],
+        "ordered: resolved fresh, launchable current_exe, then PATH fallback"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reexec_candidates_drop_deleted_current_exe_but_keep_path_fallback() {
+    // The Linux post-`cargo install` shape: `current_exe()` is a `(deleted)` inode
+    // (not launchable) and the fresh resolver succeeded. The deleted path must not
+    // appear; the PATH fallback always does so the ladder is never empty.
+    let fresh = PathBuf::from("/home/u/.cargo/bin/agent-doc");
+    let deleted = PathBuf::from("/home/u/.cargo/bin/agent-doc (deleted)");
+    let candidates =
+        build_reexec_candidates(Some(fresh.clone()), Some(deleted.clone()), false);
+    let notes: Vec<_> = candidates.iter().map(|(_, n)| *n).collect();
+    assert_eq!(notes, vec!["resolved_fresh_binary", "path_lookup_agent_doc"]);
+    assert!(
+        !candidates.iter().any(|(p, _)| p == &deleted),
+        "a non-launchable (deleted) current_exe must be excluded"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reexec_candidates_dedup_and_never_empty() {
+    // When the resolver and current_exe both point at the same path, it appears
+    // once; with neither resolvable the PATH fallback alone keeps the list usable.
+    let same = PathBuf::from("/usr/local/bin/agent-doc");
+    let deduped = build_reexec_candidates(Some(same.clone()), Some(same.clone()), true);
+    assert_eq!(
+        deduped,
+        vec![
+            (same, "resolved_fresh_binary"),
+            (PathBuf::from("agent-doc"), "path_lookup_agent_doc"),
+        ]
+    );
+
+    let empty = build_reexec_candidates(None, None, false);
+    assert_eq!(
+        empty,
+        vec![(PathBuf::from("agent-doc"), "path_lookup_agent_doc")],
+        "ladder always ends with a PATH fallback so reexec can still try"
+    );
+}
+
 #[test]
 fn resolve_agent_args_claude_prefers_claude_alias_chain() {
     let fm = Frontmatter {

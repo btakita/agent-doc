@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -141,7 +141,30 @@ Done — implemented the recommended polling first step, tested, committed + pus
 **Files:** `shared/ui.tsx` (`use_poll_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +4 tests in `tests/admin-poll-refresh.test.ts`. Full suite **614 pass / 0 fail**; builds clean.
 
 **Queue drained.** All four items done: ongoing e-sign legal doc + Judith draft email, `#gz9h` (soft printed-name match), `#fxsv` (ESIGN/UETA hardening), `#xn77` (admin polling). The e-sign code (migrations 0063/0064) ships on the next deploy; the consumer-disclosure wording still wants EFS counsel's review per the tracking doc.
-<!-- agent:boundary:837a7b49 -->
+
+### Re: do #7djh — realtime push for admin views — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#7djh]
+
+
+Done — upgraded the admin live-updates from polling to a **Cloudflare Durable Object push**, tested, committed + pushed (EFS `4c97beb`; not deployed). Migration ships with the code.
+
+**Architecture (DO broadcast, the option that actually fans out across requests):** a plain Worker can't push to *other* sessions, so cross-request fan-out needs a coordination point. Added an **`AdminEventsRoom` Durable Object** — a single hub instance admin browsers connect to over WebSocket at `GET /api/admin/events/ws` (behind the existing `/api/admin/*` auth). Mutation routes fan a small event to the hub via `notify_admin_event_` (best-effort, fire-and-forget, falls open when the binding is absent):
+- **admin:** document upload/delete, status change, approve, application delete
+- **borrower/broker:** document upload/delete, application submit
+
+The hub broadcasts to every connected admin, so views refresh on a **push** (sub-second) instead of waiting for the 20s poll.
+
+**Client:** new `use_admin_events_` hook opens the socket, refreshes on each pushed event, **auto-reconnects** on drop, and keeps a **polling heartbeat as a safety net** (60s while the socket is live, 20s when it isn't — so it degrades gracefully to the prior polling behavior if the DO/WS is unavailable). `full_applications` (list + detail) and the `pipeline` board now use it; the pipeline still skips refresh mid drag/save.
+
+**Infra:** `wrangler.toml` binds `ADMIN_EVENTS_ROOM` + adds migration `v2_admin_events_room`; `worker.ts` exports the DO class (confirmed in the bundle). **ETag/If-None-Match: intentionally skipped** — with push, polling is now an infrequent fallback heartbeat, so the 304-optimization isn't worth the complexity.
+
+**Files:** `admin/events/realtime.ts` (DO + `notify_admin_event_` + WS handler), `admin/routes.ts`, `admin/applications/index.ts`, `borrower/applications/routes.ts`, `worker.ts`, `wrangler.toml`, `shared/ui.tsx` (`use_admin_events_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +7 tests. Full suite **621 pass / 0 fail**; builds clean.
+
+**Queue drained.** This was the last item. Note: deploying this needs `make deploy` (it applies the DO migration + the earlier e-sign migrations 0063/0064 before the Worker goes live).
+<!-- agent:boundary:3260c792 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,13 +172,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#7djh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#7djh] [recommended] Admin live-updates upgrade (follow-on to #xn77): if 20s polling latency becomes an issue, replace it with a Cloudflare push path — Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (reuse the BorrowerChatRoom DO pattern) fanning an 'application:<id> changed' event to open admin sessions. Also consider ETag/If-None-Match on the list/detail/pipeline GETs so polling returns 304s instead of full payloads.
 <!-- /agent:backlog -->
 
 ## Review

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -55,7 +55,29 @@ Done — shipped and deployed. The loan-application Documents step no longer mak
 **Spec + tests:** updated `tests/multi-upload.test.ts` to the per-type-upload spec (moved both loan-app forms into the `FileDropZone` group; assert one zone per type uploading to its own type id; assert the pooled-area/category-picker markers are gone) and fixed the `BoolCheckbox` import assertion in `boolean-checkbox-fields.test.ts`. Full suite green: **589 pass / 0 fail**; client + worker builds clean.
 
 **Commit + push + deploy:** committed `5f5cd57`, pushed to `origin/main`, deployed to https://equityfundingsource.brian-takita.workers.dev (Version `70080d90`). No D1 migrations involved (UI-only).
-<!-- agent:boundary:82055c9f -->
+
+### Re: File-type icons, delete buttons, upload activity feed, and realtime updates — opus-4-8
+
+> **Queue prompt:**
+>
+> Each uploaded file should have an icon of the file type and have a delete x. Document uploads should go into the activity feed so the admin can see uploads. Would it be possible to make the admin interface update via poll or in realtime? Does CF have a way to stream events to open sessions?
+
+
+Shipped (committed + pushed `cc508ce`, not yet deployed — preset was spec-test-commit-push, no `deploy`). Three of the four parts are built; the realtime one is answered below and queued.
+
+**1. File-type icon per uploaded file** — each uploaded document shows a material icon by extension: PDF → `picture_as_pdf`, images → `image`, Word → `description`, spreadsheets/CSV → `table`, text → `article`, else `draft`. New `file_type_icon_()` in `portal/shared/ui.tsx`, used in both the borrower application form and the admin/pipeline detail card.
+
+**2. Delete (×) per uploaded file** — a remove button sits next to each uploaded file, calling new soft-delete endpoints (`DELETE /api/borrower/applications/:id/documents/:doc_id` and `DELETE /api/admin/full-applications/:id/documents/:doc_id`) which set `deleted_at` (never a hard delete; R2 object + audit trail preserved) and return the refreshed list.
+
+**3. Uploads → activity feed for admin** — every upload and removal is recorded in the existing `application_change_logs` table under a `documents` section (borrower uploads log with no admin user; admin uploads log the admin). The admin application **Documents** card now renders that as a "Change history" activity feed, reusing the per-application audit log that already powers the other sections rather than adding a parallel feed.
+
+**4. Realtime vs poll for the admin interface — answer:**
+- **Yes, and the cheapest first step is polling:** have the admin list/detail views refetch every ~15–30s, ideally with `ETag`/`If-None-Match` so unchanged responses are `304`s. Zero new infrastructure.
+- **Cloudflare does support server push to open sessions**, two ways: **Server-Sent Events (SSE)** — the Worker holds a streaming `Response` and pushes `application:<id> changed` events; the browser uses `EventSource` and refetches (one-way, simplest); or **a Durable Object broadcast / WebSockets** — EFS *already* runs a Durable Object (`BorrowerChatRoom`) for borrower chat, so the pattern is proven; a DO can hold WebSocket connections for open admin sessions and fan out change events (most realtime, most code).
+- **Recommendation:** ship polling-with-ETag first, then upgrade hot views to SSE or a DO broadcast if latency matters. Queued as a `[recommended]` backlog item rather than built this cycle (sizable, and not a "should" directive).
+
+**Tests:** +11 in `tests/app-docs-icon-delete-activity.test.ts` (icon mapping, delete wiring, DELETE routes, soft-delete + activity-log helpers, admin activity-feed render). Full suite **600 pass / 0 fail**; client + worker builds clean.
+<!-- agent:boundary:f761d63c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,12 +85,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Each uploaded file should have an icon of the file type and have a delete x. Document uploads should go into the activity feed so the admin can see uploads. Would it be possible to make the admin interface update via poll or in realtime? Does CF have a way to stream events to open sessions?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#xn77] [recommended] Realtime/poll admin updates: refresh admin application/pipeline views on document uploads + status changes without manual reload. Cheapest first: poll list/detail APIs every ~15-30s with ETag/If-None-Match. CF push options: Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (EFS already runs the BorrowerChatRoom DO) fanning an 'application:<id> changed' event to open admin sessions via EventSource/WebSocket. Start polling, upgrade to SSE/DO if latency matters.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

@@ -39,7 +39,7 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): ongoing plan document for Map Holons integration; do [#akp3]; do [#97xn]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:8e2c19e0 -->
+<!-- agent:boundary:42cd2603 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- complete [#jpf1]
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

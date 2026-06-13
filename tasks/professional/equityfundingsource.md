@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,14 +38,14 @@ committed
 Compacted content:
 - Archived 7 response topic(s): do [#qakx-impl]; do [#vd8s-dragwire]; do [#67v2-kanban]; 4 more
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db...
-<!-- agent:boundary:faa76f24 -->
+<!-- agent:boundary:50716873 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 - Let's not send the emails. You & I need to be in better sync. Since TMO does not have webhooks or any streaming APIs in their docs, let's assume they don't provide the functionality. Let's use your mitigation recommendations instead. We can save the TMO support email for later. Re: the Judith email. The https://equityfundingsource.brian-takita.workers.dev/funded-deals page was scraped from EFS's existing website, so these are real deals they have closed. The "Sample transactions funded through Equity Funding Source" should change to reflect the fact that these are previous deals. Judith wants to put better deals on this page and her team can change the deals from the admin portal. The "Legal and disclosure language." does not point to anything. I thought we were talking about the disclosure on the Borrower document uploads page. Is that correct?
 <!-- /agent:queue -->
 

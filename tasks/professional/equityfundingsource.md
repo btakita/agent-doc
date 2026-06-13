@@ -38,7 +38,26 @@ committed
 Compacted content:
 ❯ - Archived 1 response topic(s): #advance-review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:53a13ca4 -->
+
+### Re: do [#qakx-impl] — already shipped by #rpzm; verified + closed — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#qakx-impl]
+
+
+Investigated before building: #qakx-impl is already delivered by the #rpzm dashboard-rework work, so this cycle is verify-and-close, not net-new code.
+
+**Already in place (zero fixtures remain):**
+- **Documents** (`lib/ui--browser--efs/portal/investor/documents.tsx`) — D1/R2-backed via `GET /api/investor/documents`, request submission via `POST /api/investor/documents/request`, and authenticated per-document download via `GET /api/investor/documents/:id/download` (user-scoped, `status=published` gate, streams from the `R2_DOCUMENTS` bucket).
+- **Accreditation** (`accreditation.tsx`) — D1-backed via `GET /api/investor/accreditation` with authenticated evidence upload via `POST /api/investor/accreditation/upload` (FormData → R2 via `document_cache_put_`).
+- **Statements** — intentionally retired in #rpzm phase 2b (the standalone Distributions/Statements section was removed). "statement" now lives as a document **category** and request **kind**, not a fixture page.
+- Schema: `investor_documents`, `investor_document_requests` (+ `provided_documents`), `investor_accreditation_verifications`, `public_documents` (migrations 0024 + 0058). R2 binding `R2_DOCUMENTS`; auth is JWT-in-cookie via `session_R_user_`.
+
+**Verification:** `bun test` → **621 pass / 0 fail** (incl. `tests/investor-documents.test.ts` 5/5 covering the migration tables + route wiring). Grep confirmed zero `sample/fixture/mock/demo/static` data left in `lib/ui--browser--efs/portal/investor/`. No source changed → nothing to commit/push.
+
+Marking **#qakx-impl done**. Next in the go-queue: #vd8s-dragwire.
+<!-- agent:boundary:d5f9f6fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +65,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#qakx-impl]
+- ~~do [#qakx-impl]~~
 - do [#vd8s-dragwire]
 - do [#67v2-kanban]
 - do [#37ah-backend]
@@ -58,7 +77,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#qakx-impl] Investor portal document pages: implement D1/R2-backed APIs for Documents, Statements, and Accreditation with authenticated upload/request/download, replacing fixture data. Fully actionable now. Advances review #qakx.
 - [ ] [#vd8s-dragwire] Investor Pipeline phase 2 (non-TMO half): drag-to-confirm-wire from the Committed lane with multi-pending-fund disambiguation. TMO AddLoanFunding Active-lane sync stays gated on #dzmm/#k2xg. Advances #vd8s. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [ ] [#67v2-kanban] Admin loan pipeline: build TMO-aligned-stage Kanban UI (drag cards, manual stage advance) wired to dashboard with TMO stages as single source of truth; auto-advance-on-requirements deferred to #dzmm/#k2xg. Advances #67v2.
 - [ ] [#37ah-backend] Broker portal backend: replace static broker demo data with D1-backed submit-deal, pipeline, commissions, documents, and notifications; TMO sync behind the #dzmm webhook gate. Advances #37ah.

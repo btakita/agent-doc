@@ -70,17 +70,17 @@ Both done, committed, and pushed. Full EFS suite green (631 pass / 0 fail), buil
 **#xcvginbound — inbound email→chat (EFS `d8e6320`).** Replaced the 501 scaffold at `POST /api/email/inbound` with a real, authenticated handler. Two-factor sender auth: (1) the configured inbound provider must present a shared secret (`X-Inbound-Secret`; **fails closed when no secret is set**, so unauthenticated mail can never inject), and (2) the `from` address must resolve to an `admin` user. Authenticated replies append as an admin chat message via `borrower_chat_message_create_admin_`, claim thread ownership, and notify the borrower — same path as a portal admin reply. This is the #xcvg *code* half; outbound borrower notification stays config-gated on the verified sending domain (#f4rq).
 
 Net: #vd8s/#67v2/#zwws phase 4/#7a4d now have a live TMO data mirror + visibility behind them; the borrower message round-trip's inbound leg is built and waiting only on inbound-routing config (`MESSAGE_EMAIL_INBOUND_ENABLED` + `MESSAGE_EMAIL_INBOUND_SECRET` + provider webhook).
-<!-- agent:boundary:64ddd150 -->
+<!-- agent:boundary:acaf65ba -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- #advance-review
-- do [#tmopoll]
-- do [#xcvginbound]
+<!-- agent:queue preset="#spec-test-commit-push" -->
+- ~~#advance-review~~
+- ~~do [#tmopoll]~~
+- ~~do [#xcvginbound]~~
 <!-- /agent:queue -->
 
 ## Backlog

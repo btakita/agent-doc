@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -61,7 +61,7 @@ So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that
 2. `#dh3k` `#lzspecconf` [recommended] — Run the `lazily-spec` canonical conformance fixtures (`6632cb0`) in CI so cross-language wire-protocol drift fails the build instead of shipping as a runtime bug.
 
 **Top of backlog: `#ytp5`** (`#lzasyncloom`).
-<!-- agent:boundary:d4f9d8b5 -->
+<!-- agent:boundary:091bd8e0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +70,8 @@ So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#ytp5]
+- [#dh3k]
 <!-- /agent:queue -->
 
 ## Backlog

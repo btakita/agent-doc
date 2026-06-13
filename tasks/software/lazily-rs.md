@@ -54,21 +54,36 @@ The two previously-tracked bug classes are already fixed in v0.10.3:
 - `#k03k` async race (`get() already checked Resolved` / `notifier dropped` panics) — replaced by the resolve-loop at `src/async_context.rs:758+` that handles both windows; the panic strings are gone.
 - thread-safe sidecar invalidation — hardened in `c80ba70` with stress + spec coverage.
 
-So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that the `#k03k` async fix has **no exhaustive interleaving model and is not in CI**. `ThreadSafeContext` has `tests/thread_safe_loom.rs` + a CI loom step (`.github/workflows` line 46-47); `async_context.rs` has only randomized stress (`tests/async_stress.rs`). A concurrency fix without a model is regression-prone.
+So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that the `#k03k` async fix has **no exhaustive interleaving model and is not in CI**. `ThreadSafeContext` has `tests/thread_safe_loom.rs` + a CI loom step; `async_context.rs` has only randomized stress (`tests/async_stress.rs`). A concurrency fix without a model is regression-prone.
 
 **Backlog (priority order):**
-1. **`#ytp5` `#lzasyncloom`** (top) — Add `tests/async_context_loom.rs` (`--features loom`) modeling the resolve loop's two `#k03k` windows + a CI step alongside `thread_safe_loom`. Plan: `tasks/software/plan-lazily-async-loom.md`.
-2. `#dh3k` `#lzspecconf` [recommended] — Run the `lazily-spec` canonical conformance fixtures (`6632cb0`) in CI so cross-language wire-protocol drift fails the build instead of shipping as a runtime bug.
-- **CI**: added a **Test async feature** step (async tests were **not run in CI at all** — `async` isn't a default feature) + the resolve-loop window step, beside the loom step.
-- **`Makefile`**: `test-async-resolve` target → `check` + `.PHONY`.
-- **`SPEC.md`**: documents *why Loom can't model this path* + the deterministic window coverage + the Shuttle follow-up.
-- **`src/async_context.rs`**: seam (`Window1Hook`, one-shot hook field, resolved-arm counter, accessors) — entirely `#[cfg(feature = "instrumentation")]`, compiled out of default/release builds.
-  - **Window 2** (superseded notifier drop → re-resolve): gated supersede, asserts re-resolve to latest, no panic.
-  - **Window 1** (`Resolved` published in the *synchronous* gap between fast-path `get()` and re-lock — no `.await`, so cooperative scheduling can't reach it): forced via a one-shot `instrumentation`-gated seam (`__install_window1_hook`) that resolves the slot inside the gap; asserts the race arm was taken via `__window1_resolved_hits == 1`. Fails if the `#k03k` fix regresses to `unreachable!`.
-- **`tests/async_resolve_loop.rs`** (`async` + `instrumentation`):
+1. **`#ytp5` `#lzasyncloom`** (top) — deterministic coverage of the two `#k03k` windows. Plan: `tasks/software/plan-lazily-async-loom.md`.
+2. `#dh3k` `#lzspecconf` [recommended] — Run the `lazily-spec` canonical conformance fixtures (`6632cb0`) in CI so cross-language wire-protocol drift fails the build.
 
 **Top of backlog: `#ytp5`** (`#lzasyncloom`).
-<!-- agent:boundary:1a265bde -->
+
+### Re: #ytp5 (#lzasyncloom) — Option 1, done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ytp5]
+
+
+**Architecture recommendation: Option 1 (instrumentation seam), not Shuttle.** The deciding factor is structural: Shuttle needs `async_context.rs` to be generic over its concurrency primitives (swap tokio↔shuttle executor + `watch` + `Arc` under `cfg`) — the way `thread_safe.rs` was *built* for Loom (`#[cfg(loom)] use loom::sync` at the top). `async_context.rs` is hard-coded to tokio, so Shuttle means a tokio-decoupling refactor whose main beneficiary is the test harness, verifying an *approximation* of tokio rather than the real path. Option 1 tests the real path, deterministically, proportional to the one known gap. Shuttle is queued gated as `#57by` (`#lzasyncshuttle`).
+
+Shipped Option 1 and closed `#ytp5`:
+
+- **`tests/async_resolve_loop.rs`** (`async` + `instrumentation`): **Window 1** (`Resolved` published in the *synchronous* gap between fast-path `get()` and re-lock — no `.await`, so cooperative scheduling can't reach it) forced via a one-shot `instrumentation`-gated seam (`__install_window1_hook`), asserts the race arm via `__window1_resolved_hits == 1`; **Window 2** (superseded notifier drop → re-resolve) via gated supersede.
+- **`src/async_context.rs`**: seam (`Window1Hook`, one-shot hook field, resolved-arm counter, accessors) entirely behind `#[cfg(feature = "instrumentation")]`, compiled out of default/release.
+- **`SPEC.md`**: documents why Loom can't model this path + the deterministic window coverage + the Shuttle follow-up.
+- **`Makefile`**: `test-async-resolve` → `check` + `.PHONY`. **CI**: added a `--features async` step (async tests were **not run in CI at all**) + the resolve-loop step, beside loom.
+
+**Verification:** `make check` → exit 0 (full suite incl. the 544s `thread_safe_loom` model + `benchmark-check`); `make test-async-resolve` → 2 passed; clippy `--all-targets --all-features` clean. Pushed: lazily-rs `8dcf962..990c630`, superproject pointer `94168d8c3..06e60de9c`. New CI steps validate on the pushed run.
+
+_(Recovery note: the IPC finalize path repeatedly intermixed/scrambled this response into the prior one — the recurring `#ipcdrift`/`#exch-intermix` route-owned-supervisor self-race — and the byte-mismatch guard refused the commit. Recovered by hand-rebuilding the exchange + `reset --from-current --preserve-session` + `commit`.)_
+
+**Top of backlog: `#dh3k`** (`#lzspecconf`).
+<!-- agent:boundary:25edbcdb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,14 +92,13 @@ So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#ytp5]
+- ~~[#ytp5]~~
 - [#dh3k]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ytp5] #lzasyncloom=Deterministic #k03k resolve-loop window coverage (Option 1: instrumentation seam). Plan: tasks/software/plan-lazily-async-loom.md
 - [ ] [#dh3k] #lzspecconf=[recommended] Run the lazily-spec canonical conformance fixtures (lazily-spec 6632cb0) in lazily-rs CI so cross-language wire-protocol drift fails the build instead of shipping as a runtime bug. tests/conformance.rs already prefers spec fixtures when present (02c9e80); add a CI step that fetches the spec submodule fixtures and runs them.
 <!-- /agent:backlog -->
 

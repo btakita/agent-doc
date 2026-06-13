@@ -121,7 +121,30 @@ The broker portal backend is already D1-backed across all five named surfaces �
 **Verification:** `bun test tests/broker-portal.test.ts` → **35 pass / 0 fail**. No source changed → nothing to commit/push.
 
 Marking **#37ah-backend done** (review #37ah stays gated for the TMO sync). Next in the go-queue: #xcvg-admin.
-<!-- agent:boundary:61cee2ea -->
+
+### Re: do [#xcvg-admin] — already shipped (borrower secure-message admin); verified + closed — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#xcvg-admin]
+
+
+The non-email half of the borrower secure-message system is already built — verify-and-close.
+
+**Already in place:**
+- **Admin owner/assignment** — migration `0034_chat_admin_owner` (`chat_sessions.admin_owner_user_id`); ownership is claimed by the first admin who replies via `borrower_chat_session_admin_owner_set_if_unset_` (called from `POST /api/admin/messages/:session_id`). Unowned threads notify all active admins.
+- **In-app notification surface** — `notify_admin_of_borrower_message_` / `notify_borrower_of_admin_message_` write the existing notifications table immediately; `GET /api/messages/count` returns the admin unread count (`borrower_chat_admin_unread_count_R_`) and the admin nav badge counts message sessions.
+- **Inbound-reply → D1 chat-append plumbing** — the admin reply POST appends an `efs` `chat_messages` row; the inbound **email**→chat handler is scaffolded behind `MESSAGE_EMAIL_INBOUND_ENABLED` and inert until inbound routing is configured.
+- Borrower side: `GET/POST /api/borrower/messages` (+ WS live updates), read cursors (0031), session titles (0032).
+
+**Gated remainder (as designed):** email send (`MESSAGE_EMAIL_NOTIFICATIONS_ENABLED`) and inbound email receive (`MESSAGE_EMAIL_INBOUND_ENABLED`) stay off until the Resend sending domain (#f4rq) + Google Workspace SMTP (#m6ch/#p40t) land — `notify.ts` documents this split explicitly.
+
+**Verification:** full `bun test` → **626 pass / 0 fail** (incl. `borrower-messages`, `borrower-message-notify`, `contact-messages`). No source changed → nothing to commit/push.
+
+This also closes the borrower-portal-messages question from earlier in the session: admin owner + in-app round-trip is live now; the email legs are the gated piece.
+
+Marking **#xcvg-admin done** (review #xcvg stays gated for the email legs). Next in the go-queue: #dzmm-followup (the email to Robert).
+<!-- agent:boundary:d0d39af3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +156,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~do [#vd8s-dragwire]~~
 - ~~do [#67v2-kanban]~~
 - ~~do [#37ah-backend]~~
-- do [#xcvg-admin]
+- ~~do [#xcvg-admin]~~
 - do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
 - do [#jnzs-approval]
 <!-- /agent:queue -->
@@ -141,7 +164,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#xcvg-admin] Borrower secure-message admin: add admin owner/assignment, in-app notification surface, and inbound-reply -> D1 chat-append plumbing (non-email half of #xcvg). Email send/receive stays gated on #f4rq/#m6ch/#p40t. Advances #xcvg.
 - [ ] [#dzmm-followup] Send Robert the six-question TMO outbound-webhook prompt (src/equityfundingsource-dev/docs/tmo-webhooks-question.md) and record his answer; this single unblock clears the writeback gate behind #dzmm/#k2xg/#7a4d/#vd8s/#67v2/#zwws. Operator/comms action.
 - [ ] [#jnzs-approval] Draft the funded-deal images/copy/lien-position/legal-disclosure approval request to Judith or the EFS reviewer to unblock invoicing and launch sign-off. Advances #jnzs. Operator/comms action.
 <!-- /agent:backlog -->

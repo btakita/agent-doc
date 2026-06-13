@@ -231,6 +231,25 @@ pub fn queue_context_reset_reason_if_opted_in(
 /// happens only via an explicit `agent_doc_auto_compact` opt-in; otherwise the
 /// agent keeps draining and notes the size in one line. Off the queue (idle /
 /// user-driven turn), the agent asks before compacting as before.
+/// `#drain-no-defer` — restart/accretion guidance is queue-aware. While a queue is
+/// actively draining, do NOT tell the agent to stop and restart "from the current
+/// committed boundary" — that stalls the drain and is exactly the "defer to a fresh
+/// cycle" anti-pattern. The supervisor recycles onto a fresh binary and `/clear`s
+/// agent context between items at idle boundaries, so accretion/restart churn resets
+/// without the agent stopping. Off the queue (idle / user-driven turn) the normal
+/// clean-restart guidance applies.
+fn restart_or_drain_guidance(queue_active: bool) -> String {
+    if queue_active {
+        "Queue is actively draining — do NOT stop to restart or defer the remaining items: \
+         keep finalizing and looping. The supervisor recycles onto a fresh binary and \
+         /clears agent context between items at idle boundaries (#drain-no-defer), so \
+         accretion/restart churn resets without stalling the drain."
+            .to_string()
+    } else {
+        "Restart cleanly from the current committed boundary before continuing.".to_string()
+    }
+}
+
 fn compaction_guidance(file: &Path, auto_compact_opt_in: bool, queue_active: bool) -> String {
     if auto_compact_opt_in {
         format!(
@@ -357,10 +376,7 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
             || startup_miss_active
             || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN
         {
-            guidance.push(
-                "Restart cleanly from the current committed boundary before continuing."
-                    .to_string(),
-            );
+            guidance.push(restart_or_drain_guidance(queue_active));
         }
         if guidance.is_empty() {
             guidance.push(
@@ -490,10 +506,7 @@ fn inspect_at_with_context(
             || startup_miss_active
             || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN
         {
-            guidance.push(
-                "Restart cleanly from the current committed boundary before continuing."
-                    .to_string(),
-            );
+            guidance.push(restart_or_drain_guidance(queue_active));
         }
         if guidance.is_empty() {
             guidance.push(
@@ -1231,5 +1244,17 @@ mod tests {
             "expected restart guidance, got {:?}",
             report.guidance
         );
+    }
+
+    #[test]
+    fn restart_or_drain_guidance_is_queue_aware() {
+        // #drain-no-defer: off the queue, the normal clean-restart guidance applies.
+        assert!(restart_or_drain_guidance(false).contains("Restart cleanly"));
+        // While a queue is draining, never tell the agent to stop/restart/defer — the
+        // supervisor /clears + recycles between items instead.
+        let draining = restart_or_drain_guidance(true);
+        assert!(draining.contains("do NOT stop"), "got: {draining}");
+        assert!(draining.contains("#drain-no-defer"), "got: {draining}");
+        assert!(!draining.contains("Restart cleanly"), "got: {draining}");
     }
 }

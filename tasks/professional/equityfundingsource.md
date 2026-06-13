@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -63,7 +63,37 @@ They live in `src/equityfundingsource-dev/tmp/`, split by audience. They're synt
 When you click upload in the borrower application document flow or the lender accreditation flow, browse to the matching folder above. They're tiny (under 1 KB each) and exist only to exercise the upload/validation paths, not to look like real documents.
 
 If you want a richer or more realistic set (or want them checked into the repo / a seed script so they survive a fresh clone), say the word and I'll generate them.
-<!-- agent:boundary:d0433e07 -->
+
+### Re: Sample documents for all required uploads — opus-4.8
+
+> **Queue prompt:**
+>
+> Please look at all required documents for the Deal Pipeline and Investor Pipeline. Please make sample documents in a valid format that I can use to upload to Loan Applications and Investor Applications and any other form that requires documents.
+
+
+Done. I traced every required document type from the DB catalogs and generated a complete set of **valid, openable** sample files (verified with `file`, `pdftotext`, and ImageMagick `identify`).
+
+**Required-document sources (source of truth):**
+- **Loan Applications / Deal Pipeline** — `document_types` table (migrations 0010 + 0056): Appraisal Report, Preliminary Title Report, Property Photos, Purchase Agreement, Executed Promissory Note, Deed of Trust.
+- **Investor accreditation** — `investor_accreditation_verifications.verification_type` (migration 0024): income, net_worth, institution, professional.
+- **Investor documents** — `investor_documents.category` (migration 0024): tax (K-1), legal (subscription agreement), due_diligence (PPM), statement (account statement).
+- Formats restricted to what `upload_guard.ts` allows (pdf / png / csv / txt; ≤25 MB).
+
+**Where they are:** `file:///home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/tmp/samples/`
+- `loan-applications/` — appraisal-report.pdf, preliminary-title-report.pdf, property-photos.png (640×420 RGB), purchase-agreement.pdf, executed-promissory-note.pdf, deed-of-trust.pdf
+- `investor-accreditation/` — accreditation-income.pdf, accreditation-net-worth.pdf, accreditation-institution.pdf, accreditation-professional.pdf
+- `investor-documents/` — tax-k1-2025.pdf, subscription-agreement-legal.pdf, due-diligence-ppm.pdf, account-statement.pdf
+
+14 files, each a real PDF (v1.4, one page, readable text) or a real PNG — so they pass the upload guard and actually open. All clearly watermarked "SAMPLE — synthetic … for upload testing only."
+
+**Reproducible:** the generator is committed at `bin/make-sample-documents.ts` (hand-rolls valid PDF + PNG bytes, no deps), so the set survives a fresh clone — regenerate any time with `bun run bin/make-sample-documents.ts`. (`tmp/` itself stays gitignored.)
+
+**Verified:**
+- `bun test` — **574 pass / 0 fail**, incl. new `#sample-upload-docs` coverage (PDF/PNG validity, guard-allowed extensions, size limit).
+- No app/worker change, so nothing to deploy this cycle.
+
+If you also want a CSV/spreadsheet variant for the K-1 or bank statements (some reviewers prefer those), or a deliberately-oversized/disallowed file to test the rejection path, say so.
+<!-- agent:boundary:c53f544b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +101,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please look at all required documents for the Deal Pipeline and Investor Pipeline. Please make sample documents in a valid format that I can use to upload to Loan Applications and Investor Applications and any other form that requires documents.
 <!-- /agent:queue -->
 
 ## Backlog

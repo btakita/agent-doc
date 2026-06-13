@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,43 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-084343.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-084854.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Review & E-Sign; Ongoing doc + draft email to Judith re: e-sign legal requirements; do #gz9h; 3 more
+❯ - Archived 1 response topic(s): #advance-review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: #advance-review — triaged the 11 review items into actionable backlog — opus-4-8
-
-> **Queue prompt:**
->
-> #advance-review
-
-
-Went through all 11 gated review items and queued the next concrete step for each that has one: 7 new backlog items, one stale record resolved, three genuinely-gated items left as-is.
-
-**Agent-actionable now (no external gate):**
-- `#qakx-impl` — Investor portal document pages: D1/R2-backed APIs + authed upload/request/download, replacing fixtures. Buildable today.
-
-**Partially actionable (non-TMO half buildable now; TMO sync stays gated on #dzmm/#k2xg):**
-- `#vd8s-dragwire` — Committed-lane drag-to-confirm-wire with multi-pending-fund disambiguation.
-- `#67v2-kanban` — TMO-aligned-stage Kanban UI with manual advance; auto-advance deferred.
-- `#37ah-backend` — Broker portal D1 backend; TMO sync behind the webhook gate.
-- `#xcvg-admin` — Borrower-message admin owner + in-app notify + inbound-reply→D1 append. This also answers the borrower-portal-messages question: yes to an admin owner and in-app round-trip now; the email legs (notify on send, reply-by-email both directions) wait on the Resend sending domain (#f4rq) + Google Workspace SMTP (#m6ch/#p40t).
-
-**Operator/comms follow-ups (these unblock the external gates):**
-- `#dzmm-followup` — send Robert the six-question TMO webhook prompt; this one unblock clears the writeback gate behind #dzmm/#k2xg/#7a4d/#vd8s/#67v2/#zwws.
-- `#jnzs-approval` — draft the funded-deal copy/lien/legal approval request to Judith/EFS reviewer to unblock invoicing + launch.
-
-**Left as-is (no new step — same gates, already covered):**
-- `#zwws` — remaining phases share the TMO writeback + #f4rq gates captured above.
-- `#next-steps` — production-state record; custom-domain cutover intentionally deferred, SSO gated on #m6ch.
-- `#dropbox-sync-adapter` — blocked on Dropbox access.
-
-Resolved **#1v5m** (a completed 2026-05-25 Cloudflare-token record, not pending work) out of review. No spec/test/code changed this cycle — pure triage, so nothing to test.
-
-Note: preflight flagged a low-confidence semantic match between #vd8s and the shipped #vtx8 (lead-vanishing admin pipeline). They're distinct (investor-pipeline drag-wire vs. lead visibility), so #vd8s stays.
-<!-- agent:boundary:0d141752 -->
+<!-- agent:boundary:53a13ca4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,11 +46,18 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#qakx-impl]
+- do [#vd8s-dragwire]
+- do [#67v2-kanban]
+- do [#37ah-backend]
+- do [#xcvg-admin]
+- do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
+- do [#jnzs-approval]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog queue -->
 - [ ] [#qakx-impl] Investor portal document pages: implement D1/R2-backed APIs for Documents, Statements, and Accreditation with authenticated upload/request/download, replacing fixture data. Fully actionable now. Advances review #qakx.
 - [ ] [#vd8s-dragwire] Investor Pipeline phase 2 (non-TMO half): drag-to-confirm-wire from the Committed lane with multi-pending-fund disambiguation. TMO AddLoanFunding Active-lane sync stays gated on #dzmm/#k2xg. Advances #vd8s. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [ ] [#67v2-kanban] Admin loan pipeline: build TMO-aligned-stage Kanban UI (drag cards, manual stage advance) wired to dashboard with TMO stages as single source of truth; auto-advance-on-requirements deferred to #dzmm/#k2xg. Advances #67v2.

@@ -233,7 +233,7 @@ Read-only spike done. **Recommendation: NO-GO on `#57by` for now** — keep it g
 **Not auto-looping.** The supervisor (pid 337083) is now actively degraded — last finalize hit `IPC ack timeout (6s)` repeatedly and `IPC listener degraded`. `make install` in `src/agent-doc` + recycling it is now urgent before `#webrtcbackend`.
 
 **Sources:** [awslabs/shuttle](https://github.com/awslabs/shuttle) · [shuttle docs](https://docs.rs/shuttle)
-<!-- agent:boundary:8341f02e -->
+<!-- agent:boundary:115fe8dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -245,7 +245,7 @@ Read-only spike done. **Recommendation: NO-GO on `#57by` for now** — keep it g
 - ~~Go through each review item. Add actionable items into the backlog to complete the review items.~~
 - ~~do [#webrtc2]~~
 - ~~do [#webrtc3]~~
-- do [#shuttleeval]
+- ~~do [#shuttleeval]~~
 - do [#webrtcbackend]
 <!-- /agent:queue -->
 

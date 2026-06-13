@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -248,7 +248,27 @@ Done — and it's a **real, end-to-end-tested** backend, not just compiling. str
 A **networked** (non-loopback) backend reuses the same pump loop with a UDP socket + a driver thread instead of the in-memory route — out of scope here (needs live connectivity), noted in the module + plan.
 
 **`#jpf1` is now fully complete** — design (`#webrtc1`), abstraction (`#webrtc2`), tests+bench (`#webrtc3`), and a real concrete str0m backend (`#webrtcbackend`). **The queue is drained.** Open items: only gated review `#57by` (Shuttle, NO-GO) and `#jpf1` (epic, now satisfiable). The recurring `#ipcdrift` supervisor (pid 337083) is still degraded — recycling it (`make install` + restart) remains the standing recommendation.
-<!-- agent:boundary:beb7631b -->
+
+### Re: reactive bridge across WebRTC / WebSocket / IPC channels — opus-4-8
+
+> **Queue prompt:**
+>
+> Can lazily-rs act as a reactive bridge between multiple network channels. For example, if we were to integrate with Map Holons, can we also use WebRTC/Web socket/IPC data channels?
+
+
+Yes — and the design is already most of the way there for *transport pluggability*. The genuinely new piece your question names is the *multi-channel bridge* (fanning one graph across heterogeneous channels at once), which is a hub layer that doesn't exist yet. Splitting the two:
+
+**1. Transport pluggability — already designed.** The seam is `IpcSink`/`IpcSource` (`ipc.rs`): they carry `IpcMessage` (`Snapshot`/`Delta`), the reactive-graph wire protocol, and know nothing about the wire. There are already three attachments behind that seam: in-process, a socket-style transport, and `WebRtcSink`/`WebRtcSource` (`webrtc_transport.rs`) over a generic `DataChannel` byte-frame trait, with `str0m_backend.rs` as the concrete sans-IO backend (#webrtcbackend). So "use WebRTC / WebSocket / IPC" is "attach a different `IpcSink`/`IpcSource`," not a rewrite.
+
+- **IPC** and **WebRTC** exist today.
+- **WebSocket** is a small add: WS is ordered + reliable, so it satisfies the `DataChannel` frame contract *directly* — no signaling/ICE/sans-IO backend, unlike WebRTC. Queued as `#lzwstransport` (`#akp3`).
+
+**2. Reactive bridge between multiple channels — the new layer.** Each transport today attaches the graph to *one* peer set. To bridge — e.g. relay a delta arriving over WebRTC out to WebSocket and local-IPC peers — you need a hub that owns N attachments and routes between them. The architecturally correct way is **re-derive, not relay raw frames**: apply each inbound `Delta` to the local graph through the graph-apply write authority, then recompute per-peer `Snapshot`/`Delta::filter_readable` deltas for the *other* sinks. That keeps the `PeerPermissions` default-deny / omission-not-redaction boundary (`distributed.rs`) intact across a mixed fan-out, so a WebRTC peer can't leak state to a WS peer outside its allowlist. Queued as `#lzmuxbridge` (`#97xn`) with a phased plan at `tasks/software/plan-lazily-multichannel-bridge.md`.
+
+**3. Map Holons.** The transport side is ready; the real work is a **schema adapter** mapping the holon node/edge model onto lazily's `NodeId` / `Snapshot` / `Delta`. lazily already speaks a node+edge reactive graph with incremental deltas, so the shapes line up — but I don't have Map Holons' internals in front of me, so I won't claim the mapping is trivial. Once that adapter exists, holon updates flow in as deltas and the bridge hub fans them across whichever channels (WebRTC/WS/IPC) the holon peers are on. Adapter is a separate, holon-specific item, not bundled into the transport/bridge work above.
+
+Net: the reactive graph itself is the bridge point — terminate any channel into the graph, let the distributed plane re-emit filtered deltas to the others. The two backlog items above are the concrete gap between "three transports" and "one graph bridged across all three at once."
+<!-- agent:boundary:20b10de2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -257,16 +277,13 @@ A **networked** (non-loopback) backend reuses the same pump loop with a UDP sock
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Go through each review item. Add actionable items into the backlog to complete the review items.~~
-- ~~do [#webrtc2]~~
-- ~~do [#webrtc3]~~
-- ~~do [#shuttleeval]~~
-- ~~do [#webrtcbackend]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#akp3] #lzwstransport=[recommended] WebSocket IpcSink/IpcSource transport. WebSocket is ordered+reliable so it satisfies the DataChannel frame contract directly — no signaling/ICE/sans-IO backend needed (much smaller than #webrtcbackend). Implement a WsDataChannel over a ws stream and reuse WebRtcSink/WebRtcSource, or impl IpcSink/IpcSource directly.
+- [ ] [#97xn] #lzmuxbridge=[recommended] Multi-channel reactive bridge hub: fan one reactive graph across heterogeneous IpcSink/IpcSource attachments (WebRTC + WebSocket + in-process IPC) at once. Re-derive per-peer filtered deltas through the graph-apply authority — do NOT relay raw frames — to preserve PeerPermissions default-deny. Plan: tasks/software/plan-lazily-multichannel-bridge.md.
 <!-- /agent:backlog -->
 
 ## Review

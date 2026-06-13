@@ -214,16 +214,34 @@ No new actionable prompt this cycle — the only diff was striking the `~~~done`
 agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 — then either drive the `[operator-verify]` JB items live (so I check the logs), or re-invoke `/agent-doc` from that **fresh, non-route-owned** session so I can implement the `[clean-session]` fixes without racing a live host. **Not auto-looping** (would be `#qchurn` no-op churn).
-<!-- agent:boundary:fb8de721 -->
+
+### Re: `:pushpin:` annotations accumulating + stale-supervisor root cause — opus-4.8
+
+> **Queue prompt:**
+>
+> :pushpin: `:pushpin:` annotation are accumulating in the wrong place. I corrected `:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?` above.
+
+**No code changes this cycle** — recovery/triage. Your `:pushpin:` report is already captured, and the underlying cause of what you're seeing is a stale supervisor.
+
+**1. The `:pushpin:` accumulation is `#pushpinaccum` (already in backlog).** Exactly what you described: a queue head that already starts `- :pushpin:` gets another `:pushpin:` prepended → `:pushpin: - :pushpin: …`. The queue-head annotation formatter prepends the marker without checking for an existing leading pushpin/bullet. Fix: make that prefix idempotent (single marker/bullet). It's `[clean-session]` (queue formatter write path), so it can't safely land under this live supervisor.
+
+**2. Root cause of what you're seeing right now: the host supervisor is running a STALE binary.** Preflight flagged it — pid 1368698 serving this doc started *before* the currently-installed agent-doc, so it keeps emitting File Cache Conflict dialogs and stale-HEAD revival (your deleted-then-returned prompt = `#clearexchstale`/`#fcc0`). The pushpin doubling, the revived prompt, and the FCC dialogs are all the same stale-build IPC drift; they will keep recurring until the supervisor restarts onto the current binary.
+
+I can't restart it from here — pid 1368698 hosts this very pane, so `restart-supervisor` would kill the session I'm running in. **Operator action:** from outside this session run `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force` (or restart the IDE session). That moves it to the current binary and is the precondition for fixing the `[clean-session]` items cleanly.
+
+**3. Nothing is agent-drainable here.** Every backlog item (`#pushpinaccum`, `#fcc0`, `#clearexchstale`, `#qchurn`, `#rtwbcast`, …) is `[clean-session]` — they touch the live write/queue path and must not be edited under this live IPC supervisor (it races and corrupts). The review items are `[operator-verify]`. The free-text queue reports keeping `queue_active=true` with zero drainable work is `#qchurn` itself, manifesting live. **Not auto-looping** — that would be the no-op churn. Exchange is at block-level accretion, but the queue is active so I'm not stalling to ask about compaction.
+
+**To make progress:** restart the supervisor (above), then re-invoke `/agent-doc` from that fresh, non-route-owned session so the `[clean-session]` fixes (`#pushpinaccum` → `#fcc0` → `#clearexchstale`) can land without racing a live host.
+<!-- agent:boundary:f017f7cb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?~~
-- :pushpin: `:pushpin:` annotation are accumulating in the wrong place. I corrected `:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?` above.
-- :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
-- :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
+- ~~:pushpin: `:pushpin:` annotation are accumulating in the wrong place. I corrected `:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?` above.~~
+- :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug. #simworld
+- Please ensure that other 
+- :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. #simworld if you can, drive it.
 - :pushpin: :round_pushpin: do [#c2b6]
 - :pushpin: :round_pushpin: do [#aazp]
 ---

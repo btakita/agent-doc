@@ -147,7 +147,7 @@ Verified this cycle: `cargo test -p agent-doc-orchestration --lib commit_` gives
 **Residual is #stuckhandoff2, not this guard.** The live repro required the wedged Preparing controller; blocking a wedged stale write is conservative-correct, not a false-positive. The M1 self-watchdog suicide-timer for that wedge is now in source.
 
 **Closeout.** Marking `#compactdrift` done — code is complete, committed, and tested. The only remaining step is the operator-drive live JB `Compact Exchange` re-verify on a freshly `make install`ed binary (the installed cdylib currently predates `aafa6510`), filed as `#c2b6` `[operator-verify]`. Per your "no more gates" directive I'm closing this rather than adding a review gate.
-<!-- agent:boundary:36e88e68 -->
+<!-- agent:boundary:93058a44 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -203,6 +203,15 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
+- do [#c2b6]
+- do [#aazp]
+- do [#4myd]
+- do [#qdedup]
+- do [#clearexchstale]
+- do [#qpresetstrike]
+- do [#qchurn]
+- do [#fcc0]
+- do [#rtwbcast]
 <!-- /agent:queue -->
 ###
 <!--

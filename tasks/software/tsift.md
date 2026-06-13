@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -251,7 +251,7 @@ Root cause was broader than the original note: the lock surfaces from **two** si
 - **Commit + push:** tsift `1fc031a` → `origin/main`; superproject pointer `dc198313e`. CI run `27460096312` queued (local gate is the green evidence).
 
 Next in queue: `#tsreview2`.
-<!-- agent:boundary:4998a202 -->
+<!-- agent:boundary:840dbdc3 -->
 <!-- /agent:exchange -->
 
 ## Queue

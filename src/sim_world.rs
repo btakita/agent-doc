@@ -185,6 +185,13 @@ enum SimCommand {
     /// resume, recycle, and drain decision predicates exactly as `idle_watch.rs`
     /// does, with no live pane.
     SupervisorIdleQueueTick,
+    /// `#qflood2`: the idle-queue watch sent its OWN `/clear` between queue items
+    /// (an opt-in context reset or a `/clear` head). Engages the in-memory settle
+    /// gate so the next drain trigger is not injected into the in-flight clear.
+    SupervisorContextResetClear,
+    /// `#qflood2`: set whether the routed trigger is already pending in the
+    /// modeled composer (the live pane-capture dedup signal).
+    SetTriggerAlreadyPending(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +483,16 @@ struct RecycleClearModel {
     auto_recycle: bool,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
+    /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
+    /// `/clear` queue head) and must hold the next drain trigger until the pane
+    /// settles, so the trigger is not injected into the in-flight clear.
+    awaiting_clear_settle: bool,
+    /// Consecutive idle-prompt polls observed since the watch's own `/clear`,
+    /// mirroring `idle_watch.rs`'s `clear_settle_idle_ticks` debounce counter.
+    clear_settle_idle_ticks: u32,
+    /// `#qflood2`: the routed trigger is already pending/visible in the modeled
+    /// composer, so a re-send would stack a duplicate (`recent_lines_contain_trigger`).
+    trigger_already_pending: bool,
 }
 
 #[derive(Debug, Default)]
@@ -552,6 +569,13 @@ struct Coverage {
     /// A go-mode queue head was dispatched by the idle-queue drain decision after
     /// the recycle + clear settled.
     go_drain_dispatches: usize,
+    /// `#qflood2`: the idle-queue drain was held back because the watch's own
+    /// `/clear` had not settled yet (the trigger would have been injected into
+    /// the in-flight clear and concatenated as `/clear /agent-doc <FILE>`).
+    drain_settle_skips: usize,
+    /// `#qflood2`: a drain dispatch was skipped because the routed trigger was
+    /// already pending in the composer (de-dup: only one trigger lands).
+    drain_dedup_skips: usize,
 }
 
 impl Coverage {
@@ -678,6 +702,8 @@ impl Coverage {
         self.clear_cooldown_resumes += other.clear_cooldown_resumes;
         self.supervisor_recycles += other.supervisor_recycles;
         self.go_drain_dispatches += other.go_drain_dispatches;
+        self.drain_settle_skips += other.drain_settle_skips;
+        self.drain_dedup_skips += other.drain_dedup_skips;
     }
 }
 
@@ -1989,6 +2015,80 @@ fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
     // A stuck head is not re-fired every tick (drain dedup).
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn qflood2_drain_holds_trigger_until_own_clear_settles() {
+    // `#qflood2`: after the idle-queue watch sends its OWN `/clear` between queue
+    // items, the next drain trigger must NOT dispatch until the cleared pane has
+    // settled for CLEAR_COOLDOWN_RESUME_IDLE_TICKS consecutive idle polls.
+    // Otherwise it lands in the still-in-flight clear and the harness sees one
+    // concatenated line (`/clear /agent-doc <FILE>`). Driven by the production
+    // `drain_blocked_awaiting_clear_settle` predicate.
+    let mut world = SimWorld::new(4_242);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+
+    // The watch sends its own `/clear` (no manual cooldown marker written).
+    world.apply(SimCommand::SupervisorContextResetClear).unwrap();
+
+    // The first 3 settle ticks must HOLD the trigger (drain_settle_skip), never
+    // dispatching into the in-flight clear.
+    for tick in 1..4 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.go_drain_dispatches, 0,
+            "trigger must not dispatch into the in-flight clear at settle tick {tick}"
+        );
+        assert_eq!(world.coverage.drain_settle_skips, tick);
+    }
+
+    // 4th settled idle tick: the gate releases AND the drain dispatches the head
+    // exactly once — one `/clear`, then one trigger, with no concatenation.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 1,
+        "the single trigger dispatches once the pane settled after the clear"
+    );
+
+    // It is not re-fired on subsequent ticks (drain dedup on the same head).
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
+    // `#qflood2`: even at a settled idle boundary, if the routed trigger is
+    // already pending in the composer (a prior dispatch / another owner put it
+    // there), the watch must skip the re-send so duplicates never stack
+    // (`/agent-doc <FILE>/agent-doc <FILE>`). Driven by `drain_dispatch_dedup_skip`.
+    let mut world = SimWorld::new(4_243);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SetTriggerAlreadyPending(true)).unwrap();
+
+    // The pane is idle and a head is waiting, but the trigger is already pending:
+    // the drain must dedup-skip, not stack a second copy.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "a trigger already in the composer must not be re-sent"
+    );
+    assert_eq!(world.coverage.drain_dedup_skips, 1);
+
+    // Once the composer clears (operator submitted / consumed the pending trigger),
+    // the drain dispatches normally — the dedup never permanently suppresses it.
+    world.apply(SimCommand::SetTriggerAlreadyPending(false)).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "the same head was already recorded as dispatched by the dedup-skip"
+    );
+    // The head was marked last_dispatched by the dedup path, so the normal drain
+    // dedup (`SkipAlreadyDispatched`) now owns it — no duplicate, no hot loop.
+    assert_eq!(world.coverage.drain_dedup_skips, 1);
 }
 
 #[test]

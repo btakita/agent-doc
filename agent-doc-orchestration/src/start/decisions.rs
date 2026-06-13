@@ -172,6 +172,46 @@ pub fn clear_cooldown_resume_ready(
         && settled_idle_ticks >= resume_threshold
 }
 
+/// `#qflood2` — after the idle-queue watch sends a `/clear` (an opt-in context
+/// reset, or a `/clear` queue head), the next drain trigger must NOT be injected
+/// until the cleared pane has shown a fresh idle harness prompt for
+/// `settle_threshold` consecutive polls. Otherwise the trigger lands in the
+/// composer alongside the still-in-flight `/clear` and the harness sees one
+/// concatenated line (the operator-observed `/clear /agent-doc <FILE>`). This is
+/// the same debounce idea as `clear_cooldown_resume_ready`, but for the
+/// supervisor's OWN clears (which never write the manual cooldown marker), so it
+/// is tracked entirely in idle-watch memory. Pure so the settle gate is
+/// unit-testable without a live pane.
+pub fn drain_blocked_awaiting_clear_settle(
+    awaiting_clear_settle: bool,
+    prompt_visible: bool,
+    turn_active: bool,
+    settled_idle_ticks: u32,
+    settle_threshold: u32,
+) -> bool {
+    if !awaiting_clear_settle {
+        return false;
+    }
+    // A pane that is not at a fresh idle prompt has definitely not settled, so
+    // keep blocking regardless of the tick count.
+    if !prompt_visible || turn_active {
+        return true;
+    }
+    settled_idle_ticks < settle_threshold
+}
+
+/// `#qflood2` — whether the idle-queue watch should skip injecting the next
+/// drain payload (trigger or `/clear`) because that exact text is already
+/// pending/visible in the owned pane's composer. `payload_already_pending` is
+/// the live pane-capture dedup signal: `Some(true)` = the payload is already in
+/// the composer (re-sending would stack a duplicate, e.g.
+/// `/agent-doc <FILE>/agent-doc <FILE>`); `Some(false)` = proven absent;
+/// `None` = the pane could not be captured. A failed capture must never suppress
+/// a legitimate dispatch, so only a proven positive match dedups.
+pub fn drain_dispatch_dedup_skip(payload_already_pending: Option<bool>) -> bool {
+    matches!(payload_already_pending, Some(true))
+}
+
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
 #[derive(Debug, PartialEq, Eq)]
@@ -476,6 +516,68 @@ mod tests {
         // Indices 0,1 reset the counter; 2..=5 accumulate; the 4th idle tick is
         // index 5, so resume fires there — not before.
         assert_eq!(resumed_at, Some(5));
+    }
+
+    #[test]
+    fn drain_settle_gate_blocks_until_pane_idles_after_clear() {
+        const THRESHOLD: u32 = 4;
+        // Not awaiting a clear → never blocked regardless of ticks.
+        assert!(!drain_blocked_awaiting_clear_settle(false, true, false, 0, THRESHOLD));
+        // Awaiting + pane not at a fresh idle prompt → blocked regardless of count.
+        assert!(drain_blocked_awaiting_clear_settle(true, false, false, 99, THRESHOLD));
+        // Awaiting + turn still active → blocked.
+        assert!(drain_blocked_awaiting_clear_settle(true, true, true, 99, THRESHOLD));
+        // Awaiting + idle but not enough consecutive ticks → still blocked.
+        assert!(drain_blocked_awaiting_clear_settle(true, true, false, 3, THRESHOLD));
+        // Awaiting + idle + threshold reached → no longer blocked.
+        assert!(!drain_blocked_awaiting_clear_settle(true, true, false, 4, THRESHOLD));
+    }
+
+    #[test]
+    fn drain_settle_gate_tick_sequence_releases_after_consecutive_idle() {
+        const THRESHOLD: u32 = 4;
+        // (prompt_visible, turn_active) after the watch sent its own `/clear`.
+        let ticks = [
+            (false, false), // pane still processing the clear (no prompt)
+            (true, true),   // prompt back but turn still active
+            (true, false),  // idle tick 1
+            (true, false),  // idle tick 2
+            (true, false),  // idle tick 3
+            (true, false),  // idle tick 4 → released here, dispatch allowed
+        ];
+        let mut awaiting = true;
+        let mut idle_ticks: u32 = 0;
+        let mut released_at: Option<usize> = None;
+        for (i, (visible, turn)) in ticks.iter().enumerate() {
+            if awaiting && *visible && !*turn {
+                idle_ticks = idle_ticks.saturating_add(1);
+            } else {
+                idle_ticks = 0;
+            }
+            if awaiting && idle_ticks >= THRESHOLD {
+                awaiting = false;
+                released_at = Some(i);
+            }
+            // While still awaiting, the drain must stay blocked.
+            if awaiting {
+                assert!(drain_blocked_awaiting_clear_settle(
+                    true, *visible, *turn, idle_ticks, THRESHOLD
+                ));
+            }
+        }
+        // Indices 0,1 reset the counter; 2..=5 accumulate; the 4th idle tick is
+        // index 5, so the gate releases there — never injecting into the clear.
+        assert_eq!(released_at, Some(5));
+    }
+
+    #[test]
+    fn drain_dedup_skips_only_on_proven_pending_payload() {
+        // Proven pending → skip the re-send (no stacked duplicate trigger).
+        assert!(drain_dispatch_dedup_skip(Some(true)));
+        // Proven absent → dispatch normally.
+        assert!(!drain_dispatch_dedup_skip(Some(false)));
+        // Unreadable pane capture → never suppress a legitimate dispatch.
+        assert!(!drain_dispatch_dedup_skip(None));
     }
 
     #[test]

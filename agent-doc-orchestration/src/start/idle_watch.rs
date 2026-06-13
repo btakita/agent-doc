@@ -62,6 +62,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // Used to debounce the cooldown auto-expiry so a resumed drain never
             // injects into an in-flight `/clear`.
             let mut clear_cooldown_idle_ticks: u32 = 0;
+            // `#qflood2`: after this watch sends its OWN `/clear` (an opt-in
+            // context reset or a `/clear` queue head), block the next drain
+            // trigger until the cleared pane settles to a fresh idle prompt for
+            // `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls. Without this
+            // the trigger was injected into the still-in-flight `/clear` and the
+            // harness saw one concatenated line (`/clear /agent-doc <FILE>`).
+            // Tracked in memory because the supervisor's own clears never write
+            // the manual cooldown marker.
+            let mut awaiting_clear_settle = false;
+            let mut clear_settle_idle_ticks: u32 = 0;
             // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
             // installed binary at process start). A later `cargo install` makes
             // `current_binary_identity()` differ, marking this supervisor stale.
@@ -145,6 +155,30 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
+
+                // `#qflood2`: advance the post-`/clear` settle debounce. Require
+                // consecutive fresh-idle polls (reset on any busy/non-idle tick)
+                // so the next drain trigger is never injected into an in-flight
+                // `/clear`. Once the cleared pane has settled, drop the gate so
+                // the normal drain dispatches the head.
+                if awaiting_clear_settle && prompt_visible && !turn_active {
+                    clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add(1);
+                } else {
+                    clear_settle_idle_ticks = 0;
+                }
+                if awaiting_clear_settle
+                    && clear_settle_idle_ticks >= CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+                {
+                    awaiting_clear_settle = false;
+                    clear_settle_idle_ticks = 0;
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "idle_queue_watch_clear_settled harness={} after_ticks={}",
+                            harness.binary, CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+                        ),
+                    );
+                }
 
                 // `#clearcontresume`: a lingering manual clear cooldown must not
                 // suppress an active go-mode queue drain forever. The cooldown's
@@ -491,12 +525,40 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextResetDecision::Reset => {
                         let head = active_head.as_deref().unwrap_or("<unknown>");
                         let clear_cmd = harness.context_clear_command();
+                        // `#qflood2`: never stack a second `/clear` when one is
+                        // already pending in the composer. Mark the head reset so
+                        // the next tick proceeds without re-firing.
+                        if drain_dispatch_dedup_skip(supervisor_pane_payload_already_pending(
+                            &shared, clear_cmd,
+                        )) {
+                            last_context_reset_head = active_head.clone();
+                            awaiting_clear_settle = true;
+                            clear_settle_idle_ticks = 0;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_context_reset_skipped harness={} reason=clear_already_pending head={:?}",
+                                    harness.binary, head
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "queue_dispatch_skipped file={} harness={} reason=clear_already_pending",
+                                    path.display(),
+                                    harness.binary
+                                ),
+                            );
+                            continue;
+                        }
                         match auto_trigger_clear_command(&shared, &stop, clear_cmd) {
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
                                 last_context_clear_at = Some(current_epoch_secs());
                                 last_context_reset_head = active_head.clone();
                                 last_dispatched = None;
+                                awaiting_clear_settle = true;
+                                clear_settle_idle_ticks = 0;
                                 record_context_clear_prompt_for_hooks(
                                     &shared,
                                     &path,
@@ -556,10 +618,55 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_dispatched.as_deref(),
                 ) {
                     IdleQueueDrainDecision::Dispatch => {
+                        // `#qflood2`: hold the trigger until a just-sent `/clear`
+                        // has settled, so it is never injected into the in-flight
+                        // clear (the concatenated `/clear /agent-doc <FILE>`).
+                        if drain_blocked_awaiting_clear_settle(
+                            awaiting_clear_settle,
+                            prompt_visible,
+                            turn_active,
+                            clear_settle_idle_ticks,
+                            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                        ) {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_drain_skipped harness={} reason=awaiting_clear_settle settle_ticks={}",
+                                    harness.binary, clear_settle_idle_ticks
+                                ),
+                            );
+                            continue;
+                        }
                         let head = active_head.expect("dispatch implies an active head");
                         let drain_payload = idle_queue_drain_payload(&file, &harness, &head);
                         let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
                         let slash_command = idle_queue_head_slash_command(&head);
+                        // `#qflood2`: never stack a trigger already pending in the
+                        // composer. Record the head so a proven-pending trigger
+                        // does not hot-loop the watch, but do not re-send it.
+                        if drain_dispatch_dedup_skip(supervisor_pane_payload_already_pending(
+                            &shared,
+                            &drain_payload,
+                        )) {
+                            last_dispatched = Some(head.clone());
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_drain_skipped harness={} reason=trigger_already_pending payload_kind={}",
+                                    harness.binary, payload_kind
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "queue_dispatch_skipped file={} harness={} reason=trigger_already_pending payload_kind={}",
+                                    path.display(),
+                                    harness.binary,
+                                    payload_kind
+                                ),
+                            );
+                            continue;
+                        }
                         match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
                                 log_idle_queue_drain_submit(
@@ -580,6 +687,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     if crate::queue_command::is_context_clear_command(command) {
                                         last_context_clear_at = Some(current_epoch_secs());
                                         last_context_reset_head = Some(head.clone());
+                                        // `#qflood2`: a dispatched `/clear` head
+                                        // must settle before the next head's
+                                        // trigger fires, same as the context-reset
+                                        // path, so they cannot concatenate.
+                                        awaiting_clear_settle = true;
+                                        clear_settle_idle_ticks = 0;
                                         record_context_clear_prompt_for_hooks(
                                             &shared,
                                             &path,

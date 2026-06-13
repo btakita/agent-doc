@@ -437,6 +437,12 @@ impl SimWorld {
             SimCommand::SupervisorIdleQueueTick => {
                 self.supervisor_idle_queue_tick()?;
             }
+            SimCommand::SupervisorContextResetClear => {
+                self.supervisor_context_reset_clear();
+            }
+            SimCommand::SetTriggerAlreadyPending(pending) => {
+                self.set_trigger_already_pending(pending);
+            }
         }
         Ok(())
     }
@@ -536,6 +542,24 @@ impl SimWorld {
         Ok(())
     }
 
+    /// `#qflood2`: model the idle-queue watch sending its OWN `/clear` between
+    /// queue items (an opt-in context reset or a `/clear` queue head). Unlike an
+    /// operator clear this never writes the manual cooldown marker, so the next
+    /// drain trigger must be held by the in-memory settle gate
+    /// (`drain_blocked_awaiting_clear_settle`) until the cleared pane shows a
+    /// fresh idle prompt for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls.
+    pub(crate) fn supervisor_context_reset_clear(&mut self) {
+        self.recycle_clear.awaiting_clear_settle = true;
+        self.recycle_clear.clear_settle_idle_ticks = 0;
+        self.recycle_clear.last_dispatched = None;
+    }
+
+    /// `#qflood2`: model that the routed trigger is (or is not) already pending in
+    /// the harness composer — the live pane-capture dedup signal.
+    pub(crate) fn set_trigger_already_pending(&mut self, pending: bool) {
+        self.recycle_clear.trigger_already_pending = pending;
+    }
+
     /// One supervisor idle-queue-watch poll, driving the SAME production decision
     /// predicates the live `start::idle_watch` loop uses (`#clearcontresume`):
     /// the clear-cooldown idle-tick debounce + `clear_cooldown_resume_ready`, the
@@ -545,7 +569,8 @@ impl SimWorld {
     pub(crate) fn supervisor_idle_queue_tick(&mut self) -> Result<()> {
         use agent_doc_orchestration::start::decisions::{
             CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueDrainDecision, SupervisorRecycleAction,
-            clear_cooldown_resume_ready, idle_queue_drain_decision, supervisor_recycle_action,
+            clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle,
+            drain_dispatch_dedup_skip, idle_queue_drain_decision, supervisor_recycle_action,
         };
 
         // The supervisor's idle signal: a dispatch-ready harness prompt is visible
@@ -624,6 +649,21 @@ impl SimWorld {
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
+        // `#qflood2` (a): advance the post-`/clear` settle debounce for the
+        // watch's OWN clears (mirrors idle_watch.rs's `clear_settle_idle_ticks`).
+        if self.recycle_clear.awaiting_clear_settle && prompt_visible_now && !turn_active_now {
+            self.recycle_clear.clear_settle_idle_ticks =
+                self.recycle_clear.clear_settle_idle_ticks.saturating_add(1);
+        } else {
+            self.recycle_clear.clear_settle_idle_ticks = 0;
+        }
+        if self.recycle_clear.awaiting_clear_settle
+            && self.recycle_clear.clear_settle_idle_ticks >= CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+        {
+            self.recycle_clear.awaiting_clear_settle = false;
+            self.recycle_clear.clear_settle_idle_ticks = 0;
+        }
+
         let head = self.recycle_clear.queue_active_head.clone();
         let drain = idle_queue_drain_decision(
             self.recycle_clear.clear_cooldown_active,
@@ -634,6 +674,24 @@ impl SimWorld {
             self.recycle_clear.last_dispatched.as_deref(),
         );
         if matches!(drain, IdleQueueDrainDecision::Dispatch) {
+            // `#qflood2` (a): hold the trigger until the watch's own `/clear`
+            // settles, so it is never injected into the in-flight clear.
+            if drain_blocked_awaiting_clear_settle(
+                self.recycle_clear.awaiting_clear_settle,
+                prompt_visible_now,
+                turn_active_now,
+                self.recycle_clear.clear_settle_idle_ticks,
+                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+            ) {
+                self.coverage.drain_settle_skips += 1;
+                return Ok(());
+            }
+            // `#qflood2` (b): never stack a trigger already pending in the composer.
+            if drain_dispatch_dedup_skip(Some(self.recycle_clear.trigger_already_pending)) {
+                self.recycle_clear.last_dispatched = head;
+                self.coverage.drain_dedup_skips += 1;
+                return Ok(());
+            }
             self.recycle_clear.last_dispatched = head;
             self.coverage.go_drain_dispatches += 1;
         }

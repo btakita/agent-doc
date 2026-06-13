@@ -128,6 +128,29 @@ pub(crate) fn supervisor_pane_has_busy_cue(
     Some(harness.has_busy_cue(&content))
 }
 
+/// `#qflood2` pre-send dedup: capture the supervisor's owned pane fresh and
+/// report whether the routed drain payload (trigger or `/clear`) is already
+/// pending/visible in the harness composer. Returns `None` when no pane id is
+/// known or the capture fails, so the caller treats unreadable evidence as "not
+/// proven pending" and dispatches normally — a failed capture must never
+/// suppress a legitimate dispatch; only a positive match dedups.
+///
+/// Reuses `route::cycle_ack::recent_lines_contain_trigger`, the same
+/// still-in-composer detector the route acceptance poll uses, so the dedup is
+/// keyed off the harness composer rather than scrollback far above it.
+pub(crate) fn supervisor_pane_payload_already_pending(
+    shared: &SupervisorShared,
+    payload: &str,
+) -> Option<bool> {
+    let pane = shared
+        .inject_pane
+        .clone()
+        .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
+    let tmux = crate::sessions::Tmux::default_server();
+    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    Some(crate::route::recent_lines_contain_trigger(&content, payload))
+}
+
 /// Decide whether the idle-queue watch should reconcile a stale-busy actor back
 /// to ready (`#stale-busy-after-auto-inject-no-clear`).
 ///

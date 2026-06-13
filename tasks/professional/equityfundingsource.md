@@ -37,7 +37,30 @@ committed
 Compacted content:
 - Archived 3 response topic(s): Requested loan number; Loan application admin editing; Google Ads API token third-party tool question
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:71666203 -->
+
+### Re: Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore. — gpt-5
+
+> **Queue prompt:**
+>
+> Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore.
+
+Created local sample upload fixtures under `src/equityfundingsource-dev/tmp/` for testing.
+
+Borrower samples:
+- `tmp/borrower/borrower-appraisal-report.pdf`
+- `tmp/borrower/borrower-bank-statement.csv`
+- `tmp/borrower/borrower-entity-authorization.txt`
+- `tmp/borrower/borrower-payoff-statement.txt`
+
+Investor samples:
+- `tmp/investor/investor-accreditation-letter.pdf`
+- `tmp/investor/investor-bank-statement.csv`
+- `tmp/investor/investor-tax-k1-summary.csv`
+- `tmp/investor/investor-entity-formation.txt`
+- `tmp/investor/investor-wire-instructions.txt`
+
+I also added `tmp/README.md` describing the fixture set. `src/equityfundingsource-dev/.gitignore` already contains `tmp/`, and I verified Git ignores the new fixture files. I checked MIME detection: the PDFs report as `application/pdf`, the CSV files as `text/csv`, and the text files as `text/plain`, which are accepted by the app upload guard.
+<!-- agent:boundary:b5e7b163 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +68,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore.
 <!-- /agent:queue -->
 
 ## Backlog

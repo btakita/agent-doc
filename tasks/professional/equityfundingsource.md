@@ -97,7 +97,31 @@ The TMO-aligned-stage loan Kanban already exists — verify-and-close.
 **Verification:** `bun test tests/admin-pipeline.test.ts` → **44 pass / 0 fail**. No source changed → nothing to commit/push.
 
 Marking **#67v2-kanban done** (review #67v2 stays gated for the TMO auto-advance piece). Next in the go-queue: #37ah-backend.
-<!-- agent:boundary:d35d3819 -->
+
+### Re: do [#37ah-backend] — already shipped (D1-backed broker portal); verified + closed — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#37ah-backend]
+
+
+The broker portal backend is already D1-backed across all five named surfaces — verify-and-close.
+
+**Already in place** (`app/equityfundingsource/lib/broker/routes.ts`, all behind `require_broker_` auth):
+- **Submit-deal** — `POST /api/broker/deals` (+ `POST /api/broker/pre-qual`).
+- **Pipeline** — `GET /api/broker/pipeline` → `broker_deals_R_(db, broker_id, {status})` with `BROKER_DEAL_STATUSES`.
+- **Commissions** — `GET /api/broker/commissions` → `broker_commissions_R_(db, broker_id)`; admin side `POST /api/admin/broker-commissions` + `/:id/mark-paid`.
+- **Documents** — `GET /api/broker/documents` → per-deal documents via `broker_deals_R_`.
+- **Notifications** — `GET /api/broker/notifications` (D1 rows, empty-DB guarded).
+- Dashboard metrics + admin `POST /api/admin/broker-deals/:id/status`. The UI (`portal/broker/api.ts`) calls each via fetch.
+- The only remaining static data is `BROKER_RATE_SHEETS` (published rate sheets in `data.ts`) — not deal/pipeline/commission data, intentionally static.
+
+**Gated remainder:** the TMO-backed sync of broker deals (review #37ah's "TMO-backed") stays behind the #dzmm webhook gate; the D1 backend is complete.
+
+**Verification:** `bun test tests/broker-portal.test.ts` → **35 pass / 0 fail**. No source changed → nothing to commit/push.
+
+Marking **#37ah-backend done** (review #37ah stays gated for the TMO sync). Next in the go-queue: #xcvg-admin.
+<!-- agent:boundary:61cee2ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,7 +132,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~do [#qakx-impl]~~
 - ~~do [#vd8s-dragwire]~~
 - ~~do [#67v2-kanban]~~
-- do [#37ah-backend]
+- ~~do [#37ah-backend]~~
 - do [#xcvg-admin]
 - do [#dzmm-followup]: robert-waldman does not know these answers. Let's craft the email to Robert explaining what this for. My running assumption is that the TMO API is basic and may not support many of the things you are asking for. Could you also explain mitigations if TMO does not support what we want from them?
 - do [#jnzs-approval]
@@ -117,7 +141,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#37ah-backend] Broker portal backend: replace static broker demo data with D1-backed submit-deal, pipeline, commissions, documents, and notifications; TMO sync behind the #dzmm webhook gate. Advances #37ah.
 - [ ] [#xcvg-admin] Borrower secure-message admin: add admin owner/assignment, in-app notification surface, and inbound-reply -> D1 chat-append plumbing (non-email half of #xcvg). Email send/receive stays gated on #f4rq/#m6ch/#p40t. Advances #xcvg.
 - [ ] [#dzmm-followup] Send Robert the six-question TMO outbound-webhook prompt (src/equityfundingsource-dev/docs/tmo-webhooks-question.md) and record his answer; this single unblock clears the writeback gate behind #dzmm/#k2xg/#7a4d/#vd8s/#67v2/#zwws. Operator/comms action.
 - [ ] [#jnzs-approval] Draft the funded-deal images/copy/lien-position/legal-disclosure approval request to Judith or the EFS reviewer to unblock invoicing and launch sign-off. Advances #jnzs. Operator/comms action.

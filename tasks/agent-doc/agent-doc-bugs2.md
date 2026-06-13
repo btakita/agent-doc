@@ -36,7 +36,25 @@ queue: start
 Compacted content:
 ❯ - Archived 13 response topic(s): Triage of the queued JB bug reports + the live "prompt removed then came back" root cause; "continue" → took #stuckhandoff2, and it is NOT actually complete (M1 self-watchdog is dead in production); run `admin recycle --all-projects` and `/clear`; 10 more
 ❯ - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e74ff1f4 -->
+
+### Re: Post-compaction recovery + no agent-drainable work remains — opus-4.8
+
+Recovered the session and triaged the queue. **No code changes this cycle** — this is recovery + status only.
+
+**What happened:** the doc was compacted (archive `…-163702.md`, exchange reduced to the Session Summary), but the compaction left the snapshot/CRDT stale at the pre-compact size (46420 B) while the visible file was the compacted 13005 B. Preflight therefore refused to commit (`committed: false`) — this is exactly the `#compactdrift` failure mode (the `agent-doc commit` auto-recover would have wrongly restored the 46 KB snapshot and *un-compacted* the doc, so I did **not** use it). Recovery:
+
+1. `agent-doc reset --from-current --preserve-session` — declared the compacted visible file authoritative, kept the active session/queue.
+2. `agent-doc commit` — committed the compacted state. **HEAD is now 12351 B, worktree clean.**
+
+**Queue/backlog state — nothing is agent-drainable in this session.** The live route-owned supervisor (`4138479`) is active, and every remaining item requires the opposite:
+- Backlog `#fcc0`, `#compactdrift`, `#rtwbcast` are all `[clean-session]` (live write-path / multi-editor work that must NOT run under live IPC).
+- Review `#qflood2`, `#efscodexsubmit`, `#stuckhandoff2`, `#qt32`, `#2v7b` are `[operator-verify]` / code-complete-awaiting-live-JB-drive.
+- The queue prompts are operator bug *reports/repros* (some left in deliberately, e.g. the "prompt removed then came back" demo), not fresh actionable agent work.
+
+The prior turn already reached this same conclusion and paused go-mode ("queue exhausted of agent-drainable work … resume from a clean session"). I'm honoring that — **not auto-looping**.
+
+**To make progress, operator action is needed:** run the `[clean-session]` items (`#fcc0` → `#compactdrift` → `#rtwbcast`, each has a plan file) from a **fresh, non-route-owned** session (no live supervisor on this doc), and drive the `[operator-verify]` JB items live so the agent can read ops.log proof.
+<!-- agent:boundary:35915626 -->
 <!-- /agent:exchange -->
 
 ## Queue

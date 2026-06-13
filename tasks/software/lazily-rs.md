@@ -78,12 +78,34 @@ Shipped Option 1 and closed `#ytp5`:
 - **`SPEC.md`**: documents why Loom can't model this path + the deterministic window coverage + the Shuttle follow-up.
 - **`Makefile`**: `test-async-resolve` → `check` + `.PHONY`. **CI**: added a `--features async` step (async tests were **not run in CI at all**) + the resolve-loop step, beside loom.
 
-**Verification:** `make check` → exit 0 (full suite incl. the 544s `thread_safe_loom` model + `benchmark-check`); `make test-async-resolve` → 2 passed; clippy `--all-targets --all-features` clean. Pushed: lazily-rs `8dcf962..990c630`, superproject pointer `94168d8c3..06e60de9c`. New CI steps validate on the pushed run.
-
-_(Recovery note: the IPC finalize path repeatedly intermixed/scrambled this response into the prior one — the recurring `#ipcdrift`/`#exch-intermix` route-owned-supervisor self-race — and the byte-mismatch guard refused the commit. Recovered by hand-rebuilding the exchange + `reset --from-current --preserve-session` + `commit`.)_
+**Verification:** `make check` → exit 0 (full suite incl. the 544s `thread_safe_loom` model + `benchmark-check`); `make test-async-resolve` → 2 passed; clippy `--all-targets --all-features` clean. Pushed: lazily-rs `8dcf962..990c630`, superproject pointer `94168d8c3..06e60de9c`.
 
 **Top of backlog: `#dh3k`** (`#lzspecconf`).
-<!-- agent:boundary:25edbcdb -->
+
+### Re: #dh3k (#lzspecconf) — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#dh3k]
+
+
+Wired the IPC conformance suite to run against the **canonical** `lazily-spec` fixtures in CI, so cross-language wire-protocol drift fails the build.
+
+**The gap:** conformance was not run in CI at all, and `conformance.rs` prefers `../lazily-spec/conformance` (canonical) over its local fixture copies — but that sibling never exists in a standalone CI checkout, so CI only ever validated the local copies. Drift between lazily-rs's IPC impl (or its local fixtures) and the canonical spec could ship silently.
+
+**Fix** (`.github/workflows/ci.yml`):
+- Clone `lazily-spec` (public, same org) as a sibling `../lazily-spec` — the exact path `conformance.rs` resolves — so it uses the canonical fixtures.
+- Guard step: fail loudly (`::error::`) if `../lazily-spec/conformance` is missing, instead of silently falling back to local copies (false-green protection).
+- Run `cargo test --features ipc --test conformance` against them.
+
+No spec/test source change needed — `conformance.rs` and the fixtures already existed (the 6 local fixtures are currently byte-identical to canonical); the gap was purely the missing CI wiring.
+
+**Verification:** `make test-ipc-conformance` → 9 passed (using the spec fixtures via the local sibling); CI YAML validated. Pushed: lazily-rs `990c630..2495018`, superproject pointer `7bbdbf2dc..c116dac73`. The new step validates on the pushed CI run.
+
+Queue drained. Backlog is empty; the only open item is gated review `#57by` (`#lzasyncshuttle`, operator-gated Shuttle model).
+
+_Note: the IPC finalize path again intermixed/scrambled this response (the recurring `#ipcdrift`/`#exch-intermix` route-owned-supervisor self-race, supervisor pid 337083 on pre-`7bfc82e3` agent-doc per the `stale_install` preflight warning). Recovered via hand-rebuild + `reset --from-current --preserve-session` + `commit`. Recommend `make install` in `src/agent-doc` + recycling the supervisor before the next managed cycle._
+<!-- agent:boundary:d6a01d81 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,14 +114,11 @@ _(Recovery note: the IPC finalize path repeatedly intermixed/scrambled this resp
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#ytp5]~~
-- [#dh3k]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#dh3k] #lzspecconf=[recommended] Run the lazily-spec canonical conformance fixtures (lazily-spec 6632cb0) in lazily-rs CI so cross-language wire-protocol drift fails the build instead of shipping as a runtime bug. tests/conformance.rs already prefers spec fixtures when present (02c9e80); add a CI step that fetches the spec submodule fixtures and runs them.
 <!-- /agent:backlog -->
 
 ## Review

@@ -129,3 +129,26 @@ the contested **#pcwc** surface, so no separate write_queue gate is added. With 
 self-watchdog bounding the Preparing window, the wedge cannot corrupt the worktree.
 All rungs (M1, M2, M3, M4, M5) are landed with deterministic coverage; **#stuckhandoff2
 is complete.**
+
+## Status — 2026-06-13 (M3 wired into the `admin recycle` path)
+
+**Gap found + fixed.** M1–M5 were all present, but the operator-facing `admin recycle`
+path did NOT invoke the M3 reaper: `recycle_controller` re-execs only the *authoritative*
+controller reachable over the project socket (and early-returned on connect failure),
+and `recycle_controllers_all_projects` only looped that per root — so an orphaned
+`Preparing` zombie (pid no longer the bootstrap pid, invisible to the socket recycle)
+**survived `admin recycle`** and cleared only on M1's later self-watchdog tick or the
+next `gc`/`connect_or_launch`. That is exactly the "recycle leaves zombies behind" the
+operator caveat described.
+
+Fix: `recycle_controller` now runs the project-scoped M3 reaper
+(`reap_orphaned_preparing_controllers_for_caller(..., "recycle")`) **unconditionally**
+— even when no authoritative controller answers (an orphan can be the only process in
+the root) and regardless of the recycle RPC result. `recycle_controllers_all_projects`
+already collects every orphan's root from `/proc` (the orphan's own cmdline matches), so
+each orphan's root gets a reaping `recycle_controller` call — no extra cross-project sweep
+needed (and avoiding one keeps the recycle path project-scoped so it can't disturb
+concurrent tests' sentinels). The shared `stale_preparing_controller_threshold()` spares a
+healthy young handoff (including one a recycle just launched). Coverage:
+`recycle_reaps_aged_orphaned_preparing_controller` (project-scoped sentinel, threshold
+env-overridden to 1s). `make check` green.

@@ -239,6 +239,12 @@ const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
 /// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane
 /// evidence — long enough that a turn still spinning up is never cut short.
 const STALE_BUSY_RECONCILE_TICKS: u32 = 4;
+/// Consecutive idle-prompt polls the idle-queue watch must observe after a
+/// lingering *manual* clear cooldown before it auto-expires the cooldown and
+/// resumes an active go-mode queue drain (`#clearcontresume`). At
+/// `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane after
+/// the `/clear` so a resumed drain never injects into an in-flight clear.
+const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
 const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -340,8 +346,8 @@ mod idle_watch;
 
 pub(crate) use decisions::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, REEXEC_CHILD_PID_ENV,
-    REEXEC_MASTER_FD_ENV, ReexecState, SupervisorRecycleAction, idle_queue_context_reset_decision,
-    idle_queue_drain_decision, supervisor_recycle_action,
+    REEXEC_MASTER_FD_ENV, ReexecState, SupervisorRecycleAction, clear_cooldown_resume_ready,
+    idle_queue_context_reset_decision, idle_queue_drain_decision, supervisor_recycle_action,
 };
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {

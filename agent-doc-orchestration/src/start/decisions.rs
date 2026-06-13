@@ -117,6 +117,47 @@ pub(crate) fn idle_queue_drain_decision(
     }
 }
 
+/// Whether a lingering *manual* clear cooldown should be auto-expired so an
+/// active go-mode queue drain resumes (`#clearcontresume`).
+///
+/// The clear cooldown (`queue_continuation::write_clear_cooldown`) is written
+/// after an operator `session clear` / JB `Clear Exchange` / a delivered
+/// deferred clear. Historically it suppressed passive queue dispatch
+/// **indefinitely** — `idle_queue_drain_decision` returns `SkipClearCooldown`
+/// until an explicit `route::run` ("Run Agent Doc") or a deferred-clear
+/// delivery drops the marker. That stalls an active go-mode drain: after a
+/// recycle + clear the operator had to manually restart the queue.
+///
+/// The cooldown's only real job is to avoid dispatching a trigger *into* an
+/// in-flight `/clear` before the pane settles. Once the cleared pane has shown
+/// a fresh idle harness prompt for `resume_threshold` consecutive polls (the
+/// same debounce idea as `STALE_BUSY_RECONCILE_TICKS`), AND there is an active
+/// `queue_active: true` head to drain, AND no operator-deferred clear is still
+/// pending delivery (that path owns its own resume), the marker has served its
+/// purpose. The recycle + clear is then a continuation *step*, not a stop.
+///
+/// Pure so the policy is unit-testable without a live pane. The caller drops
+/// the cooldown marker and lets the next tick dispatch the head normally when
+/// this returns `true`. When there is no active head (a plain operator clear
+/// with no queue), this returns `false` so the cooldown stays
+/// authoritative-until-operator-route, preserving the non-go behavior.
+pub(crate) fn clear_cooldown_resume_ready(
+    clear_cooldown_active: bool,
+    has_active_head: bool,
+    prompt_visible: bool,
+    turn_active: bool,
+    deferred_operator_clear_pending: bool,
+    settled_idle_ticks: u32,
+    resume_threshold: u32,
+) -> bool {
+    clear_cooldown_active
+        && has_active_head
+        && prompt_visible
+        && !turn_active
+        && !deferred_operator_clear_pending
+        && settled_idle_ticks >= resume_threshold
+}
+
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
 #[derive(Debug, PartialEq, Eq)]
@@ -325,6 +366,102 @@ mod tests {
             idle_queue_drain_decision(true, true, true, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipClearCooldown
         );
+    }
+
+    // #clearcontresume: a lingering manual clear cooldown must not suppress an
+    // active go-mode queue drain forever. Once the cleared pane settles to a
+    // fresh idle prompt and a head is waiting, the cooldown auto-expires so the
+    // recycle + clear is a continuation step, not a stall.
+    #[test]
+    fn clear_cooldown_resumes_active_go_drain_after_settle() {
+        // cooldown + active head + idle + settled (>= threshold) + no deferred
+        // operator clear → resume.
+        assert!(clear_cooldown_resume_ready(
+            true,  // clear_cooldown_active
+            true,  // has_active_head
+            true,  // prompt_visible
+            false, // turn_active
+            false, // deferred_operator_clear_pending
+            4,     // settled_idle_ticks
+            4,     // resume_threshold
+        ));
+    }
+
+    #[test]
+    fn clear_cooldown_holds_until_pane_settles() {
+        // Not yet settled for the full debounce window → keep skipping so we
+        // never dispatch into an in-flight `/clear`.
+        assert!(!clear_cooldown_resume_ready(
+            true, true, true, false, false, 3, 4,
+        ));
+        // Pane not idle yet (mid-turn) → never resume.
+        assert!(!clear_cooldown_resume_ready(
+            true, true, true, true, false, 9, 4,
+        ));
+        // No visible prompt → never resume.
+        assert!(!clear_cooldown_resume_ready(
+            true, true, false, false, false, 9, 4,
+        ));
+    }
+
+    #[test]
+    fn clear_cooldown_stays_authoritative_without_active_head() {
+        // A plain operator clear with no active queue head keeps the cooldown
+        // authoritative-until-operator-route (non-go behavior preserved).
+        assert!(!clear_cooldown_resume_ready(
+            true, false, true, false, false, 9, 4,
+        ));
+        // No cooldown at all → nothing to resume.
+        assert!(!clear_cooldown_resume_ready(
+            false, true, true, false, false, 9, 4,
+        ));
+    }
+
+    #[test]
+    fn clear_cooldown_defers_to_pending_deferred_operator_clear() {
+        // The operator explicitly deferred a clear (paused the loop); that path
+        // owns delivery + resume, so the auto-resume must stand down.
+        assert!(!clear_cooldown_resume_ready(
+            true, true, true, false, true, 9, 4,
+        ));
+    }
+
+    // #clearcontresume: model the idle-watch tick loop's cooldown accounting
+    // (the counter increment/reset in `spawn_idle_queue_watch_thread`) over a
+    // sequence of polls, asserting resume fires exactly once, only after the
+    // debounce window, and only while a head is waiting on an idle pane. This is
+    // the deterministic regression for the integrated behavior without live tmux.
+    #[test]
+    fn clear_cooldown_resume_tick_sequence_debounces_then_resumes() {
+        const THRESHOLD: u32 = 4;
+        // (clear_cooldown_active, has_head, prompt_visible, turn_active, deferred)
+        let ticks = [
+            (true, true, false, false, false), // pane still settling (no prompt)
+            (true, true, true, true, false),   // prompt back but turn still active
+            (true, true, true, false, false),  // idle tick 1
+            (true, true, true, false, false),  // idle tick 2
+            (true, true, true, false, false),  // idle tick 3
+            (true, true, true, false, false),  // idle tick 4 → resume here
+            (true, true, true, false, false),  // (would also resume, but cooldown gone)
+        ];
+        let mut idle_ticks: u32 = 0;
+        let mut resumed_at: Option<usize> = None;
+        for (i, (cooldown, head, visible, turn, deferred)) in ticks.iter().enumerate() {
+            if *cooldown && *head && *visible && !*turn {
+                idle_ticks = idle_ticks.saturating_add(1);
+            } else {
+                idle_ticks = 0;
+            }
+            if clear_cooldown_resume_ready(
+                *cooldown, *head, *visible, *turn, *deferred, idle_ticks, THRESHOLD,
+            ) {
+                resumed_at = Some(i);
+                break; // production drops the marker + `continue`s; loop ends here
+            }
+        }
+        // Indices 0,1 reset the counter; 2..=5 accumulate; the 4th idle tick is
+        // index 5, so resume fires there — not before.
+        assert_eq!(resumed_at, Some(5));
     }
 
     #[test]

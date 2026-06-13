@@ -444,9 +444,18 @@ distinct from the one-shot restart auto-trigger:
   current head as reset, and waits for a later idle tick to drain the same head.
   The latch prevents a large exchange from clearing forever without dispatching;
   once the head advances, another reset may be interleaved if the accretion
-  policy still requires it. A manual clear cooldown remains authoritative and
-  still suppresses passive dispatch until it is cleared by the existing operator
-  path.
+  policy still requires it. A manual clear cooldown remains authoritative for a
+  plain operator clear with no active queue (it suppresses passive dispatch until
+  cleared by the existing operator route path) and for an operator-deferred clear
+  that explicitly paused the loop. But a manual clear cooldown must NOT suppress
+  an active go-mode queue drain forever (`#clearcontresume`): the cooldown only
+  exists to avoid dispatching a trigger into an in-flight `/clear`, so once the
+  cleared pane settles to a fresh idle prompt for
+  `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls AND a `queue_active: true`
+  head is waiting AND no operator-deferred clear is still pending delivery, the
+  watch auto-expires the cooldown marker and resumes the drain. The recycle +
+  clear is then a continuation *step*, not a stall. The decision is the pure,
+  unit-tested `decisions::clear_cooldown_resume_ready`.
 - On `Dispatch` it injects a harness-specific payload through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

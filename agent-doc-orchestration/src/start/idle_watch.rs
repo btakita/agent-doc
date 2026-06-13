@@ -57,6 +57,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_context_reset_head: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut idle_busy_ticks: u32 = 0;
+            // `#clearcontresume`: consecutive idle-prompt polls observed while a
+            // manual clear cooldown is active and a go-mode head is waiting.
+            // Used to debounce the cooldown auto-expiry so a resumed drain never
+            // injects into an in-flight `/clear`.
+            let mut clear_cooldown_idle_ticks: u32 = 0;
             // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
             // installed binary at process start). A later `cargo install` makes
             // `current_binary_identity()` differ, marking this supervisor stale.
@@ -140,6 +145,80 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let active_head = idle_watch_active_queue_head(&path);
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
+
+                // `#clearcontresume`: a lingering manual clear cooldown must not
+                // suppress an active go-mode queue drain forever. The cooldown's
+                // only job is to avoid dispatching into an in-flight `/clear`;
+                // once the cleared pane has settled to a fresh idle prompt for
+                // `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls and a head
+                // is waiting (and no operator-deferred clear is pending — that
+                // path owns its own resume), auto-expire the cooldown so the
+                // recycle + clear is a continuation step, not a stall.
+                if clear_cooldown_active && active_head.is_some() && prompt_visible && !turn_active {
+                    clear_cooldown_idle_ticks = clear_cooldown_idle_ticks.saturating_add(1);
+                } else {
+                    clear_cooldown_idle_ticks = 0;
+                }
+                let deferred_operator_clear_pending =
+                    crate::queue_continuation::read_deferred_operator_clear(&path)
+                        .unwrap_or(None)
+                        .is_some();
+                if clear_cooldown_resume_ready(
+                    clear_cooldown_active,
+                    active_head.is_some(),
+                    prompt_visible,
+                    turn_active,
+                    deferred_operator_clear_pending,
+                    clear_cooldown_idle_ticks,
+                    CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                ) {
+                    match crate::queue_continuation::clear_cooldown_marker(&path) {
+                        Ok(()) => {
+                            clear_cooldown_idle_ticks = 0;
+                            clear_cooldown_logged = false;
+                            last_dispatched = None;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_clear_cooldown_resumed harness={} head={:?} after_ticks={}",
+                                    harness.binary,
+                                    active_head.as_deref().unwrap_or("<unknown>"),
+                                    CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_watch_clear_cooldown_resumed file={} harness={} head={:?}",
+                                    path.display(),
+                                    harness.binary,
+                                    active_head.as_deref().unwrap_or("<unknown>")
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: clear cooldown settled — resuming active go-mode queue drain for {}",
+                                path.display()
+                            );
+                            // Re-evaluate next tick with the cooldown cleared so
+                            // the normal drain decision dispatches the head.
+                            continue;
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: failed to drop clear cooldown marker for {}: {err:#}",
+                                path.display()
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_watch_clear_cooldown_resume_failed file={} error={:?}",
+                                    path.display(),
+                                    err.to_string()
+                                ),
+                            );
+                        }
+                    }
+                }
 
                 // R3 (#ctlrecycle) / #suprecyclequeue: recycle this supervisor onto a
                 // freshly-installed binary at a turn boundary. Recycling ends the live

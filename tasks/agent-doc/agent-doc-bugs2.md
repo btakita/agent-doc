@@ -159,13 +159,12 @@ Confirmed — and it **reproduced live in this very cycle**. This preflight's `p
 **The churn root cause is the stale supervisor.** Preflight flags two staleness warnings this cycle: the route-owned host supervisor (pid `1368698`) started before the current binary, and the installed `~/.cargo/bin` cdylib predates source commit `aafa6510`. That stale build is what keeps producing the File Cache Conflict / compaction-drift dialogs you're filing — the fixes already on `origin/main` are not live. The durable action (operator-drive): run `make install` in `src/agent-doc` to refresh the binary + cdylib, then `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force` so the live host picks up `aafa6510`+. The JB plugin hot-reloads the new cdylib by mtime.
 
 **Not auto-looping.** The rest of the queue is the `#qchurn` no-op pattern — free-text bug reports plus 10 `[clean-session]`/`[operator-verify]` `do #id` heads that preflight already skipped as agent-undrainable under live IPC. There is no agent-drainable work behind this filing, so I'm responding and stopping rather than spinning no-op cycles. The compaction-prompt-echo bug is captured here in prose (the doc's fenced `agent:queue` markers from the tsift.md illustration block granular `--pending-add`); fold it into the `#clearexchstale`/`#fcc0` clean-session batch when you next run one.
-<!-- agent:boundary:6191dc61 -->
+<!-- agent:boundary:620dd222 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: The last recycle stalled again `❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────` + `  Opus 4.8 ctx:16% ~[agent-doc] supervisor execve hot-reload failed (No such file or directory (os error 2)); falling back to clean exit so the next launch uses the new build`. Make sure the recycle is cross-platform (Linux, OSX, Windows). Issue still happening after the last recycle. Please add logging in the Supervisor/PCP to detect issues.~~
 ---
 :pushpin: JB `Compact Exchange` has a partially uncommitted response...which is picked up as a prompt
 ```
@@ -173,17 +172,19 @@ Confirmed — and it **reproduced live in this very cycle**. This preflight's `p
 Compacted content:
 ❯ - Archived 1 response topic(s): Post-compaction recovery + no agent-drainable work remains
 ❯ - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:9dec9035-a893-4e69-ba6b-1fd5f1bf7abb -->
+&gt;!-- agent:boundary:9dec9035-a893-4e69-ba6b-1fd5f1bf7abb --&lt;
 ```
 ---
-:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
+- :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
+- :pushpin: `:pushpin:` annotation are accumulating in the wrong place. I corrected `:pushpin: - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?` above.
 - :pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug.
 - :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
 - [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+&gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
 - ~~[#pcacheattr]~~
 - ~~[#gdbwritelock]~~
 - ~~[#pcacheregtrunc]~~
@@ -191,16 +192,16 @@ Compacted content:
 - [#gdbwalcheckpoint]
 - [#logfoldname]
 - [#pcachebp]
-<!-- /agent:queue -->
+&gt;!-- /agent:queue --&lt;
 ```
 I then manually deleted the strikethrough items...but then agent-doc struck through the next open item
 ```
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+&gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
 - ~~[#loggatefidelity]~~
 - [#gdbwalcheckpoint]
 - [#logfoldname]
 - [#pcachebp]
-<!-- /agent:queue -->
+&gt;!-- /agent:queue --&lt;
 ```
 ---
 JB `Compact Exchange` on this document
@@ -253,6 +254,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#pushpinaccum] [clean-session] Queue `:pushpin:` annotations accumulate/nest in the wrong place: a head already starting `- :pushpin:` gets another `:pushpin:` prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). The queue head-grouping/annotation formatter prepends the pushpin marker without checking for an existing leading pushpin/bullet. FIX: make the queue-head annotation prefix idempotent (single :pushpin:/bullet). CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.

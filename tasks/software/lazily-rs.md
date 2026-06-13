@@ -91,7 +91,7 @@ gh release create v0.11.0 --generate-notes
 ```
 
 `#12b1` stays in the backlog as operator-gated. Not auto-looping on it — it's not agent-drainable.
-<!-- agent:boundary:046c33e8 -->
+<!-- agent:boundary:4201bae0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,6 +106,7 @@ gh release create v0.11.0 --generate-notes
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ch47] #lzwebrtcnet=[#jpf1 advance] Networked (non-loopback) str0m DataChannel backend — the real "beyond signaling" P2P path. Already shipped: the webrtc abstraction (DataChannel trait), the str0m in-process loopback (webrtc-str0m / Str0mLoopback), the WebSocket backend (websocket / #akp3), and tests + criterion bench (tests/webrtc_transport.rs, benches/webrtc_transport.rs). Remaining gap (named in src/str0m_backend.rs module doc + plan tasks/software/plan-lazily-webrtc-transport.md #webrtc2): drive the existing sans-IO str0m pump loop over a real UDP socket + a background driver thread, with SignalingClient SDP offer/answer + trickled ICE (src/signaling_client.rs, #yxjw relay) replacing the in-memory packet route. Needs live two-peer connectivity, so it cannot be deterministically loopback-tested — gate on a real peer-to-peer round-trip.
 <!-- /agent:backlog -->
 
 ## Review

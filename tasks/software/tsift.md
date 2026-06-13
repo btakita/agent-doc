@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -71,12 +71,13 @@ So: nothing added to the tsift backlog for this item — no tsift-scoped observe
 3. Force-move the `v0.1.70` tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC and publishes.
 2. `gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true`.
 1. Register a Trusted Publisher on crates.io for each of the 23 tsift crates (repo `btakita/tsift`, workflow `release.yml`, no environment): `tsift-core`, `tsift-md-ast`, `tsift-graph`, `tsift-sqlite`, `tsift-algorithms`, `tsift-resolution`, `tsift-cache`, `tsift-tokensave`, `tsift-libsql`, `tsift-index`, `tsift-summarize`, `tsift-quality`, `tsift-agent-doc`, `tsift-digest`, `tsift-search`, `tsift-status`, `tsift-session`, `tsift-memory`, `tsift-memgraphrag`, `tsift-surrealdb`, `tsift-cli`, `tsift`, `tsift-sim-world`.
-<!-- agent:boundary:644ed6ce -->
+<!-- agent:boundary:4fabceda -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

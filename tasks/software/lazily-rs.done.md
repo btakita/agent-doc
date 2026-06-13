@@ -138,3 +138,5 @@
 - 2026-06-10 [#6965] #lzthreadsafe=Implement ThreadSafeContext with per-slot read-mostly sidecars, in-flight dedup, optimistic reads, InvalidationPlan.
 - 2026-06-10 [#9evs] #lzasync=Implement AsyncContext — async computed/memo/effect, AsyncSlotNode state machine, cancellation.
 - 2026-06-10 [#74c7] #lzipc=Implement IPC layer — Snapshot, Delta, DeltaOp, IpcSink/Source, ShmBlobArena.
+- 2026-06-11 [#lrsprop] Add property/regression harness for randomized reactive graph operations across cell set/clear, slot clear, memo guard, batch boundaries, and effect disposal.
+- 2026-06-13 [#ytp5] #lzasyncloom=Deterministic #k03k resolve-loop window coverage (Option 1: instrumentation seam) — tests/async_resolve_loop.rs (window 1 via instrumentation seam, window 2 via gated supersede), src/async_context.rs seam, SPEC/Makefile/CI wiring. lazily-rs 990c630. Plan: tasks/software/plan-lazily-async-loom.md

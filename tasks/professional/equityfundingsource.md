@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,28 @@ committed
 Compacted content:
 - Archived 1 response topic(s): Email bleeding into next column in pipeline table views
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:b1c35f59 -->
+
+### Re: "Open full application" should open a Full Application dialog with a page link — opus-4.8
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new, the "Open full application" button in the Application dialog should open a Full Application dialog. The Full Application dialog should have a link to the page. deploy
+
+
+Done. In the admin pipeline (tab=pipeline), the Application dialog's **Open full application** button no longer navigates away — it now opens a stacked **Full Application dialog** in place, and that dialog carries a deep link to the standalone page.
+
+**What changed** (`lib/ui--browser--efs/portal/admin/pipeline.tsx`):
+- New `FullApplicationModalBody` — fetches `/api/admin/full-applications/:id` (the same source as the standalone page) and renders the existing `FullApplicationDetailView` in **read-only** mode, so the admin sees the complete application inline without leaving the board.
+- "Open full application" is now a button that opens this dialog (`PortalModal`, `z-[1100]`) stacked above the Application dialog (Esc/backdrop close the top one first via the shared modal stack).
+- The dialog has **a link to the page** in two spots — an "Open page" button in the header and "Open full application page" in the footer — both deep-linking to `/portal-admin/loan-applications/:id`.
+
+**Verified + deployed:**
+- `bun test` — 566 pass / 0 fail. Updated `tests/admin-pipeline.test.ts`: retargeted the detail-link assertion to the new dialog and added `#pipeline-full-app-dialog` coverage (read-only reuse, stacked dialog, deep link).
+- `bun run build:worker` clean; `bun run deploy:worker` live at https://equityfundingsource.brian-takita.workers.dev (version `aa9fa9e7`).
+- EFS commit `8614fe4`; submodule pointer bumped (`5ed5132c2`).
+
+Note: `tsc --noEmit` flags the new fetch/render-prop lines, but those mirror the file's existing accepted patterns (lead-modal fetch, the other modal render-props) — the project builds via esbuild, not strict tsc, and the suite is green. Hard-refresh to pick up the new JS bundle.
+<!-- agent:boundary:b4a1809e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +66,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- In https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?tab=pipeline&status=new, the "Open full application" button in the Application dialog should open a Full Application dialog. The Full Application dialog should have a link to the page. deploy
 <!-- /agent:queue -->
 
 ## Backlog

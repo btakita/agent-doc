@@ -61,7 +61,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // installed binary at process start). A later `cargo install` makes
             // `current_binary_identity()` differ, marking this supervisor stale.
             let recycle_launch_identity = crate::project_controller::current_binary_identity().ok();
-            let recycle_auto_enabled = crate::project_controller::supervisor_auto_recycle_enabled();
+            let recycle_auto_enabled =
+                crate::project_controller::supervisor_auto_recycle_enabled(&path);
             let recycle_grace = crate::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
@@ -140,94 +141,114 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
 
-                // R3 (#ctlrecycle): recycle this supervisor onto a freshly-installed
-                // binary when fully idle. Recycling ends the live agent child, so the
-                // automatic path is opt-in (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`);
-                // otherwise we only surface staleness once so the operator can restart
-                // deliberately. Debounced so a brief idle gap between turns never trips
-                // it. Idle = a dispatch-ready prompt is up, no turn is running, and no
-                // queue head is waiting to drain.
-                let supervisor_idle = prompt_visible && !turn_active && active_head.is_none();
+                // R3 (#ctlrecycle) / #suprecyclequeue: recycle this supervisor onto a
+                // freshly-installed binary at a turn boundary. Recycling ends the live
+                // agent child, so the automatic path is opt-in
+                // (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`); otherwise we only surface
+                // staleness once so the operator can restart deliberately. A turn
+                // boundary is a dispatch-ready prompt with no turn running. When a queue
+                // head is still waiting to drain, the *next* queue item is the
+                // deliberate restart point, so we recycle immediately (the re-exec'd
+                // image re-dispatches the pending head on the fresh binary); with no
+                // head waiting we debounce so a brief idle gap between unrelated turns
+                // never trips it.
+                let turn_boundary = prompt_visible && !turn_active;
+                let head_pending = active_head.is_some();
                 let supervisor_stale = crate::project_controller::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),
                 );
+                let recycle_action = supervisor_recycle_action(
+                    supervisor_stale,
+                    recycle_auto_enabled,
+                    turn_boundary,
+                    head_pending,
+                );
+                // The idle-grace debounce only gates the no-head-pending path; an
+                // inter-queue-item recycle bypasses it.
                 let (recycle_debounced, next_recycle_since) =
                     crate::project_controller::recycle_debounce_decision(
-                        supervisor_stale && supervisor_idle && recycle_auto_enabled,
+                        matches!(recycle_action, SupervisorRecycleAction::RecycleDebounced),
                         recycle_stale_since,
                         std::time::Instant::now(),
                         recycle_grace,
                     );
                 recycle_stale_since = next_recycle_since;
-                match supervisor_stale_action(
-                    supervisor_stale,
-                    supervisor_idle,
-                    recycle_auto_enabled,
-                ) {
-                    SupervisorStaleAction::Detect if !recycle_detected_logged => {
-                        recycle_detected_logged = true;
+                if matches!(recycle_action, SupervisorRecycleAction::Detect)
+                    && !recycle_detected_logged
+                {
+                    recycle_detected_logged = true;
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "supervisor_binary_stale_detected pane={} hint=restart_or_set_AGENT_DOC_SUPERVISOR_AUTO_RECYCLE",
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] supervisor is running a prior agent-doc binary; restart this session (or set AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1) to pick up the new build"
+                    );
+                }
+                let do_recycle = match recycle_action {
+                    SupervisorRecycleAction::RecycleImmediate => true,
+                    SupervisorRecycleAction::RecycleDebounced => recycle_debounced,
+                    _ => false,
+                };
+                if do_recycle {
+                    // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE via
+                    // `execve`, preserving the live harness child + tmux pane. Falls
+                    // back to a clean exit (child restarts) if the in-place swap cannot
+                    // start.
+                    let recycle_boundary = if head_pending {
+                        "next_queue_item"
+                    } else {
+                        "idle"
+                    };
+                    #[cfg(unix)]
+                    {
                         log_event(
                             &mut session_log,
                             &format!(
-                                "supervisor_binary_stale_detected pane={} hint=restart_or_set_AGENT_DOC_SUPERVISOR_AUTO_RECYCLE",
+                                "supervisor_binary_stale_self_recycled via=execve_preserve_child boundary={} pane={} child_pid={} master_fd={}",
+                                recycle_boundary,
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                shared.child_pid.load(Ordering::Relaxed),
+                                shared.master_fd.load(Ordering::Relaxed),
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
+                        );
+                        match supervisor_perform_reexec(&shared) {
+                            Ok(never) => match never {},
+                            Err(err) => {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "supervisor_reexec_failed fallback=process_exit error={err}"
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] supervisor execve hot-reload failed ({err}); falling back to clean exit so the next launch uses the new build"
+                                );
+                                std::process::exit(0);
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_binary_stale_self_recycled via=process_exit boundary={} pane={}",
+                                recycle_boundary,
                                 shared.inject_pane.as_deref().unwrap_or("<pty>"),
                             ),
                         );
                         eprintln!(
-                            "[agent-doc] supervisor is running a prior agent-doc binary; restart this session (or set AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1) to pick up the new build"
+                            "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary ({recycle_boundary}); the next launch uses the new build"
                         );
+                        std::process::exit(0);
                     }
-                    SupervisorStaleAction::Recycle if recycle_debounced => {
-                        // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE
-                        // via `execve`, preserving the live harness child + tmux pane.
-                        // Falls back to a clean exit (child restarts) if the in-place
-                        // swap cannot start.
-                        #[cfg(unix)]
-                        {
-                            log_event(
-                                &mut session_log,
-                                &format!(
-                                    "supervisor_binary_stale_self_recycled via=execve_preserve_child pane={} child_pid={} master_fd={}",
-                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                                    shared.child_pid.load(Ordering::Relaxed),
-                                    shared.master_fd.load(Ordering::Relaxed),
-                                ),
-                            );
-                            eprintln!(
-                                "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve"
-                            );
-                            match supervisor_perform_reexec(&shared) {
-                                Ok(never) => match never {},
-                                Err(err) => {
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "supervisor_reexec_failed fallback=process_exit error={err}"
-                                        ),
-                                    );
-                                    eprintln!(
-                                        "[agent-doc] supervisor execve hot-reload failed ({err}); falling back to clean exit so the next launch uses the new build"
-                                    );
-                                    std::process::exit(0);
-                                }
-                            }
-                        }
-                        #[cfg(not(unix))]
-                        {
-                            log_event(
-                                &mut session_log,
-                                &format!(
-                                    "supervisor_binary_stale_self_recycled via=process_exit pane={}",
-                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                                ),
-                            );
-                            eprintln!(
-                                "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary (idle); the next launch uses the new build"
-                            );
-                            std::process::exit(0);
-                        }
-                    }
-                    _ => {}
                 }
 
                 // `#autoloop-command-preemption` Phase 2b: a non-interrupting

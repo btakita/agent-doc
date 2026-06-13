@@ -959,20 +959,34 @@ pub(crate) fn recycle_idle_grace() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// `#ctlrecycle` R3 — is the opt-in `start --route-owned` supervisor auto-recycle
-/// enabled? Default OFF: the in-place `execve` hot-reload (which preserves the live
-/// agent child) is high blast-radius and needs a live two-process validation, so a
-/// stale supervisor only logs `supervisor_binary_stale_detected` unless the operator
-/// opts in. Truthy: `1`/`true`/`yes`/`on` (case-insensitive).
-pub(crate) fn supervisor_auto_recycle_enabled() -> bool {
-    matches!(
-        std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV)
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+/// `#ctlrecycle` R3 / `#suprecyclequeue` — pure resolution of the supervisor
+/// auto-recycle policy from the env override and the project-config opt-in.
+///
+/// The env var `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` is an explicit operator override:
+/// truthy (`1`/`true`/`yes`/`on`) force-enables, falsey (`0`/`false`/`no`/`off`)
+/// force-disables. When it is unset or unrecognized, the project-config opt-in
+/// (`agent_doc_supervisor_auto_recycle` in `.agent-doc/config.toml`) decides; absent
+/// there too, the default is OFF (the `execve` hot-reload is high blast-radius, so a
+/// stale supervisor only logs `supervisor_binary_stale_detected` until a project or
+/// operator opts in). Pure so the precedence is unit-testable.
+pub(crate) fn resolve_supervisor_auto_recycle(env: Option<&str>, project: Option<bool>) -> bool {
+    if let Some(raw) = env {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => return true,
+            "0" | "false" | "no" | "off" => return false,
+            _ => {}
+        }
+    }
+    project.unwrap_or(false)
+}
+
+/// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
+/// supervisor hosting `doc`? Reads the env override plus the document's project config
+/// and resolves via [`resolve_supervisor_auto_recycle`]. Default OFF.
+pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
+    let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
+    let project = crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
+    resolve_supervisor_auto_recycle(env.as_deref(), project)
 }
 
 /// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
@@ -3972,6 +3986,25 @@ mod tests {
             modified_nanos: 0,
         };
         assert!(process_binary_is_stale(Some(&stale)));
+    }
+    #[test]
+    fn resolve_supervisor_auto_recycle_precedence() {
+        use super::resolve_supervisor_auto_recycle as r;
+        // `#suprecyclequeue` precedence: env override wins over project config.
+        // Env truthy force-enables regardless of project config.
+        assert!(r(Some("1"), Some(false)));
+        assert!(r(Some("true"), None));
+        assert!(r(Some(" ON "), Some(false)));
+        // Env falsey force-disables regardless of project config opt-in.
+        assert!(!r(Some("0"), Some(true)));
+        assert!(!r(Some("off"), Some(true)));
+        // Env unset / unrecognized → project config decides.
+        assert!(r(None, Some(true)));
+        assert!(!r(None, Some(false)));
+        assert!(r(Some("garbage"), Some(true)));
+        // Nothing set anywhere → default OFF.
+        assert!(!r(None, None));
+        assert!(!r(Some(""), None));
     }
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {

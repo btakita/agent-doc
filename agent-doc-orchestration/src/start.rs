@@ -340,8 +340,8 @@ mod idle_watch;
 
 pub(crate) use decisions::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, REEXEC_CHILD_PID_ENV,
-    REEXEC_MASTER_FD_ENV, ReexecState, SupervisorStaleAction, idle_queue_context_reset_decision,
-    idle_queue_drain_decision, supervisor_stale_action,
+    REEXEC_MASTER_FD_ENV, ReexecState, SupervisorRecycleAction, idle_queue_context_reset_decision,
+    idle_queue_drain_decision, supervisor_recycle_action,
 };
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {

@@ -231,6 +231,17 @@ pub struct ProjectConfig {
     /// absent here too, the built-in default of 50 applies.
     #[serde(default, alias = "clear_threshold")]
     pub agent_doc_clear_threshold: Option<u8>,
+    /// Explicit opt-in for the in-process supervisor (`agent-doc start
+    /// --route-owned`) to self-recycle onto a freshly-installed binary at a turn
+    /// or inter-queue-item boundary (`#ctlrecycle` R3 / `#suprecyclequeue`). When
+    /// true, a stale supervisor hot-reloads via `execve` (preserving the live agent
+    /// child + pane) without a manual `agent-doc session restart-supervisor`. The
+    /// env var `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` overrides this (truthy enables,
+    /// `0`/`false`/`off` force-disables). Off by default — the image swap is high
+    /// blast-radius, so projects opt in (dog-fooding repos that rebuild constantly
+    /// set this so the supervisor always promotes the latest build automatically).
+    #[serde(default, alias = "supervisor_auto_recycle")]
+    pub agent_doc_supervisor_auto_recycle: Option<bool>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,

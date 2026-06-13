@@ -120,28 +120,50 @@ pub(crate) fn idle_queue_drain_decision(
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SupervisorStaleAction {
-    /// Not stale, or not idle — do nothing.
+pub(crate) enum SupervisorRecycleAction {
+    /// Not stale, or not at a turn boundary — do nothing.
     None,
-    /// Stale + idle but auto-recycle is off: surface it so the operator restarts.
+    /// Stale + at a turn boundary but auto-recycle is off: surface it so the
+    /// operator restarts deliberately.
     Detect,
-    /// Stale + idle + opt-in flag: recycle this supervisor onto the fresh binary.
-    Recycle,
+    /// Stale + auto-recycle + a queue head is waiting to drain: recycle NOW so the
+    /// next queue item runs on the fresh binary. The inter-queue-item boundary is the
+    /// deliberate restart point (`#suprecyclequeue`), so the brief-idle debounce that
+    /// guards against transient lulls is bypassed.
+    RecycleImmediate,
+    /// Stale + auto-recycle + no queue head waiting (end of drain, or between
+    /// unrelated turns): recycle once the idle-grace debounce elapses so a momentary
+    /// idle gap never thrashes the live agent child.
+    RecycleDebounced,
 }
 
-/// `#ctlrecycle` R3 — pure recycle policy for the `start` supervisor. Recycling ends
-/// the operator's live agent child, so `Recycle` requires the opt-in flag; without it
-/// a stale idle supervisor only surfaces (`Detect`). The debounce that gates the
-/// actual `Recycle` is applied separately by the caller via `recycle_debounce_decision`.
-pub(crate) fn supervisor_stale_action(
+/// `#ctlrecycle` R3 / `#suprecyclequeue` — pure recycle policy for the `start`
+/// supervisor. Recycling ends the operator's live agent child, so any recycle requires
+/// the opt-in flag; without it a stale supervisor at a turn boundary only surfaces
+/// (`Detect`).
+///
+/// `turn_boundary` is `prompt_visible && !turn_active` — the dispatch-ready point after
+/// a turn (or queue item) completes. `head_pending` is whether an `agent:queue` head is
+/// still waiting to drain: when one is, the *next* queue item is the deliberate restart
+/// point, so we recycle promptly (`RecycleImmediate`); when none is, we keep the
+/// idle-grace debounce (`RecycleDebounced`, applied by the caller via
+/// `recycle_debounce_decision`).
+pub(crate) fn supervisor_recycle_action(
     stale: bool,
-    idle: bool,
     auto_recycle: bool,
-) -> SupervisorStaleAction {
-    match (stale && idle, auto_recycle) {
-        (false, _) => SupervisorStaleAction::None,
-        (true, true) => SupervisorStaleAction::Recycle,
-        (true, false) => SupervisorStaleAction::Detect,
+    turn_boundary: bool,
+    head_pending: bool,
+) -> SupervisorRecycleAction {
+    if !stale || !turn_boundary {
+        return SupervisorRecycleAction::None;
+    }
+    if !auto_recycle {
+        return SupervisorRecycleAction::Detect;
+    }
+    if head_pending {
+        SupervisorRecycleAction::RecycleImmediate
+    } else {
+        SupervisorRecycleAction::RecycleDebounced
     }
 }
 
@@ -197,18 +219,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supervisor_stale_action_policy() {
-        use SupervisorStaleAction::*;
-        // `#ctlrecycle` R3 policy truth table.
+    fn supervisor_recycle_action_policy() {
+        use SupervisorRecycleAction::*;
+        // `#ctlrecycle` R3 / `#suprecyclequeue` policy truth table.
+        // (stale, auto_recycle, turn_boundary, head_pending)
         // Fresh binary → never act.
-        assert_eq!(supervisor_stale_action(false, true, true), None);
-        assert_eq!(supervisor_stale_action(false, true, false), None);
-        // Stale but busy (not idle) → never act mid-turn, even with the flag on.
-        assert_eq!(supervisor_stale_action(true, false, true), None);
-        // Stale + idle, auto-recycle OFF → surface only (operator restarts).
-        assert_eq!(supervisor_stale_action(true, true, false), Detect);
-        // Stale + idle, opt-in ON → recycle.
-        assert_eq!(supervisor_stale_action(true, true, true), Recycle);
+        assert_eq!(supervisor_recycle_action(false, true, true, true), None);
+        assert_eq!(supervisor_recycle_action(false, true, true, false), None);
+        // Stale but mid-turn (not at a boundary) → never act, even with the flag on.
+        assert_eq!(supervisor_recycle_action(true, true, false, true), None);
+        assert_eq!(supervisor_recycle_action(true, true, false, false), None);
+        // Stale at a turn boundary, auto-recycle OFF → surface only, regardless of
+        // whether a queue head is pending.
+        assert_eq!(supervisor_recycle_action(true, false, true, false), Detect);
+        assert_eq!(supervisor_recycle_action(true, false, true, true), Detect);
+        // Stale + boundary + opt-in ON, a queue head waiting → recycle NOW so the next
+        // queue item runs on the fresh binary (debounce bypassed).
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true),
+            RecycleImmediate
+        );
+        // Stale + boundary + opt-in ON, no head waiting → debounced recycle.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, false),
+            RecycleDebounced
+        );
     }
 
     #[test]

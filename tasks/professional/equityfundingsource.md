@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -120,7 +120,7 @@ So an incomplete application — or any application needing action — now appea
 - EFS commit `a7372df`; submodule bump `b950f9eb1`.
 
 Hard-refresh `/portal-borrower/dashboard` to see it (it only appears when there's an incomplete application or a docs-needed item).
-<!-- agent:boundary:1b263bbc -->
+<!-- agent:boundary:400bbf25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,6 +128,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- All document upload fields should allow multiple uploads. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -284,15 +284,39 @@ Done (`#suprecyclecfg`). Supervisor auto-recycle was already opt-in via the `AGE
 **Verification:** extended `resolve_supervisor_auto_recycle_precedence` to cover the frontmatter rung (frontmatter wins over project, env still overrides both, frontmatter-absent falls through to project). `make check` green; `cargo install` + `cargo build --release` + `agent-doc lib-install` done so the new build is staged. Latest CI run is green.
 
 Note: this is config plumbing — a **running** supervisor still serves the prior binary until it recycles or is restarted (`agent-doc admin recycle --all-projects`), so the live opt-in/out takes effect on the next supervisor start. (Session exchange is large at 241 lines / 11 sections, but the queue is active so I'm not stalling to compact.)
-<!-- agent:boundary:9aac1d1c -->
+
+### Re: Ensure non-dogfooding docs perform auto-recycle & auto-clear (#simworld) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. #simworld if you can, drive it.
+
+
+> **Queue prompt:**
+>
+> :pushpin: Please ensure that other (non-agent-doc dogfooding) properly perform the auto-recycle & auto-clear steps. #simworld
+
+
+Done. Added the complementary SimWorld coverage `non_dogfood_document_auto_recycles_and_drains_from_opt_in_alone`.
+
+**The coverage gap:** the existing matrix had two of the three cases:
+- `recycle_clear_pipeline_resumes_go_mode_drain_as_a_step` — recycle + clear + drain, but driven by an **operator** `admin recycle` mark.
+- `non_dogfood_document_clears_and_drains_without_auto_recycle` (commit `5ccf1354`) — non-dogfood doc with auto-recycle **OFF**: clear + drain only, no recycle.
+
+Missing was the case the operator asked about: a **non-dogfooding document whose project/frontmatter opted into auto-recycle** performing **both** the auto-recycle **and** the auto-clear + go-mode drain, driven purely by the opt-in — **no operator `admin recycle` mark**. This is exactly the rung the new per-document/project `agent_doc_supervisor_auto_recycle` setting feeds (`resolve_supervisor_auto_recycle`).
+
+**What the new test proves:** stale binary + opt-in (no operator mark) → first idle tick `supervisor_recycle_action` fires on its own (`supervisor_recycles == 1`, generation advances, live pane preserved via execve, binary promoted fresh); then `session clear` → cooldown holds through the settle debounce (and the already-fresh supervisor does **not** recycle again) → cooldown auto-expires (`clear_cooldown_resumes == 1`) → next tick drains the go-mode head (`go_drain_dispatches == 1`). So the opt-in alone is sufficient to drive the full recycle/clear/drain pipeline for any document — the dogfooding repo is just one configuration.
+
+**Verification:** `make check` green — 4412 tests pass, 238 skipped, clippy clean. Test-only change (no binary behavior change this cycle). (Exchange is large at ~255 lines / 12 sections, but the queue is active so not stalling to compact.)
+<!-- agent:boundary:8d28e17a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: I entered `I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.` before and agent-doc removed it. I had to type in the prompt again. Then the deleted prompt came back. So I'm leaving this queue item here so you can see the bug. #simworld~~
-- :pushpin: Please ensure that other (non-agent-doc dogfooding) properly perform the auto-recycle & auto-clear steps. #simworld
-- :pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. #simworld if you can, drive it.
+- ~~:pushpin: Please ensure that other (non-agent-doc dogfooding) properly perform the auto-recycle & auto-clear steps. #simworld~~
+- ~~:pushpin: JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. #simworld if you can, drive it.~~
 - :pushpin: :round_pushpin: do [#c2b6]
 - :pushpin: :round_pushpin: do [#aazp]
 ---

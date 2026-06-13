@@ -137,13 +137,28 @@ The go-mode queue has no agent-drainable work left, so I paused it (controller-m
 **Root-cause gap captured (`#goqstall2`, backlog).** `#goqueuestall` only defers undrainable heads at the *backlog→queue sync* boundary. Heads that were **already materialized** in the `## Queue` block before that fix — pre-existing `do [#clean-session-id]` lines and pasted console-output blocks — are still counted as drainable continuation work, so `queue_continuation_required` stays `true` and the queue churns instead of self-deferring. The durable fix is to resolve each materialized `do [#id]` head's backlog tag in the continuation set and classify non-directive console lines as noise, emitting `go_queue_skip_undrainable origin=materialized_head`. Filed with plan `tasks/agent-doc/plan-go-queue-stall-materialized-heads.md`; tagged `[clean-session]` because it edits the live queue-continuation logic.
 
 **To resume productively:** from a **clean (non-IPC) session**, drive `#goqstall2` (durable defer) and/or the `[clean-session]` items (`#fcc0`, `#rtwbcast`, `#compactdrift`), and clear the stale console-output lines from the `## Queue` block. `agent-doc admin queue resume` re-enables the drain when you're ready. Nothing actionable for this live session remains.
-<!-- agent:boundary:646495bc -->
+
+### Re: Add SimWorld tests for #qflood2 — opus-4-8
+
+Done — added + shipped a deterministic SimWorld test for the `#qflood2` deduped-success behavior (agent-doc `7bfc82e3`, superproject `94168d8c3`).
+
+**`qflood2_in_flight_coalesce_is_deduped_success_not_a_dispatch_failure`** (`src/sim_world.rs`). The existing `#qflood` SimWorld tests cover the *suppression* (a redundant in-flight re-dispatch coalesces, doesn't pile into the pane, doesn't pause). The new test covers the `#qflood2` *reporting* semantics the live route path now adds:
+
+- A redundant in-flight AUTO re-dispatch returns **`Ok`** (deduped-success) — explicitly asserted `coalesced.is_ok()`, not just unwrapped.
+- It records **no failure**: `queue_paused_dispatch_blocks == 0` and `queue_backpressure_events == 0` — a coalesce is success, not a suppressed/backpressure error.
+- Acceptances stay at 1 (no second trigger piled in), `route_dispatch_coalesced == 1`.
+- **Contrast arm:** a genuinely paused queue still **fails closed** (records a block, not a coalesce) — the deterministic analogue of the live `dispatch_error_is_coalesced` classifier *not* swallowing a real `queue_paused` as success (mirrors the `qflood2_coalesce_marker_survives_ipc_wrapping` unit test from the fix turn).
+
+**Verification.** `make check` = **4382 passed, 0 failed** (+1 from this test), clippy clean, CI green. Test-only change — no rebuild/install (production behavior unchanged).
+
+This rounds out `#qflood2` coverage: unit tests (marker survives IPC wrapping; real failures not swallowed) + SimWorld (deduped-success vs real block). The review item stays gated on your live multi-process verify only. Queue remains paused (`#goqstall2`); nothing else actionable for this live session.
+<!-- agent:boundary:efc499ad -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#qflood2]~~
+---
 The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
 ```
 resync: pruned 14 stale session(s)
@@ -158,17 +173,11 @@ agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent
 - :round_pushpin: do [#rtwbcast]
 ---
 - :round_pushpin: do [#fcc0]
-- :round_pushpin: do [#splitmodswrite]
 - :round_pushpin: do [#compactdrift]
-- JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
----
----
 JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
 ```
----
----
 JB `Run Agent Doc` on equityfundingsource.md
 ```
 [route] target tmux session: 0

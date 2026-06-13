@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -141,7 +141,7 @@ Done — implemented the recommended polling first step, tested, committed + pus
 **Files:** `shared/ui.tsx` (`use_poll_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +4 tests in `tests/admin-poll-refresh.test.ts`. Full suite **614 pass / 0 fail**; builds clean.
 
 **Queue drained.** All four items done: ongoing e-sign legal doc + Judith draft email, `#gz9h` (soft printed-name match), `#fxsv` (ESIGN/UETA hardening), `#xn77` (admin polling). The e-sign code (migrations 0063/0064) ships on the next deploy; the consumer-disclosure wording still wants EFS counsel's review per the tracking doc.
-<!-- agent:boundary:20d7241c -->
+<!-- agent:boundary:837a7b49 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,6 +149,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#7djh]
 <!-- /agent:queue -->
 
 ## Backlog

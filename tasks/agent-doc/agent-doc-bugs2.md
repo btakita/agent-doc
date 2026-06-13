@@ -54,7 +54,20 @@ Live symptoms = **stale running supervisor / un-reloaded JB cdylib**, not missin
 **3. Why no auto-loop.** The queue heads are pre-materialized `do[#id]` `[clean-session]` items + operator-drive proofs; not agent-drainable here — looping would churn no-op cycles (that *is* **#goqstall2**). Not editing queue state, not auto-looping.
 
 **Recommended order:** (a) commit/stash the 5 in-flight files → clean tree; (b) `cargo build --release && agent-doc lib-install` + recycle so #jbclaudesubmit/#qflood2/#goqueuestall go live, then re-test; (c) from a clean session, do **#fccsupwarn** (agent-drainable, read-only stale-supervisor WARN) first, then #compactdrift / #fcc0 each in its own clean session. Tell me to proceed once the tree is clean and I'll start with #fccsupwarn.
-<!-- agent:boundary:cca616c4 -->
+
+### Re: Re-run — state unchanged, one decision needed to unblock — opus-4.8
+
+Nothing changed since the prior triage, so re-running just re-hits the same wall: the queue head is `do [#fcc0]`, which is `[clean-session]` **and** operator-drive (its only proof is a live-JB 0-dialogs check) — not agent-drainable here, and per `#goqstall2` it doesn't self-defer, so the queue can't advance in this session. I'm not churning another full triage or auto-looping.
+
+**One new datum:** the 5 uncommitted `src/agent-doc` files (`project_config.rs`, `project_controller/rpc.rs`, `start.rs`, `start/decisions.rs`, `start/idle_watch.rs`) **build cleanly** (`cargo build -p agent-doc-orchestration` → Finished). So that in-flight work is coherent, not broken mid-edit — it's safe to either commit or stash to re-establish a clean boundary. That's the gating decision; everything `[clean-session]` (including `#fccsupwarn`, which touches this same start/supervisor code) is blocked behind it.
+
+**To make progress, pick one and tell me:**
+1. **Commit the 5-file WIP** (if it's a finished change you recognize) → I get a clean tree and start `#fccsupwarn` (agent-drainable, read-only stale-supervisor WARN) immediately.
+2. **Stash it** (`git -C src/agent-doc stash`) → same clean-tree start, WIP preserved for you to restore.
+3. **You drive the live items first** — `cargo build --release && agent-doc lib-install` + recycle controllers (makes the already-committed `#jbclaudesubmit`/`#qflood2`/`#goqueuestall` fixes live), then re-test the JB reports; I check the logs.
+
+I can do (1) or (2) and then `#fccsupwarn` in one go if you say which. I won't commit/stash your WIP unprompted (don't want to clobber in-flight intent). Re-invoking the command alone won't change the outcome — the blocker is the dirty clean-session tree, not a missing response.
+<!-- agent:boundary:558dabbc -->
 <!-- /agent:exchange -->
 
 ## Queue

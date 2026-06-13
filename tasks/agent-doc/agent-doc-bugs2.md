@@ -37,7 +37,15 @@ queue: start
 Compacted content:
 - Archived 14 response topic(s): Post-compaction recovery + no agent-drainable work remains; Compaction recovery + killed a live #stuckhandoff2 wedge; hot-reload stalling + recycle doesn't restart + Sync deferred; 11 more
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:a34baeae -->
+
+### Re: post-compaction recovery + go-queue is in #qchurn no-op churn — opus-4-8
+
+**Recovery done.** This session opened on a just-run compaction that was never committed: the working tree + snapshot held the compacted doc (~18.8KB, archive `…-20260613-230948.md`, 40KB) while HEAD was still the pre-compact 58.9KB version. Plain `agent-doc commit` would have auto-recovered and *un-compacted* (restored HEAD), so I used `reset --from-current --preserve-session` → `commit` (8c225bcbf). HEAD is now the compacted 18.8KB; working tree clean.
+
+**No agent-drainable work this cycle.** Preflight skipped 12 agent-undrainable backlog heads — every id-backed `do #id` in the queue is `[clean-session]` (#qchurn, #qdedup, #clearexchstale, #qpresetstrike, #fcc0, #rtwbcast, #recyclerestart) or `[operator-verify]` (#c2b6, #aazp, #4myd). Clean-session items need a fresh session (not this live-IPC one); operator-verify items need a live editor. The free-text queue reports are already captured (#mdastquote/#0kjc, the JB Compact Exchange `typed_component_drift` error → plan-compact-typed-component-drift-false-positive.md, the efs dispatch-coalesce → #qflood2).
+
+**This very cycle reproduces #qchurn:** go-mode's only diff was auto-appending `[#qchurn]` to the queue — a no-op churn with `user_intent_prompt_changes` empty and zero drainable work. Not auto-looping; leaving queue state untouched (live IPC supervisor). Operator drive needed to advance the remaining items.
+<!-- agent:boundary:4c9f2e10 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -85,7 +93,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - :pushpin: :round_pushpin: do [#qdedup]
 - :pushpin: :round_pushpin: do [#clearexchstale]
 - :pushpin: :round_pushpin: do [#qpresetstrike]
-- :pushpin: :round_pushpin: do [#qchurn]
 - :pushpin: :round_pushpin: do [#fcc0]
 - :pushpin: :round_pushpin: do [#rtwbcast]
 - [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)

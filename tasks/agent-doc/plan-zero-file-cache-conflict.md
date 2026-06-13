@@ -196,3 +196,82 @@ This edits the live IPC write/closeout path that a hosting session uses to
 finalize its own responses — it MUST run from a dedicated CLEAN session (not a
 live agent-doc IPC session), and the "0 dialogs" proof is a live JB editor check
 (operator-drive). Tracked as `#fcc0`.
+
+## Live diagnosis (2026-06-13 01:41) — why dialogs persist after the code fix
+
+Operator re-reported dialogs. Root cause is **deployment, not code** — proven from
+running-process timestamps:
+
+- agent-doc binary + cdylib (`libagent_doc-0.34.0.so`) installed **01:20** (includes
+  every `#fcc0a–f` + `#ipcdrift`/`#stuckhandoff2` de-wedge fix).
+- Superproject controller (`controller serve`, PID 617249) started **01:39** — fresh,
+  already recycled onto the new binary.
+- **The in-process supervisor hosting `agent-doc-bugs2.md` (`start --route-owned`,
+  PID 136222) started 01:00 — 20 min BEFORE the install.** It runs the OLD binary, so
+  its stale-buffer / disk-fallback writes still fire the dialog. Every finalize this
+  session logging `live_prompt_drift_after_preflight` → `snapshot from content_ours`
+  → `postcommit_worktree_check match=false` is that stale supervisor's buffer racing
+  the fresh CLI finalize.
+- Supervisor self-recycle (`#ctlrecycle` R3) is **opt-in behind
+  `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` (default OFF)**, so a stale supervisor silently
+  persists with no surfaced signal.
+
+**Fix for the live dialogs (operator-drive):** restart this document's agent-doc
+session so its supervisor respawns on 0.34.0 — JB `Run Agent Doc` stop+restart for
+the doc, or `agent-doc session restart-supervisor`, or restart the IDE/tmux session.
+Cannot be agent-done from inside the session the supervisor hosts (killing PID 136222
+would disrupt the live pane).
+
+**Durable product gap (`#fccsupwarn`) — SHIPPED 2026-06-13:** preflight/session-check now
+WARN when the live hosting controller/supervisor is serving a stale agent-doc binary (its
+recorded `controller_binary` launch identity no longer matches `current_binary_identity`),
+telling the operator to `agent-doc admin recycle` or `agent-doc session restart-supervisor`
+— so this silent failure mode surfaces instead of the operator re-filing dialog reports.
+Read-only detection over the controller status (NOT the live write path), fail-open. Impl:
+`supervisor_stale_warning_message` / `stale_supervisor_warning_for_doc` in
+`project_controller/rpc.rs` (unit-tested), wired into `preflight/run.rs` (warning code
+`supervisor_binary_stale`) and `session_check.rs`. SPEC §preflight warnings updated.
+Note: the restart-supervisor `--force` OS-signal escalation + external-watchdog detection
+(below) remain follow-ups; this rung is the read-only operator-visible signal.
+
+## Restart-supervisor cannot promote a pre-feature stale supervisor (2026-06-13 02:00)
+
+Escalation finding while trying to promote PID 136222 (the stale 01:00 host):
+
+- `agent-doc session restart-supervisor <FILE>` AND `... --force` BOTH return
+  `Requested continue restart … operator_ready` and PID 136222 survives every time
+  (etime passed 1h). Both only *request cooperative self-restart* via the controller;
+  a supervisor predating that code never acts on it. `--force` is a no-op on exactly
+  the stale supervisors that most need promotion.
+- The hosting supervisor cannot be killed from inside its own session: it is the
+  agent's parent (`agent-doc(136222) → claude(--continue)`, the live pane %2 agent),
+  so kill/--force from within would terminate the agent issuing it.
+- Every finalize / write --commit / reset --from-current is re-corrupted by the stale
+  supervisor's CRDT replay (live_prompt_drift → content_ours → drifted captured
+  baseline); the session document cannot be committed until the supervisor is gone.
+
+Only escape (operator, from OUTSIDE pane %2's process tree): `kill <supervisor_pid>`
+from an independent terminal, or fully restart the IDE/tmux session — the route
+respawns a fresh 0.34.0 supervisor on next dispatch.
+
+Product implications (fold into #fccsupwarn):
+1. restart-supervisor --force must escalate to an OS signal (SIGTERM→SIGKILL on the
+   supervisor PID) when cooperative restart is not honored within a short timeout.
+2. Stale-host detection/warning must come from a process OTHER than the hosted agent
+   (controller or external watchdog); the hosted agent cannot self-heal a stale parent,
+   and a supervisor cannot self-recycle without killing its own live agent child.
+
+## The shipped command that actually kills a stale supervisor (2026-06-13)
+
+`agent-doc session interrupt-clear --force <FILE>` DOES OS-kill the supervisor PID
+(`signal_pid_for_force_clear` → `libc::kill(SIGTERM)` on supervisor_pid + child_pid +
+pane + socket; session_actor_cmd.rs:1276-1278). `restart-supervisor --force` does NOT
+(cooperative IPC only). So the immediate unblock for a wedged stale supervisor is
+`interrupt-clear --force`, not `restart-supervisor --force`.
+
+#fccsupwarn implication #1 sharpened: `restart-supervisor --force` should reuse the
+same `signal_pid_for_force_clear` supervisor-PID escalation that `interrupt-clear
+--force` already has, gated on `process_binary_is_stale` (rpc.rs:940) so it only
+force-kills a genuinely stale/uncooperative supervisor. Implement + test in a CLEAN
+session (touches the operator-restart path; cannot be live-tested from the hosted
+session it would kill).

@@ -980,14 +980,80 @@ pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Opt
     ))
 }
 
-/// `#fccsupwarn` — IO wrapper over [`supervisor_stale_warning_message`]: resolve the
-/// live controller hosting `file` and return the stale-binary warning message if it is
-/// serving a stale build. Fail-open — a missing project root, an unreachable controller,
-/// or any stat error yields `None` so the read-only check can never block a cycle.
+/// `#fccsupwarn2` — pure staleness comparison for the route-owned HOST supervisor.
+///
+/// Unlike the lazy controller, the `agent-doc start --route-owned <doc>` host that
+/// actually serves and writes a document records NO `ControllerBinaryIdentity` in its
+/// supervisor lease — only a PID and heartbeat. So the cleanest available staleness
+/// signal is the supervisor PROCESS START TIME vs the installed binary's mtime: a host
+/// process that started strictly before the currently-installed binary was written maps
+/// the pre-install (stale) inode and keeps producing File Cache Conflict / IPC-drift
+/// dialogs after a fresh `cargo install`. Pure so it is unit-testable without `/proc`.
+///
+/// `process_start_secs` and `installed_mtime_secs` are unix-epoch seconds. Returns
+/// `true` only when the process is provably older than the installed binary
+/// (`process_start_secs < installed_mtime_secs`). Equal timestamps (clock granularity)
+/// read as NOT stale — fail-open, staleness is a recycle hint and must never block a
+/// cycle on a boundary tie.
+pub(crate) fn host_supervisor_is_stale(process_start_secs: u64, installed_mtime_secs: u64) -> bool {
+    process_start_secs < installed_mtime_secs
+}
+
+/// `#fccsupwarn2` — IO check for the route-owned HOST supervisor that serves `file`.
+///
+/// THE GAP behind `#fccsupwarn`: `stale_supervisor_warning_for_doc` only inspected the
+/// lazy controller's recorded binary. In a live session the controller was fresh (its
+/// recorded identity matched the new install → no warning) while the long-lived
+/// route-owned host supervisor was hours stale and silently kept producing the dialogs.
+/// This check resolves the host supervisor PID for `file` via the authoritative actor
+/// binding + supervisor lease, then compares its process start time against the installed
+/// binary's mtime via [`host_supervisor_is_stale`].
+///
+/// Fully fail-open: a missing project root, no authoritative binding, no live supervisor
+/// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
+/// read-only check can never block a live cycle.
+pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
+    let project_root = crate::snapshot::find_project_root(file)?;
+    let record = authoritative_actor_binding(&project_root, file).ok().flatten()?;
+    let conn = open_state_db(&project_root).ok()?;
+    let lease =
+        load_supervisor_lease_from_db(&conn, &record.document_id, record.generation).ok().flatten()?;
+    let supervisor_pid = lease.supervisor_pid?;
+    if !process_is_alive(supervisor_pid) {
+        return None;
+    }
+    let age_secs = process_start_age_secs(supervisor_pid)?;
+    let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let process_start_secs = now_secs.saturating_sub(age_secs);
+    let installed_mtime_secs = current_binary_identity().ok()?.modified_secs;
+    if !host_supervisor_is_stale(process_start_secs, installed_mtime_secs) {
+        return None;
+    }
+    Some(format!(
+        "the route-owned host supervisor (pid {supervisor_pid}) serving this document started \
+         before the currently-installed agent-doc binary — it is running a STALE build and keeps \
+         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Restart it so the \
+         latest fixes take effect: `agent-doc session restart-supervisor <FILE> --force`, \
+         `agent-doc session interrupt-clear <FILE> --force`, or restart the session."
+    ))
+}
+
+/// `#fccsupwarn`/`#fccsupwarn2` — IO wrapper: resolve the live processes hosting `file`
+/// and return a stale-binary warning if EITHER the lazy controller OR the route-owned
+/// host supervisor is serving a stale build. The controller check (`#fccsupwarn`) covers
+/// the in-process / handoff path; the host-supervisor check (`#fccsupwarn2`) covers the
+/// separate long-lived `agent-doc start --route-owned` process that actually writes the
+/// document and is the common silent-stale offender. Fail-open — a missing project root,
+/// an unreachable controller, a missing lease, or any stat error yields `None` so the
+/// read-only check can never block a cycle.
 pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     let project_root = crate::snapshot::find_project_root(file)?;
-    let status = status(&project_root).ok()?;
-    supervisor_stale_warning_message(&status)
+    if let Ok(status) = status(&project_root)
+        && let Some(message) = supervisor_stale_warning_message(&status)
+    {
+        return Some(message);
+    }
+    host_supervisor_stale_warning_for_doc(file)
 }
 
 /// `#ctlrecycle` — idle grace before a stale/recycle-requested process actually
@@ -3460,6 +3526,24 @@ mod tests {
         status.active = true;
         status.controller_binary = None;
         assert!(supervisor_stale_warning_message(&status).is_none());
+    }
+
+    #[test]
+    fn host_supervisor_is_stale_compares_process_start_against_installed_mtime() {
+        // #fccsupwarn2 — the route-owned host supervisor records no binary identity, so
+        // staleness is process-start-time vs installed-binary mtime. A host that started
+        // before the installed binary maps the stale inode; a host that started at or
+        // after it is fresh (boundary tie reads fresh — fail-open).
+        let installed_mtime = 1_000_000u64;
+
+        // Host started 10h before the installed binary was written → STALE.
+        assert!(host_supervisor_is_stale(installed_mtime - 36_000, installed_mtime));
+
+        // Host started after the installed binary → FRESH.
+        assert!(!host_supervisor_is_stale(installed_mtime + 60, installed_mtime));
+
+        // Boundary tie (same second, clock granularity) → fail-open, NOT stale.
+        assert!(!host_supervisor_is_stale(installed_mtime, installed_mtime));
     }
 
     #[test]

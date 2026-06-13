@@ -67,7 +67,21 @@ Nothing changed since the prior triage, so re-running just re-hits the same wall
 3. **You drive the live items first** — `cargo build --release && agent-doc lib-install` + recycle controllers (makes the already-committed `#jbclaudesubmit`/`#qflood2`/`#goqueuestall` fixes live), then re-test the JB reports; I check the logs.
 
 I can do (1) or (2) and then `#fccsupwarn` in one go if you say which. I won't commit/stash your WIP unprompted (don't want to clobber in-flight intent). Re-invoking the command alone won't change the outcome — the blocker is the dirty clean-session tree, not a missing response.
-<!-- agent:boundary:558dabbc -->
+
+### Re: #fccsupwarn shipped + supervisor automation live — opus-4.8
+
+Done this turn, all committed + pushed + verified:
+
+**Option 1 + 3:** committed the in-flight **supervisor auto-recycle** WIP (`#suprecyclequeue`/`#ctlrecycle` R3, `0a3565ae`) after verifying it (orchestration 2758 + core 793 green); `lib-install` + `cargo install` + `admin recycle --all-projects` promoted the fresh binary. The `execve` auto-recycle (preserves the live agent child + pane) is now the live "supervisor promotes itself" workflow.
+
+**#fccsupwarn shipped (`c350580a`, pushed; superproject `85477f778`):** preflight (`warnings[].code=supervisor_binary_stale`) + session-check now WARN when the live hosting controller/supervisor serves a stale binary (`controller_binary != current_binary_identity`) → tells the operator to `admin recycle` / `restart-supervisor`. Read-only over controller status, fail-open. Pure helper unit-tested; **`make check` green**; SPEC + plan updated; binary installed (03:39) so the WARN is live.
+
+**On "use the PCP + supervisor automation / build the workflow":** the promote-onto-fresh-binary workflow already exists and is live — `admin recycle` + the shipped `execve` auto-recycle — so nothing new needed building for the restart/promotion; I drove it through that PCP path, not a manual kill.
+
+**Remaining `[clean-session]` items** — tree is clean + binary fresh, so I can drive the agent-doable code directly, each its own fully-verified cycle: **#compactdrift** (structural typed_component_drift discriminator — fixes the compact/commit drift that keeps mangling this very doc, which I had to `reset --from-current` to recover again this turn), **#goqstall2**, then **#fcc0** converge code. Live-JB 0-dialogs (#fcc0) + two-IDE (#rtwbcast) proofs still need a human check. Starting **#compactdrift** next.
+
+Not auto-looping (remaining heads are clean-session/operator-drive; that's #goqstall2).
+<!-- agent:boundary:55337155 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -143,7 +157,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#fccsupwarn] preflight/session-check should WARN when the hosting in-process supervisor's binary is STALE (its start time precedes the installed binary mtime, or its recorded launch/controller_binary identity differs) so the operator is told to restart — currently a stale supervisor silently keeps producing #fcc0/#ipcdrift File Cache Conflict dialogs with NO surfaced signal (operator must re-file). Read-only detection, NOT the live write path; agent-drainable. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md (Live diagnosis section).
 - [ ] [#goqstall2] [clean-session] go-mode drain + session-check queue_continuation_required do NOT defer pre-materialized undrainable do[#id] queue heads (clean-session/operator-verify backlog items) or stale console-output queue lines, so a queue populated before #goqueuestall churns no-op cycles instead of self-deferring. Resolve each materialized do[#id] head's backlog tag in the continuation head set + classify non-directive/console-output lines as noise; emit go_queue_skip_undrainable origin=materialized_head + queue_stale_noise_lines diagnostic. CLEAN session (touches live queue-continuation logic). Plan: tasks/agent-doc/plan-go-queue-stall-materialized-heads.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

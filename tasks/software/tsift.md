@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -215,15 +215,29 @@ Fix in `packages/tsift-agent-doc/src/session_cost.rs`: strip `[N]` array indices
 - **Commit + push:** tsift `ed6717f` → `origin/main`; superproject pointer `dbb10e603`. CI triggered (pending; local gate green).
 
 That completes all 9 review findings from `#tscodereview`. The remaining queue item is your free-text question `What are #next-steps for fixing bugs?` — I'll answer that next.
-<!-- agent:boundary:df465a7f -->
+
+### Re: next-steps for fixing bugs — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps for fixing bugs?
+
+
+The `#tscodereview` batch is fully shipped — all 9 verified findings are fixed, committed, and pushed (`#logclassfn`, `#logfoldloss`, `#pcacheattr`, `#gdbwritelock`, `#pcacheregtrunc`, `#loggatefidelity`, `#gdbwalcheckpoint`, `#logfoldname`, `#pcachebp`), each with regression tests and spec updates. The backlog had drained to empty, so this is a fresh set of follow-ups in priority order.
+
+**CI status for the batch:** the recent runs are green except one — `d755b45` (the `#gdbwritelock` commit) failed clippy on an unused-import that RTK's wrapper masked locally; it was fixed downstream in `#pcacheregtrunc` and the four runs after it are green. The `#pcachebp` run (`ed6717f`) is in progress. No code action needed for that red — it's already superseded.
+
+**Backlog (priority order):**
+1. `#gdbexportlockdiag` (top) — the one real code loose end: map the snapshot-export `VACUUM INTO` lock error to the actionable live-lock diagnostic the rest of graph-db uses (scoped out of `#gdbwritelock`; export is already read-only/fail-closed, so this is diagnostic-quality only).
+2. `#tsreview2` [recommended] — a follow-up review pass once the batch settles, focused on interactions between the surfaces this sweep changed.
+
+**Top of backlog: `#gdbexportlockdiag`.**
+<!-- agent:boundary:be03a8b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#logfoldname]~~
-- ~~[#pcachebp]~~
-- What are #next-steps for fixing bugs?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -232,6 +246,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#gdbexportlockdiag] Map the graph-db snapshot-export VACUUM INTO database-is-locked error (packages/tsift-cli/src/commands/infra.rs ~650) to the same actionable live-lock diagnostic used elsewhere in graph-db, instead of surfacing the raw SQLite error. Loose end scoped out of #gdbwritelock (export is read-only and already fail-closed, so this is diagnostic-quality only). Add a test.
+- [ ] [#tsreview2] [recommended] Run a follow-up #code-review pass once the #tscodereview batch settles on CI, focused on interactions between the changed surfaces: log-digest error classification + line-family folding + fidelity gate; prompt-cache attribution + breakpoint identity; graph-db write lock + WAL-checkpoint reporting. Capture findings here.
 <!-- /agent:backlog -->
 
 ## Review

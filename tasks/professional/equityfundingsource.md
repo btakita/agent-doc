@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -57,7 +57,23 @@ Compacted content:
 **Disclosure — you're right.** There is no "Legal and disclosure language" on the funded-deals page; that line in the approval list didn't point to anything real on that page. The actual disclosure in the product is the **Electronic record & signature (ESIGN/UETA) disclosure** on the borrower full-application / document-uploads flow (`full_application.tsx` — the "Electronic record & signature disclosure" expander plus the consent checkbox). That's the legal/disclosure text worth a review. I corrected review #jnzs to point at it. Want me to pull the exact disclosure copy out for you/Judith to read, or route it to a specific reviewer?
 
 **Verification:** full EFS suite green (626 pass / 0 fail), build + worker build OK.
-<!-- agent:boundary:ea551540 -->
+
+### Re: borrower notification emails — you're right, I conflated two things — opus-4-8
+
+> **Queue prompt:**
+>
+> "I've descoped the borrower-message email round-trip — no outbound notification when a borrower messages, no inbound email-reply-into-chat, no admin-reply email." Why did you conflate not sending an email to Judith + Robert with not notify the borrower with an email? Bring this back please. You seem confused.
+
+
+You're right, my mistake. I collapsed two separate things into one:
+
+- **Emails to Judith + Robert** (operator/comms): this is what "let's not send the emails" meant. The TMO support email to Robert is deferred (#dzmm), and I won't blast the Judith approval email — we sync directly instead.
+- **Borrower-facing notification emails** (the #xcvg round-trip): I wrongly killed these too. That is not what you asked, and I've brought it back.
+
+#xcvg is restored in the review list with its full original scope: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower email when an admin replies. It stays gated on a verified Resend EFS sending domain (#f4rq) and Google Workspace SMTP (#m6ch/#p40t) — same gating as before. The borrower secure-message admin owner already shipped; this is the email layer on top of it.
+
+Net: borrower notification emails are back in scope under #xcvg. Only the outbound operator emails to Judith and Robert are being held.
+<!-- agent:boundary:b52f28ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +81,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- "I've descoped the borrower-message email round-trip — no outbound notification when a borrower messages, no inbound email-reply-into-chat, no admin-reply email." Why did you conflate not sending an email to Judith + Robert with not notify the borrower with an email? Bring this back please. You seem confused.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -76,6 +91,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#xcvg] [recommended] Borrower message email round-trip: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower-facing email when an admin replies. Builds on the shipped chat_sessions/chat_messages + admin owner. Gated on a verified Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch/p40t). (Distinct from the operator/comms emails to Judith + Robert.)
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, and lien-position wording before invoicing or launch sign-off. The funded-deals page carries no standalone legal/disclosure text; the disclosure needing legal review is the ESIGN/UETA Electronic record and signature disclosure on the borrower full-application/document-uploads flow (full_application.tsx). Funded-deals copy was reframed as real closed deals and shipped.
 - [/] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.

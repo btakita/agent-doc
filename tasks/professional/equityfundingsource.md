@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -195,7 +195,29 @@ So every upload form now has its own drop-file area plus click-to-open — less 
 - EFS commit `728baef`; submodule bump `581224173`.
 
 Hard-refresh to pick up the new bundle.
-<!-- agent:boundary:b1e2cd71 -->
+
+### Re: "Still see the old high-friction interface" — opus-4.8
+
+> **Queue prompt:**
+>
+> I still see the old high-friction multi-file download interface ![img_9.png](img_9.png). Deploy the new interface.
+
+
+Two things here:
+
+**1. The new interface IS live.** img_9.png actually shows the *new* multi-file form (drop-zone + "Ready to upload" list + per-file category + "Upload N files" + the required-type checklist). The old per-type "Replace file" buttons are gone (deployed in versions `3da65bae` → `0448b93f`). If you ever still see the old buttons, it's a cached JS bundle — hard-refresh (Cmd/Ctrl-Shift-R).
+
+**2. I found and fixed the real friction in that screenshot.** `appraisal-report.pdf` had auto-defaulted to the wrong category, **"Purchase Agreement"** — because the form just picked "the next required type still missing," so you had to hand-correct the category on every file. That's the friction.
+
+**Fix (`#app-docs-smart-match`):** dropped files now **auto-pick their category by matching the file name to the document-type name**. So `appraisal-report.pdf` → **Appraisal Report**, `preliminary-title-report.pdf` → **Preliminary Title Report**, `property-photos.png` → **Property Photos**, etc. A match needs to cover at least half the type name (so it won't mis-tag); anything unmatched falls back to the next-required default, and you can still override via the dropdown. Applied to both the borrower application form and the admin/pipeline-dialog version.
+
+**Verified + deployed:**
+- `bun test` — **589 pass / 0 fail** (added `#app-docs-smart-match` coverage).
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `f46ff9f2`).
+- EFS commit `f879dd3`; submodule bump `d7e7f1762`.
+
+If by "new interface" you meant something different from what img_9 shows (e.g. drop-and-auto-upload with no category step at all), tell me and I'll adjust — but documents map to specific required types, so some category assignment is needed; smart-match makes it automatic in the common case.
+<!-- agent:boundary:0d9c03cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -203,7 +225,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Add https://www.youtube.com/watch?v=ZLQ1P6Vg2HE to the https://monsterrodholders.com/product/hd150-hydroweb-heavy-duty-landing-net/ carousel.
 <!-- /agent:queue -->
 
 ## Backlog

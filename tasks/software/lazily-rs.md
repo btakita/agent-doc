@@ -9,12 +9,13 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#bugs-observed': Please add any bugs from observed behavior to the backlog.
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#mermaid': Include explanatory mermaid diagram(s).
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -83,7 +84,26 @@ Done. Shipped a concrete WebSocket backend behind an additive `websocket` featur
 **CI gap also closed:** the whole WebRTC/WebSocket transport family was *not* wired into `make check` or CI. Added `test-webrtc` (`webrtc-str0m`) + `test-websocket` targets and matching CI steps, so the str0m backend (#webrtcbackend) and this backend are now both covered. Local `make check` green; clippy/fmt clean (only the two pre-existing `ipc.rs` dead-code warnings remain).
 
 Next in the queue: `do [#97xn]` (the multi-channel bridge hub) — that one consumes both transports.
-<!-- agent:boundary:85bc91a3 -->
+
+### Re: do [#97xn] — multi-channel reactive bridge hub — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#97xn]
+
+
+Done. Shipped `BridgeHub` (`src/bridge.rs`, +380), committed + pushed to `lazily-hub/lazily-rs` (`f9e0ffa`), superproject pointer bumped (`e3e4e591c`).
+
+**What it does:** routes an authorized source-cell write arriving on one peer channel out to the *other* channels — one reactive graph bridged across **WebRTC + WebSocket + in-process IPC at once**. Attachments are stored behind object-safe, error-erased `HubSink`/`HubSource` handles, so a single hub mixes transports with different `IpcSink::Error` types (that's what makes "heterogeneous" real, not aspirational).
+
+**Faithful to the plan's core decision — re-derive, never relay raw frames.** The hub is the graph-apply authority and enforces both boundaries itself:
+- **Inbound write enforcement:** a peer may only propose `CellSet` writes, and only on nodes it holds `OpKind::Write` for. Every other op kind (slot values, invalidations, node/edge structure) is authority-derived and dropped — a peer can't forge graph structure.
+- **Outbound read filtering:** the authorized write is re-emitted to each other peer as a *fresh* `Delta`, re-filtered to that peer's read allowlist via `Delta::filter_readable` and stamped with that peer's own monotonic epoch. So a write never leaks a node outside a peer's allowlist, even crossing from a WebSocket peer to an in-process one.
+
+**Tests (deterministic):** fan-out-to-readers-only, unauthorized-write-dropped, peer-snapshot-rejected, plus a heterogeneous **WebSocket→in-process** bridge test proving the error-erased attachment actually mixes transport types. All green under both `make test-webrtc` (3) and `make test-websocket` (4); full `make check` exit 0; clippy/fmt clean.
+
+That closes the transport trilogy: `#webrtcbackend` (str0m), `#akp3` (WebSocket), and now `#97xn` (the hub that ties them together). The remaining queue item, `#xccx` (Map Holons integration), stays gated on Steve's answers to the 7 open questions in `plan-map-holons-integration.md` — nothing further is agent-drainable there until those land.
+<!-- agent:boundary:27ab8b06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,16 +112,11 @@ Next in the queue: `do [#97xn]` (the multi-channel bridge hub) — that one cons
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~I'm in contact with Steve Melville, creator of Map Holons. Please create an ongoing plan document for the Map Holons integration work.~~
-- ~~do [#akp3]~~
-- do [#97xn]
-- do [#xccx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#97xn] #lzmuxbridge=[recommended] Multi-channel reactive bridge hub: fan one reactive graph across heterogeneous IpcSink/IpcSource attachments (WebRTC + WebSocket + in-process IPC) at once. Re-derive per-peer filtered deltas through the graph-apply authority — do NOT relay raw frames — to preserve PeerPermissions default-deny. Plan: tasks/software/plan-lazily-multichannel-bridge.md.
 <!-- /agent:backlog -->
 
 ## Review

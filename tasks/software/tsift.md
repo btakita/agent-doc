@@ -32,31 +32,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260611-222217.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-052903.md`*
 
 Compacted content:
+- Archived 1 response topic(s): next-steps to fix tsift bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: next-steps to fix tsift bugs — opus-4-8
-
-No open tsift **code** bugs. The recent sweep is shipped/closed (`#tsbug*` on 2026-06-10; log-compression `#logfam`/`#logchunk`/`#loggate`/`#logsigfp`/`#logfixturecov`; prompt-cache `#pcache-*`; `#tsinflight`), the working tree is clean, there are no TODO/FIXME markers in the source, and local `make check` is green — `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace` exit 0 (49 tests ok, 0 failed).
-
-**One red signal, and it's infrastructure — not code.** The latest CI run for v0.1.69 (`27369227934`) failed, but both jobs (`clippy + test`, `live Convex graph acceptance`) died at the `Cache cargo registry + build` step with zero output from the actual work steps, both gone ~90s in. That's a cache-service/runner abort, not a test or clippy failure — the local suite confirms green. I re-ran the failed jobs; the run is pending.
-
-**Backlog (priority order):**
-1. `#cicacheguard` (top) — clear the v0.1.69 CI red: the re-run is in flight; if the cache step keeps aborting, harden it so a cache miss cannot fail the suite.
-2. `#tscodereview` [recommended] — a fresh concurrency/edge-case review pass, since meaningful graph-db/log/prompt-cache code has landed since the last bug sweep.
-
-**Top of backlog: `#cicacheguard`.**
-
-Nothing to spec/test/build/commit in the tsift repo this cycle — no code changed.
-<!-- agent:boundary:7de1ccb2 -->
+<!-- agent:boundary:74442335 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps to fix tsift bugs?
+- [#cicacheguard]
+- [#tscodereview]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

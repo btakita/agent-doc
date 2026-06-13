@@ -99,14 +99,34 @@ Fix in `packages/tsift-agent-doc/src/session_cost.rs`: order the concrete sub-fi
 - **Commit + push:** tsift `636e561` → `origin/main`; superproject pointer `d89ba5f12`. CI triggered (pending; local gate green).
 
 Next in queue: `#gdbwritelock`.
-<!-- agent:boundary:6e51f400 -->
+
+### Re: do #gdbwritelock — opus-4-8
+
+> **Queue prompt:**
+>
+> [#gdbwritelock]
+
+
+Done. graph-db refresh/write and snapshot-import relied only on SQLite `busy_timeout(5s)` for cross-process coordination, so two failure modes were possible (HIGH-sev TOCTOU corruption + spurious parallel failures). Added a bounded **flock advisory write lock** at `<graph.db-stem>.write.lock`:
+
+- **Single write chokepoint:** acquired at the top of `write_traversal_graph_store_with_options` (lib.rs) — covers every writer caller (refresh and the other write entry points), held across `SqliteGraphStore::open` + `replace_projection_with_version`.
+- **Snapshot-import rename window:** acquired before the `exists → sidecar-check → rename → rename` sequence (infra.rs) and held through post-install, so the sidecar check now runs **under the lock** and a concurrent refresh can't create `-wal`/`-shm` sidecars mid-rename and corrupt the imported db.
+- **Bounded + fail-closed:** flock auto-releases if the holder dies; the acquire polls up to 15s then bails with a clear `another tsift graph-db writer is active …` diagnostic instead of hanging or corrupting. The same lock path makes refresh and import mutually exclusive.
+
+- **Tests:** `graph_db_write_lock_serializes_concurrent_writers` (held lock blocks a second acquire, re-acquirable after release). Existing graph-db + conformance suites stay green.
+- **Spec:** documented the write lock in `specs/graph.md`.
+- **Verify:** `make check` green; release+install rebuilt.
+- **Commit + push:** tsift `d755b45` → `origin/main`; superproject pointer `6f0c3feb0`. CI triggered (pending; local gate green).
+
+Next in queue: `#pcacheregtrunc`.
+<!-- agent:boundary:922e7eca -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#pcacheattr]~~
-- [#gdbwritelock]
+- ~~[#gdbwritelock]~~
 - [#pcacheregtrunc]
 - [#loggatefidelity]
 - [#gdbwalcheckpoint]
@@ -120,7 +140,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#gdbwritelock] graph-db write/refresh (tsift-cli/src/lib.rs:14037, tsift-sqlite/src/lib.rs:833) and snapshot-import rename (tsift-cli/src/commands/infra.rs:752-785) take NO cross-process lock; they rely only on SQLite busy_timeout(5s). Snapshot-import exists->sidecar-check->rename->rename races a concurrent `graph-db refresh` (TOCTOU -> graph.db corruption/lost refresh); parallel refreshes spuriously fail `database is locked` past 5s. Apply the existing index.lock/try_lock_exclusive discipline (tsift-index/src/index.rs:1565) to graph.db writes + the import rename window; map VACUUM-INTO lock error (infra.rs:650) to the live-lock diagnostic. med-high conf, HIGH sev (#tscodereview).
 - [ ] [#pcacheregtrunc] prompt-cache read_create_regression gate false-negative: derive_prompt_cache_diagnostics pushes the session-level regression LAST (session_cost.rs:1649) then truncate(6) (:1668), and the effectiveness fixture gate counts regressions from the truncated vec (:682-688). A long degraded session with 6+ per-turn ratio-drop/creation-spike diagnostics truncates the regression away, so maximum_read_create_regressions:0 passes when the session genuinely regressed. Count from the raw signal pre-truncation (or push session-level regressions first). HIGH conf, med sev (#tscodereview).
 - [ ] [#loggatefidelity] log-digest token-savings gate is structurally always-passing for large logs (log_digest.rs:265-322): savings ~= 1 - capped_digest/raw, digest is cap-bounded (12 signals/8 families) while raw grows unbounded, so savings -> 100% regardless of how much signal dropped past the caps; only required_signals substring checks guard fidelity and cannot express all-N-failures-survived. Add a distinct-error / dropped-past-cap coverage assertion. HIGH conf, med sev (#tscodereview).
 - [ ] [#gdbwalcheckpoint] graph-db swallows WAL checkpoint failures: after a successful projection write, tsift-sqlite/src/lib.rs:1042-1046 does `let _ = ...wal_checkpoint(TRUNCATE)`. Concurrent readers block TRUNCATE (SQLITE_BUSY is normal), the error is discarded, -wal grows unbounded across refreshes, and a later snapshot-export/import trips fail_if_unsafe_sidecars (live -wal). Log/warn on checkpoint failure (surface in phase_timings/warnings) + consider PASSIVE fallback. HIGH conf, low-med sev (#tscodereview).

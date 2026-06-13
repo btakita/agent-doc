@@ -68,7 +68,27 @@ Added 4 prioritized backlog items.
 - New `remediation: String` on `SessionCostPromptCachePrefixDrift`, populated from the attributed `first_changed_field` via `prompt_cache_prefix_drift_remediation`:
 
 No tsift code changed this turn (backlog capture only). Top of backlog: **#1td4**.
-<!-- agent:boundary:ec2f3bf2 -->
+
+### Re: do [#avbq] — persist cross-run prompt-cache effectiveness — opus-4-8
+
+Implemented and shipped. tsift `6fbaec9` pushed to `origin/main`.
+
+**What #avbq needed:** prompt-cache effectiveness was only gated per-fixture / per-transcript (`session-cost --fixture`), so a regression that only shows up *across* runs — a falling cached-input ratio, net cached tokens sliding negative, read/create regressions creeping in — was invisible.
+
+**What landed:**
+- New `tsift-agent-doc::prompt_cache_history` module. Persists one effectiveness sample per matched session to `<root>/.tsift/prompt-cache-history/<source>-<hash>.jsonl` (oldest-first), carrying `cached_input_ratio`, `net_cached_input_tokens` (signed cached-read − cache-creation), and `read_create_regressions`. Recording is idempotent (an unchanged session — same mtime + token totals — is not re-appended) and capped to a 200-sample trailing window.
+- Cross-run comparison: each new sample is compared to the previous distinct reading. Flags `cached_input_ratio_drop` (≥5pt fall), `net_cached_input_tokens_drop` (halved while positive, or crossed negative — now spends more on cache creation than it saves), and `read_create_regressions_increase`.
+- `session-review` now attaches `prompt_cache_cross_run` to its report; the CLI owns the best-effort write so a read-only tree still returns the review.
+- `signed_token_delta` / `prompt_cache_read_create_regression` promoted to `pub(crate)` so history derives the same signals as the live gate.
+
+**Verification:**
+- 7 new unit tests (derivation, persistence, idempotency, each regression class). Full `make check` (clippy `-D warnings` + suite) green.
+- Live smoke test: first `session-review .` recorded a sample (`appended:true`, ratio 60.22%); second run on the unchanged session showed `appended:false`, history file stayed at 1 line.
+- Spec: `specs/digests-sessions.md` Session Review item 10 documents the persisted history + comparison.
+- Built + `cargo install --path .` done. tsift CI run `27474891118` pending at push time; local suite is the verification of record.
+
+Backlog: #avbq → done. Next queued head: **#wwm1** (surface this caching health + top drift attribution inline in `session-review --next-context` / `context-pack`) — the natural consumer of the `prompt_cache_cross_run` field this turn added.
+<!-- agent:boundary:4135c1d0 -->
 <!-- /agent:exchange -->
 
 ## Queue

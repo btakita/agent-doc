@@ -35,7 +35,26 @@ queue: start
 Compacted content:
 ❯ - Archived 10 response topic(s): JB Compact Exchange + Run Agent Doc dispatch failures; JB Run Agent Doc sends the command but does not submit; how do we fix this queue stall; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:99e929b2 -->
+
+### Re: Triage of the queued JB bug reports + #fcc0/#compactdrift/#fccsupwarn — opus-4.8
+
+I'm **not draining this queue with code changes** this cycle — and the reason is itself most of the answer. Triage, with proof:
+
+**0. Recovered this doc's own #compactdrift first.** The finalize initially failed (`snapshot 37156 bytes but visible file 13027`): the JB Compact Exchange had shrunk the working tree to the compacted 13 KB doc but the `typed_component_drift` refusal left it uncommitted (HEAD still 37 KB, snapshot stale). The 13 KB file was structurally intact (Status / compacted Exchange / Queue / Backlog all present), so I adopted it via `agent-doc reset --from-current` → preflight committed it (recovered=true). That live failure **is** #compactdrift.
+
+**1. The reported JB bugs already have committed + pushed fixes.** `HEAD == origin/main == 7bfc82e3` (`git rev-list --left-right --count origin/main...HEAD` → `0 0`); on-disk CLI binary fresh (mtime 02:50, after HEAD 01:37):
+- "Run Agent Doc sends but does not submit" → **#jbclaudesubmit** (`3b71cfeb`). The equityfundingsource console error you pasted is **#qflood2** (`9bc62c6f`, now benign deduped-success). Both pushed.
+- "tsift.md queue struck the next open item after I deleted struck ones" → **#goqueuestall** (`8884587d` + `6d9c4512`).
+- "Compact Exchange uncommitted / Clear Exchange from stale HEAD" → **#compactdrift** (the `typed_component_drift` false-positive — still open, `[clean-session]`; just reproduced above).
+
+Live symptoms = **stale running supervisor / un-reloaded JB cdylib**, not missing fixes — exactly what **#fccsupwarn** is meant to flag. To make the committed fixes live in the JB plugin: `cargo build --release && agent-doc lib-install` (plugin hot-reloads the cdylib by mtime; `cargo install` alone does not refresh the `.so`), then recycle controllers. Operator-drive.
+
+**2. Not a clean tree.** `src/agent-doc` has **5 uncommitted modified files** (`project_config.rs`, `project_controller/rpc.rs`, `start.rs`, `start/decisions.rs`, `start/idle_watch.rs`, +211/-111) — in-flight live-write-path / idle-watch work (#fcc0 territory). All TOP heads — **#fcc0**, **#compactdrift**, **#goqstall2**, **#rtwbcast** — are `[clean-session]` and cannot be safely modified in this dirty, live session; a clean `build+install` would also ship that incomplete work. **Resolve those 5 files (commit or stash) first.**
+
+**3. Why no auto-loop.** The queue heads are pre-materialized `do[#id]` `[clean-session]` items + operator-drive proofs; not agent-drainable here — looping would churn no-op cycles (that *is* **#goqstall2**). Not editing queue state, not auto-looping.
+
+**Recommended order:** (a) commit/stash the 5 in-flight files → clean tree; (b) `cargo build --release && agent-doc lib-install` + recycle so #jbclaudesubmit/#qflood2/#goqueuestall go live, then re-test; (c) from a clean session, do **#fccsupwarn** (agent-drainable, read-only stale-supervisor WARN) first, then #compactdrift / #fcc0 each in its own clean session. Tell me to proceed once the tree is clean and I'll start with #fccsupwarn.
+<!-- agent:boundary:cca616c4 -->
 <!-- /agent:exchange -->
 
 ## Queue

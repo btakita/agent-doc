@@ -50,14 +50,29 @@ Added 4 prioritized backlog items.
 - `#0g7c` — emit actionable remediation from `derive_prompt_cache_prefix_drift` (which field to stabilize / move below the breakpoint), not just attribution.
 - `#avbq` — persist per-session effectiveness (ratio / net cached tokens / read-create regressions) so cross-run regressions are detectable; today the gate is per-fixture only.
 - `#wwm1` [recommended] — surface caching health + top drift attribution inline in `session-review --next-context` / `context-pack` so it shows without running the fixture command.
+- Tests: extended the two attribution tests to assert field-specific remediation, plus a new `prompt_cache_prefix_drift_remediation_is_field_specific` unit test (incl. fallback).
+- Spec (`specs/digests-sessions.md`) documents the always-populated remediation.
+- Rendered in both digest sites: compact (`prompt-cache-prefix-drift ... fix:<…>`) and verbose (`fix: <…>` line under each drift's field changes).
+  - fallback → always actionable, never empty (covers future fields).
+  - `stable_prefix_fingerprint` → audit the cached material; keep the fingerprint stable.
+  - `stable_prefix` → move the volatile prefix bytes below the cache breakpoint.
+  - `provider` → don't switch providers mid-session.
+  - `routing_affinity` → pin the session to one cache replica.
+  - `breakpoints` → keep breakpoint placement constant; move the volatile block below the cache breakpoint.
+  - `cache_key` → reuse the same thread/session id so the warm prefix is served.
+- New `remediation: String` on `SessionCostPromptCachePrefixDrift`, populated from the attributed `first_changed_field` via `prompt_cache_prefix_drift_remediation`:
 
 No tsift code changed this turn (backlog capture only). Top of backlog: **#1td4**.
-<!-- agent:boundary:d05da004 -->
+<!-- agent:boundary:27128d78 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~:round_pushpin: do [#1td4]~~
+- :round_pushpin: do [#0g7c]
+- :round_pushpin: do [#avbq]
+- :round_pushpin: do [#wwm1]
 - #bugs-observed
 - Add backlog items for tsift to improve prompt caching?
 <!-- /agent:queue -->
@@ -68,7 +83,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#0g7c] Emit actionable remediation from derive_prompt_cache_prefix_drift: when drift is attributed to a concrete changed field, suggest the fix (stabilize / move the volatile field below the cache breakpoint) in the report, not just the diagnosis.
 - [ ] [#avbq] Track prompt-cache effectiveness across sessions: persist per-session cached_input_ratio / net_cached_input_tokens / read_create_regressions so cross-run regressions are detectable (today the gate is per-fixture / per-transcript only).
 - [ ] [#wwm1] Surface prompt-cache effectiveness + top prefix-drift attribution inline in session-review --next-context / context-pack output (packages/tsift-agent-doc/src/session_cost.rs build_prompt_cache_effectiveness_report), so caching health shows without running the fixture command. [recommended]
 <!-- /agent:backlog -->

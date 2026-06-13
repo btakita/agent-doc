@@ -45,24 +45,51 @@ Captured both as agent-doc bugs. Neither should be fixed from this live IPC sess
 **Bug B — `Run Agent Doc` on equityfundingsource.md coalesced as exit-1 (`#qflood2`, re #kp5z).** The route repaired a stale busy projection, activated a queue head, then hit `dispatch coalesced … a dispatch for generation 66 is already in flight (#qflood)`. That coalesce is the dedup gate firing because a dispatch for gen 66 was already in flight — the `#kp5z` dual-drain-owner collision (supervisor idle-drain + your manual JB dispatch both targeting gen 66). `#kp5z` is archived done but still repros here, most likely because the live binary predates `ef0810a2` (the fix isn't deployed). Two sub-issues: it shouldn't double-own the dispatch, and a benign coalesce should report deduped-success, not exit-1. (I did **not** touch the equityfundingsource.md session — scope-isolated.)
 
 **Common thread:** the live binary is stale (`predates ef0810a2`). Several of these — the drift guard, the dispatch dedup, the wedged-controller reaper — have newer source that isn't running. `cd src/agent-doc && make install && agent-doc admin recycle --all-projects` (+ `lib-install` for the cdylib) is the highest-leverage next step before re-testing any of them.
-<!-- agent:boundary:8b4702c8 -->
+
+### Re: JB Run Agent Doc sends the command but does not submit — fix + tests + deploy — opus-4-8
+
+Fixed, tested, built, installed, and committed. Drove it as far as the agent side allows; the final live two-pane check is yours.
+
+**Root cause (confirmed in code).** JB `Run Agent Doc` (dispatch-only) routes **both Claude and Codex** through the same direct-pane path — `send_command_unchecked` in `agent-doc-orchestration/src/route/dispatch.rs` — which sends the trigger text + carriage return as one merged `send-keys` payload. Both TUI composers can leave that drafted rather than submitted. The code already *detected* the non-submit (`TriggerStillVisible` → `route_submit_issue issue=prompt_not_submitted`) for both harnesses, but the one-shot Enter re-submit was gated **codex-only**, so Claude never got it. Your "affects Claude too" report matched the code exactly.
+
+**Fix.** Generalized `direct_pane_needs_codex_resubmit` → `direct_pane_needs_enter_resubmit`: the gate is now `codex | claude` (opencode still excluded), still requires `TimedOut + trigger_visible` so it never fires a stray Enter into an empty composer, still bounded to exactly one re-submit + one re-poll then falls through. Proof line unchanged in shape: `route_submit_resubmit … action=enter_key result=accepted|still_visible`. Extracted two pure helpers so the proof line is unit-tested.
+
+**Verification.** 3 new unit tests (codex|claude scoping, opencode exclusion, proof-line shape); `make check` = **4369 passed, 0 FAIL**, clippy clean. Committed: agent-doc `3b71cfeb`, superproject pointer `8fcdc067f`. Built + installed (binary + cdylib) and `admin recycle --all-projects` queued.
+
+**The one part I can't do — live verify (yours).** The agent can't reproduce a live JB→TUI submit. Recycle/restart so the dispatch path runs the new binary, then run `Run Agent Doc` against a **Claude** pane and a **Codex** pane; `ops.log` should show `route_submit_issue issue=prompt_not_submitted` then `route_submit_resubmit … action=enter_key result=accepted`, with the queue actually starting. I updated review item `#2v7b` to reflect code-complete with that operator gate as the only remainder.
+<!-- agent:boundary:410f311f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
-JB `Compact Exchange` on this document
-```
-agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
-```
----
+- :round_pushpin: do [#compactdrift]
 The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
 ```
 resync: pruned 14 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=go-mode queue self-churns on its own convergence mirror lines (do[#fcc0]/[#rtwbcast]) that commit won't fold into HEAD; all active items (#fcc0,#rtwbcast) are clean-session/operator-drive and cannot run in this live IPC session; session_accretion=warn restart-heavy. Pausing to stop the flood; resume from a clean session. receipt_id=3309
 ```
+---
+:pushpin: - :round_pushpin: do [#fcc0]
+- :round_pushpin: do [#splitmodswrite]
+- :round_pushpin: do [#compactdrift]
+- :round_pushpin: do [#qflood2]
+- JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
+---
+JB `Compact Exchange` on this document
+```
+agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
+```
+- :round_pushpin: do [#qflood2]
+- :round_pushpin: do [#splitmodswrite]
+- :round_pushpin: do [#rtwbcast]
+---
+JB `Compact Exchange` on this document
+```
+agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
+```
+---
 ---
 JB `Run Agent Doc` on equityfundingsource.md
 ```
@@ -115,7 +142,7 @@ What are #next-steps to fix bugs?
 - [/] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [/] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [/] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
-- [/] [#2v7b] #jbcodexsubmit JB `Run Agent Doc` on Codex enters the routed prompt but does not submit it (operator must press Enter manually). Root cause: Codex direct-pane dispatch in route.rs::send_command_unchecked detects prompt_not_submitted (TriggerStillVisible) but has no re-submit fallback; the merged text+`\r` send-keys payload is not treated as submit by the Codex TUI. Fix: Codex-scoped one-shot Enter re-submit + `route_submit_resubmit` proof logging + SimWorld coverage. Plan: tasks/agent-doc/plan-jb-codex-submit.md. Live verify is operator-drive (check ops.log for route_submit_resubmit action=enter_key result=accepted).
+- [/] [#2v7b] #jbcodexsubmit / #jbclaudesubmit JB Run Agent Doc enters the routed prompt but does not submit it (operator presses Enter). CODE-COMPLETE 2026-06-13 (agent-doc 3b71cfeb, superproject 8fcdc067f): JB dispatch-only routes BOTH Claude and Codex through the same direct-pane send_command_unchecked path (merged text+CR send-keys), and TriggerStillVisible detection already covered both, but the one-shot Enter re-submit was gated codex-only. Generalized direct_pane_needs_codex_resubmit -> direct_pane_needs_enter_resubmit (codex|claude; opencode excluded; requires TimedOut+trigger_visible so no stray Enter into an empty composer); proof line route_submit_resubmit ... action=enter_key result=accepted|still_visible; 3 unit tests; make check 4369 passed 0 FAIL. Built+installed+recycled. GATE now operator-drive ONLY: run JB Run Agent Doc against a Claude pane AND a Codex pane, confirm ops.log shows route_submit_issue issue=prompt_not_submitted then route_submit_resubmit action=enter_key result=accepted with the queue starting. Plan: tasks/agent-doc/plan-jb-codex-submit.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

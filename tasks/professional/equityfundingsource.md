@@ -58,7 +58,29 @@ Done. In the admin pipeline (tab=pipeline), the Application dialog's **Open full
 - EFS commit `8614fe4`; submodule pointer bumped (`5ed5132c2`).
 
 Note: `tsc --noEmit` flags the new fetch/render-prop lines, but those mirror the file's existing accepted patterns (lead-modal fetch, the other modal render-props) — the project builds via esbuild, not strict tsc, and the suite is green. Hard-refresh to pick up the new JS bundle.
-<!-- agent:boundary:4ae22a9f -->
+
+### Re: Add Decision / Feedback report / Sent feedback + Activity history to the Full Application dialog — opus-4.8
+
+> **Queue prompt:**
+>
+> Decision
+
+
+Done — and deployed. (Heads up: the queue split your bulleted list into three items; this is one request, handled together.)
+
+**What I found:** Decision, Feedback report, and Sent feedback already existed on the *standalone* full-application page (`AdminFullApplications`'s `actions` slot), but the new pipeline dialog only showed a read-only view. So rather than duplicate that logic, I made the dialog reuse the same component.
+
+**Changes:**
+- **Dialog now reuses the page detail** (`pipeline.tsx`): `FullApplicationModalBody` renders `<AdminFullApplications application_id embedded />` instead of a read-only view. The dialog now carries the full **Decision** card (Mark in review / Decline / Accept & send to TMO / Remove + writeback status), the **Feedback report** composer, **Sent feedback** log, and editable sections — identical to the page. The dialog keeps its own header/close + "Open page" deep link, so the embedded page-style topbar/Back is suppressed (`{!embedded}` guard in `full_applications.tsx`).
+- **New Activity history** (`full_applications.tsx`): added `ActivityHistoryCard` — a consolidated, reverse-chronological timeline merging lifecycle milestones (created/submitted), section + subject-property field edits (from `change_history`), and sent feedback reports. It's in the shared `actions` slot, so it renders on **both** the dialog and the standalone `/portal-admin/loan-applications/:id` page. Built entirely from data already on the detail payload — no backend change.
+
+**Verified + deployed:**
+- `bun test` — **567 pass / 0 fail**. Added `#full-app-activity-history` coverage and updated the dialog test to the reuse-based structure.
+- `bun run build:worker` clean; `bun run deploy:worker` live (version `254dbcab`).
+- EFS commit `c26fda9`; submodule bump `1a6166be0`.
+
+`tsc --noEmit` still flags the file's pre-existing pattern lines (fetch `.then` value:unknown, render-prop `close` implicit-any) — no new error classes; the project builds via esbuild and the suite is green. Hard-refresh to pick up the new bundle.
+<!-- agent:boundary:259d28b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +89,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 In the Full Application dialog, add
-- Decision
+- ~~Decision~~
 - Feedback report
 - Sent feedback
 

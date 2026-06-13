@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -105,7 +105,7 @@ Fixed it to print the **full** application:
 Verification: full suite green — **642 pass / 0 fail**; `build` + `build:worker` clean. Updated `tests/full-application-print-button.test.ts` to assert the full-application wiring (button → `set_printing(true)`, all 7 step gates render while printing).
 
 Not yet deployed — the change is committed and built but the live worker at `equityfundingsource.brian-takita.workers.dev` still runs the old bundle. Say the word and I'll run `deploy:worker`.
-<!-- agent:boundary:1b78e7dc -->
+<!-- agent:boundary:42b830d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,6 +113,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

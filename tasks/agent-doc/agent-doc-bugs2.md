@@ -270,7 +270,21 @@ So, concretely:
 - **To opt a different repo in:** add `supervisor_auto_recycle = true` to its `.agent-doc/config.toml`, or export `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1`.
 
 Note: this controls **auto-recycle** (supervisor swapping onto a freshly-installed binary at an idle/queue boundary). It is *separate* from **auto-clear** (`/clear` between queue items), which is governed by `agent_doc_clear_threshold` (this repo sets `15` at `.agent-doc/config.toml:15`; built-in default is `50`, and unknown ctx% never clears). If you also want auto-clear to be off, that's a different knob.
-<!-- agent:boundary:851902d4 -->
+
+### Re: Add a project + document front-matter setting to opt-in/opt-out of auto-recycle — opus-4-8
+
+Done (`#suprecyclecfg`). Supervisor auto-recycle was already opt-in via the `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` env var and the project-config `agent_doc_supervisor_auto_recycle` field; the missing rung was a **per-document** control. Added it and wired the precedence.
+
+**What changed:**
+- **Frontmatter field** — new `agent_doc_supervisor_auto_recycle: <bool>` on `Frontmatter` (`agent-doc-core/src/frontmatter.rs`). A document can now explicitly opt in (`true`) or opt out (`false`) of the supervisor `execve` hot-reload onto a freshly-installed binary, independent of the project default.
+- **Resolution precedence** — `resolve_supervisor_auto_recycle` now takes a frontmatter arg between env and project: **env var** (truthy `1/true/yes/on` force-enables, falsey `0/false/no/off` force-disables) -> **frontmatter** -> **project config** -> **built-in default OFF**. `supervisor_auto_recycle_enabled` reads the doc's frontmatter (`rpc.rs`).
+- **Project-config doc** — already had the `agent_doc_supervisor_auto_recycle` field; updated its doc comment to describe the full precedence chain.
+- **Spec + VERSIONS** — `specs/06-config.md` documents the field and precedence; VERSIONS.md `## Unreleased` entry added.
+
+**Verification:** extended `resolve_supervisor_auto_recycle_precedence` to cover the frontmatter rung (frontmatter wins over project, env still overrides both, frontmatter-absent falls through to project). `make check` green; `cargo install` + `cargo build --release` + `agent-doc lib-install` done so the new build is staged. Latest CI run is green.
+
+Note: this is config plumbing — a **running** supervisor still serves the prior binary until it recycles or is restarted (`agent-doc admin recycle --all-projects`), so the live opt-in/out takes effect on the next supervisor start. (Session exchange is large at 241 lines / 11 sections, but the queue is active so I'm not stalling to compact.)
+<!-- agent:boundary:9aac1d1c -->
 <!-- /agent:exchange -->
 
 ## Queue

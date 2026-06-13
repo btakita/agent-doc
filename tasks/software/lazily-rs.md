@@ -118,7 +118,25 @@ Almost everything for the WebRTC DataChannel transport is already shipped — th
 - **`src/str0m_net.rs` — `Str0mNet`**: binds a real `UdpSocket`, spawns a driver thread that pumps str0m (`poll_output` → `socket.send_to`; `recv_from` → `handle_input`) over real timers. `offer()` / `answer()` produce the SDP strings; `accept_answer()` + `add_remote_candidate()` / `local_candidate()` carry the trickled-ICE handshake (designed to be fed straight from `SignalingClient`). `channel()` hands back a `Str0mNetChannel` that implements the existing `DataChannel` trait — so `WebRtcSink`/`WebRtcSource` (permission filtering + `IpcMessage` codec) ride on top **unchanged**. Outbound frames sent before the channel opens are buffered and flushed on open; `ChannelClose`/socket death surface `Err`.
 
 Net: review now reflects reality — one actionable item queued (`#lzwebrtcnet`), three correctly parked.
-<!-- agent:boundary:60a39098 -->
+### Re: do [#h6qb] — operator-drive, gated (can't run headless) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#h6qb]
+
+
+`#h6qb` is **operator-drive and cannot be agent-completed headless**, so I gated it rather than pretend to drain it. It's the end-to-end cross-host validation of the `Str0mNet` networked backend through the LIVE `#yxjw` signaling Worker — it needs **two real hosts across NAT plus the deployed Worker**, none of which exists in this headless session. The in-process proof already shipped (`tests/str0m_net.rs` — real UDP/DTLS/SCTP/timers over a two-socket `127.0.0.1` round trip); the only remaining slice is genuinely live two-endpoint connectivity.
+
+**Done this cycle (queue hygiene, no code change):**
+- **Reaped `#f0fm`** — it was a *verbatim duplicate* of `#h6qb` (same `#lzwebrtcnet-e2e` text). The preflight `semantic_completion_match` claiming both are "resolved by `#yxjw`" is a **false positive**: `#yxjw` built the Cloudflare signaling Worker (done); the cross-host e2e *proof* riding on top of it is separate operator-drive work that has not run.
+- **Gated `#h6qb`** so go-mode defers it instead of re-materializing it into the active queue every cycle (the `#goqueuestall` churn pattern). It now sits with the other four operator-gated items in `agent:review`.
+
+**What unblocks it (operator, two live hosts):** wire `SignalingClient` offer/answer/ICE to `Str0mNet::{offer, answer, accept_answer, add_remote_candidate, local_candidate}`, run one endpoint per host against the deployed `#yxjw` Worker, and confirm a permission-filtered `Snapshot` crosses between hosts. The handshake surface is already shaped to be fed straight from `SignalingClient`.
+
+**Not auto-looping** — the queue now holds only operator-gated items (`#h6qb`, plus `#12b1`/`#xccx`/`#57by`/`#jpf1`), nothing agent-drainable.
+
+**Heads-up (operator):** preflight reports the route-owned host supervisor (pid 1754389) is running a **stale pre-update binary** (#fcc0/#ipcdrift — File Cache Conflict / IPC-drift dialogs). When convenient: `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`. I'm not restarting it mid-cycle to avoid disrupting your live editor.
+<!-- agent:boundary:e756dfcf -->
 <!-- /agent:exchange -->
 ###
 <!--

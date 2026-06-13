@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,35 @@ committed
 Compacted content:
 - Archived 2 response topic(s): Replace the single upload area with one per form type; File-type icons, delete buttons, upload activity feed, and realtime updates
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:de5ecd84 -->
+
+### Re: Review & E-Sign — printed-name validation + legal compliance — opus-4-8
+
+> **Queue prompt:**
+>
+> In the Review & E-Sign step ![img_10.png](img_10.png), should we validate the printed name is the same as the borrower's account name? Is this Review & E-Sign compliant with legal requirements for a proper signature for the borrower application?
+
+
+Good questions. I reviewed the current Review & E-Sign step (`portal/borrower/full_application.tsx` step 6) and the server-side signature capture (`borrower/applications/routes.ts`). This is an assessment with recommendations — I queued the concrete follow-ups as backlog items rather than implement a name-check this cycle, because both questions need a product/legal decision first (details below). Not legal advice.
+
+**What the flow captures today (solid foundation):** an explicit ESIGN/UETA consent checkbox, typed initials, printed name, `signed_at` timestamp, `client_ip`, and `user_agent`, plus acknowledgement + credit/background authorization text. That covers the core e-signature elements: intent to sign, consent, attribution, and an audit trail.
+
+**1. Should we validate printed name == borrower's account name?**
+Recommend **a soft check, not a hard block** — and compare against the **application's legal name** (`personal.first_name + last_name`), not the account display name:
+- A hard equality block would lock out legitimate signers: nicknames/name changes, typos in the account profile, co-borrowers signing, and entity/trust applicants (an LLC's authorized signer won't match the borrower name).
+- Better UX: normalize both (lowercase, collapse whitespace/punctuation) and on mismatch show a **non-blocking confirmation** ("This doesn't match the name on your application — confirm it's correct?"). Let them proceed after confirming.
+- Either way, **record the match/mismatch and the compared values in the signature audit row** — that's more useful for fraud review than a blunt block. Queued as an actionable item.
+
+**2. Is this Review & E-Sign legally compliant for a borrower application?**
+It's a **reasonable, good-faith ESIGN Act (15 USC 7001) / UETA e-signature** — it has the four things courts look for: intent to sign (explicit "E-sign application" action), consent to transact electronically, association of the signature with the record (linked to the application id), and an attribution/audit trail (IP, UA, timestamp, authenticated user). For many purposes that holds up.
+
+Gaps to close for **full consumer-ESIGN** confidence (queued as an actionable item):
+- **Consumer disclosures (ESIGN §101(c)):** before consent, consumers should be shown hardware/software requirements, the right to a paper copy, and the right to withdraw consent. The current checkbox asserts consent but doesn't present these disclosures.
+- **Retain what was signed:** store a tamper-evident snapshot or hash of the exact application content at signing, so EFS can later prove *what* the borrower agreed to — not just that they signed.
+- **Distinct consent timestamp** vs. `signed_at`.
+- **Jurisdiction:** CA hard-money lending carries its own disclosure obligations. **Have EFS counsel review before launch sign-off** — I can implement whatever they require, but the compliance determination should come from them, not me.
+
+Bottom line: the mechanism is sound for intent + attribution; the main compliance work is the consumer disclosure layer and signed-content retention. Nothing was code-changed or pushed this cycle (analysis only); both recommendations are now in the backlog.
+<!-- agent:boundary:ca3f75bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,12 +73,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- In the Review & E-Sign step ![img_10.png](img_10.png), should we validate the printed name is the same as the borrower's account name? Is this Review & E-Sign compliant with legal requirements for a proper signature for the borrower application?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gz9h] [recommended] Review & E-Sign: soft printed-name match. Compare the typed printed_name against the application's legal name (personal.first_name + last_name), normalized (case/space/punctuation-insensitive). On mismatch, show a non-blocking confirm ("This doesn't match the name on your application — confirm it's correct") rather than hard-blocking; co-borrowers, entities/trusts, and name changes are legitimate. Record match/mismatch + the compared values in the signature audit row regardless. Do NOT hard-equality-block against the account display name.
+- [ ] [#fxsv] [recommended] Review & E-Sign ESIGN/UETA hardening: (1) show consumer e-sign disclosures before consent per ESIGN 101(c) — hardware/software requirements, right to a paper copy, right to withdraw consent; (2) capture a tamper-evident snapshot/hash of the exact application content signed (prove what was agreed to), stored with the signature row; (3) record the consent timestamp distinctly from signed_at. Have EFS counsel review for CA hard-money disclosure requirements before launch sign-off (not legal advice).
 - [ ] [#xn77] [recommended] Realtime/poll admin updates: refresh admin application/pipeline views on document uploads + status changes without manual reload. Cheapest first: poll list/detail APIs every ~15-30s with ETag/If-None-Match. CF push options: Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (EFS already runs the BorrowerChatRoom DO) fanning an 'application:<id> changed' event to open admin sessions via EventSource/WebSocket. Start polling, upgrade to SSE/DO if latency matters.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document

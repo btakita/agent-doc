@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -70,14 +70,15 @@ Both done, committed, and pushed. Full EFS suite green (631 pass / 0 fail), buil
 **#xcvginbound — inbound email→chat (EFS `d8e6320`).** Replaced the 501 scaffold at `POST /api/email/inbound` with a real, authenticated handler. Two-factor sender auth: (1) the configured inbound provider must present a shared secret (`X-Inbound-Secret`; **fails closed when no secret is set**, so unauthenticated mail can never inject), and (2) the `from` address must resolve to an `admin` user. Authenticated replies append as an admin chat message via `borrower_chat_message_create_admin_`, claim thread ownership, and notify the borrower — same path as a portal admin reply. This is the #xcvg *code* half; outbound borrower notification stays config-gated on the verified sending domain (#f4rq).
 
 Net: #vd8s/#67v2/#zwws phase 4/#7a4d now have a live TMO data mirror + visibility behind them; the borrower message round-trip's inbound leg is built and waiting only on inbound-routing config (`MESSAGE_EMAIL_INBOUND_ENABLED` + `MESSAGE_EMAIL_INBOUND_SECRET` + provider webhook).
-<!-- agent:boundary:35e6be2f -->
+<!-- agent:boundary:1e27de88 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- On https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a, the Step 6 Documents is complete by me clicking "Save & Continue" and then the Step 7 is complete by me clicking "Save & Continue", which takes me to Step 7 "Review & Sign". But when I refresh, I go back to Step 6. deploy
 <!-- /agent:queue -->
 
 ## Backlog

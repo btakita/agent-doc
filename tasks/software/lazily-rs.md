@@ -166,7 +166,23 @@ Went through all three review items. One was already done; the other two are now
 **Backlog now (priority order):** `#webrtc1` → `#webrtc2` → `#webrtc3` → `#shuttleeval`. Top item: **`#webrtc1`**.
 
 _Note: `#pw26` (#lzmapspike) drifted into the **icebox** between turns — left it there, a reasonable home for a spike gated on external (MAP) project maturity. The recurring `#ipcdrift` supervisor (stale binary, pid 337083) is still live; `make install` + recycling it remains the durable fix._
-<!-- agent:boundary:363cc45f -->
+
+### Re: do #webrtc1 — WebRTC transport design — opus-4-8
+
+`#webrtc1` is a design item; delivered the design as **`tasks/software/plan-lazily-webrtc-transport.md`** (covers all 3 phases). `#webrtc1` → done; `#webrtc2` now points at the plan.
+
+**Key design decisions:**
+- **Build on what exists, don't rebuild.** `signaling_client.rs` already does the SDP/ICE rendezvous (offer/answer/ice); the gap is just the DataChannel data path. `ipc.rs` already has the wire protocol (`IpcMessage`/`Snapshot`/`Delta`, serde) + `Snapshot::filter_readable`.
+- **Core tension — sync trait ↔ async WebRTC.** `IpcSink::send` / `IpcSource::recv` are **synchronous**; `webrtc`/DataChannel are **async/tokio**. Resolution: keep the traits sync (so the transport is a drop-in beside the in-process/socket transports) and **bridge with `mpsc`** — `send` does a non-blocking `unbounded_send`; an async writer task drains to the DataChannel; `on_message` fills an inbound queue that `recv` `try_recv`s (`Ok(None)` when empty).
+- **Crate:** default **webrtc-rs** (full pure-Rust ICE/DTLS/SCTP/DataChannel, tokio-native); **str0m** noted as the sans-IO alternative. Native-only (host-side, not in-zome — consistent with the WASM story).
+- **Permissions are mandatory, not optional:** outbound `send_snapshot`/`send_delta` filter via `PeerPermissions`/`filter_readable`; inbound writes checked against `RemoteOp::write` before apply. DTLS gives transport encryption for free.
+- **Reconnect** = drop + re-`connect` (re-run signaling) + re-send a fresh `Snapshot` (deltas aren't replayed across a reconnect).
+- **`#webrtc3`**: loopback two-peer test (snapshot sync, delta ordering, permission-filtered routing, reconnect) + Criterion bench vs in-process/socket at 4 KB/64 KB/1 MB.
+
+**Stopping the auto-drain here (not continuing to `#webrtc2`–`#shuttleeval`).** Two reasons: (1) `#webrtc2` is a heavy implementation cycle (pulls in the `webrtc-rs` dependency tree + a new `webrtc_transport.rs` + long compile) that deserves a clean, focused session; (2) the `#ipcdrift` supervisor self-race is *still* corrupting every finalize this session (this one included — recovered via hand-rebuild). Please **`make install` in `src/agent-doc` + recycle the route-owned supervisor (pid 337083)** before driving `#webrtc2`; auto-draining a multi-cycle implementation queue through the corruption is not safe.
+
+_(Good news: the `#dh3k` CI run finished **green** — the conformance-vs-canonical-spec step and the async/resolve-loop steps all passed.)_
+<!-- agent:boundary:5671695a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,8 +197,7 @@ _Note: `#pw26` (#lzmapspike) drifted into the **icebox** between turns — left 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#webrtc1] #jpf1 phase 1 — Design the WebRTC DataChannel IpcTransport adapter: use the existing SignalingClient (offer/answer/ICE already in signaling_client.rs) to establish an RTCPeerConnection plus an ordered reliable DataChannel; map the lazily-ipc transport contract (Snapshot/Delta via IpcSink/IpcSource) onto the channel; define teardown/reconnect plus per-peer PeerPermissions filtering. Plan file at pickup.
-- [ ] [#webrtc2] #jpf1 phase 2 — Implement the WebRTC DataChannel transport behind a webrtc feature gate (evaluate webrtc-rs vs str0m); wire DataChannel to IpcSink/IpcSource carrying Snapshot/Delta; reuse PeerPermissions for per-peer op filtering.
+- [ ] [#webrtc2] #jpf1 phase 2 — Implement the WebRTC DataChannel transport (WebRtcTransport/Sink/Source) per tasks/software/plan-lazily-webrtc-transport.md behind a webrtc feature gate (default crate: webrtc-rs; str0m noted as sans-IO alt); bridge sync IpcSink/IpcSource to async DataChannel via mpsc; reuse SignalingClient for SDP/ICE and PeerPermissions/filter_readable for per-peer filtering.
 - [ ] [#webrtc3] #jpf1 phase 3 — Loopback integration tests for the WebRTC transport (two in-process peers: snapshot sync, delta ordering, permission-filtered routing, reconnect after drop) plus Criterion bench vs in-process/socket transports.
 - [ ] [#shuttleeval] [recommended] Feasibility spike for #57by #lzasyncshuttle, read-only: scope the shim surface to make src/async_context.rs generic over tokio/shuttle (executor, tokio::sync::watch, Arc, spawn) under cfg(shuttle); confirm shuttle async plus watch-equivalent can model the two #k03k windows; estimate LOC/risk. Output go/no-go for the operator-gated #57by. No prod change.
 <!-- /agent:backlog -->

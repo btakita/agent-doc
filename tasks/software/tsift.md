@@ -197,14 +197,32 @@ Fix in `packages/tsift-digest/src/log_digest.rs`: restrict the fold to the canon
 - **Commit + push:** tsift `4e08a6d` → `origin/main`; superproject pointer `52d08b7f1`. CI triggered (pending; local gate green).
 
 Next in queue: `#pcachebp` (the last `[recommended]` fix — breakpoint identity array-index instability).
-<!-- agent:boundary:e3835f4f -->
+
+### Re: do #pcachebp — opus-4-8
+
+> **Queue prompt:**
+>
+> [#pcachebp]
+
+
+Done. Breakpoint identity embedded the JSON array index (`message.content[N].cache_control`), so inserting a non-cached block ahead of the cached one shifted `content[0]` → `content[1]` and reported false `breakpoints`/fingerprint drift even though the cache boundary didn't move.
+
+Fix in `packages/tsift-agent-doc/src/session_cost.rs`: strip `[N]` array indices from the breakpoint path (`message.content.cache_control`) and aggregate identical entries into a counted entry (`... (x2)`), so repeated shapes keep their cardinality without positional churn.
+
+- **Tests:** `prompt_cache_breakpoint_identity_is_position_independent` (an inserted leading block yields the same breakpoint identity) + `prompt_cache_breakpoints_keep_count_of_repeated_shapes`. Updated the timeline attribution test to the new identity.
+- **Spec:** documented position-independent breakpoint paths in `specs/digests-sessions.md`.
+- **Verify:** `make check` green; release+install rebuilt.
+- **Commit + push:** tsift `ed6717f` → `origin/main`; superproject pointer `dbb10e603`. CI triggered (pending; local gate green).
+
+That completes all 9 review findings from `#tscodereview`. The remaining queue item is your free-text question `What are #next-steps for fixing bugs?` — I'll answer that next.
+<!-- agent:boundary:df465a7f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#logfoldname]~~
-- [#pcachebp]
+- ~~[#pcachebp]~~
 - What are #next-steps for fixing bugs?
 <!-- /agent:queue -->
 <!--
@@ -214,7 +232,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#pcachebp] [recommended] prompt-cache breakpoint identity includes the JSON array index (session_cost.rs:3368-3372 via path content[N]), so inserting a non-cached content block ahead of the cached one (e.g. a leading thinking/text block) shifts content[0]->content[1] and reports false breakpoints/fingerprint drift though the cache boundary did not move. Make breakpoint identity position-independent (key by type:ephemeral + count, drop array indices). med conf, low-med sev (#tscodereview).
 <!-- /agent:backlog -->
 
 ## Review

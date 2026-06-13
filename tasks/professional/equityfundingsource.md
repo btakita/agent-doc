@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -120,7 +120,7 @@ Deployed. The live worker now runs the Print-button bundle (EFS `d7622a7`).
 - Verified: `GET /` returns HTTP 200.
 
 No source changed this cycle — the Print-button work was already committed and built last cycle, so there was nothing new to spec/test/commit; this turn just shipped it. The full-application Print button (renders all 7 steps into the DOM, then `window.print()`) is now live on the borrower new-application page.
-<!-- agent:boundary:303f15f8 -->
+<!-- agent:boundary:7f0bfafb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,6 +128,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please add a Print button to the "Review & e-sign" disclosure at https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a. deploy
 <!-- /agent:queue -->
 
 ## Backlog

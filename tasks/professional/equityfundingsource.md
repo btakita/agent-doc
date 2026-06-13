@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -121,7 +121,27 @@ Done — all three parts implemented, tested, committed + pushed (EFS `a869545`;
 **Schema:** migration `0064` adds `consent_at`, `signed_content_hash`, `signed_content_json` to `application_signatures`. **Files:** `sections_repo.ts` (setter/reader columns), `routes.ts` (`stable_json_` + `signed_content_snapshot_` helpers, both sign handlers), `full_application.tsx` (disclosure panel + consent-time capture), migration `0064`, +4 tests in `tests/esign-hardening.test.ts`. Full suite **610 pass / 0 fail**; builds clean.
 
 Queue continues: last item `do #xn77` (realtime/poll admin updates).
-<!-- agent:boundary:f12e7a83 -->
+
+### Re: do #xn77 — live admin updates (polling) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#xn77]
+
+
+Done — implemented the recommended polling first step, tested, committed + pushed (EFS `6064e2f`). This is the last queue item, so the go-queue is now drained.
+
+**What it does:** admin views now refresh on their own — new document uploads and status changes appear without a manual reload.
+- New reusable **`use_poll_`** hook (`portal/shared/ui.tsx`): runs a refresh callback every 20s, **pauses while the browser tab is hidden** (no wasted fetches), clears its interval on unmount, and uses a ref so a changing callback doesn't reset the timer.
+- **Full-applications list + detail** (`admin/full_applications.tsx`): polls quietly — the open application detail refreshes if one is open, otherwise the list — using quiet refresh variants so there's no spinner flicker.
+- **Loan pipeline board** (`admin/pipeline.tsx`): polls the board, but **skips while a drag or save is in flight** so it never disrupts an in-progress move.
+
+**Why polling and not push:** per the earlier recommendation, polling-with-quiet-refresh is the cheap, zero-infrastructure first step. If latency ever matters, the upgrade path is Cloudflare **SSE** (one-way) or a **Durable Object broadcast** (EFS already runs the `BorrowerChatRoom` DO) — that remains documented as future work rather than built now. I did not add ETag/`If-None-Match` yet; at admin scale the full refetch every 20s is fine, and ETag is a later optimization.
+
+**Files:** `shared/ui.tsx` (`use_poll_`), `admin/full_applications.tsx`, `admin/pipeline.tsx`, +4 tests in `tests/admin-poll-refresh.test.ts`. Full suite **614 pass / 0 fail**; builds clean.
+
+**Queue drained.** All four items done: ongoing e-sign legal doc + Judith draft email, `#gz9h` (soft printed-name match), `#fxsv` (ESIGN/UETA hardening), `#xn77` (admin polling). The e-sign code (migrations 0063/0064) ships on the next deploy; the consumer-disclosure wording still wants EFS counsel's review per the tracking doc.
+<!-- agent:boundary:cb665c93 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,16 +149,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.~~
-- ~~do [#gz9h]~~
-- ~~do [#fxsv]~~
-- do [#xn77]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xn77] [recommended] Realtime/poll admin updates: refresh admin application/pipeline views on document uploads + status changes without manual reload. Cheapest first: poll list/detail APIs every ~15-30s with ETag/If-None-Match. CF push options: Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (EFS already runs the BorrowerChatRoom DO) fanning an 'application:<id> changed' event to open admin sessions via EventSource/WebSocket. Start polling, upgrade to SSE/DO if latency matters.
 <!-- /agent:backlog -->
 
 ## Review

@@ -82,7 +82,20 @@ I took the #stuckhandoff2 work you greenlit (submodule is clean, blocker resolve
 **Recorded** in `tasks/agent-doc/plan-stuck-handoff-hardening.md` (committed `7d9aeabd1`): the evidence, the three hypotheses, and a concrete next-cycle task — a deterministic test that drives a launched-`Preparing` controller's serve loop to the watchdog branch and asserts a self-reap within threshold, then fix whichever hypothesis holds. (Could not file this into `agent:backlog` — the doc's fenced `&lt;!-- agent:queue --&gt;` examples still break the granular-write parser, `#lintfence`.)
 
 **Recommended next step:** give me a genuinely clean session (no live route-owned supervisor for this doc) and I'll write the repro test + fix M1 there. In the meantime the wedge window is gc-cadence (minutes); `admin recycle --all-projects` clears current orphans on demand.
-<!-- agent:boundary:43254d6e -->
+❯ I want you to run `admin recycle --all-projects` and `/clear`.
+
+### Re: run `admin recycle --all-projects` and `/clear` — opus-4.8
+
+Done with the recycle; `/clear` is yours to run (I can't trigger Claude Code's built-in `/clear` from here).
+
+**`admin recycle --all-projects`** → `2 controller(s) marked to recycle at next idle boundary, 0 skipped`. Verified after:
+- `pgrep -af 'handoff-state preparing'` → **none** (the orphaned `Preparing` controllers are gone).
+- Controller `controller-state.json` → gen **1061**, state **stable**, pid 2585424 — fresh binary, clean write path.
+
+So the live wedge is cleared and the supervisors will promote the fresh binary at their next idle boundary (graceful `execve`, preserving the pane + agent child).
+
+**Next: run `/clear` yourself**, then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in the fresh context. That gives the genuinely clean session needed to fix **#stuckhandoff2 M1** — I'll write the deterministic repro test (drive a launched-`Preparing` serve loop to the watchdog branch, assert a `stale_preparing_controller_self_reaped` within threshold) and the fix there, per the reopening in `plan-stuck-handoff-hardening.md` (`7d9aeabd1`). Not auto-looping — this was your direct prompt and `/clear` is the intended next step.
+<!-- agent:boundary:10976736 -->
 <!-- /agent:exchange -->
 
 ## Queue

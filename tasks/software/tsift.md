@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -44,6 +44,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> #advance-review
+
+
+> **Queue prompt:**
+>
 > :pushpin: Add backlog items for tsift to improve prompt caching?
 
 
@@ -63,13 +68,15 @@ Note for the record: #wwm1's `### Re:` response section was lost from this docum
 So: nothing added to the tsift backlog for this item — no tsift-scoped observed bug to capture (`no-pending-capture`).
 - **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
 - **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
-<!-- agent:boundary:2bb31c02 -->
+3. Force-move the `v0.1.70` tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC and publishes.
+2. `gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true`.
+1. Register a Trusted Publisher on crates.io for each of the 23 tsift crates (repo `btakita/tsift`, workflow `release.yml`, no environment): `tsift-core`, `tsift-md-ast`, `tsift-graph`, `tsift-sqlite`, `tsift-algorithms`, `tsift-resolution`, `tsift-cache`, `tsift-tokensave`, `tsift-libsql`, `tsift-index`, `tsift-summarize`, `tsift-quality`, `tsift-agent-doc`, `tsift-digest`, `tsift-search`, `tsift-status`, `tsift-session`, `tsift-memory`, `tsift-memgraphrag`, `tsift-surrealdb`, `tsift-cli`, `tsift`, `tsift-sim-world`.
+<!-- agent:boundary:644ed6ce -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- #advance-review
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -78,12 +85,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#1td4] Release infra: migrate the crates.io publish job in .github/workflows/release.yml to OIDC trusted publishing (mirror the OpenCode npm OIDC job) to root-fix CARGO_REGISTRY_TOKEN expiry. v0.1.70 Release run 27473681731 failed at crates.io with 403 authentication failed (GitHub release + npm OIDC succeeded); tag/commit are pushed but no crate published. Operator must register the trusted publisher on crates.io; until then crates.io publish stays blocked.
+- [/] [#1td4] Release infra: crates.io publish job in .github/workflows/release.yml is MIGRATED to OIDC trusted publishing (commit fe4144b, on origin/main f29f7a2; uses rust-lang/crates-io-auth-action@v1, id-token: write, no CARGO_REGISTRY_TOKEN). Code complete. Remaining is operator-gated and tracked as actionable backlog #vmax: register the Trusted Publisher per crate on crates.io (23 crates), set repo var TSIFT_ENABLE_CRATES_PUBLISH=true, then re-tag v0.1.70 to verify OIDC publish. Stays gated until operator completes crates.io registration.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

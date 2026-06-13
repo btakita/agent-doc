@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -65,7 +65,7 @@ Gaps to close for **full consumer-ESIGN** confidence (queued as an actionable it
 - **Jurisdiction:** CA hard-money lending carries its own disclosure obligations. **Have EFS counsel review before launch sign-off** — I can implement whatever they require, but the compliance determination should come from them, not me.
 
 Bottom line: the mechanism is sound for intent + attribution; the main compliance work is the consumer disclosure layer and signed-content retention. Nothing was code-changed or pushed this cycle (analysis only); both recommendations are now in the backlog.
-<!-- agent:boundary:9ffc0c68 -->
+<!-- agent:boundary:d35346f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +73,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.
+- do [#gz9h]
+- do [#fxsv]
+- do [#xn77]
 <!-- /agent:queue -->
 
 ## Backlog

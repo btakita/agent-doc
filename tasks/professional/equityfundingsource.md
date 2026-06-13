@@ -11,6 +11,7 @@ links:
 - ../personal/robert-ward.md
 - ./bob-remeika.md
 prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
   '#commit-push': commit all uncommitted files
   '#commit-push-deploy': commit all uncommitted files + deploy
@@ -84,7 +85,24 @@ I kept the email deliberately short and put the detail in the tracking doc so th
 **Scope note on "push":** I committed the new doc to the agent-loop superproject locally (`a9d43d858`). I did **not** push the superproject — it has unrelated in-flight submodule changes from other sessions, so a push would sweep those in. Say the word and I'll push, or push it yourself when the tree is clean. (The deployable EFS code from the earlier cycles is already on `origin/main` of the EFS submodule.)
 
 Next in the queue: `do #gz9h` (soft printed-name match), `do #fxsv` (ESIGN/UETA hardening), `do #xn77` (realtime/poll admin updates) — I'll take those one per cycle as the queue drains.
-<!-- agent:boundary:233615c2 -->
+
+### Re: do #gz9h — soft printed-name match on the e-signature — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#gz9h]
+
+
+Done — implemented, tested, committed + pushed (EFS `428b980`; not deployed — no `deploy` in the preset). Migration ships, so this goes live on the next deploy (the deploy step runs D1 migrations before the worker).
+
+**Behavior:** when the borrower types their printed name in Review & E-Sign, it's compared to the legal name on the application (`personal.first_name + last_name`), normalized case/space/punctuation-insensitively. On a mismatch the form shows a **non-blocking amber confirmation** — "this doesn't match the name on your application (X); that's fine if you're a co-borrower, signing for an entity/trust, or your name changed — confirm below" — with a checkbox. Signing proceeds once they confirm or correct it. It **never hard-blocks** (per the recommendation: co-borrowers, trusts/LLCs, and name changes are legitimate).
+
+**Audit trail:** the match result and the compared legal name are recorded on the signature row via two new columns — `name_match` (1/0/NULL) and `name_match_expected` — added in migration `0063`. Both the borrower and broker sign routes compute and store it. NULL means "not evaluated" (legacy rows or no legal name on file).
+
+**Files:** `sections_repo.ts` (shared `normalize_name_`/`names_match_` + setter/reader columns), `borrower/applications/routes.ts` (both sign handlers), `borrower/full_application.tsx` (mismatch confirm UI), migration `0063`, +6 tests in `tests/esign-name-match.test.ts`. Full suite **606 pass / 0 fail**; builds clean.
+
+Queue continues: next up `do #fxsv` (ESIGN/UETA hardening), then `do #xn77` (realtime/poll admin updates).
+<!-- agent:boundary:29a8081a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +111,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~Please create an ongoing document that includes a draft email to judith-krug about the ESign legal requirements and for her to consult a lawyer.~~
-- do [#gz9h]
+- ~~do [#gz9h]~~
 - do [#fxsv]
 - do [#xn77]
 <!-- /agent:queue -->
@@ -101,7 +119,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gz9h] [recommended] Review & E-Sign: soft printed-name match. Compare the typed printed_name against the application's legal name (personal.first_name + last_name), normalized (case/space/punctuation-insensitive). On mismatch, show a non-blocking confirm ("This doesn't match the name on your application — confirm it's correct") rather than hard-blocking; co-borrowers, entities/trusts, and name changes are legitimate. Record match/mismatch + the compared values in the signature audit row regardless. Do NOT hard-equality-block against the account display name.
 - [ ] [#fxsv] [recommended] Review & E-Sign ESIGN/UETA hardening: (1) show consumer e-sign disclosures before consent per ESIGN 101(c) — hardware/software requirements, right to a paper copy, right to withdraw consent; (2) capture a tamper-evident snapshot/hash of the exact application content signed (prove what was agreed to), stored with the signature row; (3) record the consent timestamp distinctly from signed_at. Have EFS counsel review for CA hard-money disclosure requirements before launch sign-off (not legal advice).
 - [ ] [#xn77] [recommended] Realtime/poll admin updates: refresh admin application/pipeline views on document uploads + status changes without manual reload. Cheapest first: poll list/detail APIs every ~15-30s with ETag/If-None-Match. CF push options: Server-Sent Events from the Worker (one-way, simplest) or a Durable Object broadcast (EFS already runs the BorrowerChatRoom DO) fanning an 'application:<id> changed' event to open admin sessions via EventSource/WebSocket. Start polling, upgrade to SSE/DO if latency matters.
 <!-- /agent:backlog -->

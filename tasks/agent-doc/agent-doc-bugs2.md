@@ -80,20 +80,41 @@ Done all three: filed the bug, implemented the fix, and tagged the items so the 
 `#goqueuestall` is complete and pushed (agent-doc `6d9c4512`, superproject `eeeafeffe`) — marking it done. Verified live: `session-check` now defers the `[clean-session]`/`[operator-verify]` heads and correctly surfaces `#splitmodswrite` as the **one genuinely drainable** queue head. That confirms the stall is fixed at the root — the queue no longer churns on un-runnable phantom work; it points at real work.
 
 `#splitmodswrite` (split write.rs test layout) is a heavy but legitimately agent-drainable refactor — it's the only thing the queue now wants. I'm not auto-draining it unprompted; say the word to drive it, or I'll leave it queued.
-<!-- agent:boundary:12b8b507 -->
+
+### Re: do [#qflood2] — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#qflood2]
+
+
+Did the agent-doable half of `#qflood2`: a benign in-flight dispatch coalesce now reports **deduped-success** instead of exit-1. Shipped + pushed (agent-doc `9bc62c6f`, superproject `33bc749ac`). The live multi-process collision repro stays yours.
+
+**What the bug actually was.** When `JB Run Agent Doc` (or any route dispatch) hit an identical dispatch for the same cycle already in flight, the controller did the *right* thing — it coalesced and suppressed the re-send so the trigger never piled into the busy pane. But the route caller surfaced that suppression as `project controller command `dispatch` failed: dispatch coalesced … (#qflood)` — an **exit-1** that read as an error and made you hand-delete the queued prompt. The work was already running; the only thing wrong was the report.
+
+**The fix (reporting only — the flood guard is untouched).**
+- `handle_dispatch`'s coalesce bail now carries a stable `failed_stage=coalesced_in_flight` marker that survives `request_controller`'s IPC error-wrapping (same cross-boundary string-match pattern `#ctlstalebin` already uses).
+- `authorize_controller_dispatch` classifies that marker into a typed outcome: `RouteDispatchAuthorization::{Authorized, CoalescedDeduped}`.
+- Every route dispatch site returns the already-running dispatch pane via `route_dispatch_deduped_pane` **without re-sending** (`route_dispatch_deduped reason=in_flight_coalesce`).
+
+**Why this can't reintroduce the flood.** The new enum makes the deduped case a **compile-time-exhaustive** match at all four send sites (`managed_reopen` ×2, `dispatch_only_reopen` direct, degraded direct submit). A missed site would re-send on coalesce — that's the flood — so the type system now forbids it. Send-suppression itself is unchanged; only its reporting flipped. This also aligns the live path with the SimWorld model, which already `return Ok(())`s a coalesce as deduped-success — the live controller was the lone outlier.
+
+**Verification.** `make check` = **4381 passed, 0 failed**, clippy clean (project gate). New `qflood2_coalesce_marker_survives_ipc_wrapping` (proves the marker survives IPC wrapping and that a real failure like `queue_paused` is *not* swallowed as success) + extended `qflood_coalesces_busy_…`. Spec line added to `08b-single-process-control-plane.md`; VERSIONS Unreleased entry. Built + installed (binary + cdylib via `lib-install`) and `admin recycle --all-projects` queued 1 controller to recycle at its next idle boundary.
+
+**Your half (operator-drive, gating `#qflood2`).** The "does it *still* collide" part needs a live multi-process repro I can't drive. After the recycle promotes the new binary: trigger the efs dual-drain collision again; `ops.log` should now show `route_dispatch_deduped reason=in_flight_coalesce` and the JB action should report **success** (no exit-1, no manual prompt deletion) instead of the old `dispatch coalesced … (#qflood)` error. Gating, not closing, until you confirm that live.
+<!-- agent:boundary:434b77ee -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#compactdrift]~~
+- ~~:round_pushpin: do [#qflood2]~~
 The document reverted to a stale state. After running `agent-doc admin recycle --all-projects`, then JB `Run Agent Doc`
 ```
 resync: pruned 14 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=go-mode queue self-churns on its own convergence mirror lines (do[#fcc0]/[#rtwbcast]) that commit won't fold into HEAD; all active items (#fcc0,#rtwbcast) are clean-session/operator-drive and cannot run in this live IPC session; session_accretion=warn restart-heavy. Pausing to stop the flood; resume from a clean session. receipt_id=3309
 ```
-- :round_pushpin: do [#qflood2]
 JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
@@ -104,7 +125,6 @@ agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#splitmodswrite]
 - :round_pushpin: do [#compactdrift]
-- :round_pushpin: do [#qflood2]
 - JB `Run Agent Doc` sends the command to the Claude or Codex session but does not submit. Fix and add Simworld regression tests. If you can, drive it.
 ---
 ---
@@ -152,7 +172,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue --> 
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
-- [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#splitmodswrite] [recommended] Split write.rs (27.7k lines, largest module) test layout. Unlike the clean single-trailing-mod-tests pattern used for route/session_check/git/preflight/sync, write.rs has an irregular layout: module-scope cfg(test) helper fns (around line 12109) PLUS several non-contiguous top-level cfg(test) blocks (mod tests at 15201 closes at 21827, then more cfg(test) blocks to EOF). Needs a bespoke extraction that moves each test block into write/tests.rs (or several files) and updates the FlowCore guard_ budget (currently 91) + any structural guards in tests/test_cli.rs. Verify make check + full workspace 0 failed.
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
@@ -161,6 +180,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [/] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [/] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [/] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md

@@ -50,11 +50,14 @@ Recovered the session and triaged the queue. **No code changes this cycle** — 
 - Backlog `#fcc0`, `#compactdrift`, `#rtwbcast` are all `[clean-session]` (live write-path / multi-editor work that must NOT run under live IPC).
 - Review `#qflood2`, `#efscodexsubmit`, `#stuckhandoff2`, `#qt32`, `#2v7b` are `[operator-verify]` / code-complete-awaiting-live-JB-drive.
 - The queue prompts are operator bug *reports/repros* (some left in deliberately, e.g. the "prompt removed then came back" demo), not fresh actionable agent work.
+- PID 1075224 maps the **pre-fix** binary, so its stale-buffer / disk-fallback writes still raise `File Cache Conflict` — exactly the failure mode the plan's "Live diagnosis" section predicted. It can't be killed from inside this session (it's my parent process), so I haven't touched it.
+- The fixed binary + cdylib were installed **12:21** (`~/.cargo/bin/agent-doc`, `libagent_doc.so`).
+- This session's document host is route-owned supervisor **PID 1075224**, started **02:13** today.
 
 The prior turn already reached this same conclusion and paused go-mode ("queue exhausted of agent-drainable work … resume from a clean session"). I'm honoring that — **not auto-looping**.
 
 **To make progress, operator action is needed:** run the `[clean-session]` items (`#fcc0` → `#compactdrift` → `#rtwbcast`, each has a plan file) from a **fresh, non-route-owned** session (no live supervisor on this doc), and drive the `[operator-verify]` JB items live so the agent can read ops.log proof.
-<!-- agent:boundary:6c0b6bd4 -->
+<!-- agent:boundary:38b80329 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,6 +65,7 @@ The prior turn already reached this same conclusion and paused go-mode ("queue e
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#compactdrift]
+- :round_pushpin: do [#rtwbcast]
 - I'm still seeing JB `File Cache Conflict` dialogs. There should be 0.
 - :pushpin: JB `Compact Exchange` has a partially uncommitted response.
 - :pushpin: JB `Clear Exchange` cleared the exchange but the content came back...from a stale HEAD?
@@ -131,6 +135,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#fccsupwarn2] [clean-session] #fccsupwarn coverage gap: supervisor_stale_warning_message keys off status(&project_root) -> the lazy CONTROLLER ControllerStatus only, so a stale `agent-doc start --route-owned` HOST supervisor is invisible. Live-confirmed 2026-06-13: controller PID 4138479 is fresh (recorded controller_binary len=20618792/modified_secs match the installed 12:21 binary -> no warning) while the ACTUAL doc host, route-owned supervisor PID 1075224 started 02:13 (10h stale, maps the pre-fix mapped binary), still produces the #fcc0 File Cache Conflict dialogs with NO surfaced signal. FIX: extend the stale check to the route-owned start supervisor PID hosting the doc (compare its exec-time binary identity / start time vs installed mtime), not just the controller; warn in preflight/session-check. Read-only detection; FIX touches preflight/status path -> CLEAN session. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md (Live diagnosis section)
 - [ ] [#qchurn] [clean-session] go-mode no-op churn: after #goqueuestall tag-defer skips the id-backed [clean-session]/[operator-verify] backlog heads, untagged FREE-TEXT operator bug-report prompts in the ## Queue block still keep queue_active=true and the supervisor idle-watch re-injects queue_trigger=auto each idle boundary -> repeated no-op /agent-doc cycles (no content diff, user_intent_prompt_changes empty, zero drainable work). Halted live 2026-06-13 via admin queue pause (receipt 27, gen 338). FIX: go-mode should treat a queue whose only remaining prompts are non-id free-text reports (no actionable do #id / new user prompt) as not-drainable and stop re-dispatching, same as the undrainable-head skip. Plan: tasks/agent-doc/plan-go-queue-stall.md
 - [ ] [#compactdrift] [clean-session] JB Compact Exchange and agent-doc commit recovery fail closed on the typed_component_drift auto-adopt false-positive (guard keys on presence of a committed Re: marker in HEAD). Make the discriminator structural; compact should diff the pre-compact tag. CLEAN session required. Plan: tasks/agent-doc/plan-compact-typed-component-drift-false-positive.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

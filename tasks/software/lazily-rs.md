@@ -68,7 +68,7 @@ So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that
 - **`tests/async_resolve_loop.rs`** (`async` + `instrumentation`):
 
 **Top of backlog: `#ytp5`** (`#lzasyncloom`).
-<!-- agent:boundary:e63ca7f8 -->
+<!-- agent:boundary:1a265bde -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,6 +84,7 @@ So "fixing bugs" is now **bug-prevention**: the one real correctness gap is that
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#ytp5] #lzasyncloom=Deterministic #k03k resolve-loop window coverage (Option 1: instrumentation seam). Plan: tasks/software/plan-lazily-async-loom.md
 - [ ] [#dh3k] #lzspecconf=[recommended] Run the lazily-spec canonical conformance fixtures (lazily-spec 6632cb0) in lazily-rs CI so cross-language wire-protocol drift fails the build instead of shipping as a runtime bug. tests/conformance.rs already prefers spec fixtures when present (02c9e80); add a CI step that fetches the spec submodule fixtures and runs them.
 <!-- /agent:backlog -->
 

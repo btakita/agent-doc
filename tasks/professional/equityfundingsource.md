@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -134,7 +134,24 @@ Added a **Print** button to the borrower wizard's **Review & e-sign** step (the 
 - `tests/full-application-print-button.test.ts` — new case asserting the Review & e-sign step exposes its own Print control ahead of the E-sign button.
 
 Verification: `bun test` green (643 pass / 0 fail), `bun run build:worker` clean, deployed to Cloudflare (version `b2afe09c`, live at https://equityfundingsource.brian-takita.workers.dev). Committed EFS submodule `a959e12`.
-<!-- agent:boundary:325cc236 -->
+
+### Re: Review & e-sign Print → upper-right, acknowledgement-only — opus-4-8
+
+> **Queue prompt:**
+>
+> The "Review & E-sign" Print button should be in the upper-right corner ![img_11.png](img_11.png). The Print button should only print the "Acknowledgement and agreement" with "Electronic record & signature disclosure". deploy
+
+
+Done and deployed (EFS `69c512f`).
+
+- **Moved the Print button to the upper-right corner.** It now lives in the Review & e-sign `StepCard` header (new `header_actions` slot, right-aligned via `.form-step-head`/`.form-step-actions`), not the bottom actions row next to *E-sign application*. It's tagged `full-app-print-hide` so it stays off the printout.
+- **Scoped it to print only the acknowledgement.** A new `printing_ack` flag toggles a `full-app-print-ack` root class that hides the live wizard body (`.full-app-body`) and reveals a print-only clone containing just **"Acknowledgement and agreement"** + the **"Electronic record & signature disclosure"** (forced open). The acknowledgement+disclosure markup is now a shared `EsignAcknowledgement` component so the on-screen and printed copies can't drift.
+- The topbar Print button is unchanged — it still prints the full application via the existing `printing` flag.
+
+Verification: `bun run check` green (645 tests pass, incl. updated `full-application-print-button.test.ts`), worker build clean, deployed via `deploy:worker:no-migrate` (no schema change) → version `7d988e51`, https://equityfundingsource.brian-takita.workers.dev.
+
+Note: preflight flagged a stale local agent-doc install (predates source `5ccf1354`) — cosmetic to this EFS task; unrelated to the deploy.
+<!-- agent:boundary:a47be8e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,7 +159,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The "Review & E-sign" Print button should be in the upper-right corner ![img_11.png](img_11.png). The Print button should only print the "Acknowledgement and agreement" with "Electronic record & signature disclosure". deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -608,6 +608,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/git/normalize.rs",
         "agent-doc-orchestration/src/git/dirs.rs",
         "src/orchestrate.rs",
+        "src/orchestrate/dag.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
@@ -681,7 +682,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // listener was active or the plugin sent no ack after the HEAD-authoritative
         // working-tree repair (so the IDE stops writing the stale buffer back).
         ("agent-doc-orchestration/src/git.rs", "reason=") => 7,
-        ("src/orchestrate.rs", "guard_") => 2,
+        ("src/orchestrate.rs", "guard_") => 0,
+        ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
         // skipped opening a `preflight_started` cycle (#preflight-probe-side-effect-free).
         // +1 (`reason=struck_items_below_close_marker`): queue-escape repair logs

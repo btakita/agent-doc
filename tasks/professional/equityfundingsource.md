@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -169,7 +169,7 @@ Smoke check:
 - `GET /funded-deals` → 200
 
 Verification scope: deploy only — no code, test, or build-logic change this cycle, so I did not rerun the full Bun suite (prior cycle: 674 tests + app/worker build green). Cloudflare auth confirmed via `cf:whoami` (account `1e7e194f…`, `brian.takita@gmail.com`).
-<!-- agent:boundary:b4f9197d -->
+<!-- agent:boundary:e0e2f429 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,6 +177,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy
 <!-- /agent:queue -->
 
 ## Backlog

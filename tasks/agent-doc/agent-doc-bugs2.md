@@ -165,7 +165,15 @@ route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervi
 followed by a clean re-dispatch — *without* you running `session restart-supervisor --force` by hand. Marking `#jbrestale` done (code shipped); if the live recovery misbehaves, file it and I'll read the logs.
 
 **Queue:** no loop-drainable heads (`queue_continuation_required: false`). The rest are `[clean-session]` (supervisor drains) or `[operator-verify]` (yours). Not auto-looping.
-<!-- agent:boundary:c0ba66c1 -->
+
+### Re: queued `:pushpin: [#mphaseloop]` — opus-4-8
+
+Pinned `#mphaseloop` as the lead open queue head. It is `[clean-session]` (the multi-phase auto-loop policy fix rewrites the go-mode drain/finalize loop — the same live write path that hosts this route-owned supervisor), so it is not loop-drainable from this session: doing it here would re-stale the live supervisor mid-turn (`#fcc0`/`#no-mid-session-install`). Preflight confirms `queue_drainable_head_count: 0` / `queue_continuation_required: false`.
+
+Every remaining materialized head is `[clean-session]` (`#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#pushpinaccum`, `#0kjc`, `#compactqattr`, `#dupcontent`) or `[operator-verify]` (`#4myd`, `#aazp`, `#c2b6`). The clean-session heads are handed to the supervisor idle-watch, which force-`/clear`s and re-dispatches each one to a freshly-cleared agent (`#cleandrainsup`); the operator-verify heads need a live editor/recycle. So I am not auto-looping — stopping here hands `#mphaseloop` to the supervisor rather than stalling it.
+
+Note: exchange accretion is high (`block` level, 21 cycles / 16 no-op closeouts in 30 min) — a `JB Compact Exchange` would help, but I am not stalling the active queue to compact without an explicit opt-in.
+<!-- agent:boundary:239f8784 -->
 <!-- /agent:exchange -->
 
 ## Queue

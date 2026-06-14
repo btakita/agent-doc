@@ -109,14 +109,29 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then open a fresh `/agent-doc` and drain there.
-<!-- agent:boundary:5cf4ba0d -->
+<!-- agent:boundary:80b11c14 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: [#qchurn]
+- :pushpin: [#anw0verify]
+- :pushpin: [#jbrestale]
+- :pushpin: [#mphaseloop]
+- :round_pushpin: do [#4myd]
+- :pushpin: [#qmisstrike]
+- :pushpin: do [#aazp]
+- :round_pushpin: do [#fcc0]
+- :round_pushpin: do [#rtwbcast]
+- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- :pushpin: [#c2b6]
+- :pushpin: [#pushpinaccum]
+- :pushpin: [#0kjc]
+- :pushpin: [#compactqattr]
+- :pushpin: [#dupcontent]
 ---
-JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
+:pushpin: JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
 ```
 [sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
 [sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
@@ -153,6 +168,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 - This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 - If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
+- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```
@@ -165,6 +181,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 ---
+- :pushpin: upgrade dependencies
 <!-- /agent:queue -->
 ###
 <!--

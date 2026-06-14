@@ -357,13 +357,13 @@ Installed the new binary + cdylib and now recycling this supervisor.
 This is the one-time manual bootstrap: the running supervisor (pid 575771) predates `#supautoinstall`, so it couldn't self-install — going forward a dogfood supervisor on this build self-installs after a source-editing finalize (default ON).
 
 This response was written with `--force-disk` to avoid new-client/old-supervisor IPC drift, since the installed binary is now newer than pid 575771. Next I run `agent-doc session restart-supervisor --force`, which recycles this session onto the new binary. Expect the pane to restart; preflight should no longer warn `supervisor_binary_stale` afterward.
-<!-- agent:boundary:ef318d45 -->
+<!-- agent:boundary:287fd4c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#r18j]
+- :pushpin: [#r18j]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]

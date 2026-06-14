@@ -39,6 +39,10 @@ Compacted content:
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
 - `cargo build --release --lib` + `agent-doc lib-install` → cdylib refreshed (`libagent_doc-0.34.0.so`)
 - `cargo install --path .` → `~/.cargo/bin/agent-doc` now at `ce339055` (v0.34.0)
+- **(b) Two-process reroute** — new supervisor takes a fresh pane, PCP repoints the route, old drains and exits. Heavier (pane churn, brief two-pane window); reserve it for when in-place adopt can't be trusted.
+- **(a) In-place re-exec** — the R3 execve recycle (`ReexecState` / `PtySession::adopt`, gated `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1`) already swaps the binary in the same slot and re-adopts the child. This is the truest zero-downtime path for the stale-build case (#fcc0) and keeps the same pane — make it the default *healthy* restart.
+- Rung B (PCP force-kill backstop) stays **mandatory** — blue/green assumes the old supervisor cooperates with draining. A wedged/non-polling supervisor (the M1-dead failure mode that motivated this plan) will never drain or self-exit, so the PCP grace-timeout `/proc` force-kill is the only thing that reclaims it. Blue/green is the healthy path; force-kill is the floor.
+- Rung A (graceful self-kill, idle-gated) becomes the **drain trigger**: old supervisor self-exits *after* its last in-flight turn completes, not mid-turn.
 
 ### Re: post-compaction recovery + go-queue is in #qchurn no-op churn — opus-4-8
 
@@ -189,12 +193,13 @@ You're right, and I corrected two things:
 **The recycle IS automatable — done this turn.** `agent-doc admin recycle --all-projects` → exit 0, "2 controller(s) marked to recycle at next idle boundary." The supervisor re-execs onto the fixed binary (v0.34.0, `#jbrestale` churn-stop) when this turn goes idle — no operator kill needed. The earlier operator failures (`restart-supervisor --force`, `start --route-owned` → "generation 354 is closed" / "controller failed to start session actor") were the wrong verbs for a *closed* generation; `admin recycle` is the correct path and works around it.
 
 **What I did NOT touch:** the Queue. It is full of your deliberately-pasted bug evidence (#qchurn, #fcc0, #rtwbcast, #4myd, #aazp, the AST-tags-in-code-fences repro at the tail). Stripping it would destroy evidence. The parse jam (`unclosed component`, the `queue consume` mismatch) is the parser bug you filed — tags inside code fences must be treated as content, not document structure — which is an agent-doc code fix, not a doc edit. That is the durable automation; say the word and I'll fix the parser in the submodule (find the queue/component tokenizer, make fenced ``` and inline-code spans opaque to component scanning, add a SimWorld repro from this exact queue, build + install).
-<!-- agent:boundary:77233029 -->
+<!-- agent:boundary:c5f1895b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: Would it be more reliable to treat the restart like a no-downtime server deployment? Where we spawn the new version and the old version self-kills as it finishes it's last job? The PCP should route requests to the new process. New jobs routed (possibly due to a race condition) to the old process can fail with instructions to route to the new process. The supervisor is also stale. The auto-recycle should be fixed.
 ---
 ```
  agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force

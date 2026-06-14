@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -59,7 +59,7 @@ Deployed the EFS worker to production. The `#spec-test-commit-push` preset porti
 This ships the latest committed admin/lender pipeline work (collapsible lanes + compact density board controls, `7d0d691`).
 
 Note: a concurrent compaction had truncated the working-tree session doc to a stale snapshot before this write; recovered via `reset --from-current --preserve-session` + `commit` (`3843a096c`) so the compaction landed before this response.
-<!-- agent:boundary:7b0fbda6 -->
+<!-- agent:boundary:bd796647 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,6 +67,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Fix the formatting of the address in this card ![img_14.png](img_14.png) on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
 <!-- /agent:queue -->
 
 ## Backlog

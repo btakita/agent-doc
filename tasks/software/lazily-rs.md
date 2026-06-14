@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -64,7 +64,7 @@ Went through all 5 gated review items against the actual `src/lazily-rs` tree (H
 - **#57by (`#lzasyncshuttle`)** — decided NO-GO/defer per #shuttleeval; the trigger to revisit ("async graph grows more concurrency-critical paths") isn't met, so there's no action — left as the gated record of that decision.
 
 Backlog is now ordered **#lzwebrtcwire** (forward progress, unblocked) → **#lzpub011prep** (release prep, ahead of the operator token step). Top of backlog: **#lzwebrtcwire**.
-<!-- agent:boundary:89f35c25 -->
+<!-- agent:boundary:f6aba1a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +73,8 @@ Backlog is now ordered **#lzwebrtcwire** (forward progress, unblocked) → **#lz
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#lzwebrtcwire]
+- do [#lzpub011prep]
 <!-- /agent:queue -->
 
 ## Backlog

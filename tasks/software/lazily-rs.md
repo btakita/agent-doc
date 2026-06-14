@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -34,34 +34,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260614-152151.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260614-183154.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Backlog the Slot→Cell→Signal LinkedIn post; Backlog the Lazily architecture LinkedIn post; do [#sstz]; 5 more
+- Archived 2 response topic(s): Ensure Signal type is represented in lazily-spec; Make lazily-zig compliant with lazily-spec
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: Ensure Signal type is represented in lazily-spec — gpt-5
-
-Done. I added Signal wire semantics to `src/lazily-spec/protocol.md`: Signal is not a separate wire variant; it is observed as the backing slot with concrete snapshot state and `slot_value` deltas. Pushed lazily-spec commit `7426202` and superproject pointer commit `7d2e6e531`.
-
-### Re: Make lazily-zig compliant with lazily-spec — gpt-5
-
-> **Queue prompt:**
->
-> Make lazily-zig compliant with lazily-spec.
-
-
-> **Queue prompt:**
->
-> Ensure the Signal type is represented in the lazily-spec.
-
-
-Done. I added `src/lazily-zig/src/lazily/ipc.zig` with canonical serde-shaped `IpcMessage`, `Snapshot`/`Delta`, `NodeState`/`IpcValue` shared-blob support, capability handshakes, JSON encode/decode, and conformance tests loading `../lazily-spec/conformance`. I also exported the IPC types from `root.zig`, added the spec-named FFI bytes/status/message-kind types, made the default build avoid libc with `-Dlink_libc=true` as the opt-in, and fixed the CLI stub.
-
-Pushed lazily-zig commit `ba7e965` and superproject pointer commit `2f796b1a4`.
-
-Verification: `zig build`; `mise run test_master` (33/33); `mise run test_0_15_2` (28/28); `zig test src/lazily/ipc.zig` (6/6); root `make check` passed. GitHub Actions has no `CI` workflow; the available `Agent Doc` workflow failed before runner startup on the first push because of a billing/spending-limit annotation, and the latest run for `7d2e6e531` was queued when checked.
-<!-- agent:boundary:43e32b39 -->
+<!-- agent:boundary:5aad8c19 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +48,8 @@ Verification: `zig build`; `mise run test_master` (33/33); `mise run test_0_15_2
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- release lazily-zig
+- Make lazily-py compliant with the lazily-spec. release + publish
 <!-- /agent:queue -->
 
 ## Backlog

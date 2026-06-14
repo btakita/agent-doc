@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -44,6 +44,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> Make lazily-py compliant with the lazily-spec. release + publish
+
+
+> **Queue prompt:**
+>
 > release lazily-zig
 
 
@@ -59,9 +64,15 @@ Released **lazily-zig v0.1.0** (first release).
 - Corrected the submodule `origin` remote from `btakita/lazily-zig` → `lazily-hub/lazily-zig` (the GitHub repo-transfer to `lazily-hub` completed 2026-06-09 per the INBOX notice; `.gitmodules` already pointed there).
 - Tagged **v0.1.0** (annotated; manifest `version = "0.1.0"`, no prior tag) and pushed.
 - Created GitHub release: https://github.com/lazily-hub/lazily-zig/releases/tag/v0.1.0
+- `encode_json` / `decode_json` transport-agnostic bytes
+- `PeerPermissions` default-deny allowlist — `filter_readable` **omits** (never redacts) non-readable nodes; read/write/trigger_effect gated independently
+- Epoch sequencing: `Delta.is_next_after` / `apply_status` (resync handling)
+- `Delta` + all **7 `DeltaOp`** variants, `IpcValue` (Inline | SharedBlob), `ShmBlobRef`
+- `Snapshot` / `NodeSnapshot` / `EdgeSnapshot` / `NodeState` (Payload | SharedBlob | Opaque)
+- `IpcMessage` (`Snapshot` | `Delta`), externally-tagged like serde
 
 Submodule gitlink SHA is unchanged (`ba7e965`), so no superproject update was needed. Next queue item: make lazily-py compliant with lazily-spec, release + publish.
-<!-- agent:boundary:8fd1c6ff -->
+<!-- agent:boundary:d4545e7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,18 +81,18 @@ Submodule gitlink SHA is unchanged (`ba7e965`), so no superproject update was ne
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release lazily-zig~~
-- Make lazily-py compliant with the lazily-spec. release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sc7g] #lzpyspeclayers=[recommended] Optional lazily-spec layers not yet ported to lazily-py for full cross-binding parity with lazily-rs (NOT conformance-gated; the IPC state plane already passes all 6 fixtures): ShmBlobArena shared-memory write/read (header+checksum), Signaling WebSocket client/messages, Distributed CRDT cell plane (LWW/MV/PN + HLC), Capability negotiation handshake, FFI C-ABI. Queue per-layer when needed.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-16-lazily-architecture.md (Lazily architecture). Operator: review + publish Tue 2026-06-16 via `cork_y linkedin post <file>` or `corky schedule add --platform linkedin`.
 - [/] [#sstz] #lipostslotcell=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-15-slot-cell-signal.md (Slot->Cell->Signal). Operator: review + publish Mon 2026-06-15 via `corky linkedin post <file>` or `corky schedule add --platform linkedin`.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.

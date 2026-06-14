@@ -125,7 +125,31 @@ Once promoted, the generation-closed reject stops recurring and the `File Cache 
 **Why I did NOT `cargo install` this cycle (the one thing I left for you).** Installing a newer binary mid-session would make *my own* `finalize` client newer than the running supervisor (pid 1562136), which can trigger a handoff/recycle mid-write — exactly the drift class we keep hitting. So install + the live recycle self-heal proof are operator-drive, tracked as **`#anw0verify`** (folds with `#aazp`/`#4myd`): `cargo build --release && cargo install --path . && agent-doc lib-install`, then drive a real restart-supervisor race and confirm ops.log shows `dispatch_stale_generation_redirect` → `dispatch_retry_after_stale_generation` → clean re-dispatch.
 
 **`#mphaseloop` stays open as its own clean-session code task.** This cycle I *applied* the policy by hand (advanced #anw0 to done rather than halting); codifying "review-routed phase → emit review item + keep draining, only done/blocked terminate" into the actual drain/finalize loop is separate work on the drain path and still needs a clean session.
-<!-- agent:boundary:fa58708e -->
+
+### Re: append-not-prepend scheduling + re-queued [#anw0] + multi-phase auto-loop — opus-4-8
+
+Drained all three queued items. The headline: **backlog→queue scheduling now appends, not prepends (`#backlog-queue-append-stable`) — shipped, tested, committed `b8ffd36e`, pushed, installed.**
+
+**1. "backlog→queue (`:round_pushpin:`) scheduling should by default append, not prepend, even with non-annotated items in the queue."** — DONE.
+
+Root cause: the `queue`-attribute sync already *appended* `do [#id]` items at the tail, but when the queue carries `priority` the follow-up sort (`sort_prompts_by_priority` / `sort_prompts_by_dag`) re-ordered every unpinned prompt by backlog rank — so a freshly-scheduled item with a real rank floated **above** pre-existing non-annotated free-text prompts (which rank last), and `annotate_agent_priority_promotions` then stamped it `:round_pushpin:`. That float was the prepend you saw.
+
+Fix: a `do [#id]` whose id is an **active backlog id** is now *backlog-sourced* and held in a sort group **after** the pre-existing unpinned prompts, instead of interleaving by rank. So the default `queue` append stays appended even under `priority`. Within the backlog-sourced group, backlog-rank order is preserved; operator/agent pins are exempt (a pin is an explicit position signal — `#7r2s` already operator-pins genuinely operator-typed new lines, so those keep their slot); `queue=prepend` is still the explicit front-insertion opt-in. Keyed off the active-backlog-id set (not a "new this cycle" diff), so a previously-synced item stays append-stable on later cycles instead of floating up once it is no longer fresh. 4 new tests, `specs/07-orchestration-commands.md` updated, `make check` green.
+
+Note: I'd started to hand this to a sub-agent (your `#mphaseloop` directive explicitly lists that path) — you rejected it, so I implemented it inline myself. Faster anyway, since I already had the diagnosis.
+
+**2. `#mphaseloop` (auto-loop until done or legitimately blocked; clean-session → sub-agent / PCP restart / `/clear`)** — applied. I did NOT stall on this one. The append-stable change is pure source + tests in the submodule — it touches neither this doc's queue state, the live supervisor, nor finalize, so it was always agent-completable, and I drove it to done rather than deferring to "a clean session."
+
+**3. Re-queued `[#anw0]`** — already DONE last cycle (code + tests + committed + pushed as `21a70cdd`). The only remainder is the live recycle-race PROOF, which is genuinely operator-drive (needs a real superseded-generation dispatch against a live supervisor). Nothing new to build.
+
+**Two things you should know — I deliberately did NOT auto-decide these:**
+
+- **There is build-complete but UNCOMMITTED `#supselfheal` WIP in the working tree** (VERSIONS.md, `start/decisions.rs`, `start/idle_watch.rs`, `specs/06-config.md`, `sim_world.rs`, `sim_world/engine.rs`). It flips supervisor auto-recycle default to **ON (BREAKING)** to self-heal the stale-binary File Cache Conflict / IPC-drift loop (`#fcc0`/`#ipcdrift`) — directly relevant, but it was the thing *blocking the build* (the append-stable callers were unwired). I completed and committed **only** append-stable, kept `#supselfheal` out of the live binary (stashed it during install), and filed it to the backlog for your land-decision + live verify. It's `make check` green and ready, but I won't ship a BREAKING supervisor-behavior flip to your live environment unreviewed.
+- **The superproject submodule pointer bump to `b8ffd36e` is deferred** — the dirty submodule (that same `#supselfheal` WIP) only lets git record a `-dirty` pointer, so a clean bump waits until `#supselfheal` lands or is stashed. The append-stable commit is safely on `origin/agent-doc` regardless.
+
+Live-binary caveat: the running supervisor (pid 1562136) still serves the prior build until `agent-doc admin recycle --all-projects` or a restart — session-check is already nagging about it.
+
+<!-- agent:boundary:986102a9 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -87,7 +87,25 @@ The supervisor's **own idle-watch** ran the install (`caller=idle_watch`) after 
 - `supervisor_binary_stale_self_recycled` — fires at **this turn's boundary**. I'm the live child of supervisor `1654897`; the execve self-recycle only fires at `prompt_visible && !turn_active`, so it cannot land mid-turn. Also explicitly queued via `agent-doc admin recycle --all-projects` (2 controllers marked). The recycle path itself is the already-shipped+proven `#supselfheal` machinery.
 
 **Released:** `origin/main` `7a70a4cf..2bdeadfa` (auto-install rung + default-ON + VERSIONS); `cargo install` + `lib-install` done — `~/.cargo/bin/agent-doc` and `libagent_doc-0.34.0.so` are the new build. No crates.io/GitHub publish (gated behind your live confirmation; this is dogfood-internal). Closing `#r18j` — the auto-install feature is live-proven; the recycle completes as this turn ends.
-<!-- agent:boundary:09195760 -->
+
+### Re: [#jbrestale] pinned to top — clean-session, blocked on the stale supervisor it would fix — opus-4-8
+
+Pinned `#jbrestale` noted. It is **not loop-drainable from this session** (`queue_continuation_required: false`, `queue_drainable_head_count: 0`), and this is the one case where that signal is also the *root cause of your frustration*, so here is the concrete picture rather than a punt.
+
+**Why it can't run here — and it's literally the bug it describes:**
+- This document is served by supervisor **pid 1654897, started 14:43:10**. The installed binary was reinstalled **15:01:16** — the supervisor predates its own binary by ~18 min, so it is a **stale build** (`supervisor_binary_stale`, the `#fcc0`/`#ipcdrift` dialog source preflight flagged).
+- `#jbrestale` is the fix for *exactly this*: JB `Run Agent Doc` should red/green-restart a stale/churn-stopped supervisor instead of failing closed. It's `[clean-session]` because it edits the live route/dispatch + recycle path, and building/installing it mid-session would re-stale this very supervisor (`#no-mid-session-install`). A stale supervisor cannot drain the work that teaches it to stop being stale — chicken-and-egg.
+
+**The one command that unblocks the whole pinned column** (operator-drive — it restarts the process hosting this session, so I can't run it from inside it):
+
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+After the restart, the supervisor comes up on the 15:01 build and its idle-watch drains the `[clean-session]` heads on its own (`#cleandrainsup`: one fresh `/clear`ed agent per item — `#jbrestale`, `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#dupcontent`, `#compactqattr`, `#0kjc`, `#pushpinaccum`, `#recyclerestart`). The `[operator-verify]` heads (`#4myd`, `#aazp`, `#c2b6`, `#1j8q`) stay yours — they need a live editor/pane proof.
+
+**Not auto-looping** — every materialized head is `[clean-session]` (deferred to the post-restart supervisor) or `[operator-verify]` (yours). Restarting the supervisor hands the clean-session column off; it does not abandon it.
+<!-- agent:boundary:7a4adea9 -->
 <!-- /agent:exchange -->
 
 ## Queue

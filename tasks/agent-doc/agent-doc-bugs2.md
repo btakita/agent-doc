@@ -108,33 +108,65 @@ Captured as a bug refinement, not fixed live (clean-session code path; live-IPC 
 **Immediate workaround (your call).** Since the pause is correct, the spent preset just needs clearing — on `equityfundingsource.md`, strike/delete the `- #advance-review` queue line (drop `go` if it re-triggers), then re-run. Nothing to fix in *this* doc; the bug lives in agent-doc's preset/dispatch path and is doc-agnostic.
 
 **Stale supervisor still present.** Preflight/session-check both flag this doc's host supervisor (`pid 2825163`) as pre-`ce339055` stale — still the root of the recurring File Cache Conflict / IPC-drift dialogs. When you're ready: `make install` in `src/agent-doc`, then `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`. Not restarting it mid-cycle. Not auto-looping — clean-session code path, no agent-drainable head this cycle.
-<!-- agent:boundary:5e36bf9f -->
+
+### Re: queue bookkeeping (`~~~done` fence + `#qpresetstrike` unstrike) + the rebuild just landed — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: - [#qchurn]
+> - :pushpin: [#qpresetstrike]
+> - :pushpin: [#clearexchstale]
+> - :pushpin: [#qdedup]
+> - :pushpin: :round_pushpin: do [#c2b6]
+> - :pushpin: :round_pushpin: do [#aazp]
+
+
+Acknowledged your two edits; nothing to fix in code this cycle, but the install side of the churn problem is now resolved.
+
+**The rebuild+install just completed (exit 0).** `~/.cargo/bin/agent-doc` and the cdylib are now freshly built at 0.34.0 with the latest fixes. `lib-install` printed the important caveat:
+```
+note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build
+```
+So the on-disk binary is current, but the **running supervisor for this doc is still the old process** — `pid 2825163`, started `19:10:21`, route-owned for `agent-doc-bugs2.md`. It predates the new build and is what keeps producing the File Cache Conflict / IPC-drift dialogs and the no-op churn (this doc closed 13 cycles / 6 no-ops in the last 30 min, all of it this).
+
+**The one remaining step to stop the churn (your call — I'm not recycling mid-cycle and racing my own finalize):**
+```
+agent-doc admin recycle --all-projects
+# or, just this doc:
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+After it comes up on the current binary, a clean session can actually drain the clean-session heads (`#qpresetstrike` / `#clearexchstale` / `#qdedup`, plans under `tasks/agent-doc/plan-*.md`). This is also the live recycle that `#aazp` / `#4myd` want you to drive and check `ops.log` for (`supervisor_binary_stale_self_recycled …` → execve hot-reload or `supervisor_reexec_failed fallback=continue_current_binary`).
+
+**Your edits.** Fencing the resolved churn-stop block in `~~~done … ~~~` is the right manual mitigation for `#0kjc`/`#mdastquote` — it stops that pasted console output (with its `:pushpin:`/`[route]` tokens) from being re-parsed and re-injected as queue heads. Un-striking `#qpresetstrike` keeps it as an open work item; it stays a clean-session fix (preset-token heads are unstrikeable by any agent path), so I'm not touching it under the live IPC supervisor.
+
+No agent-drainable head this cycle; not auto-looping (churn-stopped, live-IPC supervisor); not doing queue/review surgery while the stale supervisor is active (it races + corrupts). Recycle first, then re-run on a clean session.
+<!-- agent:boundary:b3b91193 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
 ```
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
 ```
----
+~~~
 JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
 ```
----
+~~~done
 :pushpin: - [#qchurn]
-- ~~:pushpin: [#qpresetstrike]~~
+- :pushpin: [#qpresetstrike]
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]
 - :pushpin: :round_pushpin: do [#aazp]
----
+~~~
 :pushpin: In tsift.md, I had a queue:
 ```
 &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
@@ -172,8 +204,8 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - :pushpin: :round_pushpin: do [#4myd]
 - :pushpin: :round_pushpin: do [#fcc0]
 - :pushpin: :round_pushpin: do [#rtwbcast]
-- [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
-- Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
+- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 <!-- /agent:queue -->
 ###
 <!--

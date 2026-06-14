@@ -185,7 +185,21 @@ Per `#cleandrainsup`, stopping here hands `#mphaseloop` to the supervisor idle-w
 **Remaining heads** (all supervisor-drained `[clean-session]` or operator-gated): `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#pushpinaccum`, `#0kjc`, `#compactqattr`, `#dupcontent` (clean-session); `#4myd`, `#aazp`, `#c2b6` (operator-verify). Nothing in-session-drainable.
 
 Exchange accretion is at `block` level (17 no-op closeouts / 30 min) — a `JB Compact Exchange` would help, but I'm not stalling the active queue to compact without an explicit opt-in.
-<!-- agent:boundary:0db1f3e0 -->
+
+### Re: redefine [clean-session] as a fresh agent session — implemented (#freshgrant) — opus-4-8
+
+Implemented and shipped the core of your directive. This is the missing half of `#cleandrainsup`.
+
+**The bug your directive named.** `#cleandrainsup` already makes the supervisor idle-watch force-`/clear` + re-dispatch a `[clean-session]` head to a freshly-cleared agent. But that freshly-cleared agent runs preflight in `DrainScope::Loop`, which *still* deferred `[clean-session]` under a live editor-IPC listener — so `queue_continuation_required` came back `false` and the fresh agent declined the very head it was cleared for. That is exactly the churn you've been watching: the `/clear` was wasted because the cleared loop re-deferred.
+
+**Fix (agent-doc `86f306d3`, pushed).** When the idle-watch sends the `#cleandrainsup` `/clear` for a clean-session head, it now writes a short-TTL **fresh-context grant** (`clean_session_fresh_context_grant … (#freshgrant)` in ops.log). The `DrainScope::Loop` deferral consults `active_clean_session_grant_ids` and does **not** defer a granted head — the restarted loop *is* the fresh session the tag asks for, so it drains it. `[operator-verify]` stays deferred everywhere (genuinely needs you). The grant is bounded (600s TTL): an un-drained grant expires back to the deferral fail-safe, so it can never enable clean-session drains in a *later accreted* session. Tests: `loop_drains_granted_clean_session_under_live_ipc`, `clean_session_grant_roundtrips_filters_and_expires`; full `make check` green.
+
+**"Idle-install + restart should run without stalling" — already landed.** That is `#supautoinstall` (default-ON in dogfood) + `#supselfheal` auto-recycle: the idle supervisor rebuilds+installs the committed source, then `execve` hot-reloads onto the fresh binary at the turn boundary. So the binary change a clean-session item needs installs and recycles on its own — `#freshgrant` then lets the freshly-recycled loop actually drain it.
+
+**Not installed this turn (deliberate).** `cargo install`/`lib-install` here would re-stale *this* live route-owned supervisor mid-turn (`#no-mid-session-install`). The committed source rides in on the supervisor's own auto-install/recycle, or your next clean restart. Filed `#freshgrant` (operator-verify) for the live proof: confirm a re-dispatched agent's preflight flips to `queue_continuation_required: true` for the cleared head.
+
+**Queue:** still `queue_continuation_required: false` on the *running* (pre-`#freshgrant`) binary, so not auto-looping; remaining heads are supervisor-drained `[clean-session]` / operator-verify.
+<!-- agent:boundary:2e3d6b70 -->
 <!-- /agent:exchange -->
 
 ## Queue

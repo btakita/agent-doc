@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -131,7 +131,27 @@ Done — shipped, tested, committed, and pushed (no deploy).
 **Shipped:** `equityfundingsource-dev` commit `16b7966`, pushed to `origin/main`; superproject pointer `a12c7b826`. EFS repo has no CI workflow, so local `bun run check` is the gate.
 
 That clears both go-mode queue items. There's still a separate `deploy` head in the queue — I did **not** deploy (the preset was commit-push, and you only said implement item 2). Say "deploy" and I'll push both changes (#lender-gate + #deal-dialog-full) to Cloudflare.
-<!-- agent:boundary:c09809d6 -->
+
+### Re: Deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Done — deployed to Cloudflare.
+
+`bun run deploy:worker` (build → remote D1 migrate → `cf-deploy.ts`). My changes added no migrations, so the remote D1 migrate step was a no-op; the worker bundle + the one new browser asset uploaded and deployed clean.
+
+- **Version:** `0ba1e95c-f4db-46c7-9c19-a33ffedc51f9`
+- **Live:** https://equityfundingsource.brian-takita.workers.dev
+- **Smoke check:** home `HTTP 200`, `/api/investor/deals` `HTTP 401` (auth-gated, expected).
+
+This ships both go-mode features to production:
+- **#lender-gate** — Lender Account Request now gates Available deals (Available deals page renders the request form; dashboard shows a prompt) until the investor has a registered lender account.
+- **#deal-dialog-full** — the dashboard Available-deal dialog now opens the full Deal page content (loan details, documents, deal summary, commit funding, sign documents) instead of a stripped summary.
+
+Queue fully drained. To eyeball the live behavior you'd want a logged-in investor session — without a lender account you'll see the gate on `/portal-investor/available-deals` and the prompt on the dashboard; with one, the dashboard Available-deal card opens the full deal modal.
+<!-- agent:boundary:fad5746f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,9 +159,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.~~
-- ~~The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

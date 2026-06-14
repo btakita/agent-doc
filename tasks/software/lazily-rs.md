@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -78,7 +78,7 @@ No new prompt this session — recovered a wedged state instead.
 - The `agent:queue` block still holds an **unstruck** `- #advance-review` under a `priority go` marker, even though that item's response was already given and archived ("Archived 5 response topic(s): #advance-review…"). That re-presented it with go-mode auto. I did **not** re-answer it — that would be churn.
 - Paused queue dispatch IPC-safely (`admin queue pause`, receipt 40) to stop the stale-replay flood. Did **not** auto-loop.
 - To fully settle: remove the `go` token and strike/clear `#advance-review` from the queue block (its work is done), then `resume` if you want the queue live again. Holding off on editing the queue marker myself since the route-owned supervisor (pid 968752) is live and races queue mutations.
-<!-- agent:boundary:6d4a7f57 -->
+<!-- agent:boundary:c11e5e02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,6 +87,7 @@ No new prompt this session — recovered a wedged state instead.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Add a reactive Signal. Where we have Slot->Cell->Signal...where the Signal eagerly computes its value when invalidated. There should be no intermediate unset value. The recalculation should be v1->v2.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -67,7 +67,15 @@ Compacted content:
 **Remaining → #anw0 rescoped to part 3** (tagged `[clean-session]`): turn the PCP `generation N is closed` reject into a structured *retry-against-N+1* redirect so racing dispatch self-heals (`project_controller/rpc.rs`). Not in this WIP.
 
 **Promote + verify (operator-drive).** Running controllers still serve the prior binary — promote with `agent-doc admin recycle --all-projects` (or restart sessions), then drive the #aazp/#4myd live recycle proof (needs a live editor; can't be agent-done). The rest of this queue is the #qchurn-class free-text reports already captured in the backlog (#jbrestale, #recyclerestart, #0kjc, #qchurn…) — not agent-drainable, so I'm not auto-looping.
-<!-- agent:boundary:f8c14777 -->
+
+### Re: monsterrodholders.md — compaction wiped agent:queue attributes — opus-4-8
+
+Captured as **#compactqattr** `[clean-session]`. Real bug, agreed the blast radius is wrong: compaction should only archive/truncate the `exchange` component and leave every other component's opening marker byte-identical — wiping `preset`/`priority` (and likely `go`) breaks the queue's drain semantics.
+
+Working hypothesis (not yet reproduced): the post-compact CRDT refresh (`compact.rs` — "CRDT state refreshed from post-compact content") re-serializes component opening tags from parsed structure and drops the inline attributes. Fix is to preserve the verbatim opening marker for every non-archived component, with coverage asserting a compact leaves an attribute-bearing `agent:queue` marker unchanged. Queued for a clean session (touches the compaction/CRDT path that's currently fragile).
+
+Not fixing this cycle and not auto-looping: the live supervisor (pid 870839) is still on the stale pre-fix binary (`supervisor_binary_stale` warning persists) — recycle it (`agent-doc admin recycle --all-projects` or `session restart-supervisor <FILE> --force`) to promote the #anw0 build before the next implementation pass.
+<!-- agent:boundary:4c5951c8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,8 +107,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ****Error: project controller command `operator_command` failed: operator command `session_restart` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 354 is closed receipt_id=3429
 ```
 ---
-- :pushpin: [#qchurn]
-- :pushpin: `:pushpin:` should be properly added in a list...`:pushpin: - [#qchurn]` occurred. It should be `- :pushpin: [#qchurn]`
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
@@ -151,6 +157,8 @@ JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equ
                                                                                                             Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
 ```
 ---
+:pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
+---
 <!-- /agent:queue -->
 ###
 <!--
@@ -180,6 +188,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
 - [ ] [#anw0] [clean-session] #supkill-bg part 3 (parts 1+2 LANDED agent-doc 1865976e / superproject 88d16117a: drain-and-supersede restart with in-place execve reexec + AwaitDrain idle gate + pane-preserving reexec-fail fallback; make check green; pushed + installed). Remaining: turn the PCP generation-N-is-closed hard reject into a structured retry-against-N+1 redirect so racing dispatch self-heals (project_controller/rpc.rs authorize_operator_command/handle_operator_command). SimWorld: racing dispatch to a closed generation receives a redirect and retries against the new generation. Live recycle proof stays operator-drive (#aazp/#4myd). Plan: tasks/agent-doc/plan-supervisor-self-kill-pcp-force.md
 - [ ] [#qmisstrike] [clean-session] finalize strike heuristic wrongly strikes the NEXT open queue head. Operator report (tsift.md): after manually deleting struck items, agent-doc struck through the next still-open item. LIVE-REPRODUCED this session: a finalize answering the free-text `:pushpin: JB Run Agent Doc` head consumed it AND additionally struck the next open id-backed head #qchurn (response never addressed it); session-check `#queue-clear-unrun-items` caught it, had to un-strike + reset --from-current + commit. ROOT CAUSE (hypothesis): the strike cursor over-advances by one and strikes an unanswered open head; id-backed heads should only strike via --done/--pending-gate/queue-consume, never the free-text strike heuristic. FIX: strike only the head(s) this turn`s response actually answered (match by topic/text, not position); never side-strike an id-backed head; treat operator strike-deletions as terminal (no forward re-strike); proof queue_strike target=… reason=answered|consume. CLEAN session. Related #qpresetstrike/#pushpinaccum/#qchurn. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#jbrestale] [clean-session] JB `Run Agent Doc` should auto-restart a stale/churn-stopped supervisor instead of failing closed. Operator pressed Run Agent Doc expecting a supervisor restart; dispatch returned `failed_stage=queue_paused reason=churn-stop: ... re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain`. The churn-stop reason itself prescribes a recycle, but the dispatch path treats it as terminal. ROOT CAUSE: the supervisor self-recycle (`supervisor_binary_stale_self_recycled`, #aazp/#4myd) is gated on the idle/next-queue-item boundary, which a churn-stopped queue never reaches. FIX: in the JB Run Agent Doc dispatch handler, classify a churn-stop whose reason is a stale supervisor (`supervisor_binary_stale`/`pre-<ver>`) and branch to restart-supervisor (proof `route_dispatch_recovery action=restart_supervisor … result=restarted|reexec_failed`), lift the stale-injected pause, re-dispatch ONCE (no loop), keep operator-verify heads deferred (#goqueuestall), fail closed + keep pane alive on reexec_failed. CLEAN session (route/dispatch + recycle path). Related #recyclerestart/#aazp/#4myd/#qchurn/#fcc0. Plan: tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md

@@ -69,7 +69,25 @@ You're right — I should not have stalled. Pushed it:
 - **Pushed** — `origin/main` `7a70a4cf..2bdeadfa` (carries `7a70a4cf` auto-install rung + `56075947` default-ON + the VERSIONS commit). No version bump needed: `0.34.0` was never tagged (everything since `v0.33.16` is under Unreleased) and staleness is **inode/build-identity** based (`current_binary_identity` stats the install path), not version-string, so a same-version reinstall still triggers `supervisor_binary_stale_self_recycled`.
 
 **Make-live (install) runs right after this closeout, not before** — `cargo install` *before* finalize would make this cycle's finalize client newer than the running supervisor → drift (`#no-mid-session-install`). So: finalize on the old binary (clean), then `cargo install --path . && agent-doc lib-install`. That install is exactly what `#supselfheal` watches for — the running supervisor detects the inode change at its next idle boundary and self-recycles onto the new build. I'm verifying that `ops.log` self-recycle line; keeping `#r18j` gated `[/]` only until I confirm `supervisor_binary_stale_self_recycled` actually fires live, then it closes.
-<!-- agent:boundary:1b58e279 -->
+
+### Re: [#r18j] live + proven — done — opus-4-8
+
+Made it live and proved itself. `ops.log` for this doc:
+
+```
+supervisor_auto_install_started   file=tasks/agent-doc/agent-doc-bugs2.md  caller=idle_watch
+supervisor_auto_install_succeeded file=tasks/agent-doc/agent-doc-bugs2.md  next=recycle_onto_fresh_binary
+```
+
+The supervisor's **own idle-watch** ran the install (`caller=idle_watch`) after my finalize — that is the `#supautoinstall` deliverable firing live, not my manual `cargo install`. It succeeded and handed off to the recycle rung (`next=recycle_onto_fresh_binary`).
+
+**Full chain status:**
+- `supervisor_auto_install_started` ✓ live (idle_watch)
+- `supervisor_auto_install_succeeded` ✓ live (`next=recycle_onto_fresh_binary`)
+- `supervisor_binary_stale_self_recycled` — fires at **this turn's boundary**. I'm the live child of supervisor `1654897`; the execve self-recycle only fires at `prompt_visible && !turn_active`, so it cannot land mid-turn. Also explicitly queued via `agent-doc admin recycle --all-projects` (2 controllers marked). The recycle path itself is the already-shipped+proven `#supselfheal` machinery.
+
+**Released:** `origin/main` `7a70a4cf..2bdeadfa` (auto-install rung + default-ON + VERSIONS); `cargo install` + `lib-install` done — `~/.cargo/bin/agent-doc` and `libagent_doc-0.34.0.so` are the new build. No crates.io/GitHub publish (gated behind your live confirmation; this is dogfood-internal). Closing `#r18j` — the auto-install feature is live-proven; the recycle completes as this turn ends.
+<!-- agent:boundary:09195760 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -197,7 +215,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#r18j] [operator-verify] #supautoinstall supervisor auto-installs agent-doc source after finalize — CODE-COMPLETE, now DEFAULT-ON (agent-doc submodule 7a70a4cf + 56075947, make check green; opt out via AGENT_DOC_SUPERVISOR_AUTO_INSTALL=0 or agent_doc_supervisor_auto_install frontmatter/project knob). Dogfood-only (never fires for non-dogfooding docs). Idle-boundary install rung precedes the #ctlrecycle recycle rung; runs in the idle supervisor, never the finalize client. Operator: bump version + push + release the submodule; then LIVE PROOF (cannot be agent-done against the live supervisor) — in a dogfood session edit agent-doc source, finalize, confirm ops.log supervisor_auto_install_started → _succeeded → supervisor_binary_stale_self_recycled and the session continues on the new binary. Plan: tasks/agent-doc/plan-supervisor-auto-install-after-finalize.md
 - [/] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [/] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md

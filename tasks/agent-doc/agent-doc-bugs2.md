@@ -87,7 +87,7 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 Preflight also flags `stale_install` (`target/release/agent-doc` predates `ce339055`) — if you want the *restarted* supervisor on current code, run `make install` in `src/agent-doc` first, then restart. After that a clean session can actually drain the clean-session queue.
 
 No agent-drainable work this cycle beyond filing this; not auto-looping (churn-stopped queue, live-IPC supervisor).
-<!-- agent:boundary:9b5ff8c6 -->
+<!-- agent:boundary:3eee5ae7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -100,7 +100,7 @@ No agent-drainable work this cycle beyond filing this; not auto-looping (churn-s
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
 ```
 ---
-- ~~[#qchurn]~~
+- [#qchurn]
 - :pushpin: [#qpresetstrike]
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]

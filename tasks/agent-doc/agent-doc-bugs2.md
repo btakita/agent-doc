@@ -266,7 +266,22 @@ The underlying class — a supervisor that keeps running a stale build and becom
 - the **#suprecyclestall** live-verify family (#aazp / #4myd / #1j8q) — operator-drive proofs that the recycle-on-stale-binary path promotes the fresh build.
 
 No agent-drainable work in this prompt (informational standing note), and `queue_continuation_required` is false, so I'm not looping.
-<!-- agent:boundary:4facdf24 -->
+
+### Re: fix the auto-loop, restart, continue draining — opus-4-8
+
+Fixed and deployed. Root cause was a **drainability deadlock** (`#cleandrainsup`), committed as agent-doc `1f8c9f63`.
+
+**The bug.** `queue_continuation::deferred_backlog_ids` deferred a head when `operator_verify_required || (clean_session_required && live_ipc)`, and **both** drain consumers shared that one set: the in-session Claude Code `/loop` (`drainable_head_count` → `queue_continuation_required`) AND the supervisor idle-watch (`live_drainable_continuation_head`). With your IDE open (`live_ipc == true`), every `[clean-session]` head was deferred in both paths — the loop stopped *and* the supervisor saw `active_head = None` — so nobody drained the dozen `[clean-session]` bug-fix items, even though SKILL.md promised "the supervisor owns the `/clear` and re-dispatches the next item to a freshly-`/clear`ed agent." That promise was never reachable.
+
+**The fix.** The deferred-set computation is now scoped (`DrainScope::Loop` vs `DrainScope::Supervisor`):
+- The in-session `/loop` still defers `[clean-session]` under a live IPC listener (it can't give a head the fresh context the tag asks for) — so `queue_continuation_required` stays `false` and the loop stops, but now it *hands off* rather than abandoning.
+- The supervisor idle-watch defers only `[operator-verify]` and **drains `[clean-session]` heads**, force-`/clear`ing before each dispatch (`head_requires_clean_session` → `clean_session_head_forces_context_reset`, independent of the `agent_doc_queue_context_reset` opt-in) so each clean-session item runs in a genuinely fresh agent context.
+- `[operator-verify]` stays deferred in both scopes (those genuinely need you).
+
+**Verification.** `make check` green (0 FAILED); 3 new tests (`deferred_scoped_supervisor_drains_clean_session_under_live_ipc`, `head_requires_clean_session_maps_head_id_to_tag`, `clean_session_head_forces_context_reset_policy`). Built release + `cargo install` + `lib-install`; `audit-docs` clean; SKILL.md auto-loop section updated to document the hand-off. Plan: `tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md`.
+
+**Restart + drain.** Triggering an in-place `execve` `restart-supervisor --force` on this session's supervisor (pid 575771) so it supersedes onto the new binary at the turn boundary, preserving this pane. Once it's on the new build, its idle-watch will force-`/clear` and drain the `[clean-session]` heads one fresh agent per item — the 6 `[operator-verify]` items remain yours to drive.
+<!-- agent:boundary:1e98fd13 -->
 <!-- /agent:exchange -->
 
 ## Queue

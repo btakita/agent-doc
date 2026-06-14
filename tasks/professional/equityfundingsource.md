@@ -87,7 +87,7 @@ The empty-state label ("Drop a file here or click to choose") was left as-is —
 Per `#spec-test-commit-push`: added a `multi-upload.test.ts` assertion that both files render the new label and no longer contain the old one. `bun run check` green (649 tests), worker build clean. Committed + pushed to `main`.
 
 Not deployed — this preset is commit+push only; the `deploy` item later in the queue will push it live.
-<!-- agent:boundary:fe0b7948 -->
+<!-- agent:boundary:1e759505 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,6 +103,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#c7cs] #docview-tables Extend the #doc-viewer click-to-view to the remaining download-only document surfaces (admin/documents.tsx, admin/lender_documents.tsx, admin/deal_documents.tsx, admin/document_request_detail.tsx, admin/upload_detail.tsx, investor/documents.tsx, investor/available_deals.tsx, broker portal, shared/table_actions.tsx): add a View action next to each Download button using DocumentFileLink/use_document_viewer_ from shared/ui.tsx. Add per-surface wiring tests.
 <!-- /agent:backlog -->
 
 ## Review

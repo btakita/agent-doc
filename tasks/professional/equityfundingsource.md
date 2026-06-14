@@ -38,7 +38,28 @@ committed
 Compacted content:
 ❯ - Archived 3 response topic(s): deploy; Fix the formatting of the address in this pipeline card; do [#aww2]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:6fac8140 -->
+
+### Re: Rename "Applications received" tag to "Accepted applications" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Rename "Applications received" tag to "Accepted applications".
+
+
+> **Queue prompt:**
+>
+> Rename "Applications received" tag to "Accepted applications".
+
+Done. The lane/column was already relabeled (`repo.ts` → `'Accepted applications'`, commit `895ace3`), but the **per-card stage pill** still rendered the raw TMO status `'Application Received'` (uppercased to `APPLICATION RECEIVED`) — that's the "tag" still showing the old name.
+
+**Fix (`equityfundingsource-dev` `3fa1537`, committed + pushed):**
+- `pipeline.tsx` — added `STAGE_DISPLAY_LABELS` (`'Application Received' → 'Accepted applications'`) + `stage_display_label_()`, applied **inside** `PipelineStageChip` so both the board card and table pills show the relabeled stage. The underlying TMO status string is unchanged (consistent with the existing `repo.ts` comment), and the existing test asserting the call site `<PipelineStageChip label={card.status} />` still holds.
+- `tests/admin-pipeline.test.ts` — coverage for the override map, helper, and chip usage.
+
+**Verification:** full suite green (680 pass / 0 fail), `bun run build` clean. Superproject pointer already bumped to `3fa1537` by the session supervisor sweep.
+
+**Not yet live:** preset is `#spec-test-commit-push` (no deploy), so this is on `main` only — the queued `deploy` item at the tail will ship it to `workers.dev`.
+<!-- agent:boundary:f9ab6bed -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +67,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Rename "Applications received" tag to "Accepted applications".
+- ~~:pushpin: Rename "Applications received" tag to "Accepted applications".~~
 - :pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.
 - :pushpin: deploy
 <!-- /agent:queue -->

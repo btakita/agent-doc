@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -78,7 +78,48 @@ No new prompt this session — recovered a wedged state instead.
 - The `agent:queue` block still holds an **unstruck** `- #advance-review` under a `priority go` marker, even though that item's response was already given and archived ("Archived 5 response topic(s): #advance-review…"). That re-presented it with go-mode auto. I did **not** re-answer it — that would be churn.
 - Paused queue dispatch IPC-safely (`admin queue pause`, receipt 40) to stop the stale-replay flood. Did **not** auto-loop.
 - To fully settle: remove the `go` token and strike/clear `#advance-review` from the queue block (its work is done), then `resume` if you want the queue live again. Holding off on editing the queue marker myself since the route-owned supervisor (pid 968752) is live and races queue mutations.
-<!-- agent:boundary:c11e5e02 -->
+
+### Re: Add a reactive Signal (eager, no intermediate unset, v1→v2) — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a reactive Signal. Where we have Slot->Cell->Signal...where the Signal eagerly computes its value when invalidated. There should be no intermediate unset value. The recalculation should be v1->v2.
+
+
+Added a first-class **`Signal`** primitive to lazily-rs (`src/signal.rs` + `ctx.signal()`), one step beyond `Slot` on the `Slot → Cell → Signal` progression. Committed `66dcdbc`, pushed to `origin/main`.
+
+**The distinction that drove the design**
+- A `Slot`/`computed` is **lazy**: invalidation only marks it dirty; it recomputes on the next read. During the dirty window an observer effectively sees a stale/“to-be-recomputed” value.
+- A `Signal` is **eager**: it recomputes the instant a dependency is invalidated — *before the invalidating `set_cell`/`set`/`batch` call returns*. So after `n.set(&ctx, 5)` the signal already holds its new value; no read is needed to drive it.
+- **No intermediate unset value:** the backing store is invalidated by dirty-marking, never hard-cleared, so the value transitions directly `v1 → v2` and is never observed as `None`/unset.
+
+**How it's built (reuses the tested core, not a parallel engine)**
+A signal is a **memoized backing slot + a small puller effect**:
+- `ctx.memo(compute)` gives the value cell with a `PartialEq` guard (equal recompute ⇒ no downstream churn) and **glitch-free, pull-based** recomputation.
+- a puller `effect` does `ctx.get_rc(&slot)` after every invalidation, supplying the eagerness. `get_rc` avoids deep-cloning the value on each refresh.
+
+Because recomputation is pull-based (depth-first refresh of dependencies before self), a derived-signal **diamond** `D = f(A, g(A))` never surfaces the mixed new-`A`/old-`g(A)` glitch intermediate — the test asserts `D` only ever takes `[6, 18]`, never the glitch `10`.
+
+**API**
+```rust
+let n = ctx.cell(1);
+let doubled = ctx.signal(|ctx| n.get(ctx) * 2); // materialized now: 2
+n.set(&ctx, 5);                                  // doubled is already 10 — eager
+assert_eq!(doubled.get(&ctx), 10);
+```
+`signal<T>` needs `T: PartialEq + 'static` (memo guard); `get_signal` also needs `Clone`. Plus `get_signal_rc`, `dispose_signal` (reverts to lazy), `is_signal_active`, and the `SignalHandle` method aliases.
+
+**Spec + tests + build**
+- `SPEC.md`: new `### Signal` section (semantics, glitch-freedom, type bounds, disposal).
+- `tests/signal.rs`: 9 integration tests — eager init, eager recompute without a read, `v1→v2` no-unset (via a watcher effect: `[100,200,300]`), memo guard skips equal recompute, chained signals, diamond glitch-freedom, batch coalescing (`[11,22]`, no `12`/`21`), dispose-reverts-to-lazy, equal-value no-op.
+- `make check` green (fmt/clippy/build/default + tokio + async + loom + benchmark checks); release build clean.
+
+**One trade-off, noted:** the puller effect is a dependent of its own slot, so an actual value change triggers exactly one extra *no-op* puller run (it pulls, finds nothing dirty, returns). Bounded and harmless; user-facing effect counts are unaffected (only the internal puller double-fires).
+
+**CI:** run `27490089664` is **queued** at push time — recording as pending per the test-bearing workflow; closing out on local `make check` evidence.
+
+**Follow-up queued:** `#lzsignalparity` [recommended] — extend `Signal` to `ThreadSafeContext` and `AsyncContext`, which still expose only lazy slots/memo.
+<!-- agent:boundary:795d04cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,12 +128,12 @@ No new prompt this session — recovered a wedged state instead.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Add a reactive Signal. Where we have Slot->Cell->Signal...where the Signal eagerly computes its value when invalidated. There should be no intermediate unset value. The recalculation should be v1->v2.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#3dmm] #lzsignalparity=[recommended] Extend the eager Signal primitive (src/signal.rs, ctx.signal) to ThreadSafeContext and AsyncContext. Single-threaded Context now has signal/get_signal/dispose_signal; ThreadSafeContext + AsyncContext still expose only lazy slots/memo. Mirror the memo-slot + puller-effect composition (or an eager-recompute flag) so shared-graph and async consumers get always-set, glitch-free v1->v2 derived values.
 <!-- /agent:backlog -->
 
 ## Review

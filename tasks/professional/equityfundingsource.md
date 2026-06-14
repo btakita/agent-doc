@@ -19,6 +19,9 @@ prompt_presets:
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 queue: start
+agent_doc_pipeline:
+  run_id: cycle-1781420754344
+  step: write_applied
 ---
 
 ## Status
@@ -69,7 +72,51 @@ Replace the horizontal columns with a vertical left rail of stages + counts; cli
 **Recommended path:** ship **#1 (phase grouping) + #4 (default "active" filter) + #3 (List toggle)** together — phase grouping fixes the structural width, the active filter trims the working set, and the List view is the escape hatch for power triage. #2 and #5 are low-cost polish to layer on after. This stays inside the existing #67v2 kanban work rather than a rewrite.
 
 This is a discussion, so I haven't changed code. If you want, say the word and I'll queue the chosen combination as an implementation item against #67v2.
-<!-- agent:boundary:99f96512 -->
+
+### Re: Deal Pipeline horizontal width improvements — gpt-5
+
+> **Queue prompt:**
+>
+> Implement the recommended path for the Deal Pipeline horizontal width improvements.
+
+
+Implemented the recommended path for the Deal Pipeline width issue in `src/equityfundingsource-dev`.
+
+Changed paths:
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `tests/admin-pipeline.test.ts`
+- `tests/application-status-ui.test.ts`
+- `tests/portal-table-dialog.test.ts`
+- `prds/investor-pipeline-admin.md`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+What changed:
+- Deal Pipeline now defaults to an **Active** scope that hides terminal/parked cards.
+- Board columns are grouped into macro phase lanes: **Intake**, **Processing**, **Underwriting**, with **Funded / Closed** and **Parked** available under **All**.
+- Cards keep the precise raw status visible as a stage chip, so phase grouping does not hide TMO/application state.
+- Added a `?view=table` dense triage view over the same filtered pipeline cards.
+- Drag/drop still delegates through the shared loan-status writer; phase drops use the lane's primary target status.
+- Updated PRD notes and static tests that previously asserted the board was Kanban-only.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` — pass, 50 tests.
+- `bun test tests/portal-table-dialog.test.ts tests/application-status-ui.test.ts` — pass, 23 tests.
+- `bun run check` — pass, 674 tests + app build + worker build.
+- `make check` — pass, same EFS full check path.
+- `git diff --check` — pass.
+
+Commits/pushes:
+- EFS submodule: `0dd1f15` (`admin pipeline: add compact triage views`) pushed to `btakita/equityfundingsource-dev main`.
+- Superproject pointer: `99579ecfa` (`efs: update deal pipeline triage views`) pushed to `btakita/agent-loop main`.
+
+GitHub Actions:
+- No workflow named `CI` exists in the EFS submodule or superproject.
+- The superproject's only workflow, `Agent Doc`, ran for `99579ecfa` and failed before any runner started: both jobs had `runner_id: 0`, no steps/logs, and the annotation says recent account payments failed or the spending limit needs to be increased. That is an external CI-start/billing blocker, not a code/test failure.
+
+No new actionable follow-up item was created by this cycle; the next queued item already covers the optional #2 + #5 polish.
+
+Note: preflight also warned the installed `agent-doc` binary is stale relative to source; I did not rebuild it because this cycle was scoped to EFS pipeline work.
+<!-- agent:boundary:1590f0ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,8 +124,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Implement the recommended path for the Deal Pipeline horizontal width improvements.
+- ~~Implement the recommended path for the Deal Pipeline horizontal width improvements.~~
 - Add #2 + #5 polish for the Deal Pipeline horizontal width improvements
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

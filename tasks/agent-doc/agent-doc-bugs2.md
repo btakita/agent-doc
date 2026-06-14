@@ -79,8 +79,20 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 
 then `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`.
 
-This cycle is itself clean evidence for the `#qchurn` fix: a deferred clean-session head must not keep `queue_active=true` / re-dispatching when no actionable `do #id` or new user prompt remains.
-<!-- agent:boundary:2cb6baa3 -->
+This cycle is itself clean evidence for the `#qchurn` fix: a deferred clean-session head must not keep `queue_active=true` / re-dispatching when no actionable `do #id` or new user prompt remains
+
+### Re: #qchurn closing-sentence edit — opus-4-8
+
+The only change this cycle is a one-character content edit — the trailing period removed from the `#qchurn` sentence. `op_affectedness.turn_affected:false` + `plan.handoff:none` confirm no actionable directive: no `do #id`, no new prompt, no repo work. The 16 clean-session/operator-verify backlog heads were correctly skipped as agent-undrainable under live IPC.
+
+**Operator action flagged:** preflight reports the route-owned supervisor (pid 2524189) is running a **stale build** and is the source of the recurring File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). I am not racing it mid-session. To pick up the latest fixes, restart it:
+
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:73404d1b -->
 <!-- /agent:exchange -->
 
 ## Queue

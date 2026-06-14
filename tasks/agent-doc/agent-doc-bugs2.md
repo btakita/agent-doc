@@ -281,7 +281,26 @@ Fixed and deployed. Root cause was a **drainability deadlock** (`#cleandrainsup`
 **Verification.** `make check` green (0 FAILED); 3 new tests (`deferred_scoped_supervisor_drains_clean_session_under_live_ipc`, `head_requires_clean_session_maps_head_id_to_tag`, `clean_session_head_forces_context_reset_policy`). Built release + `cargo install` + `lib-install`; `audit-docs` clean; SKILL.md auto-loop section updated to document the hand-off. Plan: `tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md`.
 
 **Restart + drain.** Triggering an in-place `execve` `restart-supervisor --force` on this session's supervisor (pid 575771) so it supersedes onto the new binary at the turn boundary, preserving this pane. Once it's on the new build, its idle-watch will force-`/clear` and drain the `[clean-session]` heads one fresh agent per item — the 6 `[operator-verify]` items remain yours to drive.
-<!-- agent:boundary:0ae3d650 -->
+
+### Re: pin [#anw0verify] — opus-4-8
+
+`#anw0verify` is an `[operator-verify]` item — I can't agent-complete it. It needs a live recycle / restart-supervisor race plus ops.log inspection, which only you can drive.
+
+State:
+
+- The code it verifies (the `#anw0` redirect path) already LANDED — it's archived in `.done.md` as `#anw0` (agent-doc `1865976e`). Only the live proof remains.
+- Preflight flags two blockers that the verify explicitly depends on: the route-owned host supervisor (pid 575771) is running a STALE build, and `~/.cargo/bin` cdylib predates source commit `1f8c9f63`. `#anw0verify` requires installing the new binary first.
+- I'm deliberately NOT running `make install` / `cargo install` mid-session: a newer finalize client against the live stale supervisor causes drift (exit-75, dropped queue edits). Do the install + supervisor restart outside this session.
+
+To complete it:
+
+1. `cd src/agent-doc && cargo build --release && cargo install --path . && agent-doc lib-install`
+2. `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`
+3. Drive a recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new redirect path.
+4. Confirm ops.log shows `dispatch_stale_generation_redirect prior_generation=...`.
+
+Queue: no agent-drainable heads remain (`queue_drainable_head_count=0`; rest are operator-verify / clean-session). Not auto-looping.
+<!-- agent:boundary:2ba226e6 -->
 <!-- /agent:exchange -->
 
 ## Queue

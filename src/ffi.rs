@@ -80,6 +80,92 @@ static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
 /// Sync debounce generation counter — only the latest scheduled sync fires.
 static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Epoch-millis when the current [`SYNC_LOCKED`] holder acquired the guard (`0` = no
+/// holder). Lets a later acquire detect a guard held past the stale bound — a wedged or
+/// dead holder that never called `agent_doc_sync_unlock` (`#recyclerestart` Q2) — and
+/// supersede it instead of deferring forever with "another sync is already running".
+static SYNC_LOCK_ACQUIRED_AT_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Default stale bound for the cross-editor sync guard. Sized above the JetBrains
+/// plugin's `SYNC_PROCESS_TIMEOUT_MS` (30s) plus margin so a legitimately in-flight sync
+/// is never superseded — only a guard held past this bound (a wedged/dead holder) is.
+const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
+
+/// `#recyclerestart` Q2 — pure decision for acquiring the cross-editor sync guard, split
+/// out so the self-heal is unit-testable without real threads/clocks. A free guard is
+/// acquired; a guard held past `stale_bound_ms` by a known-age holder is superseded
+/// (the prior holder wedged and never released); an unknown-age (`acquired_at_ms == 0`)
+/// or still-fresh holder is deferred so a legitimately in-flight sync keeps the guard.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SyncLockDecision {
+    Acquire,
+    SupersedeStaleHolder { held_ms: u64 },
+    Defer,
+}
+
+pub(crate) fn sync_lock_acquire_decision(
+    currently_locked: bool,
+    acquired_at_ms: u64,
+    now_ms: u64,
+    stale_bound_ms: u64,
+) -> SyncLockDecision {
+    if !currently_locked {
+        return SyncLockDecision::Acquire;
+    }
+    let held_ms = now_ms.saturating_sub(acquired_at_ms);
+    if acquired_at_ms != 0 && held_ms >= stale_bound_ms {
+        SyncLockDecision::SupersedeStaleHolder { held_ms }
+    } else {
+        SyncLockDecision::Defer
+    }
+}
+
+fn sync_lock_now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn sync_try_lock_with_bound(stale_bound_ms: u64) -> i32 {
+    let now = sync_lock_now_epoch_ms();
+    // Fast path: take a free guard.
+    if SYNC_LOCKED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        SYNC_LOCK_ACQUIRED_AT_MS.store(now, Ordering::SeqCst);
+        return 1;
+    }
+    // Held: self-heal a guard wedged past the stale bound so it can never block every
+    // later sync (`#recyclerestart` Q2). The CLI keeps its own `.agent-doc/sync.lock`
+    // file-lock with stale-orphan reaping, so superseding here cannot double-run a sync.
+    let acquired_at = SYNC_LOCK_ACQUIRED_AT_MS.load(Ordering::SeqCst);
+    match sync_lock_acquire_decision(true, acquired_at, now, stale_bound_ms) {
+        SyncLockDecision::SupersedeStaleHolder { held_ms } => {
+            SYNC_LOCK_ACQUIRED_AT_MS.store(now, Ordering::SeqCst);
+            eprintln!(
+                "[sync] sync_guard_released reason=stale_holder_superseded held_ms={held_ms} bound_ms={stale_bound_ms}"
+            );
+            1
+        }
+        SyncLockDecision::Defer => 0,
+        // Raced free between the CAS and the load — take it if still free.
+        SyncLockDecision::Acquire => {
+            if SYNC_LOCKED
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                SYNC_LOCK_ACQUIRED_AT_MS.store(now, Ordering::SeqCst);
+                1
+            } else {
+                0
+            }
+        }
+    }
+}
+
 /// Result of [`agent_doc_resolve_project_path`].
 #[repr(C)]
 pub struct FfiProjectPath {
@@ -742,16 +828,37 @@ pub unsafe extern "C" fn agent_doc_is_editor_stable(
 ///
 /// This is a cross-editor shared lock — prevents concurrent syncs from IntelliJ
 /// and VS Code plugins simultaneously.
+///
+/// `#recyclerestart` Q2: the guard self-heals — a holder that wedges past
+/// [`DEFAULT_SYNC_LOCK_STALE_BOUND_MS`] (a sync thread blocked on in-pane recovery that
+/// never released) is superseded so a later `Sync Tmux Layout` can never be deferred
+/// forever with "another sync is already running". A legitimately in-flight sync (held
+/// under the bound) still defers as before. Use [`agent_doc_sync_try_lock_bounded`] to
+/// override the bound.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_sync_try_lock() -> i32 {
-    SYNC_LOCKED
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok() as i32
+    sync_try_lock_with_bound(DEFAULT_SYNC_LOCK_STALE_BOUND_MS)
+}
+
+/// Like [`agent_doc_sync_try_lock`] but with an explicit stale bound in milliseconds
+/// (`<= 0` falls back to [`DEFAULT_SYNC_LOCK_STALE_BOUND_MS`]). Lets a caller that knows
+/// its sync is fast use a tighter self-heal window.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_sync_try_lock_bounded(stale_bound_ms: i64) -> i32 {
+    let bound = if stale_bound_ms <= 0 {
+        DEFAULT_SYNC_LOCK_STALE_BOUND_MS
+    } else {
+        stale_bound_ms as u64
+    };
+    sync_try_lock_with_bound(bound)
 }
 
 /// Release the sync lock acquired by `agent_doc_sync_try_lock()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_sync_unlock() {
+    // Clear the holder timestamp before releasing so a racing acquirer that observes the
+    // free guard never reads a stale acquisition time.
+    SYNC_LOCK_ACQUIRED_AT_MS.store(0, Ordering::SeqCst);
     SYNC_LOCKED.store(false, Ordering::SeqCst);
 }
 
@@ -1651,6 +1758,68 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_lock_acquire_decision_self_heals_wedged_holder() {
+        use super::{SyncLockDecision, sync_lock_acquire_decision};
+        let bound = DEFAULT_SYNC_LOCK_STALE_BOUND_MS;
+        // Free guard → acquire.
+        assert_eq!(
+            sync_lock_acquire_decision(false, 0, 1_000, bound),
+            SyncLockDecision::Acquire
+        );
+        // Held by a legitimately in-flight sync (5s < 45s bound) → defer, do NOT supersede.
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 6_000, bound),
+            SyncLockDecision::Defer
+        );
+        // Held just under the bound → still defer (boundary).
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 1_000 + bound - 1, bound),
+            SyncLockDecision::Defer
+        );
+        // Held past the bound by a wedged/dead holder → supersede with the held duration.
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 1_000 + bound, bound),
+            SyncLockDecision::SupersedeStaleHolder { held_ms: bound }
+        );
+        // Locked but holder age unknown (0) → defer; never supersede an unknown-age holder.
+        assert_eq!(
+            sync_lock_acquire_decision(true, 0, 999_999, bound),
+            SyncLockDecision::Defer
+        );
+    }
+
+    #[test]
+    fn sync_try_lock_supersedes_a_guard_wedged_past_the_bound() {
+        // Acquire, then simulate a holder that wedged ~1 minute ago by back-dating the
+        // recorded acquisition time. A 45s-bound acquire must self-heal (supersede), and
+        // a fresh acquire afterward must defer (the new holder is in-flight).
+        assert_eq!(agent_doc_sync_try_lock(), 1, "free guard acquires");
+        SYNC_LOCK_ACQUIRED_AT_MS.store(
+            sync_lock_now_epoch_ms().saturating_sub(60_000),
+            Ordering::SeqCst,
+        );
+        assert_eq!(
+            agent_doc_sync_try_lock(),
+            1,
+            "a guard wedged past the bound is superseded, not deferred forever"
+        );
+        // The superseding acquire reset the timestamp to now, so a second contender defers.
+        assert_eq!(
+            agent_doc_sync_try_lock(),
+            0,
+            "a fresh in-flight holder still serializes later syncs"
+        );
+        agent_doc_sync_unlock();
+        assert_eq!(
+            SYNC_LOCK_ACQUIRED_AT_MS.load(Ordering::SeqCst),
+            0,
+            "unlock clears the holder timestamp"
+        );
+        assert_eq!(agent_doc_sync_try_lock(), 1, "guard is free again after unlock");
+        agent_doc_sync_unlock();
+    }
 
     fn parse_visual_tokens_json(doc: &str) -> Vec<serde_json::Value> {
         let c_doc = CString::new(doc).unwrap();

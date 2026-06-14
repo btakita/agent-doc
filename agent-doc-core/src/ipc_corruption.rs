@@ -193,7 +193,15 @@ pub fn summarize_findings(findings: &[IpcCorruptionFinding]) -> String {
         .map(|f| {
             let mut h = f.heading.clone();
             if h.len() > 80 {
-                h.truncate(80);
+                // Floor to the nearest char boundary so a multi-byte glyph
+                // (headings carry `—`/`→`/Unicode) straddling byte 80 cannot
+                // panic `String::truncate`. UTF-8-safe per the route/IPC
+                // diagnostic-trimming invariant.
+                let mut end = 80;
+                while end > 0 && !h.is_char_boundary(end) {
+                    end -= 1;
+                }
+                h.truncate(end);
             }
             format!(
                 "{}({}:{}->{})",
@@ -403,6 +411,28 @@ mod tests {
         assert!(s.contains("duplicated=1"), "{s}");
         assert!(s.contains("response_deleted(### Re: a:1->0)"), "{s}");
         assert!(s.contains("response_duplicated(### Re: b:1->3)"), "{s}");
+        assert!(!s.contains('\n'), "summary must be single-line: {s}");
+    }
+
+    #[test]
+    fn summarize_findings_truncates_multibyte_heading_without_panic() {
+        // Regression: a long heading whose multi-byte glyph (`—`, em dash, 3
+        // bytes) straddles byte 80 used to panic `String::truncate` with
+        // `assertion failed: self.is_char_boundary(new_len)` during the live
+        // IPC-drift corruption summary, aborting `finalize` recovery.
+        // "### Re: " (8 bytes) + 71*'x' (-> byte 79) + "—" (3 bytes, 79..82) so
+        // byte 80 lands inside the em dash, the worst-case truncation boundary.
+        let heading = format!("### Re: {}— opus-4-8", "x".repeat(71));
+        assert!(heading.len() > 80);
+        assert!(!heading.is_char_boundary(80));
+        let findings = vec![IpcCorruptionFinding {
+            kind: IpcCorruptionKind::ResponseDeleted,
+            heading,
+            prior_count: 1,
+            current_count: 0,
+        }];
+        let s = summarize_findings(&findings);
+        assert!(s.contains("deleted=1"), "{s}");
         assert!(!s.contains('\n'), "summary must be single-line: {s}");
     }
 }

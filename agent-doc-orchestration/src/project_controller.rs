@@ -4002,7 +4002,7 @@ agent:queue\n\
         assert_eq!(cycle_state, "preflight_started");
     }
     #[test]
-    fn controller_session_clear_accepts_closed_actor_generation() {
+    fn controller_session_recovery_commands_accept_closed_actor_generation() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/closed-clear.md");
@@ -4075,8 +4075,17 @@ agent:queue\n\
         .unwrap();
         let envelope: ControllerEnvelope<DispatchAuthorization> =
             serde_json::from_str(&response).unwrap();
-        assert!(!envelope.ok);
-        assert!(envelope.error.unwrap().contains("generation 1 is closed"));
+        // #supkill-bg blue/green: a `session_restart` against a `Closed` actor now
+        // SUPERSEDES it instead of failing closed with `generation 1 is closed`.
+        // Restart's purpose is to replace the dead generation, so a closed actor is
+        // exactly when it must be accepted (this is the operator's
+        // `session restart-supervisor` "generation N is closed" wall).
+        assert!(
+            envelope.ok,
+            "session_restart should supersede a closed actor (blue/green #supkill-bg): {:?}",
+            envelope.error
+        );
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_closed");
     }
     #[test]
     fn controller_attach_pane_creates_manual_attach_generation() {

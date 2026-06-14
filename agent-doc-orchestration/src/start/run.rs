@@ -698,6 +698,7 @@ pub fn run_with_reap_policy(
         shared.running.store(true, Ordering::Relaxed);
         shared.restart_count.store(restart_count, Ordering::Relaxed);
         shared.restart_requested.store(false, Ordering::Relaxed);
+        shared.restart_reexec.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
         shared.ctrl_c_forwarded.store(false, Ordering::Relaxed);
@@ -823,9 +824,15 @@ pub fn run_with_reap_policy(
             // host path is killed via the IPC handler's `libc::kill` by PID).
             let mut kill_requested = false;
             let exit_code = loop {
+                // `#supkill-bg` — a stale restart routed to the idle-watch in-place
+                // reexec (`restart_reexec`) must NOT have its child killed here: the
+                // reexec preserves the live child across `execve`, so the host loop
+                // defers to the idle watch and only kills for stop / fresh-binary
+                // restart / route-complete.
                 if !kill_requested
                     && (shared.stop_requested.load(Ordering::Relaxed)
-                        || shared.restart_requested.load(Ordering::Relaxed)
+                        || (shared.restart_requested.load(Ordering::Relaxed)
+                            && !shared.restart_reexec.load(Ordering::Relaxed))
                         || route_owned_completion.load(Ordering::Relaxed))
                 {
                     kill_requested = true;

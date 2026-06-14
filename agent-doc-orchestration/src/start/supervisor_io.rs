@@ -144,7 +144,19 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             );
             *shared.restart_mode.lock().unwrap() = mode;
             shared.restart_requested.store(true, Ordering::Relaxed);
-            shared.kill_child();
+            // `#supkill-bg` — blue/green drain-and-supersede. When the supervisor's own
+            // binary is stale (the `restart-supervisor … generation closed` / `#fcc0`
+            // case), do NOT kill the child here: route the restart through the
+            // idle-watch in-place `execve` reexec so it drains the in-flight turn, then
+            // hot-reloads onto the fresh binary preserving the live child + pane. The
+            // in-process host loop honors this flag and defers its restart-kill. A
+            // fresh binary has nothing to upgrade, so it keeps the immediate
+            // kill-child → relaunch path.
+            let reexec = shared.binary_stale.load(Ordering::Relaxed);
+            shared.restart_reexec.store(reexec, Ordering::Relaxed);
+            if !reexec {
+                shared.kill_child();
+            }
             IpcResponse::ok_empty()
         }
         IpcMethod::Stop { graceful: _ } => {

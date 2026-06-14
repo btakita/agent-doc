@@ -310,6 +310,93 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let supervisor_stale = crate::project_controller::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),
                 );
+                // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
+                // handler can decide drain-reexec vs immediate relaunch without
+                // recomputing it.
+                shared
+                    .binary_stale
+                    .store(supervisor_stale, Ordering::Relaxed);
+                // `#supkill-bg` blue/green drain-and-supersede: an explicit
+                // `restart-supervisor` routed to the in-place reexec path
+                // (`restart_reexec`, stamped stale by the IPC handler) drains its
+                // in-flight turn, then hot-reloads onto the fresh binary IN PLACE at
+                // the turn boundary — the default healthy restart that fixes the
+                // `generation closed` / stale-supervisor `#fcc0` case without dropping
+                // the live turn. Checked before the opt-in auto-recycle decision so a
+                // deliberate operator restart always supersedes (no env opt-in needed).
+                let restart_action = supervisor_restart_action(
+                    shared.restart_requested.load(Ordering::Relaxed),
+                    shared.restart_reexec.load(Ordering::Relaxed),
+                    turn_boundary,
+                );
+                if !reexec_recycle_disabled
+                    && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
+                {
+                    #[cfg(unix)]
+                    {
+                        let candidate_notes = supervisor_reexec_candidates()
+                            .iter()
+                            .map(|(path, note)| format!("{note}={}", path.display()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_restart_drain_reexec via=execve_preserve_child boundary=turn pane={} child_pid={} master_fd={} current_exe={:?} candidates=[{candidate_notes}]",
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                shared.child_pid.load(Ordering::Relaxed),
+                                shared.master_fd.load(Ordering::Relaxed),
+                                std::env::current_exe().ok(),
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_restart_drain_reexec file={} pane={} action=drain_and_supersede caller=operator",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor restart: draining complete, hot-reloading onto freshly-installed agent-doc binary; preserving the live agent child via execve"
+                        );
+                        match supervisor_perform_reexec(&shared) {
+                            Ok(never) => match never {},
+                            Err(err) => {
+                                // A failed execve must NOT strand the restart. Clear the
+                                // reexec intent so the in-process host loop's restart-kill
+                                // condition fires and relaunches the child on the current
+                                // binary (the restart still happens, pane survives), and
+                                // disable further reexec attempts this lifetime.
+                                shared.restart_reexec.store(false, Ordering::Relaxed);
+                                reexec_recycle_disabled = true;
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "supervisor_restart_reexec_failed fallback=relaunch_current_binary error={err}"
+                                    ),
+                                );
+                                crate::ops_log::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_restart_reexec_failed file={} pane={} fallback=relaunch_current_binary error={:?}",
+                                        path.display(),
+                                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                        err.to_string(),
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] supervisor restart execve hot-reload failed ({err}); relaunching on the current binary"
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // No execve on non-unix: fall back to the normal relaunch.
+                        shared.restart_reexec.store(false, Ordering::Relaxed);
+                    }
+                }
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,

@@ -262,6 +262,59 @@ pub fn supervisor_recycle_action(
     }
 }
 
+/// `#supkill-bg` — what an explicit operator `restart-supervisor` (IPC `Restart`)
+/// should do at the supervisor's next idle tick, framed as blue/green
+/// drain-and-supersede. Pure so the policy is unit-testable independent of the live
+/// pty/execve machinery.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SupervisorRestartAction {
+    /// No restart pending — do nothing.
+    None,
+    /// A restart is pending but a turn is still in flight: WAIT for the in-flight
+    /// turn to finish before acting (`#supkill-bg` part 1 — the old supervisor
+    /// drains its last turn instead of being torn down mid-turn). The kill/relaunch
+    /// is suppressed until the boundary.
+    AwaitDrain,
+    /// At a turn boundary with a stale binary: hot-reload in place via `execve`,
+    /// preserving the live harness child + pane (`#supkill-bg` part 2 — in-place
+    /// re-exec drain is the default healthy restart for the stale-build/`#fcc0`
+    /// case). No dropped turn.
+    ReexecInPlace,
+    /// At a turn boundary with a fresh binary: nothing to upgrade, so the normal
+    /// kill-child → relaunch path serves the restart (same binary, same pane).
+    RelaunchChild,
+}
+
+/// `#supkill-bg` — pure drain-and-supersede restart policy for the `start`
+/// supervisor. An explicit `restart-supervisor` is a deliberate operator request, so
+/// (unlike the opt-in [`supervisor_recycle_action`]) it always acts — but it still
+/// **drains** the in-flight turn first (`AwaitDrain` until `turn_boundary`) so a live
+/// turn is never dropped. At the boundary it prefers in-place `execve` re-exec when
+/// the binary is stale ([`ReexecInPlace`], the zero-downtime binary upgrade) and
+/// otherwise falls back to a normal child relaunch ([`RelaunchChild`]).
+///
+/// `reexec_intent` is set true when the supervisor binary is stale at request time
+/// (the IPC handler stamps it from the idle-watch's live staleness probe). A wedged
+/// supervisor that never reaches a `turn_boundary` is reclaimed by the external PCP
+/// force-kill backstop ([`crate::supervisor_selfkill`], `#supkill-b`), not here.
+pub fn supervisor_restart_action(
+    restart_requested: bool,
+    reexec_intent: bool,
+    turn_boundary: bool,
+) -> SupervisorRestartAction {
+    if !restart_requested {
+        return SupervisorRestartAction::None;
+    }
+    if !turn_boundary {
+        return SupervisorRestartAction::AwaitDrain;
+    }
+    if reexec_intent {
+        SupervisorRestartAction::ReexecInPlace
+    } else {
+        SupervisorRestartAction::RelaunchChild
+    }
+}
+
 pub(crate) const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub(crate) const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
 
@@ -339,6 +392,25 @@ mod tests {
             supervisor_recycle_action(true, true, true, false),
             RecycleDebounced
         );
+    }
+
+    #[test]
+    fn supervisor_restart_action_drain_and_supersede_policy() {
+        use SupervisorRestartAction::*;
+        // `#supkill-bg` drain-and-supersede truth table.
+        // (restart_requested, reexec_intent, turn_boundary)
+        // No request → never act, regardless of staleness or boundary.
+        assert_eq!(supervisor_restart_action(false, true, true), None);
+        assert_eq!(supervisor_restart_action(false, false, false), None);
+        // Part 1 — a pending restart mid-turn DRAINS: wait for the boundary instead
+        // of tearing down the live turn, whether or not the binary is stale.
+        assert_eq!(supervisor_restart_action(true, true, false), AwaitDrain);
+        assert_eq!(supervisor_restart_action(true, false, false), AwaitDrain);
+        // Part 2 — at the boundary, a stale binary hot-reloads in place via execve
+        // (the default healthy restart; the live child + pane are preserved).
+        assert_eq!(supervisor_restart_action(true, true, true), ReexecInPlace);
+        // At the boundary with a fresh binary, the normal child relaunch serves it.
+        assert_eq!(supervisor_restart_action(true, false, true), RelaunchChild);
     }
 
     #[test]

@@ -446,6 +446,9 @@ impl SimWorld {
             SimCommand::SetTriggerAlreadyPending(pending) => {
                 self.set_trigger_already_pending(pending);
             }
+            SimCommand::RequestSupervisorRestart => {
+                self.recycle_clear.restart_requested = true;
+            }
         }
         Ok(())
     }
@@ -572,8 +575,9 @@ impl SimWorld {
     pub(crate) fn supervisor_idle_queue_tick(&mut self) -> Result<()> {
         use agent_doc_orchestration::start::decisions::{
             CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueDrainDecision, SupervisorRecycleAction,
-            clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle,
-            drain_dispatch_dedup_skip, idle_queue_drain_decision, supervisor_recycle_action,
+            SupervisorRestartAction, clear_cooldown_resume_ready,
+            drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
+            idle_queue_drain_decision, supervisor_recycle_action, supervisor_restart_action,
         };
 
         // The supervisor's idle signal: a dispatch-ready harness prompt is visible
@@ -617,11 +621,50 @@ impl SimWorld {
             return Ok(());
         }
 
+        let turn_boundary = prompt_visible && !turn_active;
+        let head_pending = has_active_head;
+
+        // (2b) `#supkill-bg` blue/green drain-and-supersede restart. An explicit
+        // `restart-supervisor` (IPC `Restart`) drives the production
+        // `supervisor_restart_action` policy BEFORE the opt-in auto-recycle path: it
+        // DRAINS while a turn is in flight (`AwaitDrain`, restart stays pending) and
+        // only at the turn boundary re-execs in place (stale binary → `ReexecInPlace`,
+        // the default healthy restart, no dropped turn) or relaunches (fresh binary →
+        // `RelaunchChild`). `reexec_intent` is the live staleness probe, exactly as the
+        // IPC handler stamps `restart_reexec` from `binary_stale`.
+        let restart_action = supervisor_restart_action(
+            self.recycle_clear.restart_requested,
+            self.recycle_clear.binary_stale,
+            turn_boundary,
+        );
+        match restart_action {
+            SupervisorRestartAction::ReexecInPlace if !self.recycle_clear.recycle_disabled => {
+                self.recycle_clear.restart_requested = false;
+                if self.recycle_clear.reexec_will_fail {
+                    // A failed `execve` clears the reexec intent and falls back to a
+                    // child relaunch on the current binary (the restart still happens,
+                    // pane survives); the binary stays stale.
+                    self.recycle_clear.recycle_disabled = true;
+                    self.coverage.supervisor_restart_relaunches += 1;
+                } else {
+                    self.recycle_supervisor_in_place();
+                    self.recycle_clear.binary_stale = false;
+                    self.coverage.supervisor_restart_drain_reexecs += 1;
+                }
+            }
+            SupervisorRestartAction::RelaunchChild => {
+                // Fresh binary: nothing to upgrade, the normal child relaunch serves it.
+                self.recycle_clear.restart_requested = false;
+                self.coverage.supervisor_restart_relaunches += 1;
+            }
+            // `AwaitDrain` keeps the request pending (drain the in-flight turn);
+            // `None` / a disabled reexec are no-ops.
+            _ => {}
+        }
+
         // (3) Recycle policy. The operator `admin recycle` mark forces a recycle at
         // the next idle boundary regardless of staleness; the auto path uses the
         // production `supervisor_recycle_action` predicate (stale binary + opt-in).
-        let turn_boundary = prompt_visible && !turn_active;
-        let head_pending = has_active_head;
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,

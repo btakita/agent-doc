@@ -197,6 +197,11 @@ enum SimCommand {
     /// `#qflood2`: set whether the routed trigger is already pending in the
     /// modeled composer (the live pane-capture dedup signal).
     SetTriggerAlreadyPending(bool),
+    /// `#supkill-bg`: an explicit operator `restart-supervisor` (IPC `Restart`). The
+    /// next idle tick drives the `supervisor_restart_action` drain-and-supersede
+    /// policy: drain the in-flight turn, then in-place `execve` reexec (stale) or
+    /// relaunch (fresh) at the turn boundary.
+    RequestSupervisorRestart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +511,11 @@ struct RecycleClearModel {
     /// `#qflood2`: the routed trigger is already pending/visible in the modeled
     /// composer, so a re-send would stack a duplicate (`recent_lines_contain_trigger`).
     trigger_already_pending: bool,
+    /// `#supkill-bg`: an explicit `restart-supervisor` (IPC `Restart`) is pending. The
+    /// idle tick drives the production `supervisor_restart_action` drain-and-supersede
+    /// policy — it DRAINS while a turn is in flight (`turn_active`) and only at the
+    /// turn boundary re-execs in place (stale binary) or relaunches (fresh binary).
+    restart_requested: bool,
 }
 
 #[derive(Debug, Default)]
@@ -582,6 +592,13 @@ struct Coverage {
     /// `#suprecyclestall`: a self-`execve` recycle failed and the watch fell back to
     /// continuing on the current binary (never `process::exit`, so the pane survives).
     supervisor_recycle_failures: usize,
+    /// `#supkill-bg`: an explicit `restart-supervisor` drained its in-flight turn,
+    /// then hot-reloaded in place via `execve` at the turn boundary (stale binary,
+    /// `supervisor_restart_action` → `ReexecInPlace`), preserving the live pane.
+    supervisor_restart_drain_reexecs: usize,
+    /// `#supkill-bg`: an explicit `restart-supervisor` on a fresh binary relaunched
+    /// the child at the turn boundary (`supervisor_restart_action` → `RelaunchChild`).
+    supervisor_restart_relaunches: usize,
     /// A go-mode queue head was dispatched by the idle-queue drain decision after
     /// the recycle + clear settled.
     go_drain_dispatches: usize,
@@ -2032,6 +2049,138 @@ fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
     // A stuck head is not re-fired every tick (drain dedup).
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
+    // `#supkill-bg` (#anw0 parts 1+2): an explicit `restart-supervisor` on a stale
+    // supervisor is a blue/green DRAIN-and-supersede, driven by the production
+    // `supervisor_restart_action` policy. While a turn is in flight the restart DRAINS
+    // (no teardown mid-turn); only at the turn boundary does it hot-reload in place via
+    // `execve`, preserving the live pane and advancing the generation with NO dropped
+    // turn. This is the default healthy restart that fixes the stale-supervisor
+    // `generation closed` / `#fcc0` case the kill-first path could not.
+    let mut world = SimWorld::new(4_242);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // The supervisor's launch binary is stale (a later `cargo install`). The operator
+    // runs `restart-supervisor` WHILE a turn is in flight (the pane is Busy).
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+
+    // Mid-turn idle ticks must DRAIN, not tear down: `supervisor_restart_action`
+    // returns `AwaitDrain` while `turn_active`, so the restart stays pending and the
+    // live turn (generation/pane) is untouched. No env opt-in is needed — an explicit
+    // restart always supersedes.
+    for tick in 1..=2 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.supervisor_restart_drain_reexecs, 0,
+            "restart must DRAIN mid-turn (tick {tick}), never reexec into a live turn"
+        );
+        assert!(
+            world.recycle_clear.restart_requested,
+            "the restart stays pending while the turn drains (tick {tick})"
+        );
+        assert_eq!(world.route.durable.generation, gen_before);
+        assert!(world.recycle_clear.binary_stale, "binary still stale mid-turn");
+    }
+
+    // The in-flight turn finishes (drains) → the pane returns to a dispatch-ready
+    // prompt. The NEXT idle tick is the turn boundary: the restart hot-reloads in place
+    // via `execve`, preserving the pane and advancing the generation.
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 1,
+        "at the drained boundary the stale restart re-execs in place (default healthy restart)"
+    );
+    assert!(
+        !world.recycle_clear.restart_requested,
+        "the restart was served at the boundary"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "the in-place reexec advances the generation (supersede)"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "the reexec preserves the live pane via execve (no dropped turn, no cold rebind)"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the reexec promoted the freshly-installed binary"
+    );
+
+    // Idempotent: with no pending restart, later idle ticks do not re-fire.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
+}
+
+#[test]
+fn restart_supervisor_on_fresh_binary_relaunches_not_reexecs() {
+    // `#supkill-bg`: an explicit `restart-supervisor` on a FRESH binary has nothing to
+    // upgrade, so `supervisor_restart_action` returns `RelaunchChild` at the boundary —
+    // the normal kill-child → relaunch path, not an in-place reexec.
+    let mut world = SimWorld::new(909);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+
+    // Fresh binary (no MarkSupervisorBinaryStale), restart requested at an idle prompt.
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "a fresh binary has nothing to hot-reload — no in-place reexec"
+    );
+    assert_eq!(
+        world.coverage.supervisor_restart_relaunches, 1,
+        "a fresh-binary restart relaunches the child"
+    );
+    assert!(!world.recycle_clear.restart_requested);
+    assert_eq!(
+        world.route.durable.generation, gen_before,
+        "a child relaunch does not advance the supervisor generation in place"
+    );
+}
+
+#[test]
+fn restart_supervisor_reexec_failure_falls_back_to_relaunch() {
+    // `#supkill-bg` / `#suprecyclestall`: if the in-place `execve` fails, the restart
+    // must NOT strand the session — it clears the reexec intent and falls back to a
+    // child relaunch on the current binary (pane survives, binary stays stale until a
+    // clean restart succeeds).
+    let mut world = SimWorld::new(1_337);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::MarkReexecWillFail).unwrap();
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "a failed execve does not count as an in-place reexec"
+    );
+    assert_eq!(
+        world.coverage.supervisor_restart_relaunches, 1,
+        "the failed reexec falls back to a current-binary relaunch"
+    );
+    assert!(
+        world.recycle_clear.binary_stale,
+        "the failed reexec leaves the binary stale (operator restarts cleanly to upgrade)"
+    );
+    assert_eq!(world.route.durable.generation, gen_before);
 }
 
 #[test]

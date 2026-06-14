@@ -343,8 +343,9 @@ mod idle_watch;
 pub(crate) use decisions::{
     CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextResetDecision, IdleQueueDrainDecision,
     REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, SupervisorRecycleAction,
-    clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
-    idle_queue_context_reset_decision, idle_queue_drain_decision, supervisor_recycle_action,
+    SupervisorRestartAction, clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle,
+    drain_dispatch_dedup_skip, idle_queue_context_reset_decision, idle_queue_drain_decision,
+    supervisor_recycle_action, supervisor_restart_action,
 };
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
@@ -2247,6 +2248,16 @@ pub(crate) struct SupervisorShared {
     master_fd: AtomicI32,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
+    /// `#supkill-bg` — flag: the pending restart should be served by an in-place
+    /// `execve` re-exec at the next turn boundary (drain-and-supersede onto the fresh
+    /// binary), NOT by the immediate kill-child → relaunch path. Stamped by the IPC
+    /// `Restart` handler from `binary_stale` so the idle-watch reexec branch owns the
+    /// upgrade and the in-process host loop defers its restart-kill.
+    restart_reexec: AtomicBool,
+    /// `#supkill-bg` — the idle-watch's latest staleness probe for this supervisor's
+    /// launch binary (`process_binary_is_stale`), refreshed each idle tick so the IPC
+    /// `Restart` handler can decide reexec-vs-relaunch without recomputing it.
+    binary_stale: AtomicBool,
     /// Flag: IPC requested a stop.
     stop_requested: AtomicBool,
     /// Restart mode requested via IPC ("fresh" or "continue").
@@ -2305,6 +2316,8 @@ impl SupervisorShared {
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            binary_stale: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),

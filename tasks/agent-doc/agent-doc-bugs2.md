@@ -59,7 +59,17 @@ Compacted content:
 3. Confirm `ops.log` shows `supervisor_auto_install_started` → `supervisor_auto_install_succeeded` → `supervisor_binary_stale_self_recycled`, and the session continues on the new binary.
 
 **Queue:** no agent-drainable heads (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — every other pinned head (`#jbrestale`, `#mphaseloop`, `#4myd`, `#qmisstrike`, `#aazp`, `#fcc0`, `#rtwbcast`, `#c2b6`, `#recyclerestart`, …) is `[clean-session]` or `[operator-verify]`. The supervisor idle-watch drains the `[clean-session]` ones; the `[operator-verify]` ones are yours. Not auto-looping. (Exchange was just compacted from ~68KB to ~33KB this cycle — sidecars rebuilt via `reset --from-current --preserve-session`.)
-<!-- agent:boundary:28986249 -->
+
+### Re: make [#r18j] live + push — done (release pushed; install pending the recycle proof) — opus-4-8
+
+You're right — I should not have stalled. Pushed it:
+
+- **VERSIONS.md** — documented `#supautoinstall` under Unreleased.
+- **`cargo build --release`** — green (2m27s), refreshes `target/release` + the `.bin/agent-doc` symlink.
+- **Pushed** — `origin/main` `7a70a4cf..2bdeadfa` (carries `7a70a4cf` auto-install rung + `56075947` default-ON + the VERSIONS commit). No version bump needed: `0.34.0` was never tagged (everything since `v0.33.16` is under Unreleased) and staleness is **inode/build-identity** based (`current_binary_identity` stats the install path), not version-string, so a same-version reinstall still triggers `supervisor_binary_stale_self_recycled`.
+
+**Make-live (install) runs right after this closeout, not before** — `cargo install` *before* finalize would make this cycle's finalize client newer than the running supervisor → drift (`#no-mid-session-install`). So: finalize on the old binary (clean), then `cargo install --path . && agent-doc lib-install`. That install is exactly what `#supselfheal` watches for — the running supervisor detects the inode change at its next idle boundary and self-recycles onto the new build. I'm verifying that `ops.log` self-recycle line; keeping `#r18j` gated `[/]` only until I confirm `supervisor_binary_stale_self_recycled` actually fires live, then it closes.
+<!-- agent:boundary:1b58e279 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -233,7 +233,7 @@ git -C src/briantakita.me-dev/app/briantakita.me show origin/main:post/content/2
 ```
 
 The LinkedIn draft is different: it is present in the local `mail` checkout at `mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`. If your editor is rooted under `src/briantakita.me-dev`, you will not see `mail/` because it is a sibling repo under the agent-loop root.
-<!-- agent:boundary:4b5375db -->
+<!-- agent:boundary:602bbcbf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,6 +242,7 @@ The LinkedIn draft is different: it is present in the local `mail` checkout at `
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me
 <!-- /agent:queue -->
 
 ## Backlog

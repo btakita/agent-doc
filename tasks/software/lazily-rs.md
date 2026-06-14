@@ -64,7 +64,28 @@ Went through all 5 gated review items against the actual `src/lazily-rs` tree (H
 - **#57by (`#lzasyncshuttle`)** — decided NO-GO/defer per #shuttleeval; the trigger to revisit ("async graph grows more concurrency-critical paths") isn't met, so there's no action — left as the gated record of that decision.
 
 Backlog is now ordered **#lzwebrtcwire** (forward progress, unblocked) → **#lzpub011prep** (release prep, ahead of the operator token step). Top of backlog: **#lzwebrtcwire**.
-<!-- agent:boundary:f6aba1a5 -->
+
+### Re: do [#lzwebrtcwire] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#lzwebrtcwire]
+
+
+Done. `SignalingClient` now drives a full `Str0mNet` handshake, committed in the `lazily-rs` submodule as `5ce3eed`.
+
+**What landed**
+- **`src/webrtc_signaling.rs`** (new) — the missing wire. Two async drivers own the handshake:
+  - `offer_to_peer(client, peer, bind, timeout)` — `Str0mNet::offer` → send SDP `offer` + `local_candidate()` over signaling → pump `answer`→`accept_answer`, `ice`→`add_remote_candidate` until the channel opens.
+  - `answer_next_offer(client, bind, timeout)` — wait for the `offer` frame → `Str0mNet::answer` → return answer + local candidate → apply any ICE that raced ahead of the offer → pump until open.
+  - Both loops re-check `is_open()` on a 25 ms poll tick as well as per frame, since the channel opens on the backend driver thread, off the signaling path. `WebrtcSignalingError` boxes the two transport errors to stay under `clippy::result_large_err`.
+- **`tests/webrtc_signaling.rs`** (new) — an in-process #yxjw-protocol loopback relay (roster + `from`-stamped routing) brokers two real `SignalingClient` WebSocket peers on `127.0.0.1`; the negotiated channel carries a permission-filtered `Snapshot` (node 2 filtered out for the reader), proving the str0m UDP/DTLS/SCTP transport is live end-to-end after signaling — driven entirely THROUGH `SignalingClient` (`signaling_client.rs` had zero `Str0mNet` refs before this).
+- Wired `lib.rs` exports (`offer_to_peer`, `answer_next_offer`, `WebrtcSignalingError`), a `test-webrtc-signaling` make target (now in `make check`), and a SPEC.md section.
+
+**Verification** — `make check` green (full suite incl. loom + benchmarks, exit 0), targeted `cargo test --features "signaling-client webrtc-str0m" --test webrtc_signaling` passes, `fmt`/`clippy --all-features -D warnings` clean. Latest CI run is green.
+
+This is the agent-doable slice of #h6qb. The only remaining slice is the live two-host / NAT run through the deployed #yxjw Worker (#lzwebrtcnet-e2e), which stays operator-drive.
+<!-- agent:boundary:1a05c1b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,14 +94,13 @@ Backlog is now ordered **#lzwebrtcwire** (forward progress, unblocked) → **#lz
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#lzwebrtcwire]
+- ~~do [#lzwebrtcwire]~~
 - do [#lzpub011prep]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwebrtcwire] #lzwebrtcwire=Wire SignalingClient offer/answer/ICE <-> Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} (signaling_client.rs has ZERO Str0mNet refs today) + add a localhost two-endpoint integration test that drives the full handshake THROUGH SignalingClient over a loopback signaling channel. This is the agent-doable slice of #h6qb; leaves only the live two-host/NAT run via the deployed #yxjw Worker as operator-drive.
 - [ ] [#lzpub011prep] #lzpub011prep=Resolve v0.11.0 release-tag drift before the operator publish (#12b1): lazily-rs HEAD 64c7f3f (#lzwebrtcnet networked str0m DataChannel backend) is ONE commit AHEAD of the unpublished tag v0.11.0 @ 03582f5. Decide per the unpublished-tag convention — move v0.11.0 -> HEAD, or bump to 0.12.0 if the networked backend warrants a minor. Then run `cargo publish --dry-run --no-verify` to confirm publish-readiness and pre-stage the gh release notes so the operator token rotation is a one-shot.
 <!-- /agent:backlog -->
 

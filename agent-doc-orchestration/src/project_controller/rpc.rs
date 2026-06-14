@@ -1229,21 +1229,44 @@ pub(crate) fn source_newer_than_installed_binary(
     newest_source_secs > installed_binary_secs
 }
 
-/// `#supautoinstall` — pure precedence for the supervisor auto-install opt-in. Env-only
-/// for this rung (heavier than recycle, so a deliberate single switch): truthy
-/// (`1`/`true`/`yes`/`on`) enables, anything else (including unset) is OFF. Pure so the
-/// resolution is unit-testable.
-pub(crate) fn resolve_supervisor_auto_install(env: Option<&str>) -> bool {
-    matches!(
-        env.map(|raw| raw.trim().to_ascii_lowercase()).as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
+/// `#supautoinstall` — pure precedence for the supervisor auto-install opt-in, mirroring
+/// [`resolve_supervisor_auto_recycle`]. The env var `AGENT_DOC_SUPERVISOR_AUTO_INSTALL`
+/// is an explicit operator override: truthy (`1`/`true`/`yes`/`on`) force-enables, falsey
+/// (`0`/`false`/`no`/`off`) force-disables. When it is unset or unrecognized, a per-document
+/// frontmatter opt-in/opt-out (`agent_doc_supervisor_auto_install`) decides; absent there,
+/// the project-config opt-in (`agent_doc_supervisor_auto_install` in `.agent-doc/config.toml`)
+/// decides; absent everywhere, the default is ON. This is safe to default ON because the
+/// auto-install ONLY fires for a dogfooding session (`dogfood_agent_doc_crate_root` resolves
+/// a crate root) — an ordinary user's document never triggers a build. Pure so the precedence
+/// is unit-testable.
+pub(crate) fn resolve_supervisor_auto_install(
+    env: Option<&str>,
+    frontmatter: Option<bool>,
+    project: Option<bool>,
+) -> bool {
+    if let Some(raw) = env {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => return true,
+            "0" | "false" | "no" | "off" => return false,
+            _ => {}
+        }
+    }
+    frontmatter.or(project).unwrap_or(true)
 }
 
-/// `#supautoinstall` — is supervisor auto-install enabled? Reads the env override and
-/// resolves via [`resolve_supervisor_auto_install`]. Default OFF.
-pub(crate) fn supervisor_auto_install_enabled() -> bool {
-    resolve_supervisor_auto_install(std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok().as_deref())
+/// `#supautoinstall` — is supervisor auto-install enabled for the supervisor hosting `doc`?
+/// Reads the env override, the document's frontmatter, and its project config, then resolves
+/// via [`resolve_supervisor_auto_install`]. Default ON; opt out with a falsey
+/// env/frontmatter/project knob. (Never fires for a non-dogfooding document regardless.)
+pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
+    let env = std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok();
+    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
+        crate::frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm.supervisor_auto_install)
+    });
+    let project = crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
+    resolve_supervisor_auto_install(env.as_deref(), frontmatter, project)
 }
 
 /// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
@@ -4825,17 +4848,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_supervisor_auto_install_default_off() {
-        // `#supautoinstall`: env-only opt-in, default OFF. Truthy enables; anything else
-        // (including unset / unrecognized) stays off.
-        assert!(resolve_supervisor_auto_install(Some("1")));
-        assert!(resolve_supervisor_auto_install(Some("true")));
-        assert!(resolve_supervisor_auto_install(Some(" ON ")));
-        assert!(resolve_supervisor_auto_install(Some("yes")));
-        assert!(!resolve_supervisor_auto_install(Some("0")));
-        assert!(!resolve_supervisor_auto_install(Some("false")));
-        assert!(!resolve_supervisor_auto_install(Some("maybe")));
-        assert!(!resolve_supervisor_auto_install(None));
+    fn resolve_supervisor_auto_install_default_on() {
+        // `#supautoinstall`: default ON (mirrors recycle); env > frontmatter > project >
+        // built-in ON. Safe to default ON because the build only fires for a dogfooding
+        // session (crate-root resolves).
+        // Env override wins both ways, regardless of frontmatter/project.
+        assert!(resolve_supervisor_auto_install(Some("1"), Some(false), Some(false)));
+        assert!(resolve_supervisor_auto_install(Some(" ON "), None, None));
+        assert!(!resolve_supervisor_auto_install(Some("0"), Some(true), Some(true)));
+        assert!(!resolve_supervisor_auto_install(Some("off"), None, None));
+        // Unrecognized env falls through to frontmatter, then project.
+        assert!(!resolve_supervisor_auto_install(Some("maybe"), Some(false), None));
+        assert!(resolve_supervisor_auto_install(None, Some(true), Some(false)));
+        assert!(!resolve_supervisor_auto_install(None, None, Some(false)));
+        // Absent everywhere → built-in default ON.
+        assert!(resolve_supervisor_auto_install(None, None, None));
     }
 
     #[test]

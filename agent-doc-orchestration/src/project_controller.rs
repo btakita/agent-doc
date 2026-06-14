@@ -91,10 +91,11 @@ const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
 /// `#ctlrecycle` recycle path then hot-reloads onto it. This replaces the manual
 /// `runbooks/dogfood-supervisor-refresh.md` and root-fixes the "don't `cargo install`
 /// mid-session against a live supervisor" drift (`#no-mid-session-install`): the build
-/// runs in the supervisor at idle, never in the finalize client. Default OFF — building
-/// the binary is heavy and only applies when editing agent-doc's own source, so it stays a
-/// deliberate opt-in until live-validated. When off, a dogfood source-ahead-of-binary state
-/// only logs `supervisor_source_newer_detected`.
+/// runs in the supervisor at idle, never in the finalize client. Default ON — safe because
+/// the build only fires for a DOGFOODING session (an agent-doc session editing agent-doc's
+/// own source); an ordinary user's document never triggers it. Opt out with a falsey
+/// env/frontmatter/project knob; when off, a dogfood source-ahead-of-binary state only logs
+/// `supervisor_source_newer_detected`.
 const SUPERVISOR_AUTO_INSTALL_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_INSTALL";
 
 #[derive(Clone, Debug)]

@@ -536,6 +536,22 @@ pub struct Frontmatter {
         rename = "agent_doc_supervisor_auto_recycle"
     )]
     pub supervisor_auto_recycle: Option<bool>,
+    /// Explicit per-document opt-in/opt-out for supervisor auto-install
+    /// (`#supautoinstall`). When a DOGFOODING supervisor (an agent-doc session
+    /// editing agent-doc's own source) finds the source newer than the installed
+    /// binary at an idle boundary, `true` lets it `cargo build --release` +
+    /// `cargo install` + `agent-doc lib-install` so the `#ctlrecycle` recycle then
+    /// hot-reloads onto it; `false` force-disables that build so it only logs
+    /// `supervisor_source_newer_detected`. Resolution: env
+    /// `AGENT_DOC_SUPERVISOR_AUTO_INSTALL`, then this frontmatter value, then the
+    /// project config `agent_doc_supervisor_auto_install`, then the built-in
+    /// default of ON. Never fires for a non-dogfooding document.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_supervisor_auto_install"
+    )]
+    pub supervisor_auto_install: Option<bool>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -1915,6 +1931,7 @@ mod tests {
             gate_autoverify: None,
             clear_threshold: None,
             supervisor_auto_recycle: None,
+            supervisor_auto_install: None,
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,

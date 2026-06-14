@@ -14,17 +14,19 @@ the bootstrap step below is manual because the running supervisor predates the
 fix it would need to recycle itself, and it is the **parent process** of the
 live agent — a session cannot cleanly pull the binary out from under itself.
 
-## Automated path (opt-in, `#supautoinstall`)
+## Automated path (default ON, `#supautoinstall`)
 
-The build+install half of this procedure (steps 1–2 below) can run automatically
-**in the supervisor at an idle boundary** instead of by hand. Enable it for a
-dogfooding session with:
+The build+install half of this procedure (steps 1–2 below) runs automatically
+**in the supervisor at an idle boundary** instead of by hand — this is the default
+for a dogfooding session. Opt out with any of:
 
 ```bash
-export AGENT_DOC_SUPERVISOR_AUTO_INSTALL=1   # default OFF
+export AGENT_DOC_SUPERVISOR_AUTO_INSTALL=0          # env (global)
+# agent_doc_supervisor_auto_install: false          # per-document frontmatter
+# agent_doc_supervisor_auto_install = false         # .agent-doc/config.toml (project)
 ```
 
-When set, after a `finalize` that committed an edit to agent-doc's own source the
+By default, after a `finalize` that committed an edit to agent-doc's own source the
 supervisor's idle-queue watch detects that the source is newer than the installed
 binary and runs `cargo build --release && cargo install --path . && agent-doc
 lib-install` at the next turn boundary (debounced, never mid-turn). That makes the
@@ -37,9 +39,9 @@ manual procedure warns about. ops.log proof: `supervisor_auto_install_started` �
 
 It is **dogfood-only** — `dogfood_agent_doc_crate_root` resolves a crate root only
 when the served document's project tree contains the agent-doc crate, so it never
-fires for an ordinary user's document. Heavy (a full build blocks the idle watch
-for its duration) and high blast-radius, hence default OFF; a failed build latches
-off for the session and falls back to the manual procedure below. When OFF, a
+fires for an ordinary user's document. That is what makes default-ON safe. A full
+build blocks the idle watch for its duration; a failed build latches off for the
+session and falls back to the manual procedure below. When opted out, a
 source-ahead-of-binary state logs `supervisor_source_newer_detected` once.
 
 ## When to run

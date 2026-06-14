@@ -103,7 +103,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // onto it. Resolved ONCE: the default-OFF path does zero extra work (no source
             // walk, no crate-root probe) — only an opted-in dogfooding session pays for it.
             let auto_install_enabled =
-                crate::project_controller::supervisor_auto_install_enabled();
+                crate::project_controller::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
                 crate::project_controller::dogfood_agent_doc_crate_root(&path)
             } else {

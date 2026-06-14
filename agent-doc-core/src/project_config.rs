@@ -244,6 +244,18 @@ pub struct ProjectConfig {
     /// supervisor always promotes the latest build automatically).
     #[serde(default, alias = "supervisor_auto_recycle")]
     pub agent_doc_supervisor_auto_recycle: Option<bool>,
+    /// Per-project opt-in/opt-out for supervisor auto-install (`#supautoinstall`).
+    /// When a DOGFOODING supervisor finds agent-doc's own source newer than the
+    /// installed binary at an idle boundary, this controls whether it rebuilds +
+    /// installs (then the `#ctlrecycle` recycle promotes the new build) or only logs
+    /// `supervisor_source_newer_detected`. Resolution precedence: env
+    /// `AGENT_DOC_SUPERVISOR_AUTO_INSTALL` (truthy enables, `0`/`false`/`off`
+    /// force-disables), then the per-document frontmatter
+    /// `agent_doc_supervisor_auto_install`, then this project value, then the
+    /// built-in default of ON. Never fires for a non-dogfooding document, so the
+    /// default is safe for ordinary users.
+    #[serde(default, alias = "supervisor_auto_install")]
+    pub agent_doc_supervisor_auto_install: Option<bool>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,

@@ -235,12 +235,14 @@ test result: ok. 30 passed; 0 failed
 `loop_drains_granted_clean_session_under_live_ipc` asserts a granted clean-session head drains under `DrainScope::Loop` (the scope preflight's `queue_continuation_required` uses) even under live editor-IPC, while a non-granted clean-session head stays deferred and `[operator-verify]` is never drainable. That is precisely "preflight flips `queue_continuation_required:true` for the granted head instead of `false`."
 
 No code changed this turn (verification only), so no build/install or CI gate applies. Marking `#freshgrant` done.
-<!-- agent:boundary:a2187a22 -->
+<!-- agent:boundary:6b6b1547 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- [#freshgrant]. I put this here. leave this here. You should not override my decision unless there is another dependency for this to be complete.
+- [#cleardrainsim]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]
 - :pushpin: [#qmisstrike]

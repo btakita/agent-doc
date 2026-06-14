@@ -92,7 +92,7 @@ Implemented the **full lazily-spec IPC wire protocol** in lazily-py and shipped 
 **Commit + push (done)** — lazily-py `28f23e4` pushed to `lazily-hub/lazily-py main`; superproject gitlink bumped (`6339ab2e1`). CI: prior commit's run green; GitHub had not registered a run for `28f23e4` at finalize time (pending CI annotation, identical local matrix passed).
 
 **Release + publish — GATED on operator** (review `#kb9b`/`#lzpypub011`): PyPI publish is irreversible + needs token/2FA + the pre-publish live-test confirm. Artifacts wait in `src/lazily-py/dist/`. Backlogged `#sc7g`/`#lzpyspeclayers` (recommended): optional non-IPC spec layers (shm arena, signaling, CRDT, capability handshake, FFI) for full lazily-rs parity — not conformance-gated.
-<!-- agent:boundary:d3d2c2e3 -->
+<!-- agent:boundary:224d8fa2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,7 +106,6 @@ Implemented the **full lazily-spec IPC wire protocol** in lazily-py and shipped 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sc7g] #lzpyspeclayers=[recommended] Optional lazily-spec layers not yet ported to lazily-py for full cross-binding parity with lazily-rs (NOT conformance-gated; the IPC state plane already passes all 6 fixtures): ShmBlobArena shared-memory write/read (header+checksum), Signaling WebSocket client/messages, Distributed CRDT cell plane (LWW/MV/PN + HLC), Capability negotiation handshake, FFI C-ABI. Queue per-layer when needed.
 <!-- /agent:backlog -->
 
 ## Review

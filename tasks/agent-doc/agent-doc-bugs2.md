@@ -252,7 +252,25 @@ No code changed this turn (verification only), so no build/install or CI gate ap
 3. Read `.agent-doc/logs/ops.log` for `supervisor_binary_stale_self_recycled ... candidates=[...]`, then **either** a clean execve hot-reload **or** `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case confirm the **pane stays alive** (no hang) with the restart hint shown.
 
 **Queue:** no agent-drainable heads (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — the other materialized heads are all `[clean-session]` (supervisor idle-watch drains them) or `[operator-verify]`. Not auto-looping.
-<!-- agent:boundary:b3066f40 -->
+
+### Re: "you should not have stalled — set queue_continuation_required=true" — #qcontdrain shipped — opus-4-8
+
+You're right. Done — the in-session `/loop` now **drains `[clean-session]` heads in place** instead of deferring them to a (possibly-stalled) supervisor, so `queue_continuation_required` stays `true` while any non-`[operator-verify]` head remains. BREAKING: clean-session is no longer deferred to the supervisor.
+
+**What changed (committed + pushed):**
+- `queue_continuation::deferred_backlog_ids_with_ipc_scoped` and the go-mode backlog→queue sync `partition_drainable_backlog_ids` now defer **only** `[operator-verify]` in **both** scopes. `[clean-session]` is always drainable. The old `DrainScope::Loop` rule (defer clean-session under a live editor-IPC listener — `#goqueuestall`/`#cleandrainsup`/`#freshgrant`) is gone: when the supervisor itself stalled, that stranded the queue.
+- `queue_continuation_required = activation.active && queue_drainable_head_count > 0` is unchanged; it now reads `true` for a clean-session-only active queue because those heads count as drainable.
+- `session-check`'s no-response active-head guard now interrupts on a committed-without-response clean-session head regardless of live IPC.
+- Instruction surfaces aligned: SKILL.md auto-loop section, `specs/07-orchestration-commands.md` (`#goqstall2`), `DrainScope` docs, VERSIONS.md (Unreleased). `audit-docs` green.
+
+**Verify:** `make check` green (4459 passed, 0 failed); clippy clean. New/updated coverage: `deferred_backlog_ids_defers_only_operator_verify`, `loop_drains_clean_session_regardless_of_grant_or_ipc`, `loop_and_supervisor_both_drain_clean_session`, `partition_drainable_backlog_ids_skips_only_operator_verify`, `no_response_active_queue_head_interrupts_on_clean_session_head_regardless_of_ipc`. CI run `27512320056` queued — recording as pending, continuing from local evidence.
+
+**Released:** agent-doc submodule `86f306d3 → 081ede2b` (pushed origin/main); superproject `→ c4f4550da` (submodule bump + cursor mirror). **Install runs right after this closeout** (`cargo install` + `lib-install`) — installing *before* finalize would make this cycle's finalize client newer than the running 0.34.0 supervisor → `live_prompt_drift`/exit-75 (`#no-mid-session-install`). The running supervisor self-recycles onto the new inode at its next idle boundary (`#supselfheal`).
+
+Follow-up queued: `#qcontdrain-cleanup` (remove the now-dead `#freshgrant` grant machinery + vestigial `_live_ipc`/`_scope`/`_granted_ids` params + refresh remaining stale doc-comments).
+
+The queue is now continuation-eligible again (`#mphaseloop` next) — with the new binary installed the `/loop` will drain the clean-session heads instead of stalling.
+<!-- agent:boundary:4170eccc -->
 <!-- /agent:exchange -->
 
 ## Queue
